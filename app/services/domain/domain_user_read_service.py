@@ -1,0 +1,60 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.ports.sql_executor import SQLExecutor
+from app.services.shared.jsonify import jsonify_rows
+
+
+class UserDomainReadService:
+    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
+        self._sql = sql or MySQLSQLExecutor()
+
+    def list_domain_users(self, *, workspace_id: str, domain_id: int) -> List[Dict[str, Any]]:
+        sql = """
+        SELECT
+          udm.user_id AS user_id,
+          u.email AS email,
+          CONCAT_WS(' ', NULLIF(u.first_name,''), NULLIF(u.last_name,'')) AS display_name,
+          udm.can_read AS can_read,
+          udm.can_edit AS can_edit,
+          udm.created_at AS created_at,
+          NULL AS updated_at
+        FROM user_domain_mapping udm
+        JOIN domain d
+          ON d.id = udm.domain_id
+        AND d.workspace_id = :ws
+        AND d.is_active = 1
+        LEFT JOIN users u
+          ON u.user_id = udm.user_id
+        WHERE d.id = :did
+        ORDER BY display_name, udm.user_id
+        """
+        rows = self._sql.execute_query_mappings(sql, {"ws": workspace_id, "did": int(domain_id)})
+        return jsonify_rows([dict(r) for r in rows])
+
+    def list_user_domains(self, *, workspace_id: str, user_id: str) -> List[Dict[str, Any]]:
+        sql = """
+        SELECT
+          d.id,
+          d.name,
+          d.kind,
+          d.description,
+          d.model_table_id,
+          mt.name AS model_table_name,
+          d.column_name_policy,
+          udm.can_edit
+        FROM user_domain_mapping udm
+        JOIN domain d
+          ON d.id = udm.domain_id
+        AND d.workspace_id = :ws
+        AND d.is_active = 1
+        LEFT JOIN model_table mt
+          ON mt.id = d.model_table_id
+        WHERE udm.user_id = :user_id
+          AND udm.can_read = 1
+        ORDER BY d.name
+        """
+        rows = self._sql.execute_query_mappings(sql, {"ws": workspace_id, "user_id": user_id})
+        return jsonify_rows([dict(r) for r in rows])

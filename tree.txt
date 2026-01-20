@@ -1,0 +1,354 @@
+.
+├── app
+│   ├── __init__.py
+│   ├── __pycache__
+│   │   ├── __init__.cpython-312.pyc
+│   │   ├── celery_app.cpython-312.pyc
+│   │   ├── factory.cpython-312.pyc
+│   │   └── main.cpython-312.pyc
+│   ├── adapters
+│   │   ├── __pycache__
+│   │   │   ├── base_token_manager.cpython-312.pyc
+│   │   │   ├── databricke_workspace_token_manager.cpython-312.pyc
+│   │   │   ├── databricks_sql_executor.cpython-312.pyc
+│   │   │   ├── databricks_token_manager.cpython-312.pyc
+│   │   │   └── sigma_token_manager.cpython-312.pyc
+│   │   ├── base_token_manager.py
+│   │   ├── databricke_workspace_token_manager.py
+│   │   ├── databricks_sql_executor.py
+│   │   ├── databricks_token_manager.py
+│   │   └── sigma_token_manager.py
+│   ├── celery_app.py
+│   ├── config
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   │   ├── __init__.cpython-312.pyc
+│   │   │   ├── logging_config.cpython-312.pyc
+│   │   │   └── mail_config.cpython-312.pyc
+│   │   ├── logging_config.py
+│   │   └── mail_config.py
+│   ├── decorators
+│   │   ├── __pycache__
+│   │   │   ├── decorator.cpython-312.pyc
+│   │   │   ├── security.cpython-312.pyc
+│   │   │   └── validate.cpython-312.pyc
+│   │   ├── security.py
+│   │   └── validate.py
+│   ├── email
+│   │   ├── __pycache__
+│   │   │   └── mailer.cpython-312.pyc
+│   │   └── mailer.py
+│   ├── exceptions
+│   │   ├── __pycache__
+│   │   │   └── service_error.cpython-312.pyc
+│   │   └── service_error.py
+│   ├── factory.py
+│   ├── jobs
+│   ├── main.py
+│   ├── models
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   │   ├── __init__.cpython-312.pyc
+│   │   │   ├── base_token_manager.cpython-312.pyc
+│   │   │   ├── cluster_size_enum.cpython-312.pyc
+│   │   │   ├── connection.cpython-312.pyc
+│   │   │   ├── crosswalk.cpython-312.pyc
+│   │   │   ├── databricks_token_manager.cpython-312.pyc
+│   │   │   ├── product_group.cpython-312.pyc
+│   │   │   ├── product_role.cpython-312.pyc
+│   │   │   ├── product.cpython-312.pyc
+│   │   │   ├── role.cpython-312.pyc
+│   │   │   ├── sigma_claim.cpython-312.pyc
+│   │   │   ├── sigma_token_manager.cpython-312.pyc
+│   │   │   ├── status_enum.cpython-312.pyc
+│   │   │   ├── token_manager.cpython-312.pyc
+│   │   │   ├── user_invitation.cpython-312.pyc
+│   │   │   ├── user_workspace.cpython-312.pyc
+│   │   │   ├── user.cpython-312.pyc
+│   │   │   ├── warehouse_type_enum.cpython-312.pyc
+│   │   │   ├── warehouse.cpython-312.pyc
+│   │   │   └── workspace.cpython-312.pyc
+│   │   ├── cluster_size_enum.py
+│   │   ├── connection.py
+│   │   ├── crosswalk.py
+│   │   ├── dashboard.py
+│   │   ├── product_group.py
+│   │   ├── product_role.py
+│   │   ├── product.py
+│   │   ├── role.py
+│   │   ├── sigma_claim.py
+│   │   ├── status_enum.py
+│   │   ├── user_invitation.py
+│   │   ├── user_workspace.py
+│   │   ├── user.py
+│   │   ├── warehouse_type_enum.py
+│   │   ├── warehouse.py
+│   │   └── workspace.py
+│   ├── ports
+│   │   ├── __pycache__
+│   │   │   ├── sql_executor.cpython-312.pyc
+│   │   │   └── token_manager.cpython-312.pyc
+│   │   ├── sql_executor.py
+│   │   └── token_manager.py
+│   ├── routes
+│   │   ├── __pycache__
+│   │   │   ├── _route_utils.cpython-312.pyc
+│   │   │   ├── admin_routes.cpython-312.pyc
+│   │   │   ├── auth_routes.cpython-312.pyc
+│   │   │   ├── builder_routes.cpython-312.pyc
+│   │   │   ├── catalog_routes.cpython-312.pyc
+│   │   │   ├── cohort_ai_routes.cpython-312.pyc
+│   │   │   ├── connection_routes.cpython-312.pyc
+│   │   │   ├── crosswalk_routes.cpython-312.pyc
+│   │   │   ├── dashboard_routes.cpython-312.pyc
+│   │   │   ├── dictionary_routes.cpython-312.pyc
+│   │   │   ├── domain_routes.cpython-312.pyc
+│   │   │   ├── functions_routes.cpython-312.pyc
+│   │   │   ├── list_template_routes.cpython-312.pyc
+│   │   │   ├── model_routes.cpython-312.pyc
+│   │   │   ├── newfeed_routes.cpython-312.pyc
+│   │   │   ├── no_code_query_routes.cpython-312.pyc
+│   │   │   ├── otp_routes.cpython-312.pyc
+│   │   │   ├── product_groups_routes.cpython-312.pyc
+│   │   │   ├── product_routes.cpython-312.pyc
+│   │   │   ├── role_routes.cpython-312.pyc
+│   │   │   ├── user_routes.cpython-312.pyc
+│   │   │   ├── user_workspace_routes.cpython-312.pyc
+│   │   │   ├── warehouse_routes.cpython-312.pyc
+│   │   │   ├── workspace_inventory_routes.cpython-312.pyc
+│   │   │   └── workspace_routes.cpython-312.pyc
+│   │   ├── _route_utils.py
+│   │   ├── admin_routes.py
+│   │   ├── auth_routes.py
+│   │   ├── catalog_routes.py
+│   │   ├── cohort_ai_routes.py
+│   │   ├── connection_routes.py
+│   │   ├── crosswalk_routes.py
+│   │   ├── dashboard_routes.py
+│   │   ├── domain_routes.py
+│   │   ├── functions_routes.py
+│   │   ├── model_routes.py
+│   │   ├── newfeed_routes.py
+│   │   ├── no_code_query_routes.py
+│   │   ├── otp_routes.py
+│   │   ├── product_groups_routes.py
+│   │   ├── product_routes.py
+│   │   ├── role_routes.py
+│   │   ├── user_routes.py
+│   │   ├── user_workspace_routes.py
+│   │   ├── workspace_inventory_routes.py
+│   │   └── workspace_routes.py
+│   ├── services
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   │   ├── __init__.cpython-312.pyc
+│   │   │   ├── auth_service.cpython-312.pyc
+│   │   │   ├── base_service.cpython-312.pyc
+│   │   │   ├── base_token_manager.cpython-312.pyc
+│   │   │   ├── builder_domain_read_service.cpython-312.pyc
+│   │   │   ├── builder_domain_write_service.cpython-312.pyc
+│   │   │   ├── cohort_service.cpython-312.pyc
+│   │   │   ├── connection_service.cpython-312.pyc
+│   │   │   ├── dashboard_service.cpython-312.pyc
+│   │   │   ├── databricks_service.cpython-312.pyc
+│   │   │   ├── mysql_sql_executor.cpython-312.pyc
+│   │   │   ├── decorator.cpython-312.pyc
+│   │   │   ├── domain_resolver.cpython-312.pyc
+│   │   │   ├── jsonify.cpython-312.pyc
+│   │   │   ├── list_template_service.cpython-312.pyc
+│   │   │   ├── news_feed_service.cpython-312.pyc
+│   │   │   ├── no_code_query_service.cpython-312.pyc
+│   │   │   ├── otp_service.cpython-312.pyc
+│   │   │   ├── password_service.cpython-312.pyc
+│   │   │   ├── product_groups_service.cpython-312.pyc
+│   │   │   ├── product_service.cpython-312.pyc
+│   │   │   ├── request_context.cpython-312.pyc
+│   │   │   ├── role_service.cpython-312.pyc
+│   │   │   ├── udf_service.cpython-312.pyc
+│   │   │   ├── user_service.cpython-312.pyc
+│   │   │   ├── warehouse_service.cpython-312.pyc
+│   │   │   ├── workspace_service.cpython-312.pyc
+│   │   │   └── workspace_user_read_service.cpython-312.pyc
+│   │   ├── auth_service.py
+│   │   ├── base_service.py
+│   │   ├── base_token_manager.py
+│   │   ├── connection_service.py
+│   │   ├── crosswalks
+│   │   │   ├── __pycache__
+│   │   │   │   ├── list_ids.cpython-312.pyc
+│   │   │   │   ├── list_read_service.cpython-312.pyc
+│   │   │   │   ├── list_schema.cpython-312.pyc
+│   │   │   │   ├── list_template_service.cpython-312.pyc
+│   │   │   │   ├── list_upload_service.cpython-312.pyc
+│   │   │   │   └── list_writer.cpython-312.pyc
+│   │   │   ├── list_ids.py
+│   │   │   ├── list_read_service.py
+│   │   │   ├── list_schema.py
+│   │   │   ├── list_template_service.py
+│   │   │   ├── list_upload_service.py
+│   │   │   └── list_writer.py
+│   │   ├── dashboard_service.py
+│   │   ├── databricks_query_service.py
+│   │   ├── domain
+│   │   │   ├── __pycache__
+│   │   │   │   ├── builder_column_feed_service.cpython-312.pyc
+│   │   │   │   ├── builder_domain_read_service.cpython-312.pyc
+│   │   │   │   ├── builder_domain_write_service.cpython-312.pyc
+│   │   │   │   ├── domain_admin_write_service.cpython-312.pyc
+│   │   │   │   ├── domain_column_sample_read_service.cpython-312.pyc
+│   │   │   │   ├── domain_summary_read_service.cpython-312.pyc
+│   │   │   │   ├── domain_table_read_service.cpython-312.pyc
+│   │   │   │   ├── domain_table_write_service.cpython-312.pyc
+│   │   │   │   ├── domain_user_read_service.cpython-312.pyc
+│   │   │   │   ├── domain_user_write_service.cpython-312.pyc
+│   │   │   │   └── user_domain_read_service.cpython-312.pyc
+│   │   │   ├── builder_column_feed_service.py
+│   │   │   ├── domain_admin_write_service.py
+│   │   │   ├── domain_column_sample_read_service.py
+│   │   │   ├── domain_summary_read_service.py
+│   │   │   ├── domain_table_read_service.py
+│   │   │   ├── domain_table_write_service.py
+│   │   │   ├── domain_user_read_service.py
+│   │   │   ├── domain_user_write_service.py
+│   │   │   └── user_domain_read_service.py
+│   │   ├── domain_resolver.py
+│   │   ├── models
+│   │   │   ├── __pycache__
+│   │   │   │   ├── dictionary_read_service.cpython-312.pyc
+│   │   │   │   ├── dictionary_update_service.cpython-312.pyc
+│   │   │   │   ├── dictionary_upload_service.cpython-312.pyc
+│   │   │   │   ├── dictionary_write_service.cpython-312.pyc
+│   │   │   │   ├── model_read_service.cpython-312.pyc
+│   │   │   │   ├── model_sample_read_service.cpython-312.pyc
+│   │   │   │   ├── model_sample_write_service.cpython-312.pyc
+│   │   │   │   ├── model_snapshot_import_service.cpython-312.pyc
+│   │   │   │   ├── model_update_service.cpython-312.pyc
+│   │   │   │   ├── model_upload_service.cpython-312.pyc
+│   │   │   │   └── model_write_service.cpython-312.pyc
+│   │   │   ├── model_read_service.py
+│   │   │   ├── model_sample_read_service.py
+│   │   │   ├── model_sample_write_service.py
+│   │   │   ├── model_snapshot_import_service.py
+│   │   │   ├── model_update_service.py
+│   │   │   ├── model_upload_service.py
+│   │   │   └── model_write_service.py
+│   │   ├── news_feed_service.py
+│   │   ├── no_code_query_service.py
+│   │   ├── otp_service.py
+│   │   ├── password_service.py
+│   │   ├── product_groups_service.py
+│   │   ├── product_service.py
+│   │   ├── recon
+│   │   │   ├── __pycache__
+│   │   │   │   ├── workspace_recon_read_service.cpython-312.pyc
+│   │   │   │   └── workspace_recon_service.cpython-312.pyc
+│   │   │   ├── workspace_recon_read_service.py
+│   │   │   └── workspace_recon_service.py
+│   │   ├── role_service.py
+│   │   ├── semantic_layer
+│   │   │   ├── __pycache__
+│   │   │   │   ├── cohort_service.cpython-312.pyc
+│   │   │   │   ├── condition_builder.cpython-312.pyc
+│   │   │   │   ├── demographics_builder.cpython-312.pyc
+│   │   │   │   ├── drug_builder.cpython-312.pyc
+│   │   │   │   ├── drug_mapping_service.cpython-312.pyc
+│   │   │   │   ├── measurement_builder.cpython-312.pyc
+│   │   │   │   ├── procedure_builder.cpython-312.pyc
+│   │   │   │   └── semantic_layer_service.cpython-312.pyc
+│   │   │   ├── condition_builder.py
+│   │   │   ├── demographics_builder.py
+│   │   │   ├── drug_builder.py
+│   │   │   ├── drug_mapping_service.py
+│   │   │   ├── measurement_builder.py
+│   │   │   ├── procedure_builder.py
+│   │   │   └── semantic_layer_service.py
+│   │   ├── shared
+│   │   │   ├── __pycache__
+│   │   │   │   ├── mysql_sql_executor.cpython-312.pyc
+│   │   │   │   ├── jsonify.cpython-312.pyc
+│   │   │   │   └── request_context.cpython-312.pyc
+│   │   │   ├── mysql_sql_executor.py
+│   │   │   ├── jsonify.py
+│   │   │   └── request_context.py
+│   │   ├── udf_service.py
+│   │   ├── user_service.py
+│   │   ├── warehouse_service.py
+│   │   ├── workspace_inventory
+│   │   │   ├── __pycache__
+│   │   │   │   ├── catalog_builder_feed_service.cpython-312.pyc
+│   │   │   │   ├── catalog_context.cpython-312.pyc
+│   │   │   │   ├── catalog_model_sample_service.cpython-312.pyc
+│   │   │   │   ├── catalog_pipeline_service.cpython-312.pyc
+│   │   │   │   ├── catalog_recon_read_service.cpython-312.pyc
+│   │   │   │   ├── catalog_recon_service.cpython-312.pyc
+│   │   │   │   ├── catalog_sample_read_service.cpython-312.pyc
+│   │   │   │   ├── catalog_sample_service.cpython-312.pyc
+│   │   │   │   ├── catalog_snapshot_ensure_service.cpython-312.pyc
+│   │   │   │   ├── catalog_snapshot_service.cpython-312.pyc
+│   │   │   │   ├── catalog_unmapped_tables_read_service.cpython-312.pyc
+│   │   │   │   ├── catalog_workspace_sample_write_service.cpython-312.pyc
+│   │   │   │   ├── unmapped_workspace_tables_read_service.cpython-312.pyc
+│   │   │   │   ├── workspace_context.cpython-312.pyc
+│   │   │   │   ├── workspace_inventory_pipeline_service.cpython-312.pyc
+│   │   │   │   ├── workspace_sample_write_service.cpython-312.pyc
+│   │   │   │   ├── workspace_snapshot_ensure_service.cpython-312.pyc
+│   │   │   │   └── workspace_snapshot_service.cpython-312.pyc
+│   │   │   ├── parser.py
+│   │   │   ├── unmapped_workspace_tables_read_service.py
+│   │   │   ├── workspace_context.py
+│   │   │   ├── workspace_inventory_pipeline_service.py
+│   │   │   ├── workspace_sample_write_service.py
+│   │   │   ├── workspace_snapshot_ensure_service.py
+│   │   │   └── workspace_snapshot_service.py
+│   │   ├── workspace_service.py
+│   │   └── workspace_user_read_service.py
+│   ├── static
+│   │   └── images
+│   │       └── kythera_logo.png
+│   ├── tasks
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   │   ├── __init__.cpython-312.pyc
+│   │   │   └── email_tasks.cpython-312.pyc
+│   │   ├── catalog_tasks.py
+│   │   ├── email_tasks.py
+│   │   └── logging_tasks.py
+│   ├── templates
+│   │   ├── email_invitation
+│   │   │   ├── invite_user.html
+│   │   │   └── invite_user.txt
+│   │   ├── email_password_reset
+│   │   │   └── password_reset.html
+│   │   └── otp_verification
+│   │       ├── otp_verification.html
+│   │       └── otp_verification.txt
+│   ├── tester.py
+│   └── utils
+│       ├── __pycache__
+│       │   ├── param_builder.cpython-312.pyc
+│       │   ├── password_check.cpython-312.pyc
+│       │   └── token_utils.cpython-312.pyc
+│       ├── param_builder.py
+│       ├── password_check.py
+│       └── token_utils.py
+├── log_file
+├── pyproject.toml
+├── README.md
+├── requirements.txt
+├── tests
+│   ├── __pycache__
+│   │   ├── test_mail.cpython-312-pytest-8.3.4.pyc
+│   │   ├── test_password.cpython-312-pytest-8.3.4.pyc
+│   │   └── test_sql_compiler.cpython-312-pytest-8.3.4.pyc
+│   ├── pytest.ini
+│   ├── sql_tester.py
+│   └── test_sql_compiler.py
+├── tree.txt
+├── workboard_api.egg-info
+│   ├── dependency_links.txt
+│   ├── PKG-INFO
+│   ├── SOURCES.txt
+│   └── top_level.txt
+└── wsgi.py
+
+49 directories, 303 files
