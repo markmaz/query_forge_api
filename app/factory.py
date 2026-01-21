@@ -27,6 +27,7 @@ from app.routes.connection_routes import connection_ns
 from app.routes.crosswalk_routes import crosswalk_ns
 from app.routes.dashboard_routes import dashboard_ns
 from app.routes.domain_routes import domains_ns
+from app.routes.execution_routes import executions_ns
 from app.routes.export_routes import exports_ns
 from app.routes.functions_routes import functions_ns
 from app.routes.model_routes import model_ns
@@ -121,6 +122,7 @@ def create_app():
     api.add_namespace(cohort_ns, path=build_url("/", NAME, VERSION, "cohort_ai"))
     api.add_namespace(crosswalk_ns, path=build_url("/", NAME, VERSION, "crosswalks"))
     api.add_namespace(domains_ns, path=build_url("/", NAME, VERSION, "domains"))
+    api.add_namespace(executions_ns, path=build_url("/", NAME, VERSION, "executions"))
     api.add_namespace(exports_ns, path=build_url("/", NAME, VERSION, "exports"))
     api.add_namespace(wsinv_ns, path=build_url("/", NAME, VERSION, "workspace-inventory"))
     api.add_namespace(model_ns, path=build_url("/", NAME, VERSION, "models"))

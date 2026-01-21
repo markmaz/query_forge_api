@@ -387,6 +387,28 @@ def test_data_prep_ops_variants() -> None:
                     "output": {"columnName": "code_cast"},
                     "toType": "STRING",
                 },
+                {
+                    "id": "r9",
+                    "op": "concat",
+                    "inputs": [
+                        {"type": "column", "col": {"columnName": "first"}},
+                        {"type": "column", "col": {"columnName": "last"}},
+                    ],
+                    "separator": " ",
+                    "nulls": "skip",
+                    "output": {"columnName": "full_name"},
+                },
+                {
+                    "id": "r10",
+                    "op": "concat",
+                    "inputs": [
+                        {"type": "column", "col": {"columnName": "city"}},
+                        {"type": "literal", "value": "-"},
+                        {"type": "column", "col": {"columnName": "state"}},
+                    ],
+                    "nulls": "propagate",
+                    "output": {"columnName": "city_state"},
+                },
             ]
         },
         base_from_sql="main.asset.people t0",
@@ -402,6 +424,8 @@ def test_data_prep_ops_variants() -> None:
     assert "TRIM(t0.zip) AS __dp_zip_trim" in cte_sql
     assert "TO_DATE(t0.dob) AS __dp_dob_date" in cte_sql
     assert "ROUND(t0.score, 1) AS __dp_score_round" in cte_sql
+    assert "CONCAT_WS(' ', t0.first, t0.last) AS __dp_full_name" in cte_sql
+    assert "CONCAT(t0.city, '-', t0.state) AS __dp_city_state" in cte_sql
     assert ctx["rewrite_by_modelid"][10] == "__dp_code_cast"
 
 
@@ -429,6 +453,145 @@ def test_data_prep_exprs_empty_after_iteration() -> None:
         alias_by_wt={},
     )
     assert ctx["cte_sql"] == ""
+
+
+def test_compile_exprid_projection_alias() -> None:
+    plan = _single_table_plan()
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(plan))
+    q = {
+        "domainId": 1,
+        "columns": [
+            {"columnName": "full_name", "exprId": "r1", "alias": "Full Name"},
+        ],
+        "filters": None,
+        "sorting": [],
+        "dataPrep": {
+            "rules": [
+                {
+                    "id": "r1",
+                    "op": "concat",
+                    "inputs": [
+                        {"type": "column", "col": {"columnName": "first"}},
+                        {"type": "column", "col": {"columnName": "last"}},
+                    ],
+                    "separator": " ",
+                    "nulls": "skip",
+                    "output": {"columnName": "full_name"},
+                }
+            ]
+        },
+        "aggs": {"enabled": False, "metrics": [], "groupBy": []},
+    }
+
+    compiled = svc.compile(svc.normalize(q))
+    assert "__dp_full_name AS `Full Name`" in compiled.sql
+    assert compiled.output_columns == [{"key": "Full Name", "label": "Full Name"}]
+
+
+def test_compile_crosswalk_exprid_projection_alias() -> None:
+    plan = _single_table_plan()
+    resolver = FakeResolver(plan)
+    resolver._workspace_id = "ws"
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=resolver)
+    q = {
+        "domainId": 1,
+        "columns": [
+            {"columnName": "cw_region", "exprId": "cw:att1:cw:region"},
+        ],
+        "filters": None,
+        "sorting": [],
+        "crosswalkAttachments": [
+            {
+                "id": "att1",
+                "listType": "regions",
+                "listId": "list-1",
+                "mode": "join",
+                "domainJoinColumns": [{"columnName": "patient_zip"}],
+                "projectFields": ["region"],
+            }
+        ],
+        "aggs": {"enabled": False, "metrics": [], "groupBy": []},
+    }
+
+    compiled = svc.compile(svc.normalize(q))
+    assert "cw_regions.region AS cw_region" in compiled.sql
+    assert compiled.output_columns == [{"key": "cw_region", "label": "cw_region"}]
+
+
+def test_compile_exprid_duplicate_column_names_are_aliased() -> None:
+    plan = _single_table_plan()
+    resolver = FakeResolver(plan)
+    resolver._workspace_id = "ws"
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=resolver)
+    q = {
+        "domainId": 1,
+        "columns": [
+            {
+                "columnName": "val",
+                "exprId": "r1",
+            },
+            {
+                "columnName": "val",
+                "exprId": "r2",
+            },
+        ],
+        "filters": None,
+        "sorting": [],
+        "dataPrep": {
+            "rules": [
+                {
+                    "id": "r1",
+                    "op": "fill_empty",
+                    "target": {"columnName": "a"},
+                    "output": {"columnName": "val_1"},
+                    "value": "x",
+                },
+                {
+                    "id": "r2",
+                    "op": "normalize_text",
+                    "target": {"columnName": "b"},
+                    "output": {"columnName": "val_2"},
+                    "mode": "lower",
+                },
+            ]
+        },
+        "aggs": {"enabled": False, "metrics": [], "groupBy": []},
+    }
+
+    compiled = svc.compile(svc.normalize(q))
+    output_names = [c["key"] for c in compiled.output_columns]
+    assert len(output_names) == 2
+    assert output_names[0] != output_names[1]
+
+
+def test_compile_exprid_projection_dedupes() -> None:
+    plan = _single_table_plan()
+    resolver = FakeResolver(plan)
+    resolver._workspace_id = "ws"
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=resolver)
+    q = {
+        "domainId": 1,
+        "columns": [
+            {"columnName": "cw_region", "exprId": "cw:att1:cw:region"},
+            {"columnName": "cw_region", "exprId": "cw:att1:cw:region"},
+        ],
+        "filters": None,
+        "sorting": [],
+        "crosswalkAttachments": [
+            {
+                "id": "att1",
+                "listType": "regions",
+                "listId": "list-1",
+                "mode": "join",
+                "domainJoinColumns": [{"columnName": "patient_zip"}],
+                "projectFields": ["region"],
+            }
+        ],
+        "aggs": {"enabled": False, "metrics": [], "groupBy": []},
+    }
+
+    compiled = svc.compile(svc.normalize(q))
+    assert [c["key"] for c in compiled.output_columns] == ["cw_region"]
 
 
 def test_compile_or_group_with_exists() -> None:

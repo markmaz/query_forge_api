@@ -61,6 +61,7 @@ class CompiledQuery:
     sql: str
     count_sql: str
     params: Dict[str, Any]
+    output_columns: List[Dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,17 @@ class NoCodeRunResult:
     rows: List[Any]
     columns: List[Dict[str, Any]]
     total: int
+    limit: int
+    offset: int
+
+
+@dataclass(frozen=True)
+class NoCodePreparedQuery:
+    sql: str
+    sql_rendered: str
+    params: Dict[str, Any]
+    count_sql: str
+    columns: List[Dict[str, Any]]
     limit: int
     offset: int
 
@@ -115,7 +127,11 @@ class NoCodeQueryService:
         count = self._executor.submit_statement(compiled.count_sql, parameters=compiled.params)
         total = self._extract_total((count or {}).get("rows") or [])
 
-        columns = self._infer_columns_from_rows(rows_any) or self._columns_from_query_json(normalized)
+        columns = (
+            self._infer_columns_from_rows(rows_any)
+            or compiled.output_columns
+            or self._columns_from_query_json(normalized)
+        )
         rows = self._rows_to_dicts(rows_any, columns)
 
         rendered_sql = self._render_sql_with_params(compiled.sql, compiled.params)
@@ -127,6 +143,27 @@ class NoCodeQueryService:
             rows=rows,
             columns=columns,
             total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    def prepare(
+        self,
+        raw_query: Dict[str, Any],
+        mode: str = "preview",
+        limit: int = 200,
+        offset: int = 0,
+    ) -> NoCodePreparedQuery:
+        normalized = self.normalize(raw_query)
+        compiled = self.compile(normalized, mode=mode, limit=limit, offset=offset)
+        columns = compiled.output_columns or self._columns_from_query_json(normalized)
+        rendered_sql = self._render_sql_with_params(compiled.sql, compiled.params)
+        return NoCodePreparedQuery(
+            sql=compiled.sql,
+            sql_rendered=rendered_sql,
+            params=compiled.params,
+            count_sql=compiled.count_sql,
+            columns=columns,
             limit=limit,
             offset=offset,
         )
@@ -665,11 +702,40 @@ class NoCodeQueryService:
         )
 
         derived_by_exprid = {**derived_by_exprid, **attach_ctx.get("exprid_sql", {})}
+        def _dedupe_projection_columns(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            seen: set[tuple] = set()
+            out: List[Dict[str, Any]] = []
+            for col in items:
+                expr_id = col.get("exprId")
+                if expr_id:
+                    key = ("expr", expr_id)
+                else:
+                    key = (
+                        "col",
+                        col.get("workspaceTableId"),
+                        col.get("modelColumnId"),
+                        col.get("columnName"),
+                    )
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(col)
+            return out
+
+        def _alias_hint_from_expr(expr_sql: str) -> Optional[str]:
+            if not isinstance(expr_sql, str):
+                return None
+            m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)$", expr_sql)
+            return m.group(1) if m else None
+
         filter_table_ids = self._filter_table_ids(filters, plan)
         sorting_table_ids = self._sorting_table_ids(q.get("sorting") or [], plan)
 
+        raw_cols = q.get("columns") or []
+        cols = _dedupe_projection_columns(raw_cols)
+
         alias_by_col: Dict[str, str] = {}
-        for c in (q.get("columns") or []):
+        for c in cols:
             cn = c.get("columnName")
             al = c.get("alias")
             wt_id = c.get("workspaceTableId")
@@ -683,6 +749,31 @@ class NoCodeQueryService:
         select_exprs: List[str] = []
         group_by_exprs: List[str] = []
         output_names: Dict[str, bool] = {}
+        output_columns: List[Dict[str, Any]] = []
+
+        def _reserve_output_name(base_name: str | None, alias_hint: Optional[str]) -> str:
+            base = (base_name or "").strip() or "col"
+            key = base.lower()
+            if not output_names.get(key):
+                output_names[key] = True
+                return base
+            if alias_hint:
+                candidate = f"{alias_hint}_{base}"
+                key = candidate.lower()
+                if not output_names.get(key):
+                    output_names[key] = True
+                    return candidate
+                prefix = candidate
+            else:
+                prefix = base
+            i = 2
+            while True:
+                candidate = f"{prefix}_{i}"
+                key = candidate.lower()
+                if not output_names.get(key):
+                    output_names[key] = True
+                    return candidate
+                i += 1
 
         if aggs and bool(aggs.get("enabled")):
             if distinct:
@@ -706,11 +797,18 @@ class NoCodeQueryService:
                 raw_name = self._col_label_key(raw_gb)
                 raw_key = f"{raw_gb.get('workspaceTableId')}:{raw_name}" if isinstance(raw_gb, dict) else raw_name
                 user_alias = alias_by_col.get(raw_key)
-                if user_alias:
-                    select_exprs.append(f"{gb_expr} AS {self._safe_alias(user_alias)}")
-                else:
-                    # ✅ if rewritten to internal dp col, alias back to the expected name
-                    select_exprs.append(self._project_expr(gb_expr, desired_name=raw_name, user_alias=None))
+                alias_hint = None
+                if isinstance(raw_gb, dict):
+                    wt_id = raw_gb.get("workspaceTableId")
+                    if wt_id is not None:
+                        try:
+                            alias_hint = alias_by_wt.get(int(wt_id))
+                        except Exception:
+                            alias_hint = None
+                alias_hint = alias_hint or _alias_hint_from_expr(gb_expr)
+                output_name = _reserve_output_name(user_alias or raw_name, alias_hint)
+                select_exprs.append(f"{gb_expr} AS {self._safe_alias(output_name)}")
+                output_columns.append({"key": output_name, "label": output_name})
 
             metric_exprs: List[str] = []
             for m in (aggs.get("metrics") or []):
@@ -729,14 +827,14 @@ class NoCodeQueryService:
                     base_alias,
                     alias_by_wt,
                 )
-                if label:
-                    metric_sql += f" AS {self._safe_alias(label)}"
+                output_name = _reserve_output_name(label or fn or "metric", None)
+                metric_sql += f" AS {self._safe_alias(output_name)}"
                 metric_exprs.append(metric_sql)
+                output_columns.append({"key": output_name, "label": output_name})
 
             select_exprs.extend(metric_exprs)
 
         else:
-            cols = q.get("columns") or []
             name_counts: Dict[str, int] = {}
             for c in cols:
                 cn = c.get("columnName")
@@ -748,8 +846,9 @@ class NoCodeQueryService:
                 desired_name = c.get("columnName")
                 user_alias = c.get("alias")
                 wt_id = c.get("workspaceTableId")
+                expr_id = c.get("exprId")
 
-                col_expr = self._col_expr(
+                expr_sql = self._col_expr(
                     c,
                     derived_by_exprid,
                     derived_by_name,
@@ -760,36 +859,23 @@ class NoCodeQueryService:
                     alias_by_wt,
                 )
 
-                # If user provided alias -> honor it
-                if user_alias:
-                    col_expr = f"{col_expr} AS {self._safe_alias(user_alias)}"
-                else:
-                    auto_alias = None
-                    if plan.column_name_policy == "SHOW_ALL_QUALIFIED" and desired_name:
-                        if name_counts.get(desired_name, 0) > 1:
-                            alias_base = alias_by_wt_table.get(int(wt_id)) if wt_id is not None else base_alias
-                            auto_alias = f"{alias_base}_{desired_name}"
+                alias_hint = None
+                if wt_id is not None:
+                    try:
+                        alias_hint = alias_by_wt_table.get(int(wt_id)) if wt_id is not None else base_alias
+                    except Exception:
+                        alias_hint = None
+                if expr_id and not alias_hint:
+                    alias_hint = _alias_hint_from_expr(expr_sql)
+                base_output_name = user_alias or desired_name
+                if not user_alias and desired_name and name_counts.get(desired_name, 0) > 1:
+                    alias_base = alias_hint or base_alias
+                    base_output_name = f"{alias_base}_{desired_name}"
 
-                    if auto_alias:
-                        col_expr = f"{col_expr} AS {self._safe_alias(auto_alias)}"
-                    else:
-                        # ✅ If we rewrote to internal dp col, alias back to original columnName
-                        col_expr = self._project_expr(col_expr, desired_name=desired_name, user_alias=None)
-
-                # Ensure unique output labels when policy is SHOW_ALL_QUALIFIED
-                out_name = None
-                if " AS " in col_expr:
-                    out_name = col_expr.split(" AS ", 1)[1].strip()
-                elif desired_name:
-                    out_name = desired_name
-
-                if out_name:
-                    key = out_name.lower()
-                    if output_names.get(key):
-                        raise ServiceError("Duplicate output column names; please add aliases.", status_code=400)
-                    output_names[key] = True
-
+                output_name = _reserve_output_name(base_output_name, alias_hint)
+                col_expr = f"{expr_sql} AS {self._safe_alias(output_name)}"
                 select_exprs.append(col_expr)
+                output_columns.append({"key": output_name, "label": output_name})
 
         if not select_exprs:
             raise ServiceError("No selectable columns/expressions produced.", status_code=400)
@@ -828,6 +914,8 @@ class NoCodeQueryService:
                         continue
                     output_names[key] = True
                 select_exprs.append(expr)
+                if out_name:
+                    output_columns.append({"key": out_name, "label": out_name})
 
         if using_prep and attach_ctx["needs_base_alias"] and from_clause_sql.strip() == "prep":
             from_clause_sql = f"{from_clause_sql} {self._safe_ident(base_alias)}"
@@ -939,7 +1027,7 @@ class NoCodeQueryService:
         if mode == "preview" and not use_two_phase:
             sql += f"\nLIMIT {int(limit)}\nOFFSET {int(offset)}"
 
-        return CompiledQuery(sql=sql, count_sql=count_sql, params=params)
+        return CompiledQuery(sql=sql, count_sql=count_sql, params=params, output_columns=output_columns)
 
     # -----------------------------
     # Data Prep compilation (CTE)
@@ -993,10 +1081,10 @@ class NoCodeQueryService:
 
             target = r.get("target")
             output = r.get("output")
-            if not isinstance(target, dict):
-                raise ServiceError(f"dataPrep.rules[{i}].target must be a column key", status_code=400)
             if not isinstance(output, dict):
                 raise ServiceError(f"dataPrep.rules[{i}].output must be a column key", status_code=400)
+            if op != "concat" and not isinstance(target, dict):
+                raise ServiceError(f"dataPrep.rules[{i}].target must be a column key", status_code=400)
 
             out_name = output.get("columnName")
             if not out_name or not isinstance(out_name, str):
@@ -1005,16 +1093,18 @@ class NoCodeQueryService:
             # ✅ Always use an internal identifier to avoid collisions with SELECT *
             out_ident = self._dp_ident(out_name)
 
-            target_expr = self._col_expr(
-                target,
-                derived_by_exprid,
-                derived_by_name,
-                rewrite_by_colname,
-                rewrite_by_modelid,
-                using_prep,
-                base_alias,
-                alias_by_wt,
-            )
+            target_expr = None
+            if op != "concat":
+                target_expr = self._col_expr(
+                    target,
+                    derived_by_exprid,
+                    derived_by_name,
+                    rewrite_by_colname,
+                    rewrite_by_modelid,
+                    using_prep,
+                    base_alias,
+                    alias_by_wt,
+                )
 
             if op == "fill_empty":
                 treat_blank = bool(r.get("treatBlankAsEmpty"))
@@ -1080,6 +1170,61 @@ class NoCodeQueryService:
                     raise ServiceError("round.decimals must be an integer", status_code=400)
                 exprs.append(f"ROUND({target_expr}, {int(dec)}) AS {out_ident}")
 
+            elif op == "concat":
+                inputs = r.get("inputs")
+                if not isinstance(inputs, list) or not inputs:
+                    raise ServiceError("concat.inputs must be a non-empty list", status_code=400)
+
+                separator = r.get("separator")
+                if separator is None:
+                    separator = ""
+                if not isinstance(separator, str):
+                    raise ServiceError("concat.separator must be a string or null", status_code=400)
+                sep_sql = self._literal_sql(separator)
+
+                nulls_mode = (r.get("nulls") or "skip").strip().lower()
+                if nulls_mode not in ("skip", "propagate", "empty"):
+                    raise ServiceError("concat.nulls must be skip|propagate|empty", status_code=400)
+
+                parts: List[str] = []
+                for j, ref in enumerate(inputs):
+                    if not isinstance(ref, dict):
+                        raise ServiceError(f"concat.inputs[{j}] must be an object", status_code=400)
+                    ref_type = (ref.get("type") or "").strip().lower()
+                    if ref_type == "column":
+                        expr = self._col_expr(
+                            ref.get("col"),
+                            derived_by_exprid,
+                            derived_by_name,
+                            rewrite_by_colname,
+                            rewrite_by_modelid,
+                            using_prep,
+                            base_alias,
+                            alias_by_wt,
+                        )
+                    elif ref_type == "literal":
+                        expr = self._literal_sql(ref.get("value"))
+                    else:
+                        raise ServiceError("concat.inputs type must be column or literal", status_code=400)
+
+                    if nulls_mode == "empty":
+                        expr = f"COALESCE({expr}, '')"
+                    parts.append(expr)
+
+                if nulls_mode == "skip":
+                    expr_sql = f"CONCAT_WS({sep_sql}, {', '.join(parts)})"
+                else:
+                    if separator:
+                        interleaved: List[str] = []
+                        for idx, part in enumerate(parts):
+                            if idx:
+                                interleaved.append(sep_sql)
+                            interleaved.append(part)
+                        expr_sql = f"CONCAT({', '.join(interleaved)})"
+                    else:
+                        expr_sql = f"CONCAT({', '.join(parts)})"
+                exprs.append(f"{expr_sql} AS {out_ident}")
+
             else:
                 raise ServiceError(f"Unsupported dataPrep op: {op}", status_code=400)
 
@@ -1087,13 +1232,14 @@ class NoCodeQueryService:
             derived_by_name[out_name] = out_ident
 
             # ✅ query-wide rewrite: target -> internal output identifier
-            tgt_name = target.get("columnName")
-            if isinstance(tgt_name, str) and tgt_name:
-                rewrite_by_colname[tgt_name] = out_ident
+            if isinstance(target, dict):
+                tgt_name = target.get("columnName")
+                if isinstance(tgt_name, str) and tgt_name:
+                    rewrite_by_colname[tgt_name] = out_ident
 
-            tgt_id = target.get("modelColumnId")
-            if isinstance(tgt_id, int):
-                rewrite_by_modelid[tgt_id] = out_ident
+                tgt_id = target.get("modelColumnId")
+                if isinstance(tgt_id, int):
+                    rewrite_by_modelid[tgt_id] = out_ident
 
         if not exprs:
             return {

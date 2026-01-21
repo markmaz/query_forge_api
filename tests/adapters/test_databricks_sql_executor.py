@@ -107,6 +107,61 @@ def test_submit_statement_wait_false() -> None:
     assert session.posts
 
 
+def test_submit_statement_async_overrides() -> None:
+    session = _Session()
+    session.set_post(_Resp({"statement_id": "s2"}))
+    exec = DatabricksSQLExecutor(
+        base_url="https://dbx",
+        token_provider=_TokenProvider("tok"),
+        http=session,
+        default_warehouse_id="wh-default",
+        default_catalog="cat-default",
+        default_schema="sch-default",
+    )
+
+    resp = exec.submit_statement_async(
+        "SELECT 1",
+        {"p1": 1},
+        warehouse_id="wh-override",
+        catalog="cat-override",
+        schema="sch-override",
+    )
+
+    assert resp["statement_id"] == "s2"
+    payload = session.posts[-1]["json"]
+    assert payload["warehouse_id"] == "wh-override"
+    assert payload["catalog"] == "cat-override"
+    assert payload["schema"] == "sch-override"
+    assert payload["statement"] == "SELECT 1"
+    assert payload["parameters"]
+
+
+def test_get_statement_status() -> None:
+    session = _Session()
+    session.set_get(_Resp({"status": {"state": "RUNNING"}}))
+    exec = DatabricksSQLExecutor(
+        base_url="https://dbx",
+        token_provider=_TokenProvider("tok"),
+        http=session,
+        default_warehouse_id="wh",
+    )
+
+    status = exec.get_statement_status("s1")
+    assert status["status"]["state"] == "RUNNING"
+
+
+def test_cancel_statement_allows_202() -> None:
+    session = _Session()
+    session.set_post(_Resp(status_code=202))
+    exec = DatabricksSQLExecutor(
+        base_url="https://dbx",
+        token_provider=_TokenProvider("tok"),
+        http=session,
+        default_warehouse_id="wh",
+    )
+    exec.cancel_statement("s1")
+
+
 def test_submit_statement_arrow(monkeypatch: pytest.MonkeyPatch) -> None:
     session = _Session()
     session.set_post(_Resp({"statement_id": "s1"}))

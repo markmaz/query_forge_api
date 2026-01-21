@@ -478,8 +478,10 @@ def test_compile_duplicate_output_names_error():
         "aggs": {"enabled": False, "metrics": [], "groupBy": []},
     }
 
-    with pytest.raises(ServiceError):
-        svc.compile(svc.normalize(q), mode="preview")
+    compiled = svc.compile(svc.normalize(q), mode="preview")
+    assert "AS dup" in compiled.sql
+    assert "AS dup_2" in compiled.sql
+    assert [c["key"] for c in compiled.output_columns] == ["dup", "dup_2"]
 
 
 def test_compile_data_prep_fill_empty():
