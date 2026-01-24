@@ -139,6 +139,47 @@ class DatabricksSQLExecutor:
             "rows": rows_any,
         }
 
+    def submit_statement_async(
+        self,
+        sql: str,
+        parameters: Mapping[str, Any],
+        *,
+        warehouse_id: Optional[str] = None,
+        catalog: Optional[str] = None,
+        schema: Optional[str] = None,
+        result_format: ResultFormat = "JSON_ARRAY",
+    ) -> Dict[str, Any]:
+        wh = warehouse_id or self._warehouse
+        if not wh:
+            raise ValueError("No warehouse_id provided and no default_warehouse_id configured")
+
+        payload: Dict[str, Any] = {
+            "statement": sql,
+            "warehouse_id": wh,
+            "catalog": catalog if catalog is not None else self._catalog,
+            "schema": schema if schema is not None else self._schema,
+            "disposition": "EXTERNAL_LINKS",
+            "format": result_format,
+        }
+
+        if parameters:
+            payload["parameters"] = self._encode_parameters(parameters)
+
+        logger.debug("Submitting async SQL statement payload: %s", payload)
+        r = self._post(DATABRICKS_STATEMENTS_URL, json=payload)
+        r.raise_for_status()
+        return r.json()
+
+    def get_statement_status(self, statement_id: str) -> Dict[str, Any]:
+        r = self._get(f"{DATABRICKS_STATEMENTS_URL}/{statement_id}")
+        r.raise_for_status()
+        return r.json()
+
+    def cancel_statement(self, statement_id: str) -> None:
+        r = self._post(f"{DATABRICKS_STATEMENTS_URL}/{statement_id}/cancel")
+        if r.status_code not in (200, 202):
+            r.raise_for_status()
+
     def execute_write(self, query: str, params: Optional[Mapping[str, Any]] = None) -> int:
         resp = self.submit_statement(query, parameters=params, result_format="JSON_ARRAY")
         state = (resp.get("status") or {}).get("state")

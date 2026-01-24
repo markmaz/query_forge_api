@@ -16,7 +16,7 @@ from flask_restx import Api
 from app.adapters.databricks_token_manager import DatabricksTokenManager
 from app.adapters.sigma_token_manager import SigmaTokenManager
 from app.celery_app import celery, init_celery
-from app.config import AI_MODEL_NAME, LOG_QUEUE, OPEN_AI_KEY, VALKEY_ADDRESS, VALKEY_CONFIG, VALKEY_PORT
+from app.config import AI_MODEL_NAME, JWT_SECRET, LOG_QUEUE, OPEN_AI_KEY, VALKEY_ADDRESS, VALKEY_CONFIG, VALKEY_PORT
 from app.config.logging_config import configure_logging
 from app.config.mail_config import MailConfig
 from app.exceptions.service_error import ServiceError
@@ -27,6 +27,7 @@ from app.routes.connection_routes import connection_ns
 from app.routes.crosswalk_routes import crosswalk_ns
 from app.routes.dashboard_routes import dashboard_ns
 from app.routes.domain_routes import domains_ns
+from app.routes.execution_routes import executions_ns
 from app.routes.export_routes import exports_ns
 from app.routes.functions_routes import functions_ns
 from app.routes.model_routes import model_ns
@@ -68,7 +69,10 @@ def extract_user_id():
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header.split(" ")[1]
-        return auth_service.verify_token(token).get("sub") or "unknown_user"
+        payload = auth_service.verify_token(token)
+        if payload and isinstance(payload, dict):
+            return payload.get("sub") or "unknown_user"
+        return "unknown_user"
     return "unknown_user"
 
 def create_app():
@@ -121,6 +125,7 @@ def create_app():
     api.add_namespace(cohort_ns, path=build_url("/", NAME, VERSION, "cohort_ai"))
     api.add_namespace(crosswalk_ns, path=build_url("/", NAME, VERSION, "crosswalks"))
     api.add_namespace(domains_ns, path=build_url("/", NAME, VERSION, "domains"))
+    api.add_namespace(executions_ns, path=build_url("/", NAME, VERSION, "executions"))
     api.add_namespace(exports_ns, path=build_url("/", NAME, VERSION, "exports"))
     api.add_namespace(wsinv_ns, path=build_url("/", NAME, VERSION, "workspace-inventory"))
     api.add_namespace(model_ns, path=build_url("/", NAME, VERSION, "models"))
@@ -130,6 +135,7 @@ def create_app():
 
     configure_logging()
     logger = logging.getLogger(__name__)
+    logger.info("JWT_SECRET=%s", JWT_SECRET)
     logger.info("Starting the application...")
 
     databricks_token_manager = DatabricksTokenManager()

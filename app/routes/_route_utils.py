@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from flask import request
+from flask import g, request
 
 from app.exceptions.service_error import ServiceError
-from app.services.shared.request_context import get_current_username
 
 
 def get_workspace_id_from_header() -> str:
@@ -15,8 +14,10 @@ def get_workspace_id_from_header() -> str:
     return ws
 
 def get_user_id() -> str:
-    uid = (request.headers.get("X-User-Id") or "").strip()
-    return uid or get_current_username()
+    user_id = getattr(g, "user_id", None)
+    if user_id:
+        return str(user_id).strip()
+    raise ServiceError("Missing user identity", status_code=401)
 
 def int_arg(name: str, default: int) -> int:
     v = (request.args.get(name) or "").strip()

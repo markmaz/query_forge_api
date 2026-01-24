@@ -14,6 +14,14 @@ DB_URI = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}
 JWT_SECRET = os.getenv("JWT_SECRET")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXP_DELTA_HOURS = 2
+JWT_LEEWAY_SECONDS = int(os.getenv("JWT_LEEWAY_SECONDS", "120"))
+JWT_VERIFY_IAT = os.getenv("JWT_VERIFY_IAT", "").strip().lower() in ("1", "true", "yes", "y", "on")
+ACCESS_TOKEN_TTL_SECONDS = int(os.getenv("ACCESS_TOKEN_TTL_SECONDS", "900"))
+REFRESH_TOKEN_TTL_SECONDS = int(os.getenv("REFRESH_TOKEN_TTL_SECONDS", "1209600"))
+OTP_VALID_WINDOW = int(os.getenv("OTP_VALID_WINDOW", "2"))
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "").strip().lower() in ("1", "true", "yes", "y", "on")
+COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "Lax")
+REFRESH_COOKIE_PATH = os.getenv("REFRESH_COOKIE_PATH", "/api/v1/auth")
 
 DATABRICKS_URL = os.getenv("DATABRICKS_URL")
 DATABRICKS_BASE_ACCOUNT_URL = os.getenv("DATABRICKS_BASE_ACCOUNT_URL")

@@ -1,0 +1,279 @@
+from __future__ import annotations
+
+import app.services.execution_service as execution_service
+
+
+class _FakeValkey:
+    def __init__(self):
+        self.store = {}
+
+    def setex(self, key, _ttl, value):
+        self.store[key] = value
+        return True
+
+    def get(self, key):
+        return self.store.get(key)
+
+    def delete(self, key):
+        return self.store.pop(key, None)
+
+
+def _install_valkey(monkeypatch):
+    client = _FakeValkey()
+    monkeypatch.setattr(execution_service, "_get_valkey_client", lambda: client)
+    return client
+
+
+def test_execution_start_status_cancel(client, auth_headers, monkeypatch):
+    _install_valkey(monkeypatch)
+
+    class _SqlExec:
+        def __init__(self):
+            self.canceled = []
+
+        def submit_statement_async(self, sql, parameters, **_kwargs):
+            assert sql == "SELECT 1"
+            assert parameters == {}
+            return {"statement_id": "stmt-1"}
+
+        def get_statement_status(self, statement_id):
+            return {"status": {"state": "SUCCEEDED"}, "statement_id": statement_id}
+
+        def cancel_statement(self, statement_id):
+            self.canceled.append(statement_id)
+
+    class _Ctx:
+        sql_exec = _SqlExec()
+
+    class _Builder:
+        def build(self, workspace_id: str):
+            return _Ctx()
+
+    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+
+    resp = client.post(
+        "/api/v1/executions/start",
+        headers=auth_headers,
+        json={"sql": "SELECT 1", "params": {}, "kind": "query_builder"},
+    )
+    assert resp.status_code == 200
+    job_id = resp.json["jobId"]
+    assert resp.json["statementId"] == "stmt-1"
+
+    status = client.get(f"/api/v1/executions/{job_id}/status", headers=auth_headers)
+    assert status.status_code == 200
+    assert status.json["status"] == "SUCCEEDED"
+    assert status.json["statementId"] == "stmt-1"
+
+    cancel = client.post(f"/api/v1/executions/{job_id}/cancel", headers=auth_headers)
+    assert cancel.status_code == 200
+    assert cancel.json["ok"] is True
+
+
+def test_execution_start_validation_error(client, auth_headers, monkeypatch):
+    _install_valkey(monkeypatch)
+
+    class _Builder:
+        def build(self, workspace_id: str):
+            raise AssertionError("Builder should not be called")
+
+    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+
+    resp = client.post(
+        "/api/v1/executions/start",
+        headers=auth_headers,
+        json={"sql": "", "params": {}, "kind": "query_builder"},
+    )
+    assert resp.status_code == 400
+
+
+def test_execution_status_not_found(client, auth_headers, monkeypatch):
+    _install_valkey(monkeypatch)
+
+    class _Builder:
+        def build(self, workspace_id: str):
+            raise AssertionError("Builder should not be called")
+
+    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+
+    resp = client.get("/api/v1/executions/missing/status", headers=auth_headers)
+    assert resp.status_code == 404
+
+
+def test_execution_results_success(client, auth_headers, monkeypatch):
+    _install_valkey(monkeypatch)
+
+    class _SqlExec:
+        def submit_statement_async(self, sql, parameters, **_kwargs):
+            assert sql == "SELECT 1"
+            assert parameters == {"a": 1}
+            return {"statement_id": "stmt-2"}
+
+        def get_statement_status(self, statement_id):
+            assert statement_id == "stmt-2"
+            return {
+                "status": {"state": "SUCCEEDED"},
+                "manifest": {"schema": {"columns": [{"name": "a", "type": "INT", "nullable": True}]}},
+                "result": {"row_count": 2},
+            }
+
+        def fetch_all_json(self, statement_id):
+            assert statement_id == "stmt-2"
+            return [[1], [2]]
+
+    class _Ctx:
+        sql_exec = _SqlExec()
+
+    class _Builder:
+        def build(self, workspace_id: str):
+            return _Ctx()
+
+    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+
+    resp = client.post(
+        "/api/v1/executions/start",
+        headers=auth_headers,
+        json={
+            "sql": "SELECT 1",
+            "params": {"a": 1},
+            "kind": "query_builder",
+            "sqlRendered": "SELECT 1",
+            "limit": 5,
+            "offset": 10,
+        },
+    )
+    assert resp.status_code == 200
+    job_id = resp.json["jobId"]
+
+    results = client.get(f"/api/v1/executions/{job_id}/results", headers=auth_headers)
+    assert results.status_code == 200
+    assert results.json["rows"] == [{"a": 1}, {"a": 2}]
+    assert results.json["columns"] == [{"key": "a", "label": "a", "dataType": "INT", "nullable": True}]
+    assert results.json["total"] == 2
+    assert results.json["totalRowCount"] == 2
+    assert results.json["sql"] == "SELECT 1"
+    assert results.json["sqlRendered"] == "SELECT 1"
+    assert results.json["params"] == {"a": 1}
+    assert results.json["limit"] == 5
+    assert results.json["offset"] == 10
+
+
+def test_execution_results_running(client, auth_headers, monkeypatch):
+    _install_valkey(monkeypatch)
+
+    class _SqlExec:
+        def submit_statement_async(self, sql, parameters, **_kwargs):
+            return {"statement_id": "stmt-3"}
+
+        def get_statement_status(self, statement_id):
+            assert statement_id == "stmt-3"
+            return {"status": {"state": "RUNNING"}}
+
+    class _Ctx:
+        sql_exec = _SqlExec()
+
+    class _Builder:
+        def build(self, workspace_id: str):
+            return _Ctx()
+
+    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+
+    resp = client.post(
+        "/api/v1/executions/start",
+        headers=auth_headers,
+        json={"sql": "SELECT 1", "params": {}, "kind": "query_builder"},
+    )
+    assert resp.status_code == 200
+    job_id = resp.json["jobId"]
+
+    results = client.get(f"/api/v1/executions/{job_id}/results", headers=auth_headers)
+    assert results.status_code == 409
+    assert results.json["status"] == "RUNNING"
+
+
+def test_execution_results_failed(client, auth_headers, monkeypatch):
+    _install_valkey(monkeypatch)
+
+    class _SqlExec:
+        def submit_statement_async(self, sql, parameters, **_kwargs):
+            return {"statement_id": "stmt-4"}
+
+        def get_statement_status(self, statement_id):
+            assert statement_id == "stmt-4"
+            return {"status": {"state": "FAILED"}}
+
+    class _Ctx:
+        sql_exec = _SqlExec()
+
+    class _Builder:
+        def build(self, workspace_id: str):
+            return _Ctx()
+
+    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+
+    resp = client.post(
+        "/api/v1/executions/start",
+        headers=auth_headers,
+        json={"sql": "SELECT 1", "params": {}, "kind": "query_builder"},
+    )
+    assert resp.status_code == 200
+    job_id = resp.json["jobId"]
+
+    results = client.get(f"/api/v1/executions/{job_id}/results", headers=auth_headers)
+    assert results.status_code == 500
+    assert results.json["status"] == "FAILED"
+
+
+def test_execution_start_sql_json(client, auth_headers, monkeypatch):
+    _install_valkey(monkeypatch)
+
+    class _Prepared:
+        sql = "SELECT 2"
+        params = {"x": 1}
+        sql_rendered = "SELECT 2"
+        count_sql = "SELECT COUNT(*) AS total FROM t"
+
+    class _NoCodeService:
+        def __init__(self, executor, domain_resolver):
+            self.executor = executor
+            self.domain_resolver = domain_resolver
+
+        def prepare(self, raw_query, mode="preview", limit=200, offset=0):
+            assert raw_query == {"domainId": 1}
+            assert mode == "preview"
+            assert limit == 25
+            assert offset == 5
+            return _Prepared()
+
+    class _SqlExec:
+        def submit_statement_async(self, sql, parameters, **_kwargs):
+            assert sql == "SELECT 2"
+            assert parameters == {"x": 1}
+            return {"statement_id": "stmt-5"}
+
+    class _Ctx:
+        sql_exec = _SqlExec()
+
+    class _Builder:
+        def build(self, workspace_id: str):
+            return _Ctx()
+
+    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+    monkeypatch.setattr(execution_service, "NoCodeQueryService", _NoCodeService)
+    monkeypatch.setattr(execution_service, "DomainResolver", lambda workspace_id: object())
+
+    resp = client.post(
+        "/api/v1/executions/start?limit=25&offset=5",
+        headers=auth_headers,
+        json={"sqlJson": {"domainId": 1}, "kind": "query_builder"},
+    )
+    assert resp.status_code == 200
+    job_id = resp.json["jobId"]
+
+    job = execution_service._get_job(job_id)
+    assert job["sql"] == "SELECT 2"
+    assert job["sqlRendered"] == "SELECT 2"
+    assert job["params"] == {"x": 1}
+    assert job["limit"] == 25
+    assert job["offset"] == 5
+    assert job["countSql"] == "SELECT COUNT(*) AS total FROM t"

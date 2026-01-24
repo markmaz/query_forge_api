@@ -162,10 +162,75 @@ def test_compile_with_data_prep_cte_rewrites() -> None:
     assert "COALESCE(NULLIF(TRIM(t0.name), ''), t0.name_fallback) AS __dp_name" in compiled.sql
     assert "TRY_CAST(t0.age AS INT) AS __dp_age_num" in compiled.sql
     assert "LOWER(TRIM(t0.city)) AS __dp_city_norm" in compiled.sql
-    assert "TO_DATE(t0.dob, 'yyyy-MM-dd') AS __dp_dob_date" in compiled.sql
+    assert "TO_DATE(t0.dob, 'yyyy-mm-dd') AS __dp_dob_date" in compiled.sql
     assert "ROUND(t0.score, 2) AS __dp_score_round" in compiled.sql
     assert "FROM prep" in compiled.sql
     assert "WHERE __dp_name = :p1" in compiled.sql
+
+
+def test_compile_date_part_year_filter_exprid() -> None:
+    plan = _single_table_plan()
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(plan))
+
+    q = {
+        "domainId": 1,
+        "columns": [{"columnName": "enc_year", "exprId": "dp:year:1"}],
+        "dataPrep": {
+            "rules": [
+                {
+                    "id": "r1",
+                    "op": "date_part",
+                    "part": "year",
+                    "target": {"columnName": "encounter_date"},
+                    "output": {"columnName": "enc_year", "exprId": "dp:year:1"},
+                    "applyScope": "query_wide",
+                }
+            ]
+        },
+        "filters": {
+            "type": "group",
+            "match": "and",
+            "children": [
+                {
+                    "type": "condition",
+                    "field": {"columnName": "enc_year", "exprId": "dp:year:1"},
+                    "op": "equals",
+                    "value": 2024,
+                }
+            ],
+        },
+    }
+
+    compiled = svc.compile(svc.normalize(q))
+
+    assert "YEAR(t0.encounter_date) AS __dp_enc_year" in compiled.sql
+    assert "WHERE __dp_enc_year = :p1" in compiled.sql
+    assert compiled.params.get("p1") == 2024
+
+
+def test_parse_date_format_normalizes_parentheses_and_uppercase() -> None:
+    plan = _single_table_plan()
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(plan))
+
+    q = {
+        "domainId": 1,
+        "columns": [{"columnName": "dob_date"}],
+        "dataPrep": {
+            "rules": [
+                {
+                    "id": "r1",
+                    "op": "parse_date",
+                    "target": {"columnName": "dob"},
+                    "output": {"columnName": "dob_date"},
+                    "format": "(YYYY)",
+                }
+            ]
+        },
+    }
+
+    compiled = svc.compile(svc.normalize(q))
+
+    assert "TO_DATE(t0.dob, 'yyyy') AS __dp_dob_date" in compiled.sql
 
 
 def test_compile_aggs_with_metrics_and_aliases() -> None:
@@ -387,6 +452,28 @@ def test_data_prep_ops_variants() -> None:
                     "output": {"columnName": "code_cast"},
                     "toType": "STRING",
                 },
+                {
+                    "id": "r9",
+                    "op": "concat",
+                    "inputs": [
+                        {"type": "column", "col": {"columnName": "first"}},
+                        {"type": "column", "col": {"columnName": "last"}},
+                    ],
+                    "separator": " ",
+                    "nulls": "skip",
+                    "output": {"columnName": "full_name"},
+                },
+                {
+                    "id": "r10",
+                    "op": "concat",
+                    "inputs": [
+                        {"type": "column", "col": {"columnName": "city"}},
+                        {"type": "literal", "value": "-"},
+                        {"type": "column", "col": {"columnName": "state"}},
+                    ],
+                    "nulls": "propagate",
+                    "output": {"columnName": "city_state"},
+                },
             ]
         },
         base_from_sql="main.asset.people t0",
@@ -402,6 +489,8 @@ def test_data_prep_ops_variants() -> None:
     assert "TRIM(t0.zip) AS __dp_zip_trim" in cte_sql
     assert "TO_DATE(t0.dob) AS __dp_dob_date" in cte_sql
     assert "ROUND(t0.score, 1) AS __dp_score_round" in cte_sql
+    assert "CONCAT_WS(' ', t0.first, t0.last) AS __dp_full_name" in cte_sql
+    assert "CONCAT(t0.city, '-', t0.state) AS __dp_city_state" in cte_sql
     assert ctx["rewrite_by_modelid"][10] == "__dp_code_cast"
 
 
@@ -429,6 +518,145 @@ def test_data_prep_exprs_empty_after_iteration() -> None:
         alias_by_wt={},
     )
     assert ctx["cte_sql"] == ""
+
+
+def test_compile_exprid_projection_alias() -> None:
+    plan = _single_table_plan()
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(plan))
+    q = {
+        "domainId": 1,
+        "columns": [
+            {"columnName": "full_name", "exprId": "r1", "alias": "Full Name"},
+        ],
+        "filters": None,
+        "sorting": [],
+        "dataPrep": {
+            "rules": [
+                {
+                    "id": "r1",
+                    "op": "concat",
+                    "inputs": [
+                        {"type": "column", "col": {"columnName": "first"}},
+                        {"type": "column", "col": {"columnName": "last"}},
+                    ],
+                    "separator": " ",
+                    "nulls": "skip",
+                    "output": {"columnName": "full_name"},
+                }
+            ]
+        },
+        "aggs": {"enabled": False, "metrics": [], "groupBy": []},
+    }
+
+    compiled = svc.compile(svc.normalize(q))
+    assert "__dp_full_name AS `Full Name`" in compiled.sql
+    assert compiled.output_columns == [{"key": "Full Name", "label": "Full Name"}]
+
+
+def test_compile_crosswalk_exprid_projection_alias() -> None:
+    plan = _single_table_plan()
+    resolver = FakeResolver(plan)
+    resolver._workspace_id = "ws"
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=resolver)
+    q = {
+        "domainId": 1,
+        "columns": [
+            {"columnName": "cw_region", "exprId": "cw:att1:cw:region"},
+        ],
+        "filters": None,
+        "sorting": [],
+        "crosswalkAttachments": [
+            {
+                "id": "att1",
+                "listType": "regions",
+                "listId": "list-1",
+                "mode": "join",
+                "domainJoinColumns": [{"columnName": "patient_zip"}],
+                "projectFields": ["region"],
+            }
+        ],
+        "aggs": {"enabled": False, "metrics": [], "groupBy": []},
+    }
+
+    compiled = svc.compile(svc.normalize(q))
+    assert "cw_regions.region AS cw_region" in compiled.sql
+    assert compiled.output_columns == [{"key": "cw_region", "label": "cw_region"}]
+
+
+def test_compile_exprid_duplicate_column_names_are_aliased() -> None:
+    plan = _single_table_plan()
+    resolver = FakeResolver(plan)
+    resolver._workspace_id = "ws"
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=resolver)
+    q = {
+        "domainId": 1,
+        "columns": [
+            {
+                "columnName": "val",
+                "exprId": "r1",
+            },
+            {
+                "columnName": "val",
+                "exprId": "r2",
+            },
+        ],
+        "filters": None,
+        "sorting": [],
+        "dataPrep": {
+            "rules": [
+                {
+                    "id": "r1",
+                    "op": "fill_empty",
+                    "target": {"columnName": "a"},
+                    "output": {"columnName": "val_1"},
+                    "value": "x",
+                },
+                {
+                    "id": "r2",
+                    "op": "normalize_text",
+                    "target": {"columnName": "b"},
+                    "output": {"columnName": "val_2"},
+                    "mode": "lower",
+                },
+            ]
+        },
+        "aggs": {"enabled": False, "metrics": [], "groupBy": []},
+    }
+
+    compiled = svc.compile(svc.normalize(q))
+    output_names = [c["key"] for c in compiled.output_columns]
+    assert len(output_names) == 2
+    assert output_names[0] != output_names[1]
+
+
+def test_compile_exprid_projection_dedupes() -> None:
+    plan = _single_table_plan()
+    resolver = FakeResolver(plan)
+    resolver._workspace_id = "ws"
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=resolver)
+    q = {
+        "domainId": 1,
+        "columns": [
+            {"columnName": "cw_region", "exprId": "cw:att1:cw:region"},
+            {"columnName": "cw_region", "exprId": "cw:att1:cw:region"},
+        ],
+        "filters": None,
+        "sorting": [],
+        "crosswalkAttachments": [
+            {
+                "id": "att1",
+                "listType": "regions",
+                "listId": "list-1",
+                "mode": "join",
+                "domainJoinColumns": [{"columnName": "patient_zip"}],
+                "projectFields": ["region"],
+            }
+        ],
+        "aggs": {"enabled": False, "metrics": [], "groupBy": []},
+    }
+
+    compiled = svc.compile(svc.normalize(q))
+    assert [c["key"] for c in compiled.output_columns] == ["cw_region"]
 
 
 def test_compile_or_group_with_exists() -> None:

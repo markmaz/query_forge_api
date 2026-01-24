@@ -8,14 +8,13 @@ from flask_restx import Namespace, Resource
 from app.adapters.mysql_sql_executor import MySQLSQLExecutor
 from app.decorators.security import token_required
 from app.exceptions.service_error import ServiceError
-from app.routes._route_utils import bool_arg, get_workspace_id_from_header, int_arg
+from app.routes._route_utils import bool_arg, get_user_id, get_workspace_id_from_header, int_arg
 from app.services.models.model_read_service import ModelReadService
 from app.services.models.model_sample_read_service import ModelColumnSampleReadService
 from app.services.models.model_sample_write_service import ModelSampleService
 from app.services.models.model_update_service import ModelUpdateService
 from app.services.models.model_upload_service import ModelUploadService
 from app.services.shared.jsonify import jsonify_dict
-from app.services.shared.request_context import get_current_username
 from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
 
 logger = logging.getLogger(__name__)
@@ -41,7 +40,7 @@ class ModelUpload(Resource):
         """
         try:
             workspace_id = get_workspace_id_from_header()
-            user_id = get_current_username()
+            user_id = get_user_id()
 
             full_replace = bool_arg("fullReplace", default=False)
 
@@ -172,7 +171,7 @@ class ModelColumns(Resource):
         """
         try:
             _ = get_workspace_id_from_header()
-            user_id = get_current_username()
+            user_id = get_user_id()
 
             body = request.get_json(silent=True) or {}
             if not isinstance(body, dict):
@@ -221,7 +220,7 @@ class ModelColumnById(Resource):
         """
         try:
             _ = get_workspace_id_from_header()
-            user_id = get_current_username()
+            user_id = get_user_id()
 
             body = request.get_json(silent=True) or {}
             if not isinstance(body, dict):
@@ -286,7 +285,7 @@ class ModelColumnSample(Resource):
         """
         try:
             workspace_id = get_workspace_id_from_header()
-            user_id = get_current_username()
+            user_id = get_user_id()
 
             domain_id = request.args.get("domain_id")
             if not (domain_id or "").strip():
