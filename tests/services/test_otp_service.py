@@ -73,12 +73,7 @@ def test_verify_otp_success(monkeypatch: pytest.MonkeyPatch) -> None:
         def verify(self, _otp: str, valid_window: int = 1) -> bool:
             return True
 
-    class DummyAuth:
-        def generate_token(self, _user):
-            return "token"
-
     monkeypatch.setattr(otp_service, "UserService", DummyUserService)
     monkeypatch.setattr(otp_service.pyotp, "TOTP", DummyTotp)
-    monkeypatch.setattr(otp_service, "AuthService", lambda: DummyAuth())
 
-    assert otp_service.verify_otp("u1", "123") == "token"
+    assert otp_service.verify_otp("u1", "123") == user

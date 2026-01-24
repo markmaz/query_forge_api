@@ -11,7 +11,7 @@ from app.utils.token_utils import generate_token
 logger = logging.getLogger(__name__)
 
 def send_invite_email(to_email: str, user_id: str):
-    subject = "You've been invited to join Workboard"
+    subject = "You've been invited to join QueryForge!"
 
     token = generate_token(user_id)
     url = f"{INVITE_URL}?token={token}" 
@@ -20,12 +20,12 @@ def send_invite_email(to_email: str, user_id: str):
     send_email(get_logo(), subject, to_email, html)
 
 def send_otp_code(to_email: str, otp: str):
-    subject = f"Kythera Workboad - Your verification code is {otp}"
+    subject = f"QueryForge - Your verification code is {otp}"
     html = render_template("/otp_verification/otp_verification.html", otp = otp)
     send_email(get_logo(), subject, to_email, html)
 
 def send_password_reset(to_email: str, token: str):
-    subject = "Kythera Workboard - Password Reset"
+    subject = "QueryForge - Password Reset"
     url = f"{PASSWORD_RESET_URL}?token={token}"
     html = render_template("/email_password_reset/password_reset.html", password_reset_url=url)
     send_email(get_logo(), subject, to_email, html)
@@ -35,7 +35,7 @@ def send_email(logo_path: str, subject: str, to_email: str, html: str):
 
     with open(logo_path, 'rb') as fp:
                 msg.attach(
-            filename="kythera_logo.png",
+            filename="qf-logo.png",
             content_type="image/png",
             data=fp.read(),
             disposition="inline",
@@ -44,4 +44,4 @@ def send_email(logo_path: str, subject: str, to_email: str, html: str):
     mail.send(msg)
 
 def get_logo() -> str:
-      return  os.path.join(current_app.root_path, 'static', 'images', 'kythera_logo.png')
+      return  os.path.join(current_app.root_path, 'static', 'images', 'qf_logo.png')

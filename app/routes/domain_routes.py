@@ -9,6 +9,7 @@ from flask_restx import Namespace, Resource
 
 from app.decorators.security import token_required
 from app.exceptions.service_error import ServiceError
+from app.routes._route_utils import get_user_id
 from app.services.domain.builder_column_feed_service import (
     BuilderColumnFeedService,
     BuilderFeedQuery,
@@ -21,7 +22,6 @@ from app.services.domain.domain_table_read_service import DomainTableReadService
 from app.services.domain.domain_table_write_service import DomainTableWriteService
 from app.services.domain.domain_user_read_service import UserDomainReadService
 from app.services.domain.domain_user_write_service import DomainUserWriteService
-from app.services.shared.request_context import get_current_username
 
 logger = logging.getLogger(__name__)
 domains_ns = Namespace("domains", description="Domains + Builder feed + permissions")
@@ -40,12 +40,6 @@ def _get_workspace_id_from_header() -> str:
 
 def _handle_service_error(e: ServiceError):
     return {"error": str(e)}, getattr(e, "status_code", 400) or 400
-
-def _get_user_id() -> str:
-    user_id = (request.headers.get("X-User-Id") or "").strip()
-    if user_id:
-        return user_id
-    return get_current_username()
 
 
 def _int_arg(name: str, default: int) -> int:
@@ -83,7 +77,7 @@ class DomainsRoot(Resource):
         """
         try:
             workspace_id = _get_workspace_id_from_header()
-            user_id = _get_user_id()
+            user_id = get_user_id()
 
             rows = UserDomainReadService().list_user_domains(
                 workspace_id=workspace_id,
@@ -105,7 +99,7 @@ class DomainsRoot(Resource):
         """
         try:
             workspace_id = _get_workspace_id_from_header()
-            user_id = _get_user_id()
+            user_id = get_user_id()
 
             body = request.get_json(silent=True) or {}
             if not isinstance(body, dict):
@@ -139,7 +133,7 @@ class DomainById(Resource):
         """
         try:
             workspace_id = _get_workspace_id_from_header()
-            user_id = _get_user_id()
+            user_id = get_user_id()
 
             body = request.get_json(silent=True) or {}
             if not isinstance(body, dict):
@@ -171,7 +165,7 @@ class DomainById(Resource):
         """
         try:
             workspace_id = _get_workspace_id_from_header()
-            user_id = _get_user_id()
+            user_id = get_user_id()
 
             res = DomainAdminWriteService().delete_domain(
                 workspace_id=workspace_id,
@@ -197,7 +191,7 @@ class ColumnSample(Resource):
         """
         try:
             workspace_id = _get_workspace_id_from_header()
-            user_id = _get_user_id()
+            user_id = get_user_id()
 
             wtid = request.args.get("workspace_table_id")
             if not (wtid or "").strip():
@@ -309,7 +303,7 @@ class DomainTables(Resource):
         """
         try:
             workspace_id = _get_workspace_id_from_header()
-            user_id = _get_user_id()
+            user_id = get_user_id()
 
             body = request.get_json(silent=True) or {}
             if not isinstance(body, dict):
@@ -532,7 +526,7 @@ class DomainUsers(Resource):
         """
         try:
             workspace_id = _get_workspace_id_from_header()
-            editor_user_id = _get_user_id()
+            editor_user_id = get_user_id()
 
             body = request.get_json(silent=True) or {}
             if not isinstance(body, dict):
@@ -585,7 +579,7 @@ class DomainUserById(Resource):
         """
         try:
             workspace_id = _get_workspace_id_from_header()
-            editor_user_id = _get_user_id()
+            editor_user_id = get_user_id()
 
             res = DomainUserWriteService().remove_user(
                 workspace_id=workspace_id,
@@ -652,7 +646,7 @@ class BuilderTables(Resource):
         """
         try:
             workspace_id = _get_workspace_id_from_header()
-            user_id = _get_user_id()
+            user_id = get_user_id()
 
             domain_id = request.args.get("domain_id")
             domain_id = int(domain_id) if (domain_id or "").strip() else None
@@ -680,7 +674,7 @@ class BuilderColumns(Resource):
         """
         try:
             workspace_id = _get_workspace_id_from_header()
-            user_id = _get_user_id()
+            user_id = get_user_id()
 
             domain_id = request.args.get("domain_id")
             domain_id = int(domain_id) if (domain_id or "").strip() else None

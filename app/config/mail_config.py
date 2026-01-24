@@ -8,3 +8,5 @@ class MailConfig:
     MAIL_USERNAME = SMTP_USERNAME
     MAIL_PASSWORD = SMTP_PASSWORD
     MAIL_DEFAULT_SENDER = DEFAULT_MAIL_SENDER
+
+#todo: add mail config for production and development

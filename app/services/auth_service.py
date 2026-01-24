@@ -2,14 +2,24 @@ import datetime
 import hashlib
 import logging
 import time
-from typing import Optional
+import uuid
+from typing import Any, Dict, Optional, Tuple
 
 import jwt
 import redis
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from werkzeug.security import check_password_hash
 
-from app.config import JWT_ALGORITHM, JWT_EXP_DELTA_HOURS, JWT_SECRET, VALKEY_CONFIG
+from app.config import (
+    ACCESS_TOKEN_TTL_SECONDS,
+    JWT_ALGORITHM,
+    JWT_EXP_DELTA_HOURS,
+    JWT_LEEWAY_SECONDS,
+    JWT_SECRET,
+    JWT_VERIFY_IAT,
+    REFRESH_TOKEN_TTL_SECONDS,
+    VALKEY_CONFIG,
+)
 from app.decorators.validate import validate_params
 from app.exceptions.service_error import ServiceError
 from app.models.user import User
@@ -20,6 +30,8 @@ cache = redis.Redis.from_url(VALKEY_CONFIG, decode_responses=True)
 logger = logging.getLogger(__name__)
 TTL_SECONDS = 3600
 KEY_PREFIX = "reset:token:"
+REFRESH_PREFIX = "auth:refresh:"
+DEFAULT_LEEWAY_SECONDS = 30
 
 def hash_token(t):
     return hashlib.sha256(t.encode()).hexdigest()
@@ -35,6 +47,10 @@ class AuthService:
         self.secret = JWT_SECRET
         self.algorithm = JWT_ALGORITHM
         self.exp_delta = datetime.timedelta(hours=JWT_EXP_DELTA_HOURS)
+        self.access_ttl_seconds = int(ACCESS_TOKEN_TTL_SECONDS or (JWT_EXP_DELTA_HOURS * 3600))
+        self.refresh_ttl_seconds = int(REFRESH_TOKEN_TTL_SECONDS or (14 * 24 * 3600))
+        self.leeway_seconds = int(JWT_LEEWAY_SECONDS or DEFAULT_LEEWAY_SECONDS)
+        self.verify_iat = bool(JWT_VERIFY_IAT)
     
     def _norm_status(self, s: object) -> str:
         return (str(s or "")).strip().lower()
@@ -129,13 +145,125 @@ class AuthService:
         :return: An encoded JWT token as a string
         :raises ServiceError: If the user data is invalid
         """
+        return self.generate_access_token(
+            user.user_id,
+            extra_claims={"username": user.user_name},
+        )
+
+    def _encode(self, payload: Dict[str, Any]) -> str:
+        return jwt.encode(payload, self.secret, algorithm=self.algorithm)
+
+    def _decode(self, token: str) -> Dict[str, Any]:
+        return jwt.decode(
+            token,
+            self.secret,
+            algorithms=[self.algorithm],
+            leeway=self.leeway_seconds,
+            options={"verify_iat": self.verify_iat},
+        )
+
+    def _log_token_timing(self, payload: Dict[str, Any], context: str) -> None:
+        iat = payload.get("iat")
+        exp = payload.get("exp")
+        if isinstance(iat, datetime.datetime):
+            iat = int(iat.timestamp())
+        if isinstance(exp, datetime.datetime):
+            exp = int(exp.timestamp())
+        now_ts = int(datetime.datetime.utcnow().timestamp())
+        logger.debug(
+            "Token timing (%s): sub=%s typ=%s iat=%s exp=%s now=%s leeway=%s",
+            context,
+            payload.get("sub"),
+            payload.get("typ"),
+            iat,
+            exp,
+            now_ts,
+            self.leeway_seconds,
+        )
+
+    def decode_and_verify(self, token: str, *, expected_typ: Optional[str] = None) -> Dict[str, Any]:
+        try:
+            payload = self._decode(token)
+        except jwt.ExpiredSignatureError as exc:
+            logger.warning("JWT decode failed: expired token")
+            raise ServiceError("Token expired", status_code=401) from exc
+        except jwt.InvalidTokenError as exc:
+            logger.warning("JWT decode failed: %s", exc)
+            raise ServiceError("Invalid token", status_code=401) from exc
+
+        if expected_typ:
+            if payload.get("typ") != expected_typ:
+                raise ServiceError("Invalid token type", status_code=401)
+        self._log_token_timing(payload, "decode_and_verify")
+        return payload
+
+    def generate_access_token(self, user_id: str, extra_claims: Optional[Dict[str, Any]] = None) -> str:
+        now = datetime.datetime.utcnow()
         payload = {
-            "sub": user.user_id,  # Use 'sub' as the standard JWT subject
-            "username": user.user_name,
-            "exp": datetime.datetime.utcnow() + self.exp_delta
+            "sub": str(user_id),
+            "typ": "access",
+            "jti": uuid.uuid4().hex,
+            "iat": int(now.timestamp()),
+            "exp": now + datetime.timedelta(seconds=self.access_ttl_seconds),
+        }
+        if extra_claims:
+            payload.update(extra_claims)
+        return self._encode(payload)
+
+    def _generate_refresh_token_with_jti(self, user_id: str) -> Tuple[str, str]:
+        now = datetime.datetime.utcnow()
+        jti = uuid.uuid4().hex
+        payload = {
+            "sub": str(user_id),
+            "typ": "refresh",
+            "jti": jti,
+            "iat": int(now.timestamp()),
+            "exp": now + datetime.timedelta(seconds=self.refresh_ttl_seconds),
+        }
+        return self._encode(payload), jti
+
+    def generate_refresh_token(self, user_id: str) -> str:
+        token, _jti = self._generate_refresh_token_with_jti(user_id)
+        return token
+
+    def store_refresh_jti(self, jti: str, user_id: str, ttl_seconds: int) -> None:
+        key = f"{REFRESH_PREFIX}{jti}"
+        cache.setex(key, int(ttl_seconds), str(user_id))
+
+    def revoke_refresh_jti(self, jti: str) -> None:
+        cache.delete(f"{REFRESH_PREFIX}{jti}")
+
+    def is_refresh_jti_valid(self, jti: str) -> bool:
+        return bool(cache.exists(f"{REFRESH_PREFIX}{jti}"))
+
+    def issue_tokens(self, user: User) -> Dict[str, Any]:
+        access_token = self.generate_access_token(
+            user.user_id,
+            extra_claims={"username": user.user_name},
+        )
+        refresh_token, jti = self._generate_refresh_token_with_jti(user.user_id)
+        self.store_refresh_jti(jti, user.user_id, self.refresh_ttl_seconds)
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "expires_in": self.access_ttl_seconds,
         }
 
-        return jwt.encode(payload, self.secret, algorithm=self.algorithm)
+    def rotate_refresh_token(self, refresh_token: str) -> Tuple[str, str]:
+        payload = self.decode_and_verify(refresh_token, expected_typ="refresh")
+        jti = payload.get("jti")
+        if not jti:
+            raise ServiceError("Invalid refresh token", status_code=401)
+        if not self.is_refresh_jti_valid(jti):
+            raise ServiceError("Refresh token revoked", status_code=401)
+        user_id = str(payload.get("sub") or "")
+        if not user_id:
+            raise ServiceError("Invalid refresh token", status_code=401)
+
+        self.revoke_refresh_jti(jti)
+        new_refresh_token, new_jti = self._generate_refresh_token_with_jti(user_id)
+        self.store_refresh_jti(new_jti, user_id, self.refresh_ttl_seconds)
+        return new_refresh_token, user_id
     
 
     @validate_params("token")
@@ -150,11 +278,15 @@ class AuthService:
         :raises jwt.InvalidTokenError: When the token is invalid or malformed.
         """
         try:
-            return jwt.decode(token, self.secret, algorithms=[self.algorithm])
+            payload = self._decode(token)
         except jwt.ExpiredSignatureError:
             return None
         except jwt.InvalidTokenError:
             return None
+        if payload.get("typ") != "access":
+            return None
+        self._log_token_timing(payload, "verify_token")
+        return payload
 
     @validate_params("email")
     def send_reset_request(self, email: str) -> dict:

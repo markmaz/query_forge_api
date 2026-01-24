@@ -162,10 +162,75 @@ def test_compile_with_data_prep_cte_rewrites() -> None:
     assert "COALESCE(NULLIF(TRIM(t0.name), ''), t0.name_fallback) AS __dp_name" in compiled.sql
     assert "TRY_CAST(t0.age AS INT) AS __dp_age_num" in compiled.sql
     assert "LOWER(TRIM(t0.city)) AS __dp_city_norm" in compiled.sql
-    assert "TO_DATE(t0.dob, 'yyyy-MM-dd') AS __dp_dob_date" in compiled.sql
+    assert "TO_DATE(t0.dob, 'yyyy-mm-dd') AS __dp_dob_date" in compiled.sql
     assert "ROUND(t0.score, 2) AS __dp_score_round" in compiled.sql
     assert "FROM prep" in compiled.sql
     assert "WHERE __dp_name = :p1" in compiled.sql
+
+
+def test_compile_date_part_year_filter_exprid() -> None:
+    plan = _single_table_plan()
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(plan))
+
+    q = {
+        "domainId": 1,
+        "columns": [{"columnName": "enc_year", "exprId": "dp:year:1"}],
+        "dataPrep": {
+            "rules": [
+                {
+                    "id": "r1",
+                    "op": "date_part",
+                    "part": "year",
+                    "target": {"columnName": "encounter_date"},
+                    "output": {"columnName": "enc_year", "exprId": "dp:year:1"},
+                    "applyScope": "query_wide",
+                }
+            ]
+        },
+        "filters": {
+            "type": "group",
+            "match": "and",
+            "children": [
+                {
+                    "type": "condition",
+                    "field": {"columnName": "enc_year", "exprId": "dp:year:1"},
+                    "op": "equals",
+                    "value": 2024,
+                }
+            ],
+        },
+    }
+
+    compiled = svc.compile(svc.normalize(q))
+
+    assert "YEAR(t0.encounter_date) AS __dp_enc_year" in compiled.sql
+    assert "WHERE __dp_enc_year = :p1" in compiled.sql
+    assert compiled.params.get("p1") == 2024
+
+
+def test_parse_date_format_normalizes_parentheses_and_uppercase() -> None:
+    plan = _single_table_plan()
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(plan))
+
+    q = {
+        "domainId": 1,
+        "columns": [{"columnName": "dob_date"}],
+        "dataPrep": {
+            "rules": [
+                {
+                    "id": "r1",
+                    "op": "parse_date",
+                    "target": {"columnName": "dob"},
+                    "output": {"columnName": "dob_date"},
+                    "format": "(YYYY)",
+                }
+            ]
+        },
+    }
+
+    compiled = svc.compile(svc.normalize(q))
+
+    assert "TO_DATE(t0.dob, 'yyyy') AS __dp_dob_date" in compiled.sql
 
 
 def test_compile_aggs_with_metrics_and_aliases() -> None:

@@ -671,7 +671,10 @@ class NoCodeQueryService:
         )
 
         from_clause_sql = dp_ctx["from_clause_sql"]
-        derived_by_exprid = dp_ctx["derived_by_exprid"]
+        derived_by_exprid = {
+            **dp_ctx.get("derived_by_exprid", {}),
+            **dp_ctx.get("computed_alias_by_expr_id", {}),
+        }
         derived_by_name = dp_ctx["derived_by_name"]
         rewrite_by_colname = dp_ctx["rewrite_by_colname"]
         rewrite_by_modelid = dp_ctx["rewrite_by_modelid"]
@@ -1046,6 +1049,7 @@ class NoCodeQueryService:
                 "cte_sql": "",
                 "from_clause_sql": default_from,
                 "derived_by_exprid": {},
+                "computed_alias_by_expr_id": {},
                 "derived_by_name": {},
                 "rewrite_by_colname": {},
                 "rewrite_by_modelid": {},
@@ -1057,18 +1061,32 @@ class NoCodeQueryService:
                 "cte_sql": "",
                 "from_clause_sql": default_from,
                 "derived_by_exprid": {},
+                "computed_alias_by_expr_id": {},
                 "derived_by_name": {},
                 "rewrite_by_colname": {},
                 "rewrite_by_modelid": {},
             }
 
         derived_by_exprid: Dict[str, str] = {}
+        computed_alias_by_expr_id: Dict[str, str] = {}
         derived_by_name: Dict[str, str] = {}
         rewrite_by_colname: Dict[str, str] = {}
         rewrite_by_modelid: Dict[int, str] = {}
 
         exprs: List[str] = []
         using_prep = False  # compiling inside CTE against src
+
+        def normalize_date_format(fmt: Any) -> Optional[str]:
+            if fmt is None:
+                return None
+            if not isinstance(fmt, str):
+                raise ServiceError("parse_date.format must be string or null", status_code=400)
+            s = fmt.strip()
+            if s.startswith("(") and s.endswith(")"):
+                s = s[1:-1].strip()
+            if not s:
+                return None
+            return s.lower()
 
         for i, r in enumerate(rules):
             if not isinstance(r, dict):
@@ -1156,13 +1174,19 @@ class NoCodeQueryService:
                     exprs.append(f"LOWER(TRIM({target_expr})) AS {out_ident}")
 
             elif op == "parse_date":
-                fmt = r.get("format", None)
+                fmt = normalize_date_format(r.get("format", None))
                 if fmt:
-                    if not isinstance(fmt, str):
-                        raise ServiceError("parse_date.format must be string or null", status_code=400)
                     exprs.append(f"TO_DATE({target_expr}, {self._literal_sql(fmt)}) AS {out_ident}")
                 else:
                     exprs.append(f"TO_DATE({target_expr}) AS {out_ident}")
+
+            elif op == "date_part":
+                part = (r.get("part") or "").strip().lower()
+                if part not in ("year", "month", "day"):
+                    raise ServiceError("date_part.part must be year|month|day", status_code=400)
+                fn = part.upper()
+                # Use YEAR/MONTH/DAY to compare numerically instead of DATE = '2024' string comparisons.
+                exprs.append(f"{fn}({target_expr}) AS {out_ident}")
 
             elif op == "round":
                 dec = r.get("decimals")
@@ -1229,6 +1253,9 @@ class NoCodeQueryService:
                 raise ServiceError(f"Unsupported dataPrep op: {op}", status_code=400)
 
             derived_by_exprid[rid] = out_ident
+            out_expr_id = output.get("exprId")
+            if out_expr_id and isinstance(out_expr_id, str):
+                computed_alias_by_expr_id[out_expr_id] = out_ident
             derived_by_name[out_name] = out_ident
 
             # ✅ query-wide rewrite: target -> internal output identifier
@@ -1246,6 +1273,7 @@ class NoCodeQueryService:
                 "cte_sql": "",
                 "from_clause_sql": default_from,
                 "derived_by_exprid": {},
+                "computed_alias_by_expr_id": {},
                 "derived_by_name": {},
                 "rewrite_by_colname": {},
                 "rewrite_by_modelid": {},
@@ -1263,6 +1291,7 @@ class NoCodeQueryService:
             "cte_sql": cte_sql,
             "from_clause_sql": "prep",
             "derived_by_exprid": derived_by_exprid,
+            "computed_alias_by_expr_id": computed_alias_by_expr_id,
             "derived_by_name": derived_by_name,
             "rewrite_by_colname": rewrite_by_colname,
             "rewrite_by_modelid": rewrite_by_modelid,

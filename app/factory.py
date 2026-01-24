@@ -16,7 +16,7 @@ from flask_restx import Api
 from app.adapters.databricks_token_manager import DatabricksTokenManager
 from app.adapters.sigma_token_manager import SigmaTokenManager
 from app.celery_app import celery, init_celery
-from app.config import AI_MODEL_NAME, LOG_QUEUE, OPEN_AI_KEY, VALKEY_ADDRESS, VALKEY_CONFIG, VALKEY_PORT
+from app.config import AI_MODEL_NAME, JWT_SECRET, LOG_QUEUE, OPEN_AI_KEY, VALKEY_ADDRESS, VALKEY_CONFIG, VALKEY_PORT
 from app.config.logging_config import configure_logging
 from app.config.mail_config import MailConfig
 from app.exceptions.service_error import ServiceError
@@ -69,7 +69,10 @@ def extract_user_id():
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header.split(" ")[1]
-        return auth_service.verify_token(token).get("sub") or "unknown_user"
+        payload = auth_service.verify_token(token)
+        if payload and isinstance(payload, dict):
+            return payload.get("sub") or "unknown_user"
+        return "unknown_user"
     return "unknown_user"
 
 def create_app():
@@ -132,6 +135,7 @@ def create_app():
 
     configure_logging()
     logger = logging.getLogger(__name__)
+    logger.info("JWT_SECRET=%s", JWT_SECRET)
     logger.info("Starting the application...")
 
     databricks_token_manager = DatabricksTokenManager()

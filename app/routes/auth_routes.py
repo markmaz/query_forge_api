@@ -1,6 +1,8 @@
 from flask import jsonify, make_response, request
 from flask_restx import Namespace, Resource, fields
 
+from app.config import COOKIE_SAMESITE, COOKIE_SECURE, REFRESH_COOKIE_PATH
+from app.exceptions.service_error import ServiceError
 from app.services.auth_service import AuthService, hash_token
 from app.services.user_service import UserService
 from app.utils.token_utils import validate_token
@@ -25,9 +27,28 @@ class Authenticate(Resource):
 
         if not user:
             return {"message": "Invalid username or password"}, 401
-        else:
-            token = auth.generate_token(user)
-            return {"token": token}
+
+        tokens = auth.issue_tokens(user)
+        response = make_response(
+            jsonify(
+                {
+                    "access_token": tokens["access_token"],
+                    "token_type": "Bearer",
+                    "expires_in": tokens["expires_in"],
+                    "token": tokens["access_token"],
+                }
+            )
+        )
+        response.set_cookie(
+            "refresh_token",
+            tokens["refresh_token"],
+            httponly=True,
+            secure=bool(COOKIE_SECURE),
+            samesite=COOKIE_SAMESITE,
+            max_age=auth.refresh_ttl_seconds,
+            path=REFRESH_COOKIE_PATH,
+        )
+        return response
 
 @auth_ns.route('/login')
 @auth_ns.expect(login_model)
@@ -60,6 +81,91 @@ class Login(Resource):
             return {"message": "Invalid username or password"}, 401
 
         return jsonify(user)
+
+
+def _get_refresh_from_request() -> str | None:
+    token = request.cookies.get("refresh_token")
+    if token:
+        return token
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        return auth_header.split(" ", 1)[1].strip()
+    return None
+
+
+@auth_ns.route("/refresh")
+class Refresh(Resource):
+    def post(self):
+        token = _get_refresh_from_request()
+        if not token:
+            return {"error": "Missing refresh token"}, 401
+
+        auth = AuthService()
+        try:
+            new_refresh, user_id = auth.rotate_refresh_token(token)
+            access_token = auth.generate_access_token(user_id)
+        except ServiceError as e:
+            return {"error": str(e)}, getattr(e, "status_code", 401) or 401
+
+        response = make_response(
+            jsonify(
+                {
+                    "access_token": access_token,
+                    "token_type": "Bearer",
+                    "expires_in": auth.access_ttl_seconds,
+                }
+            )
+        )
+        response.set_cookie(
+            "refresh_token",
+            new_refresh,
+            httponly=True,
+            secure=bool(COOKIE_SECURE),
+            samesite=COOKIE_SAMESITE,
+            max_age=auth.refresh_ttl_seconds,
+            path=REFRESH_COOKIE_PATH,
+        )
+        return response
+
+
+@auth_ns.route("/logout")
+class Logout(Resource):
+    def post(self):
+        auth = AuthService()
+        refresh_token = request.cookies.get("refresh_token")
+        access_token = None
+
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            access_token = auth_header.split(" ", 1)[1].strip()
+
+        if not refresh_token and not access_token:
+            return {"error": "Missing credentials"}, 401
+
+        if refresh_token:
+            try:
+                payload = auth.decode_and_verify(refresh_token, expected_typ="refresh")
+                jti = payload.get("jti")
+                if jti:
+                    auth.revoke_refresh_jti(jti)
+            except ServiceError:
+                return {"error": "Invalid refresh token"}, 401
+
+        if access_token:
+            if not auth.verify_token(access_token):
+                return {"error": "Invalid access token"}, 401
+
+        response = make_response(("", 204))
+        response.set_cookie(
+            "refresh_token",
+            "",
+            httponly=True,
+            secure=bool(COOKIE_SECURE),
+            samesite=COOKIE_SAMESITE,
+            max_age=0,
+            path=REFRESH_COOKIE_PATH,
+        )
+        return response
 
 @auth_ns.route("/invite/validate/<string:token>")
 class InviteValidationResource(Resource):

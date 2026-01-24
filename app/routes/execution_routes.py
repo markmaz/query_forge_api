@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+
 from flask import request
 from flask_restx import Namespace, Resource
 

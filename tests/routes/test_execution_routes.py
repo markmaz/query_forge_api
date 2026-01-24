@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import app.routes.execution_routes as execution_routes
 import app.services.execution_service as execution_service
 
 
