@@ -1298,10 +1298,11 @@ class NoCodeQueryService:
                 "rewrite_by_modelid": {},
             }
 
+        joined_exprs = ",\n    ".join(exprs)
         cte_sql = (
             "WITH prep AS (\n"
             "  SELECT *,\n"
-            f"    {',\n    '.join(exprs)}\n"
+            f"    {joined_exprs}\n"
             f"  FROM {default_from}\n"
             ")"
         )
