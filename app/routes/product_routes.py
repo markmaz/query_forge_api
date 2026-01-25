@@ -3,7 +3,6 @@ from flask_restx import Namespace, Resource, reqparse
 
 from app.decorators.security import token_required
 from app.models.product import Product
-from app.services.dashboard_service import DashboardService
 from app.services.product_service import ProductService
 from app.services.role_service import RoleService
 
@@ -100,26 +99,6 @@ class DeleteProductRoles(Resource):
 class SigmaProduct(Resource):
     @token_required
     def post(self):
-        data = request.get_json()
-        product_name = data.get("product_name")
-        product_group_id = data.get("product_group_id")
-        role_ids = data.get("role_ids")
-
-        service = ProductService()
-        results = service.create_product(product_name, product_group_id, role_ids)
-
-        if results:
-            dashboard = DashboardService()
-            workbook_id = data.get("sigma_dashboard_id")
-
-            if workbook_id:
-                response = dashboard.share_workbook(workbook_id)
-
-                if response:
-                    return {"status": "success"}, 200
-            else:
-                return {"Missing workbook id"}, 409
-        else:
-            return {"status":"partial"}, 207
+        return {"status": "ok"}, 200
 
         

@@ -1,38 +1,99 @@
 <!DOCTYPE html>
 <html>
-  <body style="background-color: #f5f5f5; margin: 0; padding: 30px; font-family: Arial, sans-serif;">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>You're Invited</title>
+  </head>
+  <body
+    style="
+      background-color: #0b0f19;
+      margin: 0;
+      padding: 30px;
+      font-family: Arial, sans-serif;
+      color: #ffffff;
+    "
+  >
     <table width="100%" cellpadding="0" cellspacing="0">
       <tr>
         <td align="center">
-          <table width="600" cellpadding="20" cellspacing="0" style="background-color: #ffffff; border-radius: 8px;">
+          <table
+            width="600"
+            cellpadding="20"
+            cellspacing="0"
+            style="
+              background-color: #111827;
+              border-radius: 12px;
+              border: 1px solid #1f2937;
+            "
+          >
+            <!-- Logo -->
             <tr>
-              <td align="center">
-                <img src="cid:logo" style="max-width: 200px; height: auto; margin-bottom: 5px;" alt="Kythera Labs Logo" />
+              <td align="center" style="padding-bottom: 10px;">
+                <img
+                  src="https://www.query-forge.com/assets/images/logo/qf_logo.png"
+                  alt="QueryForge Logo"
+                  width="200"
+                  style="
+                    max-width: 200px;
+                    height: auto;
+                    display: block;
+                  "
+                />
               </td>
             </tr>
+
+            <!-- Content -->
             <tr>
-              <td>
-                <h2 style="color: #2b5f60;">You've been invited!</h2>
+              <td style="font-size: 15px; line-height: 1.6; color: #e5e7eb;">
+                <h2 style="color: #ff4d1f; margin: 0 0 12px;">
+                  You've been invited!
+                </h2>
+
                 <p>
-                  You are receiving this email because you've been invited to join <strong>QueryForge</strong>. This platform will help you streamline operations and help provide excellent analysis.
-                </p>
-                <p>
-                  Please click the link below to complete the invitation process:
+                  You are receiving this email because you've been invited to join
+                  <strong style="color: #ffffff;">QueryForge</strong>. This platform will help you streamline
+                  operations and provide excellent analysis.
                 </p>
 
-                <p style="text-align: center; margin: 30px 0;">
-                  <a href="{{ invite_url }}" style="display: inline-block; background-color: #e0ecec; color: #2b5f60; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold;">
+                <p>Please click the button below to complete the invitation process:</p>
+
+                <!-- CTA Button -->
+                <p style="text-align: center; margin: 36px 0;">
+                  <a
+                    href="{{ invite_url }}"
+                    style="
+                      display: inline-block;
+                      background-color: #ff4d1f;
+                      border: 1px solid #e6451c;
+                      color: #ffffff;
+                      text-decoration: none;
+                      padding: 14px 28px;
+                      border-radius: 10px;
+                      font-weight: bold;
+                      font-size: 15px;
+                    "
+                  >
                     Complete Your Invitation
                   </a>
                 </p>
 
                 <p>
-                  If you experience any issues logging in or have questions about your account, please contact <a href="mailto:csx@query-forge.com">csx@query-forge.com</a> directly.
+                  If you experience any issues logging in or have questions about your account, please contact
+                  <a
+                    href="mailto:csx@query-forge.com"
+                    style="color: #ff4d1f; text-decoration: none;"
+                    >csx@query-forge.com</a
+                  >
+                  directly.
                 </p>
+
                 <p>Thank you for trusting QueryForge as your partner in data solutions.</p>
 
-                <p>Best regards,</p>
-                <p><strong>The QueryForge Team</strong></p>
+                <p style="margin-top: 30px;">
+                  Best regards,<br />
+                  <strong style="color: #ffffff;">The QueryForge Team</strong>
+                </p>
               </td>
             </tr>
           </table>

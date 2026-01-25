@@ -67,6 +67,10 @@ def test_resolve_workspace_url_object(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_resolve_default_warehouse_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.WorkspaceService.get_workspace",
+        lambda *_args, **_kwargs: {"server": "https://dbx"},
+    )
+    monkeypatch.setattr(
         "app.services.workspace_inventory.workspace_context.WarehouseService.get_warehouse_by_name",
         lambda *_args, **_kwargs: {},
     )

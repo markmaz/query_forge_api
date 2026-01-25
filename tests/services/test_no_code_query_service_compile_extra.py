@@ -208,6 +208,23 @@ def test_compile_date_part_year_filter_exprid() -> None:
     assert compiled.params.get("p1") == 2024
 
 
+def test_compile_distinct_orders_by_output_alias() -> None:
+    plan = _single_table_plan()
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(plan))
+
+    q = {
+        "domainId": 1,
+        "columns": [{"columnName": "display_name", "alias": "Name"}],
+        "sorting": [{"col": {"columnName": "display_name"}, "dir": "asc"}],
+        "distinct": True,
+        "aggs": {"enabled": False, "metrics": [], "groupBy": []},
+    }
+
+    compiled = svc.compile(svc.normalize(q))
+    assert "ORDER BY Name ASC" in compiled.sql
+    assert "ORDER BY t0.display_name" not in compiled.sql
+
+
 def test_parse_date_format_normalizes_parentheses_and_uppercase() -> None:
     plan = _single_table_plan()
     svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(plan))

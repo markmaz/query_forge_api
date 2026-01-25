@@ -731,6 +731,16 @@ class NoCodeQueryService:
             m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)$", expr_sql)
             return m.group(1) if m else None
 
+        def _col_key_for_map(v: Any) -> Optional[tuple]:
+            if isinstance(v, dict):
+                expr_id = v.get("exprId")
+                if expr_id:
+                    return ("expr", str(expr_id))
+                return ("col", v.get("workspaceTableId"), v.get("modelColumnId"), v.get("columnName"))
+            if isinstance(v, str):
+                return ("col", None, None, v.strip())
+            return None
+
         filter_table_ids = self._filter_table_ids(filters, plan)
         sorting_table_ids = self._sorting_table_ids(q.get("sorting") or [], plan)
 
@@ -753,6 +763,7 @@ class NoCodeQueryService:
         group_by_exprs: List[str] = []
         output_names: Dict[str, bool] = {}
         output_columns: List[Dict[str, Any]] = []
+        order_alias_by_key: Dict[tuple, str] = {}
 
         def _reserve_output_name(base_name: str | None, alias_hint: Optional[str]) -> str:
             base = (base_name or "").strip() or "col"
@@ -812,6 +823,9 @@ class NoCodeQueryService:
                 output_name = _reserve_output_name(user_alias or raw_name, alias_hint)
                 select_exprs.append(f"{gb_expr} AS {self._safe_alias(output_name)}")
                 output_columns.append({"key": output_name, "label": output_name})
+                key = _col_key_for_map(raw_gb)
+                if key and key not in order_alias_by_key:
+                    order_alias_by_key[key] = output_name
 
             metric_exprs: List[str] = []
             for m in (aggs.get("metrics") or []):
@@ -878,6 +892,9 @@ class NoCodeQueryService:
                 output_name = _reserve_output_name(base_output_name, alias_hint)
                 col_expr = f"{expr_sql} AS {self._safe_alias(output_name)}"
                 select_exprs.append(col_expr)
+                key = _col_key_for_map(c)
+                if key and key not in order_alias_by_key:
+                    order_alias_by_key[key] = output_name
                 output_columns.append({"key": output_name, "label": output_name})
 
         if not select_exprs:
@@ -934,6 +951,8 @@ class NoCodeQueryService:
             using_prep,
             base_alias,
             alias_by_wt,
+            order_alias_by_key=order_alias_by_key,
+            distinct=distinct,
         )
 
         select_prefix = "SELECT DISTINCT" if distinct else "SELECT"
@@ -2288,6 +2307,9 @@ class NoCodeQueryService:
         using_prep: bool,
         base_alias: str,
         alias_by_wt: Dict[int, str],
+        *,
+        order_alias_by_key: Optional[Dict[tuple, str]] = None,
+        distinct: bool = False,
     ) -> str:
         parts: List[str] = []
         for s in sorting:
@@ -2295,6 +2317,31 @@ class NoCodeQueryService:
                 raise ServiceError("Invalid sorting entry", status_code=400)
 
             col = s.get("col") if "col" in s else s.get("columnName")
+            if distinct and order_alias_by_key:
+                key = None
+                if isinstance(col, dict):
+                    expr_id = col.get("exprId")
+                    if expr_id:
+                        key = ("expr", str(expr_id))
+                    else:
+                        key = (
+                            "col",
+                            col.get("workspaceTableId"),
+                            col.get("modelColumnId"),
+                            col.get("columnName"),
+                        )
+                elif isinstance(col, str):
+                    key = ("col", None, None, col.strip())
+
+                if key:
+                    alias = order_alias_by_key.get(key)
+                    if alias:
+                        dir_ = (s.get("dir") or "asc").lower()
+                        if dir_ not in ("asc", "desc"):
+                            raise ServiceError("Invalid sort direction", status_code=400)
+                        parts.append(f"{self._safe_alias(alias)} {dir_.upper()}")
+                        continue
+
             col_expr = self._col_expr(
                 col,
                 derived_by_exprid,

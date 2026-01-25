@@ -19,18 +19,6 @@ class _DummyTokenManager:
         return None
 
 
-class _DummyLLM:
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.args = args
-        self.kwargs = kwargs
-
-
-class _DummyCohortNERAgent:
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.args = args
-        self.kwargs = kwargs
-
-
 class _DummyValkeyClient:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.args = args
@@ -50,8 +38,6 @@ def app(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(factory, "DatabricksTokenManager", _DummyTokenManager)
     monkeypatch.setattr(factory, "SigmaTokenManager", _DummyTokenManager)
-    monkeypatch.setattr(factory, "OpenAILLMClient", _DummyLLM)
-    monkeypatch.setattr(factory, "CohortNERAgent", _DummyCohortNERAgent)
     monkeypatch.setattr(factory, "valkey", _DummyValkeyModule)
 
     app = factory.create_app()

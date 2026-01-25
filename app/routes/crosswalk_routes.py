@@ -177,7 +177,10 @@ def _build_databricks_context() -> DatabricksContext:
     user_name = get_current_username()
     user_id = get_user_id()
 
-    token_manager = DatabricksWorkspaceTokenManager(workspace_host=workspace_url)
+    token_manager = DatabricksWorkspaceTokenManager(
+        workspace_host=workspace_url,
+        workspace_id=workspace_id,
+    )
     sql_exec = DatabricksSQLExecutor(
         base_url=workspace_url,
         token_provider=token_manager,

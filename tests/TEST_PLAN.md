@@ -9,13 +9,11 @@
 - dashboards (`app/routes/dashboard_routes.py`)
 - connections (`app/routes/connection_routes.py`)
 - user-workspaces (`app/routes/user_workspace_routes.py`)
-- news (`app/routes/newfeed_routes.py`)
 - roles (`app/routes/role_routes.py`)
 - functions (`app/routes/functions_routes.py`)
 - admin (`app/routes/admin_routes.py`)
 - products (`app/routes/product_routes.py`)
 - otp (`app/routes/otp_routes.py`)
-- cohort_ai (`app/routes/cohort_ai_routes.py`)
 - product-groups (`app/routes/product_groups_routes.py`)
 - crosswalks (`app/routes/crosswalk_routes.py`)
 - models (`app/routes/model_routes.py`)
@@ -36,8 +34,8 @@
 - Auth: `AuthService`, `OtpService`, `PasswordService`
 - Products: `ProductService`, `ProductGroupService`, `RoleService`
 - Crosswalks: `ListReadService`, `ListUploadService`, `ListTemplateService`, `ListWriter`/`DualListWriter`
-- No-code: `NoCodeQueryService`, `CohortBuilderVectorSqlJsonService`
-- Misc: `ConnectionService`, `DashboardService`, `WorkspaceService`, `WarehouseService`, `NewsFeedService`, `UdfService`
+- No-code: `NoCodeQueryService`
+- Misc: `ConnectionService`, `DashboardService`, `WorkspaceService`, `WarehouseService`, `UdfService`
 - Recon: `WorkspaceReconService`
 
 ## Ports / Adapters
@@ -47,4 +45,3 @@
 - Databricks SQL adapter: `DatabricksSQLExecutor` (`app/adapters/databricks_sql_executor.py`)
 - Domain resolver: `DomainResolver` (`app/services/domain_resolver.py`)
 - Token managers: `DatabricksTokenManager`, `SigmaTokenManager` (`app/adapters/*`)
-- LLM client: `OpenAILLMClient` (`cohort_ai/*`)

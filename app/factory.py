@@ -6,8 +6,6 @@ import time
 import uuid
 
 import valkey
-from cohort_ai.adapters.open_ai_llm_client import OpenAILLMClient
-from cohort_ai.agents.cohort_ner_agent import CohortNERAgent
 from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 from flask_mail import Mail
@@ -16,13 +14,12 @@ from flask_restx import Api
 from app.adapters.databricks_token_manager import DatabricksTokenManager
 from app.adapters.sigma_token_manager import SigmaTokenManager
 from app.celery_app import celery, init_celery
-from app.config import AI_MODEL_NAME, JWT_SECRET, LOG_QUEUE, OPEN_AI_KEY, VALKEY_ADDRESS, VALKEY_CONFIG, VALKEY_PORT
+from app.config import JWT_SECRET, LOG_QUEUE, VALKEY_ADDRESS, VALKEY_CONFIG, VALKEY_PORT
 from app.config.logging_config import configure_logging
 from app.config.mail_config import MailConfig
 from app.exceptions.service_error import ServiceError
 from app.routes.admin_routes import admin_ns
 from app.routes.auth_routes import auth_ns
-from app.routes.cohort_ai_routes import cohort_ns
 from app.routes.connection_routes import connection_ns
 from app.routes.crosswalk_routes import crosswalk_ns
 from app.routes.dashboard_routes import dashboard_ns
@@ -31,7 +28,6 @@ from app.routes.execution_routes import executions_ns
 from app.routes.export_routes import exports_ns
 from app.routes.functions_routes import functions_ns
 from app.routes.model_routes import model_ns
-from app.routes.newfeed_routes import news_ns
 from app.routes.no_code_query_routes import nocode_ns
 from app.routes.otp_routes import otp_ns
 from app.routes.product_groups_routes import product_group_ns
@@ -118,11 +114,9 @@ def create_app():
     api.add_namespace(role_ns, path=build_url("/", NAME, VERSION, "roles"))
     api.add_namespace(functions_ns, path=build_url("/", NAME, VERSION, "functions"))
     api.add_namespace(admin_ns, path=build_url("/", NAME, VERSION, "admin"))
-    api.add_namespace(news_ns, path=build_url("/", NAME, VERSION, "news"))
     api.add_namespace(product_ns, path=build_url("/", NAME, VERSION, "products"))
     api.add_namespace(otp_ns, path=build_url("/", NAME, VERSION, "otp"))
     api.add_namespace(product_group_ns, path=build_url("/", NAME, VERSION, "product-groups"))
-    api.add_namespace(cohort_ns, path=build_url("/", NAME, VERSION, "cohort_ai"))
     api.add_namespace(crosswalk_ns, path=build_url("/", NAME, VERSION, "crosswalks"))
     api.add_namespace(domains_ns, path=build_url("/", NAME, VERSION, "domains"))
     api.add_namespace(executions_ns, path=build_url("/", NAME, VERSION, "executions"))
@@ -143,11 +137,8 @@ def create_app():
     databricks_token_manager.start_auto_refresh()
     sigma_token_manager.start_auto_refresh()
 
-    llm = OpenAILLMClient(api_key=OPEN_AI_KEY, default_model=AI_MODEL_NAME)
     app.config["DATABRICKS_TOKEN_MANAGER"] = databricks_token_manager
     app.config["SIGMA_TOKEN_MANAGER"] = sigma_token_manager
-    app.config["COHORT_NER_AGENT"] = CohortNERAgent(llm=llm)
-    app.config["COHORT_LLM"] = llm
 
     valkey_client = valkey.StrictValkey(host=VALKEY_ADDRESS, port=VALKEY_PORT, decode_responses=True)
 

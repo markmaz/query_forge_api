@@ -1,13 +1,7 @@
-import logging
-from typing import Dict, Optional
-
 from flask_restx import Namespace, Resource, fields, reqparse
 
-from app.config import SIGMA_TAGS, SIGMA_WORKSPACE
 from app.decorators.security import token_required
-from app.services.dashboard_service import DashboardService
 
-logger = logging.getLogger(__name__)
 dashboard_ns = Namespace("dashboards", description="Dashboards")
 
 parser = reqparse.RequestParser()
@@ -50,15 +44,12 @@ workbook_model = dashboard_ns.model("Workbook", {
 @dashboard_ns.route("/")
 @dashboard_ns.response(code=200, description="The list of Dashboards specific to the Provider UI")
 class DashboardList(Resource):
-    @dashboard_ns.marshal_list_with(dashboard_model)
     @token_required
     def get(self):
         """
-        Gets the list of available workbooks (dashboards) from Sigma for the Navigator App
+        Dashboard endpoints are temporarily disabled.
         """
-        sigma = DashboardService()
-        logger.info(f"Getting dashboards for: {SIGMA_WORKSPACE}")
-        return sigma.list_workbooks_in_workspace(SIGMA_WORKSPACE, SIGMA_TAGS), 200
+        return {"status": "ok"}, 200
     
     def options(self):
         return {}, 200
@@ -69,10 +60,9 @@ class DashboardWorkspaces(Resource):
     @token_required
     def get(self):
         """
-        Gets all the available Workspaces in Sigma
+        Dashboard endpoints are temporarily disabled.
         """
-        sigma = DashboardService()
-        return sigma.get_workspaces()
+        return {"status": "ok"}, 200
 
 @dashboard_ns.route("/workbooks")
 @dashboard_ns.response(200, "The list of Sigma Workbooks", workbook_model)
@@ -80,10 +70,9 @@ class DashboardWorkbooks(Resource):
     @token_required
     def get(self):
         """
-        Gets all the available workbooks (dashboards) in Sigma
+        Dashboard endpoints are temporarily disabled.
         """
-        sigma = DashboardService()
-        return sigma.get_workbooks()
+        return {"status": "ok"}, 200
 
 @dashboard_ns.route("/<string:workbook_id>/embed")
 @dashboard_ns.response(200, "Embed found")
@@ -91,11 +80,9 @@ class DashboardEmbed(Resource):
     @token_required
     def get(self, workbook_id):
         """
-        This call will get the existing embed ID for a given workbook (dashboard) or create it.
+        Dashboard endpoints are temporarily disabled.
         """
-        sigma = DashboardService()
-        print(workbook_id)
-        return sigma.get_embed_for_dashboard(workbook_id=workbook_id)
+        return {"status": "ok"}, 200
     
 @dashboard_ns.route("/tags")
 @dashboard_ns.expect(parser)
@@ -104,18 +91,9 @@ class DashboardTags(Resource):
     @token_required
     def get(self):
         """
-        Get all the Sigma Tags
+        Dashboard endpoints are temporarily disabled.
         """
-        args: Dict[str, Optional[str]] = parser.parse_args()
-        tag_name: Optional[str] = args.get('name')
-        
-        logger.info(f"Arguments: {args}")
-        sigma = DashboardService()
-
-        if tag_name:
-           return sigma.get_tags_by_name(tag_name)
-        else:
-            return sigma.get_tags()
+        return {"status": "ok"}, 200
         
 @dashboard_ns.route("/workbooks/<string:workbook_id>/tags")
 @dashboard_ns.expect(parser)
@@ -124,8 +102,7 @@ class DashboardTag(Resource):
     @token_required
     def get(self, workbook_id: str):
         """
-        Gets thes tag for the given workbook
+        Dashboard endpoints are temporarily disabled.
         """
-        sigma = DashboardService()
-        return sigma.verify_tags(workbook_id, SIGMA_TAGS)
+        return {"status": "ok"}, 200
         

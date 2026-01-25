@@ -7,7 +7,6 @@ from pydantic import ValidationError
 from app.decorators.security import token_required
 from app.models.user import User
 from app.models.user_invitation import UserInvitation
-from app.services.dashboard_service import DashboardService
 from app.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
@@ -164,11 +163,9 @@ class UserWorkspaceDashboard(Resource):
     )
     def get(self, user_id, workspace_id, dashboard_id):
         """
-        Get the Sigma Dashboard Embed URL for the given user and organization
+        Dashboard embedding is temporarily disabled.
         """
-        sigma = DashboardService()
-        results = sigma.create_embed_url(dashboard_id, user_id, workspace_id)
-        return results, 200
+        return {"status": "ok"}, 200
     
     def options(self, user_id, workspace_id, dashboard_id):
         return {}, 200
