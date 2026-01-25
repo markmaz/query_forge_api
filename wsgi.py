@@ -1,5 +1,5 @@
 from app import create_app
 
-wayfinder = create_app()
+query_forge = create_app()
 
-app = wayfinder
+app = query_forge
