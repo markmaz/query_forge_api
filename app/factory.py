@@ -129,7 +129,6 @@ def create_app():
 
     configure_logging()
     logger = logging.getLogger(__name__)
-    logger.info("JWT_SECRET=%s", JWT_SECRET)
     logger.info("Starting the application...")
 
     databricks_token_manager = DatabricksTokenManager()
