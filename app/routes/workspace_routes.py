@@ -6,6 +6,7 @@ from flask import request
 from flask_restx import Namespace, Resource, fields
 from sqlalchemy import text
 
+from app.adapters.databricke_workspace_token_manager import DatabricksWorkspaceTokenManager
 from app.adapters.mysql_sql_executor import engine
 from app.config import DEFAULT_SQL_WAREHOUSE
 from app.decorators.security import token_required
@@ -50,6 +51,21 @@ def _int_arg(name: str, default: int) -> int:
         return int(v)
     except ValueError:
         raise ServiceError(f"Invalid integer for '{name}'", status_code=400)
+
+def _build_workspace_token_manager(workspace_id: str) -> DatabricksWorkspaceTokenManager:
+    ws = WorkspaceService().get_workspace(workspace_id)
+    if isinstance(ws, dict):
+        server = ws.get("server") or ws.get("host_url") or ws.get("workspace_url")
+    else:
+        server = getattr(ws, "server", None) or getattr(ws, "host_url", None) or getattr(ws, "workspace_url", None)
+
+    if not server:
+        raise ServiceError(f"Workspace {workspace_id} has no associated server.", 404)
+
+    return DatabricksWorkspaceTokenManager(
+        workspace_host=str(server).rstrip("/"),
+        workspace_id=str(workspace_id),
+    )
 
 
 @workspace_ns.route("/", methods=["GET"])
@@ -123,7 +139,8 @@ class WorkspaceAndWarehouseList(Resource):
         Returns:
             List[Dict]: A list of warehouse objects.
         """
-        databricks = WarehouseService()
+        token_manager = _build_workspace_token_manager(workspace_id)
+        databricks = WarehouseService(token_manager=token_manager)
         return databricks.get_all_warehouses(workspace_id)
 
     @workspace_ns.expect(Warehouse.warehouse_model)
@@ -142,7 +159,8 @@ class WorkspaceAndWarehouseList(Resource):
         """
         warehouse = Warehouse(**request.json)
         if warehouse:
-            databricks = WarehouseService()
+            token_manager = _build_workspace_token_manager(workspace_id)
+            databricks = WarehouseService(token_manager=token_manager)
             value = databricks.create_warehouse(workspace_id=workspace_id, warehouse=warehouse)
             return value, 200
         else:
@@ -152,7 +170,11 @@ class WorkspaceAndWarehouseList(Resource):
 class GetDefaultWorkspace(Resource):
     @token_required
     def get(self, workspace_id: str):
-        wh = WarehouseService().get_warehouse_by_name(workspace_id=workspace_id, warehouse_name=DEFAULT_SQL_WAREHOUSE)
+        token_manager = _build_workspace_token_manager(workspace_id)
+        wh = WarehouseService(token_manager=token_manager).get_warehouse_by_name(
+            workspace_id=workspace_id,
+            warehouse_name=DEFAULT_SQL_WAREHOUSE,
+        )
     
         if hasattr(wh, "to_dict"):
             return wh.to_dict(), 200
@@ -176,7 +198,8 @@ class WorkspaceAndWarehouseDetail(Resource):
         Returns:
             Dict: A warehouse object.
         """
-        databricks = WarehouseService()
+        token_manager = _build_workspace_token_manager(workspace_id)
+        databricks = WarehouseService(token_manager=token_manager)
         return databricks.get_warehouses_for_workspace(workspace_id=workspace_id, warehouse_id=warehouse_id)
 
     @workspace_ns.response(200, "Warehouse deleted")
@@ -195,7 +218,8 @@ class WorkspaceAndWarehouseDetail(Resource):
         Returns:
             Dict: A success message
         """
-        warehouse_service = WarehouseService()
+        token_manager = _build_workspace_token_manager(workspace_id)
+        warehouse_service = WarehouseService(token_manager=token_manager)
         return warehouse_service.delete_warehouse(workspace_id, warehouse_id)
 
 

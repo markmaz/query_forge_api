@@ -26,7 +26,7 @@ class _DummyFile(io.BytesIO):
 def test_get_logo(app) -> None:
     with app.app_context():
         path = mailer.get_logo()
-        assert path.endswith("static/images/kythera_logo.png")
+        assert path.endswith("static/images/qf_logo.png")
 
 
 def test_send_email_sends(monkeypatch: pytest.MonkeyPatch, app) -> None:

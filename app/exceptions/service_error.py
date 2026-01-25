@@ -14,7 +14,7 @@ class ServiceError(Exception):
         self.details = details if details else {}  # Ensure details is a dict
 
     def __str__(self):
-        return self.message
+        return str(self.message)
 
     def to_dict(self):
         """

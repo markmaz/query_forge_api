@@ -30,7 +30,10 @@ class WorkspaceContextBuilder:
         warehouse_id = self._resolve_default_warehouse_id(workspace_id)
         user_name = get_current_username()
 
-        token_manager = DatabricksWorkspaceTokenManager(workspace_host=workspace_url)
+        token_manager = DatabricksWorkspaceTokenManager(
+            workspace_host=workspace_url,
+            workspace_id=workspace_id,
+        )
         sql_exec = DatabricksSQLExecutor(
             base_url=workspace_url,
             token_provider=token_manager,
@@ -66,7 +69,12 @@ class WorkspaceContextBuilder:
         return str(url).rstrip("/")
 
     def _resolve_default_warehouse_id(self, workspace_id: str) -> str:
-        wh = WarehouseService().get_warehouse_by_name(
+        workspace_url = self._resolve_workspace_url(workspace_id)
+        token_manager = DatabricksWorkspaceTokenManager(
+            workspace_host=workspace_url,
+            workspace_id=workspace_id,
+        )
+        wh = WarehouseService(token_manager=token_manager).get_warehouse_by_name(
             workspace_id=workspace_id,
             warehouse_name=DEFAULT_SQL_WAREHOUSE,
         )

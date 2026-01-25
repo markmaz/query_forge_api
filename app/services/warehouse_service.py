@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import requests
 
@@ -66,6 +66,14 @@ def parse_warehouse_list(data: Dict[str, List[Dict]]) -> List[Dict]:
 
 
 class WarehouseService:
+    def __init__(self, token_manager: Optional[object] = None) -> None:
+        self._token_manager = token_manager
+
+    def _headers(self) -> Dict[str, str]:
+        if self._token_manager:
+            return self._token_manager.get_headers()
+        return get_headers(DATABRICKS_TOKEN)
+
     @validate_params("workspace_id", "warehouse_name")
     def get_warehouse_by_name(
         self,
@@ -97,8 +105,11 @@ class WarehouseService:
         Raises:
             ServiceError: When the request fails
         """
-        logger.info(get_headers(DATABRICKS_TOKEN))
-        response = requests.get(build_url(get_server_name(workspace_id), DATABRICKS_WAREHOUSE_URL), headers=get_headers(DATABRICKS_TOKEN))
+        logger.info(self._headers())
+        response = requests.get(
+            build_url(get_server_name(workspace_id), DATABRICKS_WAREHOUSE_URL),
+            headers=self._headers(),
+        )
         data = process_response(response)
         return parse_warehouse_list(data)
 
@@ -117,7 +128,10 @@ class WarehouseService:
         Raises:
             ServiceError: If the request fails
         """
-        response = requests.get(build_url(get_server_name(workspace_id), DATABRICKS_WAREHOUSE_URL, warehouse_id), headers=get_headers(DATABRICKS_TOKEN))
+        response = requests.get(
+            build_url(get_server_name(workspace_id), DATABRICKS_WAREHOUSE_URL, warehouse_id),
+            headers=self._headers(),
+        )
         return Warehouse.from_dict(process_response(response)).to_dict()
     
     @validate_params("workspace_id", "warehouse")
@@ -135,7 +149,11 @@ class WarehouseService:
         Raises:
             ServiceError: If the request fails
         """
-        response = requests.post(build_url(get_server_name(workspace_id), DATABRICKS_WAREHOUSE_URL), json=warehouse.to_create(), headers=get_headers(DATABRICKS_TOKEN))
+        response = requests.post(
+            build_url(get_server_name(workspace_id), DATABRICKS_WAREHOUSE_URL),
+            json=warehouse.to_create(),
+            headers=self._headers(),
+        )
         return process_response(response)
         
     @validate_params("workspace_id", "warehouse_id")
@@ -153,5 +171,8 @@ class WarehouseService:
         Raises:
             ServiceError: When the request fails
         """
-        response = requests.delete(build_url(get_server_name(workspace_id), DATABRICKS_WAREHOUSE_URL, warehouse_id), headers=get_headers(DATABRICKS_TOKEN))
+        response = requests.delete(
+            build_url(get_server_name(workspace_id), DATABRICKS_WAREHOUSE_URL, warehouse_id),
+            headers=self._headers(),
+        )
         return process_response(response)
