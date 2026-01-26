@@ -398,9 +398,14 @@ class UserService:
         """
         delete_user = "DELETE FROM users WHERE user_id = :user_id"
         delete_user_workspace = "DELETE FROM user_workspace_map WHERE user_id = :user_id"
+        delete_user_roles = "DELETE FROM user_roles WHERE user_id = :user_id"
+        delete_user_domain_mapping = "DELETE FROM user_domain_mapping WHERE user_id = :user_id"
 
         try:
             with self._sql.transaction() as tx:
+                # Delete dependent rows first to avoid FK violations.
+                tx.execute_write(delete_user_roles, {"user_id": user_id})
+                tx.execute_write(delete_user_domain_mapping, {"user_id": user_id})
                 tx.execute_write(delete_user_workspace, {"user_id": user_id})
                 result = tx.execute_write(delete_user, {"user_id": user_id})
                 if (result or 0) == 0:

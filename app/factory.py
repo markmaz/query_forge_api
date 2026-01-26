@@ -14,7 +14,7 @@ from flask_restx import Api
 from app.adapters.databricks_token_manager import DatabricksTokenManager
 from app.adapters.sigma_token_manager import SigmaTokenManager
 from app.celery_app import celery, init_celery
-from app.config import JWT_SECRET, LOG_QUEUE, VALKEY_ADDRESS, VALKEY_CONFIG, VALKEY_PORT
+from app.config import LOG_QUEUE, VALKEY_ADDRESS, VALKEY_CONFIG, VALKEY_PORT
 from app.config.logging_config import configure_logging
 from app.config.mail_config import MailConfig
 from app.exceptions.service_error import ServiceError
