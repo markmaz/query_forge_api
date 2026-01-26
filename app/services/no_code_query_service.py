@@ -99,11 +99,11 @@ class NoCodeQueryService:
 
     - We alias the base FROM as the primary table alias and compile physical columns as <alias>.<col>.
 
-    - DataPrep compiles into a CTE `prep` which selects from `<domain_fqn> src`.
+    - DataPrep compiles into a CTE `prep` which selects explicit base columns plus derived outputs.
       Subsequent SELECTs use `FROM prep`.
 
     - ✅ Important: DataPrep outputs use INTERNAL identifiers (e.g. __dp_claim_type) to avoid
-      collisions with `SELECT *` columns inside the CTE. Query-wide references are rewritten
+      collisions with base columns inside the CTE. Query-wide references are rewritten
       to these internal identifiers, and projection aliases back to the user-visible name.
     """
 
@@ -663,22 +663,59 @@ class NoCodeQueryService:
         required_table_ids.discard(0)
         base_from_sql = self._from_clause_from_plan(plan, required_table_ids)
 
-        dp_ctx = self._compile_data_prep_cte(
+        dp_meta = self._compile_data_prep_meta(
             q.get("dataPrep"),
-            base_from_sql=base_from_sql,
             base_alias=base_alias,
             alias_by_wt=alias_by_wt,
         )
 
-        from_clause_sql = dp_ctx["from_clause_sql"]
         derived_by_exprid = {
-            **dp_ctx.get("derived_by_exprid", {}),
-            **dp_ctx.get("computed_alias_by_expr_id", {}),
+            **dp_meta.get("derived_by_exprid", {}),
+            **dp_meta.get("computed_alias_by_expr_id", {}),
         }
-        derived_by_name = dp_ctx["derived_by_name"]
-        rewrite_by_colname = dp_ctx["rewrite_by_colname"]
-        rewrite_by_modelid = dp_ctx["rewrite_by_modelid"]
-        using_prep = bool(dp_ctx["cte_sql"])
+        derived_by_name = dp_meta["derived_by_name"]
+        rewrite_by_colname = dp_meta["rewrite_by_colname"]
+        rewrite_by_modelid = dp_meta["rewrite_by_modelid"]
+        rewrite_by_wt_col: Dict[tuple, str] = {}
+        using_prep = bool(dp_meta["exprs"])
+
+        required_cols = self._collect_required_column_keys(
+            q,
+            plan,
+            required_table_ids=required_table_ids,
+            derived_by_exprid=derived_by_exprid,
+            derived_by_name=derived_by_name,
+        )
+        base_selects: List[str] = []
+        if using_prep:
+            (
+                base_selects,
+                base_by_colname,
+                base_by_modelid,
+                base_by_wt_col,
+            ) = self._build_prep_base_selects(
+                required_cols,
+                primary_id=primary_id,
+                base_alias=base_alias,
+                alias_by_wt=alias_by_wt,
+            )
+
+            for k, v in base_by_modelid.items():
+                rewrite_by_modelid.setdefault(k, v)
+            for k, v in base_by_wt_col.items():
+                rewrite_by_wt_col.setdefault(k, v)
+            for k, v in base_by_colname.items():
+                rewrite_by_colname.setdefault(k, v)
+
+            cte_sql = self._render_data_prep_cte(
+                base_from_sql=base_from_sql,
+                base_selects=base_selects,
+                exprs=dp_meta["exprs"],
+            )
+            from_clause_sql = "prep"
+        else:
+            cte_sql = ""
+            from_clause_sql = base_from_sql
 
         params: Dict[str, Any] = {}
         param_counter = 0
@@ -697,6 +734,7 @@ class NoCodeQueryService:
             derived_by_name=derived_by_name,
             rewrite_by_colname=rewrite_by_colname,
             rewrite_by_modelid=rewrite_by_modelid,
+            rewrite_by_wt_col=rewrite_by_wt_col,
             using_prep=using_prep,
             base_alias=base_alias,
             alias_by_wt=alias_by_wt,
@@ -800,6 +838,7 @@ class NoCodeQueryService:
                     derived_by_name,
                     rewrite_by_colname,
                     rewrite_by_modelid,
+                    rewrite_by_wt_col,
                     using_prep,
                     base_alias,
                     alias_by_wt,
@@ -840,6 +879,7 @@ class NoCodeQueryService:
                     derived_by_name,
                     rewrite_by_colname,
                     rewrite_by_modelid,
+                    rewrite_by_wt_col,
                     using_prep,
                     base_alias,
                     alias_by_wt,
@@ -871,6 +911,7 @@ class NoCodeQueryService:
                     derived_by_name,
                     rewrite_by_colname,
                     rewrite_by_modelid,
+                    rewrite_by_wt_col,
                     using_prep,
                     base_alias,
                     alias_by_wt,
@@ -916,6 +957,7 @@ class NoCodeQueryService:
             derived_by_name,
             rewrite_by_colname,
             rewrite_by_modelid,
+            rewrite_by_wt_col,
             using_prep,
             base_alias,
             alias_by_wt,
@@ -948,6 +990,7 @@ class NoCodeQueryService:
             derived_by_name,
             rewrite_by_colname,
             rewrite_by_modelid,
+            rewrite_by_wt_col,
             using_prep,
             base_alias,
             alias_by_wt,
@@ -1006,7 +1049,8 @@ class NoCodeQueryService:
         if group_by_exprs:
             base_sql += f"\nGROUP BY {', '.join(group_by_exprs)}"
 
-        cte_sql = dp_ctx["cte_sql"]
+        base_cte_sql = cte_sql
+
         if base_patients_cte:
             if cte_sql:
                 cte_sql = f"{cte_sql},\n{base_patients_cte}"  # pragma: no cover
@@ -1022,7 +1066,7 @@ class NoCodeQueryService:
             base_sql = f"{cte_sql}\n{base_sql}"
 
         if use_two_phase:
-            cte_sql_count = dp_ctx["cte_sql"]
+            cte_sql_count = base_cte_sql
             if base_patients_cte_count:
                 if cte_sql_count:
                     cte_sql_count = f"{cte_sql_count},\n{base_patients_cte_count}"  # pragma: no cover
@@ -1054,19 +1098,15 @@ class NoCodeQueryService:
     # -----------------------------
     # Data Prep compilation (CTE)
     # -----------------------------
-    def _compile_data_prep_cte(
+    def _compile_data_prep_meta(
         self,
         data_prep: Any,
-        base_from_sql: str,
         base_alias: str,
         alias_by_wt: Dict[int, str],
     ) -> Dict[str, Any]:
-        default_from = base_from_sql
-
         if not data_prep or not isinstance(data_prep, dict):
             return {
-                "cte_sql": "",
-                "from_clause_sql": default_from,
+                "exprs": [],
                 "derived_by_exprid": {},
                 "computed_alias_by_expr_id": {},
                 "derived_by_name": {},
@@ -1077,8 +1117,7 @@ class NoCodeQueryService:
         rules = data_prep.get("rules") or []
         if not isinstance(rules, list) or not rules:
             return {
-                "cte_sql": "",
-                "from_clause_sql": default_from,
+                "exprs": [],
                 "derived_by_exprid": {},
                 "computed_alias_by_expr_id": {},
                 "derived_by_name": {},
@@ -1091,6 +1130,7 @@ class NoCodeQueryService:
         derived_by_name: Dict[str, str] = {}
         rewrite_by_colname: Dict[str, str] = {}
         rewrite_by_modelid: Dict[int, str] = {}
+        rewrite_by_wt_col: Dict[tuple, str] = {}
 
         exprs: List[str] = []
         using_prep = False  # compiling inside CTE against src
@@ -1138,6 +1178,7 @@ class NoCodeQueryService:
                     derived_by_name,
                     rewrite_by_colname,
                     rewrite_by_modelid,
+                    rewrite_by_wt_col,
                     using_prep,
                     base_alias,
                     alias_by_wt,
@@ -1159,6 +1200,7 @@ class NoCodeQueryService:
                         derived_by_name,
                         rewrite_by_colname,
                         rewrite_by_modelid,
+                        rewrite_by_wt_col,
                         using_prep,
                         base_alias,
                         alias_by_wt,
@@ -1241,6 +1283,7 @@ class NoCodeQueryService:
                             derived_by_name,
                             rewrite_by_colname,
                             rewrite_by_modelid,
+                            rewrite_by_wt_col,
                             using_prep,
                             base_alias,
                             alias_by_wt,
@@ -1289,8 +1332,7 @@ class NoCodeQueryService:
 
         if not exprs:
             return {
-                "cte_sql": "",
-                "from_clause_sql": default_from,
+                "exprs": [],
                 "derived_by_exprid": {},
                 "computed_alias_by_expr_id": {},
                 "derived_by_name": {},
@@ -1298,24 +1340,34 @@ class NoCodeQueryService:
                 "rewrite_by_modelid": {},
             }
 
-        joined_exprs = ",\n    ".join(exprs)
-        cte_sql = (
-            "WITH prep AS (\n"
-            "  SELECT *,\n"
-            f"    {joined_exprs}\n"
-            f"  FROM {default_from}\n"
-            ")"
-        )
-
         return {
-            "cte_sql": cte_sql,
-            "from_clause_sql": "prep",
+            "exprs": exprs,
             "derived_by_exprid": derived_by_exprid,
             "computed_alias_by_expr_id": computed_alias_by_expr_id,
             "derived_by_name": derived_by_name,
             "rewrite_by_colname": rewrite_by_colname,
             "rewrite_by_modelid": rewrite_by_modelid,
         }
+
+    def _render_data_prep_cte(
+        self,
+        *,
+        base_from_sql: str,
+        base_selects: List[str],
+        exprs: List[str],
+    ) -> str:
+        if not exprs:
+            return ""
+        select_exprs = list(base_selects or [])
+        select_exprs.extend(exprs)
+        joined_exprs = ",\n    ".join(select_exprs)
+        return (
+            "WITH prep AS (\n"
+            "  SELECT\n"
+            f"    {joined_exprs}\n"
+            f"  FROM {base_from_sql}\n"
+            ")"
+        )
 
     def _from_clause_from_plan(self, plan: DomainPlan, required_table_ids: set[int]) -> str:
         tables_by_id = {t.workspace_table_id: t for t in plan.tables}
@@ -1487,6 +1539,195 @@ class NoCodeQueryService:
         walk_filters(q.get("filters"))
         return needed
 
+    def _collect_required_column_keys(
+        self,
+        q: Dict[str, Any],
+        plan: DomainPlan,
+        *,
+        required_table_ids: set[int],
+        derived_by_exprid: Dict[str, str],
+        derived_by_name: Dict[str, str],
+    ) -> List[Dict[str, Any]]:
+        primary_id = int(plan.primary.workspace_table_id)
+        out: List[Dict[str, Any]] = []
+        seen: set[tuple] = set()
+
+        def add_ref(v: Any, path: str) -> None:
+            if v is None:
+                return
+            norm = self._normalize_col_key(v, path)
+            expr_id = norm.get("exprId")
+            mid = norm.get("modelColumnId")
+            # Treat exprId-based refs as derived unless they carry a concrete modelColumnId.
+            if expr_id:
+                if expr_id in derived_by_exprid:
+                    return
+                if mid is None:
+                    return
+            col_name = norm.get("columnName")
+            if col_name in derived_by_name:
+                return
+            wt_id = norm.get("workspaceTableId")
+            if wt_id is None:
+                wt_id = primary_id
+            try:
+                wt_id_int = int(wt_id)
+            except Exception:
+                return
+            if required_table_ids and wt_id_int not in required_table_ids:
+                return
+            norm["workspaceTableId"] = wt_id_int
+            key = (wt_id_int, norm.get("modelColumnId"), col_name)
+            if key in seen:
+                return
+            seen.add(key)
+            out.append(norm)
+
+        for i, c in enumerate(q.get("columns") or []):
+            add_ref(c, f"columns[{i}]")
+
+        aggs = q.get("aggs") or {}
+        for i, g in enumerate(aggs.get("groupBy") or []):
+            add_ref(g, f"aggs.groupBy[{i}]")
+        for i, m in enumerate(aggs.get("metrics") or []):
+            field = (m or {}).get("field")
+            if field is not None:
+                add_ref(field, f"aggs.metrics[{i}].field")
+
+        for i, s in enumerate(q.get("sorting") or []):
+            if not isinstance(s, dict):
+                continue
+            col = s.get("col") if "col" in s else s.get("columnName")
+            add_ref(col, f"sorting[{i}].col")
+
+        def walk_filters(n: Any) -> None:
+            if not isinstance(n, dict):
+                return
+            t = n.get("type")
+            if t == "group":
+                for c in (n.get("children") or []):
+                    walk_filters(c)
+                return
+            if t != "condition":
+                return
+            field = n.get("field")
+            wt_id = None
+            if isinstance(field, dict):
+                wt_id = field.get("workspaceTableId")
+            if wt_id is None:
+                wt_id = primary_id
+            mode = self._effective_filter_mode(plan, int(wt_id))
+            if mode == "WHERE":
+                add_ref(field, "filters.condition.field")
+
+        walk_filters(q.get("filters"))
+
+        for i, cw in enumerate(q.get("crosswalkAttachments") or []):
+            if not isinstance(cw, dict):
+                continue
+            cols = cw.get("domainJoinColumns") or []
+            if not isinstance(cols, list):
+                continue
+            for j, col in enumerate(cols):
+                add_ref(col, f"crosswalkAttachments[{i}].domainJoinColumns[{j}]")
+
+        cohort = q.get("cohortAttachment")
+        if isinstance(cohort, dict):
+            domain_col = cohort.get("domainJoinColumn")
+            if domain_col is not None:
+                add_ref(domain_col, "cohortAttachment.domainJoinColumn")
+
+        return out
+
+    def _build_prep_base_selects(
+        self,
+        required_cols: List[Dict[str, Any]],
+        *,
+        primary_id: int,
+        base_alias: str,
+        alias_by_wt: Dict[int, str],
+    ) -> Tuple[List[str], Dict[str, str], Dict[int, str], Dict[tuple, str]]:
+        if not required_cols:
+            return [], {}, {}, {}
+
+        name_counts: Dict[str, int] = {}
+        refs_by_name: Dict[str, List[Dict[str, Any]]] = {}
+        for c in required_cols:
+            cn = c.get("columnName") or ""
+            name_counts[cn] = name_counts.get(cn, 0) + 1
+            refs_by_name.setdefault(cn, []).append(c)
+
+        used: set[str] = set()
+
+        def unique_name(base: str) -> str:
+            key = base.lower()
+            if key not in used:
+                used.add(key)
+                return base
+            i = 2
+            while True:
+                candidate = f"{base}_{i}"
+                key = candidate.lower()
+                if key not in used:
+                    used.add(key)
+                    return candidate
+                i += 1
+
+        base_selects: List[str] = []
+        by_colname: Dict[str, str] = {}
+        by_modelid: Dict[int, str] = {}
+        by_wt_col: Dict[tuple, str] = {}
+
+        for c in required_cols:
+            cn = c.get("columnName")
+            if not cn:
+                continue
+            wt_id = c.get("workspaceTableId")
+            if wt_id is None:
+                wt_id = primary_id
+            try:
+                wt_id_int = int(wt_id)
+            except Exception:
+                continue
+
+            alias = alias_by_wt.get(wt_id_int) or (base_alias if wt_id_int == primary_id else None)
+            if not alias:
+                raise ServiceError("workspaceTableId is not in domain", status_code=400)
+
+            alias_hint = alias_by_wt.get(wt_id_int) or (base_alias if wt_id_int == primary_id else f"t{wt_id_int}")
+
+            out_name = cn
+            if name_counts.get(cn, 0) > 1:
+                if wt_id_int != primary_id:
+                    out_name = f"{alias_hint}_{cn}"
+            out_name = unique_name(out_name)
+
+            base_selects.append(
+                f"{self._safe_ident(alias)}.{self._safe_ident(cn)} AS {self._safe_ident(out_name)}"
+            )
+
+            mid = c.get("modelColumnId")
+            if isinstance(mid, int):
+                by_modelid[mid] = out_name
+            by_wt_col[(wt_id_int, cn)] = out_name
+
+        for cn, refs in refs_by_name.items():
+            chosen = None
+            for r in refs:
+                if int(r.get("workspaceTableId") or primary_id) == primary_id:
+                    chosen = r
+                    break
+            if not chosen and len(refs) == 1:
+                chosen = refs[0]
+            if not chosen:
+                continue
+            wt_id = int(chosen.get("workspaceTableId") or primary_id)
+            mapped = by_wt_col.get((wt_id, cn))
+            if mapped:
+                by_colname[cn] = mapped
+
+        return base_selects, by_colname, by_modelid, by_wt_col
+
     def _render_sql_with_params(self, sql: str, params: Dict[str, Any]) -> str:
         if not sql or not params:
             return sql
@@ -1626,6 +1867,7 @@ class NoCodeQueryService:
         derived_by_name: Dict[str, str],
         rewrite_by_colname: Dict[str, str],
         rewrite_by_modelid: Dict[int, str],
+        rewrite_by_wt_col: Dict[tuple, str],
         using_prep: bool,
         base_alias: str,
         alias_by_wt: Dict[int, str],
@@ -1663,6 +1905,15 @@ class NoCodeQueryService:
         if using_prep:
             if isinstance(mid, int) and mid in rewrite_by_modelid:
                 return rewrite_by_modelid[mid]
+            if wt_id is not None:
+                try:
+                    wt_id_int = int(wt_id)
+                except Exception:
+                    wt_id_int = None
+                if wt_id_int is not None:
+                    mapped = rewrite_by_wt_col.get((wt_id_int, cn))
+                    if mapped:
+                        return mapped
             if cn in rewrite_by_colname:
                 return rewrite_by_colname[cn]
 
@@ -1701,6 +1952,7 @@ class NoCodeQueryService:
         derived_by_name: Dict[str, str],
         rewrite_by_colname: Dict[str, str],
         rewrite_by_modelid: Dict[int, str],
+        rewrite_by_wt_col: Dict[tuple, str],
         using_prep: bool,
         base_alias: str,
         alias_by_wt: Dict[int, str],
@@ -1716,6 +1968,7 @@ class NoCodeQueryService:
                 derived_by_name,
                 rewrite_by_colname,
                 rewrite_by_modelid,
+                rewrite_by_wt_col,
                 using_prep,
                 base_alias,
                 alias_by_wt,
@@ -1731,6 +1984,7 @@ class NoCodeQueryService:
                 derived_by_name,
                 rewrite_by_colname,
                 rewrite_by_modelid,
+                rewrite_by_wt_col,
                 using_prep,
                 base_alias,
                 alias_by_wt,
@@ -1740,20 +1994,20 @@ class NoCodeQueryService:
         if fn in ("sum", "avg", "min", "max"):
             if not field:
                 raise ServiceError(f"{fn} requires a field", status_code=400)
-            return f"{fn.upper()}({self._col_expr(field, derived_by_exprid, derived_by_name, rewrite_by_colname, rewrite_by_modelid, using_prep, base_alias, alias_by_wt)})"
+            return f"{fn.upper()}({self._col_expr(field, derived_by_exprid, derived_by_name, rewrite_by_colname, rewrite_by_modelid, rewrite_by_wt_col, using_prep, base_alias, alias_by_wt)})"
 
         if fn.replace("_", " ").upper() in ("COUNT DISTINCT", "COUNT", "SUM", "AVG", "MIN", "MAX"):
             legacy = fn.replace("_", " ").upper()
             if legacy == "COUNT":
-                return "COUNT(*)" if not field else f"COUNT({self._col_expr(field, derived_by_exprid, derived_by_name, rewrite_by_colname, rewrite_by_modelid, using_prep, base_alias, alias_by_wt)})"
+                return "COUNT(*)" if not field else f"COUNT({self._col_expr(field, derived_by_exprid, derived_by_name, rewrite_by_colname, rewrite_by_modelid, rewrite_by_wt_col, using_prep, base_alias, alias_by_wt)})"
             if legacy == "COUNT DISTINCT":
                 if not field:
                     raise ServiceError("count_distinct requires a field", status_code=400)
-                return f"COUNT(DISTINCT {self._col_expr(field, derived_by_exprid, derived_by_name, rewrite_by_colname, rewrite_by_modelid, using_prep, base_alias, alias_by_wt)})"
+                return f"COUNT(DISTINCT {self._col_expr(field, derived_by_exprid, derived_by_name, rewrite_by_colname, rewrite_by_modelid, rewrite_by_wt_col, using_prep, base_alias, alias_by_wt)})"
             if legacy in ("SUM", "AVG", "MIN", "MAX"):
                 if not field:
                     raise ServiceError(f"{legacy} requires a field", status_code=400)
-                return f"{legacy}({self._col_expr(field, derived_by_exprid, derived_by_name, rewrite_by_colname, rewrite_by_modelid, using_prep, base_alias, alias_by_wt)})"
+                return f"{legacy}({self._col_expr(field, derived_by_exprid, derived_by_name, rewrite_by_colname, rewrite_by_modelid, rewrite_by_wt_col, using_prep, base_alias, alias_by_wt)})"
 
         raise ServiceError(f"Unsupported metric fn: {fn}", status_code=400)
 
@@ -1767,6 +2021,7 @@ class NoCodeQueryService:
         derived_by_name: Dict[str, str],
         rewrite_by_colname: Dict[str, str],
         rewrite_by_modelid: Dict[int, str],
+        rewrite_by_wt_col: Dict[tuple, str],
         using_prep: bool,
         base_alias: str,
         alias_by_wt: Dict[int, str],
@@ -2027,6 +2282,7 @@ class NoCodeQueryService:
                             derived_by_name,
                             rewrite_by_colname,
                             rewrite_by_modelid,
+                            rewrite_by_wt_col,
                             using_prep,
                             base_alias,
                             alias_by_wt,
@@ -2059,6 +2315,7 @@ class NoCodeQueryService:
         derived_by_name: Dict[str, str],
         rewrite_by_colname: Dict[str, str],
         rewrite_by_modelid: Dict[int, str],
+        rewrite_by_wt_col: Dict[tuple, str],
         using_prep: bool,
         base_alias: str,
         alias_by_wt: Dict[int, str],
@@ -2094,6 +2351,7 @@ class NoCodeQueryService:
                 derived_by_name,
                 rewrite_by_colname,
                 rewrite_by_modelid,
+                rewrite_by_wt_col,
                 using_prep,
                 base_alias,
                 alias_by_wt,
@@ -2305,6 +2563,7 @@ class NoCodeQueryService:
         derived_by_name: Dict[str, str],
         rewrite_by_colname: Dict[str, str],
         rewrite_by_modelid: Dict[int, str],
+        rewrite_by_wt_col: Dict[tuple, str],
         using_prep: bool,
         base_alias: str,
         alias_by_wt: Dict[int, str],
@@ -2349,6 +2608,7 @@ class NoCodeQueryService:
                 derived_by_name,
                 rewrite_by_colname,
                 rewrite_by_modelid,
+                rewrite_by_wt_col,
                 using_prep,
                 base_alias,
                 alias_by_wt,
