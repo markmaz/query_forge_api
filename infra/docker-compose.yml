@@ -1,0 +1,20 @@
+# infra/docker-compose.yml
+# Qdrant (single-node) with persistent storage + API key
+# Usage:
+#   cd infra
+#   docker compose up -d
+#   curl -H "api-key: ${QDRANT_API_KEY}" http://localhost:6333/healthz
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "6333:6333"   # REST
+      - "6334:6334"   # gRPC (optional)
+    environment:
+      # Set in infra/.env (recommended)
+      QDRANT__SERVICE__API_KEY: "${QDRANT_API_KEY}"
+    volumes:
+      - ./qdrant/storage:/qdrant/storage
+    restart: unless-stopped

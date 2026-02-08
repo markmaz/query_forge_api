@@ -24,14 +24,17 @@ from app.routes.connection_routes import connection_ns
 from app.routes.crosswalk_routes import crosswalk_ns
 from app.routes.dashboard_routes import dashboard_ns
 from app.routes.domain_routes import domains_ns
+from app.routes.embeddings import embeddings_ns
 from app.routes.execution_routes import executions_ns
 from app.routes.export_routes import exports_ns
 from app.routes.functions_routes import functions_ns
 from app.routes.model_routes import model_ns
+from app.routes.nlp_routes import nlp_ns
 from app.routes.no_code_query_routes import nocode_ns
 from app.routes.otp_routes import otp_ns
 from app.routes.product_groups_routes import product_group_ns
 from app.routes.product_routes import product_ns
+from app.routes.public_sales_inquiry import public_ns
 from app.routes.query_tree_routes import saved_query_ns, tree_ns
 from app.routes.role_routes import role_ns
 from app.routes.user_routes import user_ns
@@ -118,11 +121,14 @@ def create_app():
     api.add_namespace(otp_ns, path=build_url("/", NAME, VERSION, "otp"))
     api.add_namespace(product_group_ns, path=build_url("/", NAME, VERSION, "product-groups"))
     api.add_namespace(crosswalk_ns, path=build_url("/", NAME, VERSION, "crosswalks"))
+    api.add_namespace(public_ns, path=build_url("/", NAME, VERSION, "public"))
     api.add_namespace(domains_ns, path=build_url("/", NAME, VERSION, "domains"))
+    api.add_namespace(embeddings_ns, path=build_url("/", NAME, VERSION, "embeddings"))
     api.add_namespace(executions_ns, path=build_url("/", NAME, VERSION, "executions"))
     api.add_namespace(exports_ns, path=build_url("/", NAME, VERSION, "exports"))
     api.add_namespace(wsinv_ns, path=build_url("/", NAME, VERSION, "workspace-inventory"))
     api.add_namespace(model_ns, path=build_url("/", NAME, VERSION, "models"))
+    api.add_namespace(nlp_ns, path=build_url("/", NAME, VERSION, "nlp"))
     api.add_namespace(nocode_ns, path=build_url("/", NAME, VERSION, "query"))
     api.add_namespace(tree_ns, path=build_url("/", NAME, VERSION, "query-tree"))
     api.add_namespace(saved_query_ns, path=build_url("/", NAME, VERSION, "saved-queries"))

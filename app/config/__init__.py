@@ -73,6 +73,23 @@ SMTP_PORT=os.getenv("SMPT_PORT")
 DEFAULT_MAIL_SENDER=os.getenv("DEFAULT_MAIL_SENDER")
 INVITE_URL=os.getenv("INVITE_URL")
 PASSWORD_RESET_URL=os.getenv("PASSWORD_RESET_URL")
+
+SALES_INQUIRY_EMAIL = os.getenv("SALES_INQUIRY_EMAIL") or os.getenv("sales_inquiry_email")
+ERROR_VALIDATION_URL = (
+    os.getenv("ERROR_VALIDATION_URL")
+    or os.getenv("error_validation_url")
+    or "/request-walkthrough?error=validation"
+)
+ERROR_SERVER_URL = (
+    os.getenv("ERROR_SERVER_URL")
+    or os.getenv("error_server_url")
+    or "/request-walkthrough?error=server"
+)
+THANK_YOU_REDIRECT = (
+    os.getenv("THANK_YOU_REDIRECT")
+    or os.getenv("thank_you_redirect")
+    or "/thank-you"
+)
 # OPEN_AI_KEY=os.getenv("OPEN_AI_KEY")
 # CENTRAL_TAVILY_API_KEY=os.getenv("CENTRAL_TAVILY_API_KEY")
 # AI_MODEL_NAME=os.getenv("AI_MODEL_NAME")
@@ -82,3 +99,12 @@ DBX_MODEL_SNAPSHOT_CATALOG = os.getenv("DBX_MODEL_SNAPSHOT_CATALOG", "analytics"
 DBX_MODEL_SNAPSHOT_SCHEMA = os.getenv("DBX_MODEL_SNAPSHOT_SCHEMA", "workboard")
 DBX_MODEL_COLUMNS_SNAPSHOT_TABLE = os.getenv("DBX_MODEL_COLUMNS_SNAPSHOT_TABLE", "model_columns_snapshot")
 DBX_MODEL_TABLES_SNAPSHOT_TABLE = os.getenv("DBX_MODEL_TABLES_SNAPSHOT_TABLE", "model_tables_snapshot")
+
+# Qdrant
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
+QDRANT_TIMEOUT_S = int(os.getenv("QDRANT_TIMEOUT_S", "30"))
+QDRANT_DOMAIN_COLLECTION = os.getenv("QDRANT_DOMAIN_COLLECTION", "domain_catalog")
+QDRANT_TABLE_COLLECTION = os.getenv("QDRANT_TABLE_COLLECTION", "table_catalog")
+QDRANT_COLUMN_COLLECTION = os.getenv("QDRANT_COLUMN_COLLECTION", "column_catalog")
+QDRANT_COLUMN_COLLECTION_V2 = os.getenv("QDRANT_COLUMN_COLLECTION_V2", "column_catalog_v2")
