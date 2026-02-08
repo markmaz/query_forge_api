@@ -8,7 +8,6 @@ import uuid
 import valkey
 from flask import Flask, g, jsonify, request
 from flask_cors import CORS
-from flask_mail import Mail
 from flask_restx import Api
 
 from app.adapters.databricks_token_manager import DatabricksTokenManager
@@ -18,6 +17,7 @@ from app.config import LOG_QUEUE, VALKEY_ADDRESS, VALKEY_CONFIG, VALKEY_PORT
 from app.config.logging_config import configure_logging
 from app.config.mail_config import MailConfig
 from app.exceptions.service_error import ServiceError
+from app.extensions import mail
 from app.routes.admin_routes import admin_ns
 from app.routes.auth_routes import auth_ns
 from app.routes.connection_routes import connection_ns
@@ -48,7 +48,6 @@ from app.services.base_service import build_url
 NAME = "api"
 VERSION = "v1"
 
-mail = Mail()
 auth_service = AuthService()
 
 def try_get_json_body(req):

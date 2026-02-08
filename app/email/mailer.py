@@ -4,7 +4,7 @@ import os
 from flask import current_app, render_template
 from flask_mail import Message
 
-from app import mail
+from app.extensions import mail
 from app.config import INVITE_URL, PASSWORD_RESET_URL
 from app.utils.token_utils import generate_token
 
