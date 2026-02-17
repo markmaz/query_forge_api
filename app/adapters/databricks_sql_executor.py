@@ -53,7 +53,7 @@ class DatabricksSQLExecutor:
         self._poll = poll_interval_s
         self._timeout = default_timeout_s
 
-        logger.error("DBX executor init: default_timeout_s=%s poll=%s", default_timeout_s, poll_interval_s)
+        logger.debug("DBX executor init: default_timeout_s=%s poll=%s", default_timeout_s, poll_interval_s)
 
     # ---------- Protocol methods ----------
 
@@ -92,7 +92,7 @@ class DatabricksSQLExecutor:
         if parameters:
             payload["parameters"] = self._encode_parameters(parameters)
 
-        logger.debug("Submitting SQL statement payload: %s", payload)
+        logger.debug("Submitting SQL statement: %s", self._summarize_statement_payload(payload))
         r = self._post(DATABRICKS_STATEMENTS_URL, json=payload)
         r.raise_for_status()
         data = r.json()
@@ -112,9 +112,8 @@ class DatabricksSQLExecutor:
 )
 
         status = self._wait_for_terminal(statement_id, timeout_s or self._timeout)
-        logger.info("Statement %s finished with status: %s", statement_id, status)
-
         state = (status.get("status") or {}).get("state")
+        logger.info("Statement %s finished with state=%s", statement_id, state)
         if state != "SUCCEEDED":
             return status
 
@@ -165,7 +164,7 @@ class DatabricksSQLExecutor:
         if parameters:
             payload["parameters"] = self._encode_parameters(parameters)
 
-        logger.debug("Submitting async SQL statement payload: %s", payload)
+        logger.debug("Submitting async SQL statement: %s", self._summarize_statement_payload(payload))
         r = self._post(DATABRICKS_STATEMENTS_URL, json=payload)
         r.raise_for_status()
         return r.json()
@@ -213,7 +212,8 @@ class DatabricksSQLExecutor:
         r = self._get(f"{DATABRICKS_STATEMENTS_URL}/{statement_id}")
         r.raise_for_status()
         payload = r.json()
-        logger.debug("Polled status for %s: %s", statement_id, payload)
+        state = (payload.get("status") or {}).get("state")
+        logger.debug("Polled status for %s: state=%s", statement_id, state)
         return payload
 
     def fetch_all_json(self, statement_id: str) -> List[Any]:
@@ -422,6 +422,18 @@ class DatabricksSQLExecutor:
     def _post(self, path: str, json: Optional[Dict[str, Any]] = None) -> requests.Response:
         url = build_url(self._base, path)
         return self._http.post(url, headers=self._headers(), json=json, timeout=self._timeout)
+
+    def _summarize_statement_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        parameters = payload.get("parameters") or []
+        return {
+            "statement_len": len(str(payload.get("statement") or "")),
+            "has_warehouse_id": bool(payload.get("warehouse_id")),
+            "has_catalog": bool(payload.get("catalog")),
+            "has_schema": bool(payload.get("schema")),
+            "disposition": payload.get("disposition"),
+            "format": payload.get("format"),
+            "parameter_count": len(parameters) if isinstance(parameters, list) else 0,
+        }
 
 
 def _rows_from_result_json(payload: Dict[str, Any]) -> List[Any]:

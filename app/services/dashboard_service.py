@@ -85,7 +85,7 @@ class DashboardService:
                 break
 
             params = {"page": next_page}
-        print(all_wbs)
+        logger.debug("Retrieved %s Sigma workbooks", len(all_wbs))
         return all_wbs
 
     @validate_params("workspace_name")
@@ -193,7 +193,7 @@ class DashboardService:
         connections = connection_service.get_connection_by_host(urlparse(workspace.server).netloc)
     
         if not connections:
-            print("Not good")
+            logger.warning("No Sigma connection found for workspace host")
             ##create one    
             pass
 
@@ -242,8 +242,15 @@ class DashboardService:
             .add_param("ua_catalog", "luminis"))
 
 
-        url = f"{build_url(SIGMA_JWT_BASE_URL, "workbook", dashboard_id)}{pBuilder.get_query_string()}"
-        logger.info(f"The embedded URL for {dashboard_id}: {url}")
+        base_embed_url = build_url(SIGMA_JWT_BASE_URL, "workbook", dashboard_id)
+        url = f"{base_embed_url}{pBuilder.get_query_string()}"
+        parsed = urlparse(base_embed_url)
+        logger.info(
+            "Generated embed URL for dashboard_id=%s host=%s path=%s",
+            dashboard_id,
+            parsed.netloc,
+            parsed.path,
+        )
 
         return {"embed_url": url}
 

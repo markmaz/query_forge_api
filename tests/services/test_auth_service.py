@@ -11,7 +11,7 @@ from app.services.auth_service import AuthService
 
 def test_authenticate_success(monkeypatch) -> None:
     class DummyUserService:
-        def get_user_by_username(self, _username: str) -> User:
+        def find_user_by_username(self, _username: str) -> User:
             return User(user_id="u1", user_name="u1", password="hashed", status="active", email="a@b.com")
 
         def update_last_login(self, _user_id: str) -> None:
@@ -27,33 +27,49 @@ def test_authenticate_success(monkeypatch) -> None:
 
 def test_authenticate_inactive_user(monkeypatch) -> None:
     class DummyUserService:
-        def get_user_by_username(self, _username: str) -> User:
+        def find_user_by_username(self, _username: str) -> User:
             return User(user_id="u1", user_name="u1", password="hashed", status="deactivated")
 
     monkeypatch.setattr(auth_service, "UserService", DummyUserService)
     monkeypatch.setattr(auth_service, "check_password_hash", lambda *_args, **_kwargs: True)
 
     svc = AuthService()
-    with pytest.raises(ServiceError, match="User is not active"):
+    with pytest.raises(ServiceError, match="Invalid credentials") as exc:
         svc.authenticate("u1", "pw")
+    assert exc.value.status_code == 401
 
 
 def test_authenticate_invalid_password(monkeypatch) -> None:
     class DummyUserService:
-        def get_user_by_username(self, _username: str) -> User:
+        def find_user_by_username(self, _username: str) -> User:
             return User(user_id="u1", user_name="u1", password="hashed", status="active")
 
     monkeypatch.setattr(auth_service, "UserService", DummyUserService)
     monkeypatch.setattr(auth_service, "check_password_hash", lambda *_args, **_kwargs: False)
 
     svc = AuthService()
-    with pytest.raises(ServiceError, match="User not authenticated"):
+    with pytest.raises(ServiceError, match="Invalid credentials") as exc:
         svc.authenticate("u1", "pw")
+    assert exc.value.status_code == 401
+
+
+def test_authenticate_missing_user(monkeypatch) -> None:
+    class DummyUserService:
+        def find_user_by_username(self, _username: str):
+            return None
+
+    monkeypatch.setattr(auth_service, "UserService", DummyUserService)
+    monkeypatch.setattr(auth_service, "check_password_hash", lambda *_args, **_kwargs: False)
+
+    svc = AuthService()
+    with pytest.raises(ServiceError, match="Invalid credentials") as exc:
+        svc.authenticate("missing", "pw")
+    assert exc.value.status_code == 401
 
 
 def test_non_interactive_authentication_success(monkeypatch) -> None:
     class DummyUserService:
-        def get_user_by_username(self, _username: str) -> User:
+        def find_user_by_username(self, _username: str) -> User:
             return User(user_id="u1", user_name="u1", password="hashed", status="active")
 
         def update_last_login(self, _user_id: str) -> None:
@@ -69,7 +85,7 @@ def test_non_interactive_authentication_success(monkeypatch) -> None:
 
 def test_non_interactive_authentication_operational_error(monkeypatch) -> None:
     class DummyUserService:
-        def get_user_by_username(self, _username: str) -> User:
+        def find_user_by_username(self, _username: str) -> User:
             raise OperationalError("select 1", {}, Exception("boom"))
 
     monkeypatch.setattr(auth_service, "UserService", DummyUserService)
@@ -86,6 +102,26 @@ def test_generate_and_verify_token() -> None:
     assert payload["sub"] == "u1"
 
     assert svc.verify_token("bad.token") is None
+
+
+def test_issue_tokens_includes_roles_claims(monkeypatch) -> None:
+    class FakeCache:
+        def setex(self, *_args, **_kwargs):
+            return True
+
+    class DummyUserService:
+        def get_user_effective_role_names(self, _user_id: str):
+            return ["Admin", "Viewer"]
+
+    monkeypatch.setattr(auth_service, "UserService", DummyUserService)
+    monkeypatch.setattr(auth_service, "cache", FakeCache())
+
+    svc = AuthService()
+    tokens = svc.issue_tokens(User(user_id="u1", user_name="user1"))
+    payload = svc.decode_and_verify(tokens["access_token"], expected_typ="access")
+    assert payload["roles"] == ["Admin", "Viewer"]
+    assert payload["is_admin"] is True
+    assert payload["username"] == "user1"
 
 
 def test_send_reset_request_and_reset_password(monkeypatch) -> None:
@@ -121,7 +157,7 @@ def test_send_reset_request_and_reset_password(monkeypatch) -> None:
             return FakePipeline(self.data)
 
     class DummyUserService:
-        def get_user_by_username(self, _email: str) -> User:
+        def find_user_by_username(self, _email: str) -> User:
             return User(user_id="u1", email="u1@example.com")
 
         def update_user(self, _user_id: str, _user: User):
@@ -168,3 +204,50 @@ def test_reset_password_invalid_token(monkeypatch) -> None:
 
     svc = AuthService()
     assert svc.reset_password("pw", "hashed") == ("", 400)
+
+
+def test_send_reset_request_unknown_email_is_still_success(monkeypatch) -> None:
+    class FakeCache:
+        def hset(self, *_args, **_kwargs):
+            raise AssertionError("hset should not be called for unknown email")
+
+        def expire(self, *_args, **_kwargs):
+            raise AssertionError("expire should not be called for unknown email")
+
+    class DummyUserService:
+        def find_user_by_username(self, _email: str):
+            return None
+
+    monkeypatch.setattr(auth_service, "cache", FakeCache())
+    monkeypatch.setattr(auth_service, "UserService", DummyUserService)
+
+    svc = AuthService()
+    assert svc.send_reset_request("unknown@example.com") == ("", 204)
+
+
+def test_reset_password_enforces_password_policy(monkeypatch) -> None:
+    class FakePipeline:
+        def hgetall(self, _key):
+            return self
+
+        def delete(self, _key):
+            return self
+
+        def execute(self):
+            return {"purpose": "password_reset", "user_id": "u1"}, None
+
+    class FakeCache:
+        def pipeline(self):
+            return FakePipeline()
+
+    class DummyUserService:
+        def update_user(self, _user_id: str, _user: User):
+            raise ServiceError("Password violates policy rules.", 422)
+
+    monkeypatch.setattr(auth_service, "cache", FakeCache())
+    monkeypatch.setattr(auth_service, "UserService", DummyUserService)
+
+    svc = AuthService()
+    with pytest.raises(ServiceError) as exc:
+        svc.reset_password("weak", "hashed")
+    assert exc.value.status_code == 422

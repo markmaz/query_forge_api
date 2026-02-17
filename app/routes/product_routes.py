@@ -62,10 +62,12 @@ class ProductStandard(Resource):
         service = ProductService()
         return service.get_product(product_id).model_dump(mode="json")
     
+    @token_required
     def delete(self, product_id: str):
         service = ProductService()
         return service.delete(product_id)
     
+    @token_required
     def put(self, product_id: str):
         service = ProductService()
         product = Product(**(request.get_json(force=True) or {}))

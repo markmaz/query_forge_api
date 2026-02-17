@@ -94,6 +94,19 @@ THANK_YOU_REDIRECT = (
 # CENTRAL_TAVILY_API_KEY=os.getenv("CENTRAL_TAVILY_API_KEY")
 # AI_MODEL_NAME=os.getenv("AI_MODEL_NAME")
 
+# vLLM (OpenAI-compatible local server)
+VLLM_BASE_URL = os.getenv("VLLM_BASE_URL", "http://localhost:8000")
+VLLM_MODEL = os.getenv("VLLM_MODEL", "qwen25-7b")
+VLLM_TIMEOUT = int(os.getenv("VLLM_TIMEOUT", "60"))
+
+# LLM EC2 environment control
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "").strip()
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "").strip()
+AWS_SESSION_TOKEN = os.getenv("AWS_SESSION_TOKEN", "").strip() or None
+LLM_INSTANCE_ID = os.getenv("LLM_INSTANCE_ID", "").strip()
+LLM_STATUS_CACHE_SECONDS = int(os.getenv("LLM_STATUS_CACHE_SECONDS", "5"))
+
 # Databricks model snapshot (Delta)
 DBX_MODEL_SNAPSHOT_CATALOG = os.getenv("DBX_MODEL_SNAPSHOT_CATALOG", "analytics")
 DBX_MODEL_SNAPSHOT_SCHEMA = os.getenv("DBX_MODEL_SNAPSHOT_SCHEMA", "workboard")
@@ -108,3 +121,27 @@ QDRANT_DOMAIN_COLLECTION = os.getenv("QDRANT_DOMAIN_COLLECTION", "domain_catalog
 QDRANT_TABLE_COLLECTION = os.getenv("QDRANT_TABLE_COLLECTION", "table_catalog")
 QDRANT_COLUMN_COLLECTION = os.getenv("QDRANT_COLUMN_COLLECTION", "column_catalog")
 QDRANT_COLUMN_COLLECTION_V2 = os.getenv("QDRANT_COLUMN_COLLECTION_V2", "column_catalog_v2")
+QDRANT_SEMANTIC_CONCEPT_COLLECTION = os.getenv("QDRANT_SEMANTIC_CONCEPT_COLLECTION", "semantic_concepts_v1")
+
+# Semantic suggestion backfill
+SEMANTIC_LLM_ENDPOINT = os.getenv("SEMANTIC_LLM_ENDPOINT", "http://localhost:8000/v1/chat/completions")
+SEMANTIC_LLM_MODEL = os.getenv("SEMANTIC_LLM_MODEL", "qwen25-7b")
+SEMANTIC_LLM_TIMEOUT_SECONDS = int(os.getenv("SEMANTIC_LLM_TIMEOUT_SECONDS", "60"))
+SEMANTIC_LLM_MAX_CONCURRENCY = int(os.getenv("SEMANTIC_LLM_MAX_CONCURRENCY", "2"))
+SEMANTIC_LLM_BATCH_SIZE = int(os.getenv("SEMANTIC_LLM_BATCH_SIZE", "20"))
+SEMANTIC_AUTO_APPROVE_THRESHOLD = float(os.getenv("SEMANTIC_AUTO_APPROVE_THRESHOLD", "0.85"))
+SEMANTIC_AUTO_APPROVE_MAX_ERRORS = int(os.getenv("SEMANTIC_AUTO_APPROVE_MAX_ERRORS", "0"))
+SEMANTIC_SAMPLE_VALUES_LIMIT = int(os.getenv("SEMANTIC_SAMPLE_VALUES_LIMIT", "20"))
+SEMANTIC_STATS_ENABLED = os.getenv("SEMANTIC_STATS_ENABLED", "1").strip().lower() in ("1", "true", "yes", "y", "on")
+SEMANTIC_VERTICAL_DEFAULT = os.getenv("SEMANTIC_VERTICAL_DEFAULT", "generic").strip().lower() or "generic"
+SEMANTIC_PLAN_LLM_MODEL = (
+    os.getenv("SEMANTIC_PLAN_LLM_MODEL", VLLM_MODEL).strip() or VLLM_MODEL
+)
+SEMANTIC_PLAN_LLM_TIMEOUT_SECONDS = int(os.getenv("SEMANTIC_PLAN_LLM_TIMEOUT_SECONDS", "60"))
+SEMANTIC_CONCEPT_SEED_ON_STARTUP = os.getenv("SEMANTIC_CONCEPT_SEED_ON_STARTUP", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+)

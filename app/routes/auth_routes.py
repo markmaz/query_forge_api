@@ -4,6 +4,7 @@ from flask_restx import Namespace, Resource, fields
 from app.config import COOKIE_SAMESITE, COOKIE_SECURE, REFRESH_COOKIE_PATH
 from app.exceptions.service_error import ServiceError
 from app.services.auth_service import AuthService, hash_token
+from app.services.otp_service import OTP_CHALLENGE_TTL_S, issue_otp_challenge
 from app.services.user_service import UserService
 from app.utils.token_utils import validate_token
 
@@ -54,33 +55,44 @@ class Authenticate(Resource):
 @auth_ns.expect(login_model)
 class Login(Resource):
     @auth_ns.expect(login_model)
-    @auth_ns.response(code=200, description="Successful authentication")
+    @auth_ns.response(code=200, description="Credentials accepted and OTP challenge issued")
     @auth_ns.doc(security=[])
     @auth_ns.doc(
         description=(
             "## Authentication\n"
-            "This endpoint allows a user to authenticate inside the application and obtain a JWT Token. The user can then take this token and pass it in the header `Authentication` with `Bearer` and the token\n\n"
+            "This endpoint validates username and password, then starts an OTP challenge. "
+            "It does not return JWT tokens directly.\n\n"
             "**Required URL Parameters:**\n"
             "- `username`: The username for the application.\n"
             "- `password`: The password for the application\n\n"
             "**Response Codes:**\n"
-            "- `200`: Authenticated successfully and a token returned (See model).\n"
+            "- `200`: Credentials accepted and OTP challenge metadata returned.\n"
             "- `401`: Invalid username or password"
         )
     )
     def post(self):
-        """JWT Authentication"""
+        """Step 1: credential authentication and OTP challenge issuance"""
         data = request.json
         username = data.get("username")
         password = data.get("password")
 
         auth = AuthService()
         user = auth.authenticate(username, password)
-        print(user)
         if not user:
             return {"message": "Invalid username or password"}, 401
 
-        return jsonify(user)
+        challenge_id = issue_otp_challenge(
+            user_id=str(user["user_id"]),
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent"),
+        )
+        return jsonify(
+            {
+                "requires_otp": True,
+                "challenge_id": challenge_id,
+                "challenge_expires_in": OTP_CHALLENGE_TTL_S,
+            }
+        )
 
 
 def _get_refresh_from_request() -> str | None:
@@ -176,14 +188,10 @@ class InviteValidationResource(Resource):
         try:
             user_id = validate_token(token)
             user_service = UserService()
-
             user = user_service.get_user(user_id)
-            if not user:
-                return {"error": "Invalid or expired token"}, 404
-
             return {"email": user.email, "user_id": user_id}
-        except Exception as e:
-            return {"error": str(e)}, 400
+        except Exception:
+            return {"error": "Invalid or expired token"}, 400
 
 @auth_ns.route("/reset/request")
 class ResetPasswordRequest(Resource):
@@ -225,5 +233,3 @@ class ResetPassword(Resource):
 
         auth = AuthService()
         return auth.reset_password(password, token_hash)
-
-

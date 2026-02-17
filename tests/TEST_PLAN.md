@@ -15,7 +15,7 @@
 - products (`app/routes/product_routes.py`)
 - otp (`app/routes/otp_routes.py`)
 - product-groups (`app/routes/product_groups_routes.py`)
-- crosswalks (`app/routes/crosswalk_routes.py`)
+- value_overrides (`app/routes/value_override_routes.py`)
 - models (`app/routes/model_routes.py`)
 - workspace-inventory (`app/routes/workspace_inventory_routes.py`)
 - domains (`app/routes/domain_routes.py`)
@@ -33,7 +33,7 @@
 - Users: `UserService`, `WorkspaceUserReadService`
 - Auth: `AuthService`, `OtpService`, `PasswordService`
 - Products: `ProductService`, `ProductGroupService`, `RoleService`
-- Crosswalks: `ListReadService`, `ListUploadService`, `ListTemplateService`, `ListWriter`/`DualListWriter`
+- ValueOverrides: `ListReadService`, `ListUploadService`, `ListTemplateService`, `ListWriter`/`DualListWriter`
 - No-code: `NoCodeQueryService`
 - Misc: `ConnectionService`, `DashboardService`, `WorkspaceService`, `WarehouseService`, `UdfService`
 - Recon: `WorkspaceReconService`

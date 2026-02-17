@@ -13,7 +13,7 @@ product_group_parser.add_argument('direction', type=str, default='forward', choi
 
 @product_group_ns.route("/")
 class ProductGroupList(Resource):
-    token_required
+    @token_required
     def get(self):
         args = product_group_parser.parse_args()
         service = ProductGroupService()
@@ -21,7 +21,7 @@ class ProductGroupList(Resource):
         product_groups = service.get_product_groups(status=args['status'])
         return [product_group.model_dump(mode="json") for product_group in product_groups]
     
-    token_required
+    @token_required
     def post(self):
         service = ProductGroupService()
         data = request.get_json()
@@ -44,6 +44,7 @@ class ProductGroupStandard(Resource):
 
 @product_group_ns.route("/<string:product_group_id>/products/<string:product_id>")
 class ProductGroupProductMap(Resource):
+    @token_required
     def put(self, product_group_id: str, product_id:str):
         service = ProductGroupService()
 
@@ -51,6 +52,7 @@ class ProductGroupProductMap(Resource):
 
 @product_group_ns.route("/<string:product_group_id>/products/<string:product_id>")
 class ProductGroupRemoveProduct(Resource):
+    @token_required
     def delete(self, product_group_id: str, product_id: str):
         service = ProductGroupService()
 

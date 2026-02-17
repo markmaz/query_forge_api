@@ -12,6 +12,7 @@ from app.config import VALKEY_ADDRESS, VALKEY_PORT
 from app.exceptions.service_error import ServiceError
 from app.services.domain_resolver import DomainResolver
 from app.services.no_code_query_service import NoCodeQueryService
+from app.services.sql_guard_service import assert_no_disallowed_client_sql_fields, assert_read_only_sql_statement
 from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
 
 logger = logging.getLogger(__name__)
@@ -139,19 +140,16 @@ class ExecutionService:
         self._builder = context_builder or WorkspaceContextBuilder()
 
     def start(self, workspace_id: str, payload: Dict[str, Any], query_args: Dict[str, Any]) -> tuple[Dict[str, Any], int]:
+        assert_no_disallowed_client_sql_fields(payload)
+
         sql_json = payload.get("sqlJson") or payload.get("sql_json")
-        if sql_json is None and "sql" not in payload:
-            sql_json = payload
+        if sql_json is None:
+            raise ServiceError("sqlJson is required", status_code=400)
         if sql_json is not None and not isinstance(sql_json, dict):
             raise ServiceError("sqlJson must be an object", status_code=400)
 
-        sql = (payload.get("sql") or "").strip() if sql_json is None else ""
-        params = payload.get("params") or {}
-        if sql_json is None:
-            if not sql:
-                raise ServiceError("sql is required", status_code=400)
-            if not isinstance(params, dict):
-                raise ServiceError("params must be an object", status_code=400)
+        sql = ""
+        params: Dict[str, Any] = {}
 
         kind = (payload.get("kind") or "").strip()
         if not kind and isinstance(sql_json, dict):
@@ -164,38 +162,30 @@ class ExecutionService:
         if kind not in ("query_builder", "cohort_builder"):
             raise ServiceError("kind must be query_builder or cohort_builder", status_code=400)
 
-        warehouse_id = payload.get("warehouse_id")
-        catalog = payload.get("catalog")
-        schema = payload.get("schema")
-
         ctx = self._builder.build(workspace_id)
         limit_raw = _int_from_payload(payload.get("limit"), "limit")
         offset_raw = _int_from_payload(payload.get("offset"), "offset")
-        if sql_json is not None:
-            limit = limit_raw if limit_raw is not None else _int_from_args(query_args, "limit", 200)
-            offset = offset_raw if offset_raw is not None else _int_from_args(query_args, "offset", 0)
-        else:
-            limit = limit_raw
-            offset = offset_raw
+        limit = limit_raw if limit_raw is not None else _int_from_args(query_args, "limit", 200)
+        offset = offset_raw if offset_raw is not None else _int_from_args(query_args, "offset", 0)
 
-        sql_rendered = payload.get("sqlRendered")
-        count_sql = payload.get("countSql") or payload.get("count_sql")
-        if sql_json is not None:
-            domain_resolver = DomainResolver(workspace_id=workspace_id)
-            svc = NoCodeQueryService(executor=ctx.sql_exec, domain_resolver=domain_resolver)
-            mode = (query_args.get("mode") or "preview").strip().lower()
-            prepared = svc.prepare(raw_query=sql_json, mode=mode, limit=limit, offset=offset)
-            sql = prepared.sql
-            params = prepared.params
-            sql_rendered = prepared.sql_rendered
-            count_sql = prepared.count_sql
+        sql_rendered = None
+        count_sql = None
+        domain_resolver = DomainResolver(workspace_id=workspace_id)
+        svc = NoCodeQueryService(executor=ctx.sql_exec, domain_resolver=domain_resolver)
+        mode = (query_args.get("mode") or "preview").strip().lower()
+        prepared = svc.prepare(raw_query=sql_json, mode=mode, limit=limit, offset=offset)
+        sql = prepared.sql
+        params = prepared.params
+        sql_rendered = prepared.sql_rendered
+        count_sql = prepared.count_sql
+
+        assert_read_only_sql_statement(sql, context="Compiled SQL statement")
+        if count_sql:
+            assert_read_only_sql_statement(count_sql, context="Compiled count SQL statement")
 
         resp = ctx.sql_exec.submit_statement_async(
             sql,
             params,
-            warehouse_id=warehouse_id,
-            catalog=catalog,
-            schema=schema,
         )
 
         statement_id = resp.get("statement_id")
@@ -279,6 +269,7 @@ class ExecutionService:
         total = None
         count_sql = job.get("countSql") or job.get("count_sql")
         if count_sql:
+            assert_read_only_sql_statement(str(count_sql), context="Stored count SQL statement")
             count_resp = ctx.sql_exec.submit_statement(count_sql, parameters=job.get("params") or {})
             total = _extract_total((count_resp or {}).get("rows") or [])
         if total is None:

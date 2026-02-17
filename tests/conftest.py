@@ -39,6 +39,12 @@ def app(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(factory, "DatabricksTokenManager", _DummyTokenManager)
     monkeypatch.setattr(factory, "SigmaTokenManager", _DummyTokenManager)
     monkeypatch.setattr(factory, "valkey", _DummyValkeyModule)
+    monkeypatch.setattr(factory, "LLM_INSTANCE_ID", "i-test-llm")
+    monkeypatch.setattr(factory, "AWS_REGION", "us-east-1")
+    monkeypatch.setattr(factory, "AWS_ACCESS_KEY_ID", "test-access-key")
+    monkeypatch.setattr(factory, "AWS_SECRET_ACCESS_KEY", "test-secret-key")
+    monkeypatch.setattr(factory, "AWS_SESSION_TOKEN", "")
+    monkeypatch.setattr(factory, "LLM_STATUS_CACHE_SECONDS", 5)
 
     app = factory.create_app()
     app.config["TESTING"] = True
@@ -109,12 +115,24 @@ def auth_headers(
 ) -> Dict[str, str]:
     from app import factory
     from app.decorators import security
+    from app.routes import _route_utils
+    from app.services.workspace_inventory import workspace_context
 
     def _verify_token(token: str) -> Dict[str, Any]:
         return {"sub": "user-1", "username": "user-1", "is_admin": True}
 
+    def _allow_workspace_access(*, user_id: str, workspace_id: str) -> str:
+        return workspace_id
+
     monkeypatch.setattr(security.auth_service, "verify_token", _verify_token)
     monkeypatch.setattr(factory.auth_service, "verify_token", _verify_token)
+    monkeypatch.setattr(security.workspace_access_service, "assert_workspace_access", _allow_workspace_access)
+    monkeypatch.setattr(_route_utils.workspace_access_service, "assert_workspace_access", _allow_workspace_access)
+    monkeypatch.setattr(
+        workspace_context.WorkspaceAccessService,
+        "assert_workspace_access",
+        lambda self, *, user_id, workspace_id: workspace_id,
+    )
     return {
         "Authorization": f"Bearer {auth_token}",
         "X-Workspace-Id": workspace_id,

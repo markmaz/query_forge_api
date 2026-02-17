@@ -146,6 +146,7 @@ class WorkspaceAndWarehouseList(Resource):
     @workspace_ns.expect(Warehouse.warehouse_model)
     @workspace_ns.response(201, "Warehouse created")
     @workspace_ns.doc(security='BearerAuth')
+    @token_required
     def post(self, workspace_id: int) -> Union[Tuple[Dict, int], int]:
         """
         Create a new warehouse in a workspace.

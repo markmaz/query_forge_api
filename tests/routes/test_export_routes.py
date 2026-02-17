@@ -45,10 +45,35 @@ class _Builder:
         return _Ctx(self._total, self._rows)
 
 
+def _install_nocode_compile(monkeypatch, *, sql="SELECT 1", params=None, count_sql="SELECT COUNT(*) AS total FROM t"):
+    class _Compiled:
+        pass
+
+    compiled = _Compiled()
+    compiled.sql = sql
+    compiled.params = params or {}
+    compiled.count_sql = count_sql
+
+    class _NoCodeService:
+        def __init__(self, executor, domain_resolver):
+            self.executor = executor
+            self.domain_resolver = domain_resolver
+
+        def normalize(self, sql_json):
+            return sql_json
+
+        def compile(self, normalized, mode="export", limit=0, offset=0):
+            return compiled
+
+    monkeypatch.setattr(export_routes, "NoCodeQueryService", _NoCodeService)
+    monkeypatch.setattr(export_routes, "DomainResolver", lambda workspace_id: object())
+
+
 def test_excel_export_blocks_over_limit(client, auth_headers, monkeypatch):
     clear_rowcount_cache()
     export_routes._valkey_client = None
     monkeypatch.setattr(export_routes.valkey, "StrictValkey", _DummyValkey)
+    _install_nocode_compile(monkeypatch)
     monkeypatch.setattr(
         export_routes,
         "WorkspaceContextBuilder",
@@ -58,7 +83,7 @@ def test_excel_export_blocks_over_limit(client, auth_headers, monkeypatch):
     resp = client.post(
         "/api/v1/exports/excel",
         headers=auth_headers,
-        json={"sql": "select 1", "params": {}, "countSql": "select 1"},
+        json={"sqlJson": {"domainId": 1}},
     )
 
     assert resp.status_code == 409
@@ -71,6 +96,7 @@ def test_excel_export_allows_under_limit(client, auth_headers, monkeypatch):
     clear_rowcount_cache()
     export_routes._valkey_client = None
     monkeypatch.setattr(export_routes.valkey, "StrictValkey", _DummyValkey)
+    _install_nocode_compile(monkeypatch)
     monkeypatch.setattr(
         export_routes,
         "WorkspaceContextBuilder",
@@ -80,7 +106,7 @@ def test_excel_export_allows_under_limit(client, auth_headers, monkeypatch):
     resp = client.post(
         "/api/v1/exports/excel",
         headers=auth_headers,
-        json={"sql": "select 1", "params": {}, "countSql": "select 1"},
+        json={"sqlJson": {"domainId": 1}},
     )
 
     assert resp.status_code == 200
@@ -101,6 +127,7 @@ def test_excel_export_download_requires_auth(client, auth_headers, monkeypatch):
     clear_rowcount_cache()
     export_routes._valkey_client = None
     monkeypatch.setattr(export_routes.valkey, "StrictValkey", _DummyValkey)
+    _install_nocode_compile(monkeypatch)
     monkeypatch.setattr(
         export_routes,
         "WorkspaceContextBuilder",
@@ -110,7 +137,7 @@ def test_excel_export_download_requires_auth(client, auth_headers, monkeypatch):
     resp = client.post(
         "/api/v1/exports/excel",
         headers=auth_headers,
-        json={"sql": "select 1", "params": {}, "countSql": "select 1"},
+        json={"sqlJson": {"domainId": 1}},
     )
     token = resp.json["token"]
 
@@ -122,6 +149,7 @@ def test_excel_export_download_wrong_workspace(client, auth_headers, monkeypatch
     clear_rowcount_cache()
     export_routes._valkey_client = None
     monkeypatch.setattr(export_routes.valkey, "StrictValkey", _DummyValkey)
+    _install_nocode_compile(monkeypatch)
     monkeypatch.setattr(
         export_routes,
         "WorkspaceContextBuilder",
@@ -131,7 +159,7 @@ def test_excel_export_download_wrong_workspace(client, auth_headers, monkeypatch
     resp = client.post(
         "/api/v1/exports/excel",
         headers=auth_headers,
-        json={"sql": "select 1", "params": {}, "countSql": "select 1"},
+        json={"sqlJson": {"domainId": 1}},
     )
     token = resp.json["token"]
 
@@ -139,3 +167,18 @@ def test_excel_export_download_wrong_workspace(client, auth_headers, monkeypatch
     wrong_headers["X-Workspace-Id"] = "ws-2"
     download = client.get(f"/api/v1/exports/excel/{token}", headers=wrong_headers)
     assert download.status_code == 404
+
+
+def test_excel_export_rejects_raw_sql_fields(client, auth_headers, monkeypatch):
+    clear_rowcount_cache()
+    export_routes._valkey_client = None
+    monkeypatch.setattr(export_routes.valkey, "StrictValkey", _DummyValkey)
+    _install_nocode_compile(monkeypatch)
+
+    resp = client.post(
+        "/api/v1/exports/excel",
+        headers=auth_headers,
+        json={"sqlJson": {"domainId": 1}, "sql": "SELECT 1"},
+    )
+    assert resp.status_code == 400
+    assert "Raw SQL fields are not allowed" in resp.json["error"]

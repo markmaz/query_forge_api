@@ -123,7 +123,7 @@ def test_compile_with_aliases_where_sorting():
                     "dir": "asc"
                 }
             ],
-            "crosswalks": {
+            "value_overrides": {
                 "a": None,
                 "b": None,
                 "c": None

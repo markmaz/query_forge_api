@@ -2,7 +2,7 @@ import logging
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from sqlalchemy import exc
 from werkzeug.security import generate_password_hash
@@ -18,8 +18,7 @@ from app.models.user import User
 from app.models.user_invitation import UserInvitation
 from app.models.user_workspace import Workspace
 from app.ports.sql_executor import SQLExecutor, SQLTransaction
-from app.services.password_service import generate_otp_secret
-from app.utils.password_check import is_good_password
+from app.services.password_service import generate_otp_secret, validate_password_policy
 
 logger = logging.getLogger(__name__)
 
@@ -193,9 +192,7 @@ class UserService:
             logger.error(f"User with this username or email already exists: {username}")
             raise ServiceError("User with this username already exists", 409)
 
-        if not is_good_password(password=password):
-            logger.error(f"User {username} in violation of password rules - need a new password.")
-            raise ServiceError("Password violates policy rules.", 409)
+        validate_password_policy(password)
         
 
         hashed_password = generate_password_hash(password)
@@ -241,7 +238,17 @@ class UserService:
             # 2) Prepare scalar field updates on the users table, excluding nested relations
             update_fields = update_data.model_dump(exclude_unset=True)
             new_workspaces = update_fields.pop("workspaces", None)
-            new_products   = update_fields.pop("products", None)
+            new_products = update_fields.pop("products", None)
+            new_rbac_role_ids = update_fields.pop("rbac_role_ids", None)
+            rbac_roles_payload = update_fields.pop("rbac_roles", None)
+            if new_rbac_role_ids is None and rbac_roles_payload is not None:
+                extracted: List[str] = []
+                for role_obj in rbac_roles_payload or []:
+                    if isinstance(role_obj, dict):
+                        extracted.append(str(role_obj.get("role_id") or "").strip())
+                    else:
+                        extracted.append(str(getattr(role_obj, "role_id", "")).strip())
+                new_rbac_role_ids = [rid for rid in extracted if rid]
 
             params = {"user_id": user_id}
             updates = []
@@ -251,7 +258,12 @@ class UserService:
                     continue
                 current_value = getattr(current_user, field, None)
 
-                if field == "password" and new_value:
+                if field == "password":
+                    if new_value is None:
+                        continue
+                    if not isinstance(new_value, str) or not new_value.strip():
+                        raise ServiceError("Password violates policy rules.", 422)
+                    validate_password_policy(new_value)
                     new_value = generate_password_hash(new_value)
                     updates.append(f"{field} = :{field}")
                     params[field] = new_value
@@ -274,6 +286,10 @@ class UserService:
                     # 3c) Sync product roles junction if provided
                     if new_products is not None:
                         self._sync_user_product_roles(tx, user_id, new_products)
+
+                    # 3d) Sync user-level RBAC roles if provided
+                    if new_rbac_role_ids is not None:
+                        self._sync_user_direct_roles(tx, user_id, new_rbac_role_ids)
 
                 # 4) Return fresh copy
                 return self.get_user(user_id)
@@ -382,6 +398,37 @@ class UserService:
                 [{"uid": user_id, "product_role_id": prid} for prid in to_insert],
             )
 
+    def _sync_user_direct_roles(self, tx: SQLTransaction, user_id: str, new_role_ids: List[str]) -> None:
+        desired_role_ids: Set[str] = set()
+        for role_id in new_role_ids or []:
+            rid = str(role_id or "").strip()
+            if rid:
+                desired_role_ids.add(rid)
+
+        rows = tx.execute_query_mappings(
+            "SELECT role_id FROM user_global_roles WHERE user_id = :uid",
+            {"uid": user_id},
+        )
+        existing_role_ids = set(str(r.get("role_id")) for r in rows if r.get("role_id"))
+
+        to_delete = existing_role_ids - desired_role_ids
+        to_insert = desired_role_ids - existing_role_ids
+
+        if to_delete:
+            ids_list = list(to_delete)
+            placeholders = ",".join([f":id{i}" for i in range(len(ids_list))])
+            params = {"uid": user_id, **{f"id{i}": rid for i, rid in enumerate(ids_list)}}
+            tx.execute_write(
+                f"DELETE FROM user_global_roles WHERE user_id = :uid AND role_id IN ({placeholders})",
+                params,
+            )
+
+        if to_insert:
+            tx.execute_write(
+                "INSERT INTO user_global_roles (user_id, role_id) VALUES (:uid, :role_id)",
+                [{"uid": user_id, "role_id": rid} for rid in to_insert],
+            )
+
 
     @validate_params("user_id")
     def delete_user(self, user_id: str) -> Dict[str, str]:
@@ -399,12 +446,14 @@ class UserService:
         delete_user = "DELETE FROM users WHERE user_id = :user_id"
         delete_user_workspace = "DELETE FROM user_workspace_map WHERE user_id = :user_id"
         delete_user_roles = "DELETE FROM user_roles WHERE user_id = :user_id"
+        delete_user_global_roles = "DELETE FROM user_global_roles WHERE user_id = :user_id"
         delete_user_domain_mapping = "DELETE FROM user_domain_mapping WHERE user_id = :user_id"
 
         try:
             with self._sql.transaction() as tx:
                 # Delete dependent rows first to avoid FK violations.
                 tx.execute_write(delete_user_roles, {"user_id": user_id})
+                tx.execute_write(delete_user_global_roles, {"user_id": user_id})
                 tx.execute_write(delete_user_domain_mapping, {"user_id": user_id})
                 tx.execute_write(delete_user_workspace, {"user_id": user_id})
                 result = tx.execute_write(delete_user, {"user_id": user_id})
@@ -417,17 +466,17 @@ class UserService:
             raise ServiceError(f"Failed to delete user: {str(e)}", 500)
 
     @validate_params("username")
-    def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
+    def find_user_by_username(self, username: str) -> Optional[User]:
         """
-        Fetches a user by username.
-        
-        :parm username: The username for the user.
+        Fetches a user by username and returns None when missing.
+
+        :param username: The username for the user.
         :type username: str
 
         Returns:
-            dict[str, any]: User
+            User | None
         Raises:
-            ServiceError 404 (User not found), 500 (database error)
+            ServiceError 500 (database error)
         """
         sql = """
             SELECT u.user_id, u.username, u.password, u.email, u.first_name, u.last_name, u.tos_accepted, u.eula_accepted, u.status as user_status,
@@ -444,12 +493,34 @@ class UserService:
         try:
             result = self._sql.execute_query_mappings(sql, {"username": username})
             if not result:
-                logger.error(f"User not found {username}")
-                raise ServiceError("User not found", 404)
-            return self.map_user_with_products(result)
+                return None
+            user = self.map_user_with_products(result)
+            direct_roles = self._to_role_models(self.get_user_direct_roles(str(user.user_id)))
+            user.rbac_roles = direct_roles
+            user.rbac_role_ids = [role.role_id for role in direct_roles]
+            return user
         except exc.SQLAlchemyError as e:
             logger.error(f"{sql} - {str(e)}")
             raise ServiceError(f"Failed to retrieve user: {str(e)}", 500)
+
+    @validate_params("username")
+    def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetches a user by username.
+        
+        :parm username: The username for the user.
+        :type username: str
+
+        Returns:
+            dict[str, any]: User
+        Raises:
+            ServiceError 404 (User not found), 500 (database error)
+        """
+        user = self.find_user_by_username(username)
+        if not user:
+            logger.error(f"User not found {username}")
+            raise ServiceError("User not found", 404)
+        return user
 
     @validate_params("user_id")
     def get_user(self, user_id: str) -> Optional[User]:
@@ -481,7 +552,11 @@ class UserService:
             if not result:
                 logger.error(f"User not found {user_id}")
                 raise ServiceError("User not found", 404)
-            return self.map_user_with_products(result)
+            user = self.map_user_with_products(result)
+            direct_roles = self._to_role_models(self.get_user_direct_roles(str(user.user_id)))
+            user.rbac_roles = direct_roles
+            user.rbac_role_ids = [role.role_id for role in direct_roles]
+            return user
         except exc.SQLAlchemyError as e:
             logger.error(f"{sql} - {str(e)}")
             raise ServiceError(f"Failed to retrieve user: {str(e)}", 500)
@@ -508,8 +583,8 @@ class UserService:
             order_by = "ORDER BY user_id ASC"
 
         base_user_query = f"""
-            SELECT user_id, username, password, first_name, last_name, email, status, tos_accepted, 
-                eula_accepted, otp_secret, two_factor_preference, last_log_in
+            SELECT user_id, username, first_name, last_name, email, status, tos_accepted,
+                eula_accepted, two_factor_preference, last_log_in
             FROM users
             WHERE {where_clause}
             {order_by}
@@ -588,6 +663,13 @@ class UserService:
             workspaces = list(user_map[uid]["workspaces"])
 
             users.append(User(**row_dict, products=products, workspaces=workspaces))
+
+        direct_roles_map = self.get_direct_roles_for_users(user_ids)
+        for user in users:
+            role_rows = direct_roles_map.get(str(user.user_id), [])
+            role_models = self._to_role_models(role_rows)
+            user.rbac_roles = role_models
+            user.rbac_role_ids = [role.role_id for role in role_models]
 
         # Pagination cursors
         next_cursor = None
@@ -764,6 +846,302 @@ class UserService:
         except exc.SQLAlchemyError as e:
             logger.error(f"Error fetching roles for user_id={user_id}: {str(e)}")
             raise ServiceError(f"Failed to retrieve user roles: {str(e)}", 500)
+
+    @validate_params("user_id")
+    def get_user_direct_roles(self, user_id: str) -> List[Dict[str, Any]]:
+        sql = """
+            SELECT ugr.role_id, r.role_name
+            FROM user_global_roles ugr
+            JOIN roles r ON r.role_id = ugr.role_id
+            WHERE ugr.user_id = :user_id
+            ORDER BY r.role_name
+        """
+        try:
+            return [dict(row) for row in self._sql.execute_query_mappings(sql, {"user_id": user_id})]
+        except exc.SQLAlchemyError as e:
+            logger.error(f"Error fetching direct roles for user_id={user_id}: {str(e)}")
+            raise ServiceError(f"Failed to retrieve user direct roles: {str(e)}", 500)
+
+    @validate_params("user_id", "role_id")
+    def add_user_direct_role(self, user_id: str, role_id: str, tx: Optional[SQLTransaction] = None) -> Dict[str, Any]:
+        uid = str(user_id or "").strip()
+        rid = str(role_id or "").strip()
+        self._assert_user_exists(uid)
+        self._assert_role_exists(rid)
+
+        try:
+            if tx is None:
+                with self._sql.transaction() as local_tx:
+                    exists_rows = local_tx.execute_query_mappings(
+                        """
+                        SELECT user_global_role_id
+                        FROM user_global_roles
+                        WHERE user_id = :user_id AND role_id = :role_id
+                        LIMIT 1
+                        """,
+                        {"user_id": uid, "role_id": rid},
+                    )
+                    if exists_rows:
+                        role = self.get_role_by_id(rid)
+                        return {
+                            "user_id": uid,
+                            "role_id": rid,
+                            "role_name": role.get("role_name"),
+                            "created": False,
+                        }
+
+                    local_tx.execute_write(
+                        """
+                        INSERT INTO user_global_roles (user_id, role_id)
+                        VALUES (:user_id, :role_id)
+                        """,
+                        {"user_id": uid, "role_id": rid},
+                    )
+                    role = self.get_role_by_id(rid)
+                    return {
+                        "user_id": uid,
+                        "role_id": rid,
+                        "role_name": role.get("role_name"),
+                        "created": True,
+                    }
+
+            exists_rows = tx.execute_query_mappings(
+                """
+                SELECT user_global_role_id
+                FROM user_global_roles
+                WHERE user_id = :user_id AND role_id = :role_id
+                LIMIT 1
+                """,
+                {"user_id": uid, "role_id": rid},
+            )
+            if exists_rows:
+                role = self.get_role_by_id(rid)
+                return {
+                    "user_id": uid,
+                    "role_id": rid,
+                    "role_name": role.get("role_name"),
+                    "created": False,
+                }
+
+            tx.execute_write(
+                """
+                INSERT INTO user_global_roles (user_id, role_id)
+                VALUES (:user_id, :role_id)
+                """,
+                {"user_id": uid, "role_id": rid},
+            )
+            role = self.get_role_by_id(rid)
+            return {
+                "user_id": uid,
+                "role_id": rid,
+                "role_name": role.get("role_name"),
+                "created": True,
+            }
+        except ServiceError:
+            raise
+        except exc.SQLAlchemyError as e:
+            logger.error(f"Error adding direct role for user_id={uid}: {str(e)}")
+            raise ServiceError(f"Failed to add user direct role: {str(e)}", 500)
+
+    @validate_params("user_id", "role_id")
+    def remove_user_direct_role(self, user_id: str, role_id: str, tx: Optional[SQLTransaction] = None) -> Dict[str, Any]:
+        uid = str(user_id or "").strip()
+        rid = str(role_id or "").strip()
+        self._assert_user_exists(uid)
+
+        try:
+            if tx is None:
+                with self._sql.transaction() as local_tx:
+                    deleted = local_tx.execute_write(
+                        """
+                        DELETE FROM user_global_roles
+                        WHERE user_id = :user_id AND role_id = :role_id
+                        """,
+                        {"user_id": uid, "role_id": rid},
+                    )
+                    if int(deleted or 0) == 0:
+                        raise ServiceError("User direct role mapping not found", 404)
+                    return {
+                        "user_id": uid,
+                        "role_id": rid,
+                        "deleted": True,
+                    }
+
+            deleted = tx.execute_write(
+                """
+                DELETE FROM user_global_roles
+                WHERE user_id = :user_id AND role_id = :role_id
+                """,
+                {"user_id": uid, "role_id": rid},
+            )
+            if int(deleted or 0) == 0:
+                raise ServiceError("User direct role mapping not found", 404)
+
+            return {
+                "user_id": uid,
+                "role_id": rid,
+                "deleted": True,
+            }
+        except ServiceError:
+            raise
+        except exc.SQLAlchemyError as e:
+            logger.error(f"Error removing direct role for user_id={uid}: {str(e)}")
+            raise ServiceError(f"Failed to remove user direct role: {str(e)}", 500)
+
+    @validate_params("user_id")
+    def replace_user_direct_roles(self, user_id: str, role_ids: List[str]) -> Dict[str, Any]:
+        uid = str(user_id or "").strip()
+        self._assert_user_exists(uid)
+
+        normalized_role_ids: List[str] = []
+        seen = set()
+        for role_id in role_ids or []:
+            rid = str(role_id or "").strip()
+            if not rid:
+                continue
+            if rid in seen:
+                continue
+            seen.add(rid)
+            normalized_role_ids.append(rid)
+
+        for rid in normalized_role_ids:
+            self._assert_role_exists(rid)
+
+        try:
+            with self._sql.transaction() as tx:
+                self._sync_user_direct_roles(tx, uid, normalized_role_ids)
+            roles = self.get_user_direct_roles(uid)
+            return {
+                "user_id": uid,
+                "roles": roles,
+                "count": len(roles),
+            }
+        except ServiceError:
+            raise
+        except exc.SQLAlchemyError as e:
+            logger.error(f"Error replacing direct roles for user_id={uid}: {str(e)}")
+            raise ServiceError(f"Failed to replace user direct roles: {str(e)}", 500)
+
+    @validate_params("user_id", "old_role_id", "new_role_id")
+    def update_user_direct_role(self, user_id: str, old_role_id: str, new_role_id: str) -> Dict[str, Any]:
+        uid = str(user_id or "").strip()
+        old_rid = str(old_role_id or "").strip()
+        new_rid = str(new_role_id or "").strip()
+        self._assert_user_exists(uid)
+        self._assert_role_exists(new_rid)
+
+        try:
+            with self._sql.transaction() as tx:
+                self.remove_user_direct_role(uid, old_rid, tx=tx)
+                created = self.add_user_direct_role(uid, new_rid, tx=tx)
+            return {
+                "user_id": uid,
+                "old_role_id": old_rid,
+                "new_role_id": new_rid,
+                "created": bool(created.get("created")),
+            }
+        except ServiceError:
+            raise
+        except exc.SQLAlchemyError as e:
+            logger.error(f"Error updating direct role for user_id={uid}: {str(e)}")
+            raise ServiceError(f"Failed to update user direct role: {str(e)}", 500)
+
+    def get_direct_roles_for_users(self, user_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+        ids = [str(uid or "").strip() for uid in user_ids if str(uid or "").strip()]
+        if not ids:
+            return {}
+        placeholders = ",".join([f":uid{i}" for i in range(len(ids))])
+        params = {f"uid{i}": uid for i, uid in enumerate(ids)}
+        sql = f"""
+            SELECT ugr.user_id, ugr.role_id, r.role_name
+            FROM user_global_roles ugr
+            JOIN roles r ON r.role_id = ugr.role_id
+            WHERE ugr.user_id IN ({placeholders})
+            ORDER BY ugr.user_id, r.role_name
+        """
+        try:
+            rows = self._sql.execute_query_mappings(sql, params)
+        except exc.SQLAlchemyError as e:
+            logger.error(f"Error fetching direct roles for users: {str(e)}")
+            raise ServiceError(f"Failed to retrieve user direct roles: {str(e)}", 500)
+
+        out: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            uid = str(row.get("user_id") or "").strip()
+            if uid:
+                out[uid].append({"role_id": row.get("role_id"), "role_name": row.get("role_name")})
+        return out
+
+    @validate_params("user_id")
+    def get_user_effective_roles(self, user_id: str) -> List[Dict[str, Any]]:
+        roles_by_id: Dict[str, Dict[str, Any]] = {}
+        for row in self.get_user_product_roles(user_id):
+            rid = str(row.get("role_id") or "").strip()
+            if rid and rid not in roles_by_id:
+                roles_by_id[rid] = {"role_id": rid, "role_name": row.get("role_name")}
+        for row in self.get_user_direct_roles(user_id):
+            rid = str(row.get("role_id") or "").strip()
+            if rid and rid not in roles_by_id:
+                roles_by_id[rid] = {"role_id": rid, "role_name": row.get("role_name")}
+        values = list(roles_by_id.values())
+        values.sort(key=lambda item: str(item.get("role_name") or ""))
+        return values
+
+    def get_role_by_id(self, role_id: str) -> Dict[str, Any]:
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT role_id, role_name
+            FROM roles
+            WHERE role_id = :role_id
+            LIMIT 1
+            """,
+            {"role_id": str(role_id)},
+        )
+        if not rows:
+            raise ServiceError("Role not found", 404)
+        return dict(rows[0])
+
+    def _assert_user_exists(self, user_id: str) -> None:
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT user_id
+            FROM users
+            WHERE user_id = :user_id
+            LIMIT 1
+            """,
+            {"user_id": str(user_id)},
+        )
+        if not rows:
+            raise ServiceError("User not found", 404)
+
+    def _assert_role_exists(self, role_id: str) -> None:
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT role_id
+            FROM roles
+            WHERE role_id = :role_id
+            LIMIT 1
+            """,
+            {"role_id": str(role_id)},
+        )
+        if not rows:
+            raise ServiceError("Role not found", 404)
+
+    @validate_params("user_id")
+    def get_user_effective_role_names(self, user_id: str) -> List[str]:
+        roles = self.get_user_effective_roles(user_id)
+        names: List[str] = []
+        seen = set()
+        for row in roles:
+            role_name = str(row.get("role_name") or "").strip()
+            if not role_name:
+                continue
+            key = role_name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            names.append(role_name)
+        return names
 
     @validate_params("user_id")
     def get_user_products(self, user_id: str):
@@ -1012,6 +1390,21 @@ class UserService:
             products=products,
             workspaces=workspaces
         )
+
+    @staticmethod
+    def _to_role_models(rows: List[Dict[str, Any]]) -> List[Role]:
+        out: List[Role] = []
+        seen = set()
+        for row in rows or []:
+            role_id = str(row.get("role_id") or "").strip()
+            role_name = str(row.get("role_name") or "").strip()
+            if not role_id or not role_name:
+                continue
+            if role_id in seen:
+                continue
+            seen.add(role_id)
+            out.append(Role(role_id=role_id, role_name=role_name))
+        return out
 
     def update_last_login(self, user_id: str):
         sql = """

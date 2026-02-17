@@ -4,6 +4,7 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, computed_field
 
 from app.models.product import Product
+from app.models.role import Role
 from app.models.user_workspace import Workspace
 
 
@@ -21,6 +22,8 @@ class User(BaseModel):
     two_factor_preference: Optional[str] = "Email"
     products: Optional[List[Product]] = []
     workspaces: Optional[List[Workspace]] = []
+    rbac_roles: Optional[List[Role]] = []
+    rbac_role_ids: Optional[List[str]] = []
     last_log_in: Optional[datetime] = None
 
     @computed_field

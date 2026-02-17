@@ -105,7 +105,7 @@ class WarehouseService:
         Raises:
             ServiceError: When the request fails
         """
-        logger.info(self._headers())
+        logger.debug("Fetching warehouse list for workspace_id=%s", workspace_id)
         response = requests.get(
             build_url(get_server_name(workspace_id), DATABRICKS_WAREHOUSE_URL),
             headers=self._headers(),

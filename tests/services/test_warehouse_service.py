@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -91,3 +92,20 @@ def test_get_warehouses_for_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
     svc = WarehouseService()
     wh = svc.get_warehouses_for_workspace(workspace_id="ws", warehouse_id="w1")
     assert wh["warehouse_id"] == "w1"
+
+
+def test_get_all_warehouses_does_not_log_auth_header(caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(warehouse_service, "get_server_name", lambda _ws: "https://dbx")
+    monkeypatch.setattr(
+        "app.services.warehouse_service.get_headers",
+        lambda *_args, **_kwargs: {"Authorization": "Bearer super-secret"},
+    )
+    monkeypatch.setattr("app.services.warehouse_service.requests.get", lambda *_a, **_k: _Resp(200))
+    monkeypatch.setattr(
+        "app.services.warehouse_service.process_response",
+        lambda _resp: {"warehouses": []},
+    )
+    svc = WarehouseService()
+    with caplog.at_level(logging.DEBUG, logger="app.services.warehouse_service"):
+        svc.get_all_warehouses("ws-1")
+    assert not any("super-secret" in rec.message for rec in caplog.records)

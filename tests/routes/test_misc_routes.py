@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 import app.routes.connection_routes as connection_routes
-import app.routes.functions_routes as functions_routes
 import app.routes.product_groups_routes as product_groups_routes
 import app.routes.product_routes as product_routes
 import app.routes.role_routes as role_routes
@@ -18,18 +17,6 @@ class _FakeProductGroup:
 
     def model_dump(self, mode: str = "json") -> Dict[str, Any]:
         return {"product_group_id": self.product_group_id}
-
-
-def test_functions_route_success(client, auth_headers, monkeypatch):
-    class _Svc:
-        def get_diag_code_details(self, diag_details: str):
-            return {"code": diag_details}
-
-    monkeypatch.setattr(functions_routes, "UdfService", _Svc)
-
-    resp = client.get("/api/v1/functions/diagnosis_code_details/ABC", headers=auth_headers)
-    assert resp.status_code == 200
-    assert resp.json["code"] == "ABC"
 
 
 def test_roles_get_success(client, auth_headers, monkeypatch):
@@ -56,14 +43,14 @@ def test_products_get_success(client, auth_headers, monkeypatch):
     assert resp.json["total_count"] == 0
 
 
-def test_product_groups_get_success(client, monkeypatch):
+def test_product_groups_get_success(client, auth_headers, monkeypatch):
     class _Svc:
         def get_product_groups(self, status: str = "All"):
             return [_FakeProductGroup("pg-1")]
 
     monkeypatch.setattr(product_groups_routes, "ProductGroupService", _Svc)
 
-    resp = client.get("/api/v1/product-groups/")
+    resp = client.get("/api/v1/product-groups/", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json[0]["product_group_id"] == "pg-1"
 

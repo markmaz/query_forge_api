@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from flask import g, has_request_context
+
 from app.adapters.databricke_workspace_token_manager import DatabricksWorkspaceTokenManager
 from app.adapters.databricks_sql_executor import DatabricksSQLExecutor
 from app.config import DEFAULT_SQL_WAREHOUSE
 from app.exceptions.service_error import ServiceError
 from app.services.shared.request_context import get_current_username
+from app.services.workspace_access_service import WorkspaceAccessService
 from app.services.warehouse_service import WarehouseService
 from app.services.workspace_service import WorkspaceService
 
@@ -22,10 +25,16 @@ class CatalogContext:
 
 class WorkspaceContextBuilder:
     """
-    Mirrors your Crosswalk pattern, but for catalog admin.
+    Mirrors your ValueOverride pattern, but for catalog admin.
     """
 
     def build(self, workspace_id: str) -> CatalogContext:
+        workspace_id = str(workspace_id or "").strip()
+        if not workspace_id:
+            raise ServiceError("workspace_id is required", status_code=400)
+
+        self._assert_request_workspace_access(workspace_id)
+
         workspace_url = self._resolve_workspace_url(workspace_id)
         warehouse_id = self._resolve_default_warehouse_id(workspace_id)
         user_name = get_current_username()
@@ -47,6 +56,16 @@ class WorkspaceContextBuilder:
             user_name=user_name,
             sql_exec=sql_exec,
         )
+
+    def _assert_request_workspace_access(self, workspace_id: str) -> None:
+        if not has_request_context():
+            return
+
+        user_id = str(getattr(g, "user_id", "") or "").strip()
+        if not user_id:
+            return
+
+        WorkspaceAccessService().assert_workspace_access(user_id=user_id, workspace_id=workspace_id)
 
     def _resolve_workspace_url(self, workspace_id: str) -> str:
         ws = WorkspaceService().get_workspace(workspace_id=workspace_id)

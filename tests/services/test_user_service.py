@@ -77,7 +77,7 @@ def test_create_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
     fake.write_responses = [1]
     svc = UserService(sql=fake)
     monkeypatch.setattr(svc, "check_for_existing_user", lambda username: False)
-    monkeypatch.setattr(user_service_mod, "is_good_password", lambda password: True)
+    monkeypatch.setattr(user_service_mod, "validate_password_policy", lambda password: 200)
 
     resp = svc.create_user("alice", "Password1!", "a@example.com", "A", "B")
     assert resp["username"] == "alice"
@@ -94,7 +94,11 @@ def test_create_user_duplicate(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_create_user_bad_password(monkeypatch: pytest.MonkeyPatch) -> None:
     svc = UserService(sql=FakeSQLExecutor())
     monkeypatch.setattr(svc, "check_for_existing_user", lambda username: False)
-    monkeypatch.setattr(user_service_mod, "is_good_password", lambda password: False)
+    monkeypatch.setattr(
+        user_service_mod,
+        "validate_password_policy",
+        lambda password: (_ for _ in ()).throw(ServiceError("Password violates policy rules.", 422)),
+    )
     with pytest.raises(ServiceError):
         svc.create_user("alice", "bad", "a@example.com", "A", "B")
 
@@ -104,7 +108,7 @@ def test_create_user_db_error(monkeypatch: pytest.MonkeyPatch) -> None:
     fake.write_exceptions = [user_service_mod.exc.SQLAlchemyError("err")]
     svc = UserService(sql=fake)
     monkeypatch.setattr(svc, "check_for_existing_user", lambda username: False)
-    monkeypatch.setattr(user_service_mod, "is_good_password", lambda password: True)
+    monkeypatch.setattr(user_service_mod, "validate_password_policy", lambda password: 200)
     with pytest.raises(ServiceError):
         svc.create_user("alice", "Password1!", "a@example.com", "A", "B")
 
@@ -193,6 +197,39 @@ def test_update_user_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(svc, "get_user", lambda user_id: None)
     with pytest.raises(ServiceError):
         svc.update_user("u1", User(first_name="New"))
+
+
+def test_update_user_password_enforces_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeSQLExecutor()
+    svc = UserService(sql=fake)
+    existing = User(user_id="u1", first_name="Old", last_name="Name")
+    monkeypatch.setattr(svc, "get_user", lambda user_id: existing)
+    monkeypatch.setattr(
+        user_service_mod,
+        "validate_password_policy",
+        lambda _password: (_ for _ in ()).throw(ServiceError("Password violates policy rules.", 422)),
+    )
+
+    with pytest.raises(ServiceError) as exc:
+        svc.update_user("u1", User(password="weak"))
+    assert exc.value.status_code == 422
+    assert not fake.write_calls
+
+
+def test_update_user_password_hashes_after_policy_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeSQLExecutor()
+    fake.write_responses = [1]
+    svc = UserService(sql=fake)
+    existing = User(user_id="u1", first_name="Old", last_name="Name")
+    monkeypatch.setattr(svc, "get_user", lambda user_id: existing)
+    monkeypatch.setattr(user_service_mod, "validate_password_policy", lambda _password: 200)
+
+    svc.update_user("u1", User(password="StrongPass1!"))
+
+    assert fake.write_calls
+    call = fake.write_calls[0]
+    assert "password = :password" in call.query
+    assert call.params["password"] != "StrongPass1!"
 
 
 def test_sync_user_workspaces_inserts_and_updates() -> None:
@@ -289,10 +326,14 @@ def test_get_users_with_products_and_workspaces() -> None:
                 "role_name": "Role",
             }
         ],
+        [],
         [{"count": 1}],
     ]
     svc = UserService(sql=fake)
     users, next_cursor, prev_cursor, total = svc.get_users()
+    base_query = fake.query_mappings_calls[0].query
+    assert "password" not in base_query.lower()
+    assert "otp_secret" not in base_query.lower()
     assert users[0].user_id == "u1"
     assert users[0].workspaces[0].workspace_id == "ws1"
     assert users[0].products[0].product_id == "p1"
@@ -321,11 +362,15 @@ def test_get_users_prev_cursor() -> None:
             }
         ],
         [],
+        [],
         [{"user_id": "u1"}],
         [{"count": 2}],
     ]
     svc = UserService(sql=fake)
     users, next_cursor, prev_cursor, total = svc.get_users(cursor="u1", direction="forward")
+    base_query = fake.query_mappings_calls[0].query
+    assert "password" not in base_query.lower()
+    assert "otp_secret" not in base_query.lower()
     assert users[0].user_id == "u2"
     assert prev_cursor == "u1"
     assert total == 2
