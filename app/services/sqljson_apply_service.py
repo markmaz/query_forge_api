@@ -96,18 +96,42 @@ def _ensure_aggs(sqljson: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _map_filter_operator(op: str) -> str:
+    token = str(op or "").strip().lower()
     mapping = {
         "=": "equals",
-        "!=": "equals",
+        "==": "equals",
+        "eq": "equals",
+        "equals": "equals",
+        "!=": "not_equals",
+        "<>": "not_equals",
+        "ne": "not_equals",
+        "not_equal": "not_equals",
+        "not_equals": "not_equals",
         "in": "in",
+        "not in": "not_in",
+        "not_in": "not_in",
         "between": "between",
         "contains": "contains",
+        "like": "contains",
         "starts_with": "starts_with",
+        "startswith": "starts_with",
+        "prefix": "starts_with",
         "gt": "gt",
+        ">": "gt",
+        "gte": "gte",
+        ">=": "gte",
         "lt": "lt",
-        "equals": "equals",
+        "<": "lt",
+        "lte": "lte",
+        "<=": "lte",
+        "exists": "is_not_null",
+        "not_exists": "is_null",
+        "is_null": "is_null",
+        "is null": "is_null",
+        "is_not_null": "is_not_null",
+        "is not null": "is_not_null",
     }
-    return mapping.get(op, "equals")
+    return mapping.get(token, "equals")
 
 
 def apply_edits(

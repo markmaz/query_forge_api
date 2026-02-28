@@ -87,7 +87,7 @@ def test_compile_with_aliases_where_sorting():
     assert "paid_amount AS `Paid Amount`" in compiled.sql
     assert "WHERE" in compiled.sql
     assert "t0.paid_amount > :p1" in compiled.sql
-    assert "t0.provider_npi LIKE :p2" in compiled.sql
+    assert "LOWER(t0.provider_npi) LIKE LOWER(:p2)" in compiled.sql
     assert "ORDER BY t0.paid_amount DESC" in compiled.sql
     assert "LIMIT 200" in compiled.sql
 
@@ -177,11 +177,11 @@ def test_exists_filters_secondary_table():
 
     assert "FROM main.asset.patients t0" in compiled.sql
     assert "JOIN main.asset.codes" not in compiled.sql
-    assert "WHERE t0.gender = :p1" in compiled.sql
+    assert "WHERE LOWER(t0.gender) = LOWER(:p1)" in compiled.sql
     assert "EXISTS" in compiled.sql
     assert "FROM main.asset.codes e1" in compiled.sql
     assert "t0.patient_id = e1.patient_id" in compiled.sql
-    assert "e1.code = :p2" in compiled.sql
+    assert "LOWER(e1.code) = LOWER(:p2)" in compiled.sql
     assert compiled.params == {"p1": "F", "p2": "A1"}
 
 

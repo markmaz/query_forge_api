@@ -21,6 +21,7 @@ from app.config import (
     LLM_INSTANCE_ID,
     LLM_STATUS_CACHE_SECONDS,
     LOG_QUEUE,
+    QF_MINIMAL_CHAT_ENABLED,
     SEMANTIC_CONCEPT_SEED_ON_STARTUP,
     SEMANTIC_VERTICAL_DEFAULT,
     VALKEY_ADDRESS,
@@ -34,23 +35,29 @@ from app.config.logging_config import configure_logging
 from app.config.mail_config import MailConfig
 from app.exceptions.service_error import ServiceError
 from app.extensions import mail
+from app.routes import planner_domain as _planner_domain  # noqa: F401
+from app.routes import planner_llm as _planner_llm  # noqa: F401
 from app.routes.admin_routes import admin_ns
 from app.routes.ai import ai_ns
 from app.routes.auth_routes import auth_ns
+from app.routes.chat_minimal import chat_ns
 from app.routes.connection_routes import connection_ns
-from app.routes.value_override_routes import value_override_ns
 from app.routes.dashboard_routes import dashboard_ns
+from app.routes.data_environment import data_environment_ns
 from app.routes.domain_routes import domains_ns
 from app.routes.embeddings import embeddings_ns
 from app.routes.execution_routes import executions_ns
 from app.routes.export_routes import exports_ns
-from app.routes.data_environment import data_environment_ns
 from app.routes.model_routes import model_ns
+from app.routes.nlp_review import nlp_review_ns
 from app.routes.nlp_routes import nlp_ns
+from app.routes.nlp_tier2 import nlp_tier2_ns
 from app.routes.no_code_query_routes import nocode_ns
 from app.routes.otp_routes import otp_ns
+from app.routes.planner_extract import planner_ns
 from app.routes.product_groups_routes import product_group_ns
 from app.routes.product_routes import product_ns
+from app.routes.prompt_feedback import prompt_feedback_ns
 from app.routes.public_sales_inquiry import public_ns
 from app.routes.query_tree_routes import saved_query_ns, tree_ns
 from app.routes.role_routes import role_ns
@@ -67,6 +74,8 @@ from app.routes.semantic_routes import semantic_ns
 from app.routes.semantic_suggestions import semantic_suggestions_ns
 from app.routes.user_routes import user_ns
 from app.routes.user_workspace_routes import user_workspace_ns
+from app.routes.value_override_routes import value_override_ns
+from app.routes.vector_domains import vector_ns
 from app.routes.workspace_inventory_routes import wsinv_ns
 from app.routes.workspace_routes import workspace_ns
 from app.routes.workspace_table_routes import workspace_tables_ns
@@ -115,6 +124,7 @@ def create_app():
     app.config["AWS_SESSION_TOKEN"] = AWS_SESSION_TOKEN
     app.config["LLM_INSTANCE_ID"] = LLM_INSTANCE_ID
     app.config["LLM_STATUS_CACHE_SECONDS"] = LLM_STATUS_CACHE_SECONDS
+    app.config["QF_MINIMAL_CHAT_ENABLED"] = QF_MINIMAL_CHAT_ENABLED
     if not app.config["LLM_INSTANCE_ID"]:
         raise RuntimeError("LLM_INSTANCE_ID environment variable is required")
     if not app.config["AWS_ACCESS_KEY_ID"] or not app.config["AWS_SECRET_ACCESS_KEY"]:
@@ -160,6 +170,7 @@ def create_app():
     api.add_namespace(role_ns, path=build_url("/", NAME, VERSION, "roles"))
     api.add_namespace(admin_ns, path=build_url("/", NAME, VERSION, "admin"))
     api.add_namespace(product_ns, path=build_url("/", NAME, VERSION, "products"))
+    api.add_namespace(planner_ns, path=build_url("/", NAME, VERSION, "planner"))
     api.add_namespace(otp_ns, path=build_url("/", NAME, VERSION, "otp"))
     api.add_namespace(product_group_ns, path=build_url("/", NAME, VERSION, "product-groups"))
     api.add_namespace(value_override_ns, path=build_url("/", NAME, VERSION, "value_overrides"))
@@ -171,10 +182,14 @@ def create_app():
     api.add_namespace(wsinv_ns, path=build_url("/", NAME, VERSION, "workspace-inventory"))
     api.add_namespace(model_ns, path=build_url("/", NAME, VERSION, "models"))
     api.add_namespace(nlp_ns, path=build_url("/", NAME, VERSION, "nlp"))
+    api.add_namespace(nlp_tier2_ns, path=build_url("/", NAME, VERSION, "nlp"))
+    api.add_namespace(nlp_review_ns, path=build_url("/", NAME, VERSION, "nlp"))
     api.add_namespace(nocode_ns, path=build_url("/", NAME, VERSION, "query"))
     api.add_namespace(tree_ns, path=build_url("/", NAME, VERSION, "query-tree"))
     api.add_namespace(saved_query_ns, path=build_url("/", NAME, VERSION, "saved-queries"))
     api.add_namespace(ai_ns, path=build_url("/", NAME, VERSION, "ai"))
+    api.add_namespace(prompt_feedback_ns, path=build_url("/", NAME, VERSION, "prompt-feedback"))
+    api.add_namespace(chat_ns, path=build_url("/", NAME, VERSION, "chat"))
     api.add_namespace(semantic_concepts_ns, path=build_url("/", NAME, VERSION, "semantic", "concepts"))
     api.add_namespace(semantic_concept_aliases_ns, path=build_url("/", NAME, VERSION, "semantic", "concept-aliases"))
     api.add_namespace(semantic_value_aliases_ns, path=build_url("/", NAME, VERSION, "semantic", "value-aliases"))
@@ -184,6 +199,7 @@ def create_app():
     api.add_namespace(semantic_relationships_ns, path=build_url("/", NAME, VERSION, "semantic", "relationships"))
     api.add_namespace(semantic_suggestions_ns, path=build_url("/", NAME, VERSION, "semantic", "suggestions"))
     api.add_namespace(semantic_ns, path=build_url("/", NAME, VERSION, "semantic"))
+    api.add_namespace(vector_ns, path=build_url("/", NAME, VERSION, "vector"))
     api.add_namespace(data_environment_ns, path=f"/{NAME}/{VERSION}/data-environment")
 
     configure_logging()

@@ -24,6 +24,13 @@ class FakeResolver:
         return list(self._paths.get(int(to_workspace_table_id), []))
 
 
+class _ResolverWithWorkspaceSql(FakeResolver):
+    def __init__(self, plan: DomainPlan, sql: FakeSQLExecutor, workspace_id: str = "ws-1") -> None:
+        super().__init__(plan)
+        self._sql = sql
+        self._workspace_id = workspace_id
+
+
 class FakeRunExecutor:
     def __init__(self, responses: list[dict]) -> None:
         self._responses = list(responses)
@@ -165,7 +172,64 @@ def test_compile_with_data_prep_cte_rewrites() -> None:
     assert "TO_DATE(t0.dob, 'yyyy-mm-dd') AS __dp_dob_date" in compiled.sql
     assert "ROUND(t0.score, 2) AS __dp_score_round" in compiled.sql
     assert "FROM prep" in compiled.sql
-    assert "WHERE __dp_name = :p1" in compiled.sql
+    assert "WHERE LOWER(__dp_name) LIKE LOWER(:p1)" in compiled.sql
+
+
+def test_load_domain_column_catalog_filters_workspace_via_workspace_table() -> None:
+    plan = DomainPlan(
+        primary=DomainPlanTable(
+            workspace_table_id=20,
+            full_name="main.a.t20",
+            alias="t0",
+            table_alias="t20",
+            is_primary=True,
+            sort_order=0,
+            filter_mode="AUTO",
+            cardinality="ONE",
+        ),
+        tables=[
+            DomainPlanTable(
+                workspace_table_id=20,
+                full_name="main.a.t20",
+                alias="t0",
+                table_alias="t20",
+                is_primary=True,
+                sort_order=0,
+                filter_mode="AUTO",
+                cardinality="ONE",
+            ),
+            DomainPlanTable(
+                workspace_table_id=24,
+                full_name="main.a.t24",
+                alias="t1",
+                table_alias="t24",
+                is_primary=False,
+                sort_order=1,
+                filter_mode="AUTO",
+                cardinality="MANY",
+            ),
+        ],
+        joins=[],
+        alias_by_workspace_table_id={20: "t0", 24: "t1"},
+        column_name_policy="DEDUP_PRIMARY_FIRST",
+    )
+    sql = FakeSQLExecutor()
+    sql.query_mappings_responses.append([])
+    svc = NoCodeQueryService(executor=sql, domain_resolver=_ResolverWithWorkspaceSql(plan, sql))
+
+    catalog = svc._load_domain_column_catalog(plan)  # noqa: SLF001
+
+    assert catalog == {}
+    assert sql.query_mappings_calls
+    query = sql.query_mappings_calls[-1].query
+    params = sql.query_mappings_calls[-1].params
+    assert "JOIN workspace_table wt" in query
+    assert "WHERE wt.workspace_id = :ws" in query
+    assert "wc.workspace_id" not in query
+    assert "mc.id = wc.model_column_id" not in query
+    assert "mc.model_table_id = wt.model_table_id" in query
+    assert "mc.column_name = wc.column_name" in query
+    assert params == {"ws": "ws-1"}
 
 
 def test_compile_date_part_year_filter_exprid() -> None:
@@ -1280,14 +1344,26 @@ def test_compile_where_ops_and_errors() -> None:
             {"type": "condition", "field": "name", "op": "starts_with", "value": "A"},
             {"type": "condition", "field": "age", "op": "gt", "value": 21},
             {"type": "condition", "field": "age", "op": "lt", "value": 99},
+            {"type": "condition", "field": "country", "op": "not_equals", "value": "US"},
             {"type": "condition", "field": "state", "op": "in", "value": "CA, NY"},
+            {"type": "condition", "field": "status", "op": "not_in", "value": ["inactive", "deleted"]},
             {"type": "condition", "field": "city", "op": "contains", "value": "x"},
             {"type": "condition", "field": "age", "op": "between", "value": [10, 20]},
+            {"type": "condition", "field": "age", "op": "gte", "value": 10},
+            {"type": "condition", "field": "age", "op": "lte", "value": 99},
+            {"type": "condition", "field": "middle_name", "op": "is_null", "value": None},
+            {"type": "condition", "field": "nickname", "op": "is_not_null", "value": None},
         ],
     }
     where_sql, exists_parts, params = _compile_where_with_params(svc, node, plan)
     assert "LIKE" in where_sql
     assert "IN" in where_sql
+    assert "NOT IN" in where_sql
+    assert "<>" in where_sql
+    assert ">=" in where_sql
+    assert "<=" in where_sql
+    assert "IS NULL" in where_sql
+    assert "IS NOT NULL" in where_sql
     assert exists_parts == []
     assert params
 
@@ -1301,6 +1377,25 @@ def test_compile_where_ops_and_errors() -> None:
 
     with pytest.raises(ServiceError, match="Invalid filter node"):
         _compile_where_with_params(svc, "bad", plan)
+
+
+def test_compile_where_normalizes_string_equals_and_name_matching() -> None:
+    plan = _single_table_plan()
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(plan))
+    node = {
+        "type": "group",
+        "match": "and",
+        "children": [
+            {"type": "condition", "field": "last_name", "op": "equals", "value": "Holden"},
+            {"type": "condition", "field": "state", "op": "equals", "value": "TN"},
+        ],
+    }
+    where_sql, exists_parts, params = _compile_where_with_params(svc, node, plan)
+    assert "LOWER(t0.last_name) LIKE LOWER(:p1)" in where_sql
+    assert "LOWER(t0.state) = LOWER(:p2)" in where_sql
+    assert params["p1"] == "%Holden%"
+    assert params["p2"] == "TN"
+    assert exists_parts == []
 
 
 def test_compile_where_in_manual_cap() -> None:
@@ -1718,3 +1813,136 @@ def test_compile_order_by_errors() -> None:
         svc._compile_order_by(["bad"], {}, {}, {}, {}, False, "t0", {1: "t0"})
     with pytest.raises(ServiceError, match="Invalid sort direction"):
         svc._compile_order_by([{"columnName": {"columnName": "id"}, "dir": "up"}], {}, {}, {}, {}, False, "t0", {1: "t0"})
+
+
+def _ratio_plan() -> tuple[DomainPlan, dict[int, list[DomainPlanJoin]]]:
+    t0 = DomainPlanTable(20, "main.asset.dim_school", "t0", None, True, 0, "AUTO", "ONE")
+    t1 = DomainPlanTable(30, "main.asset.fct_staff_school_association", "t1", None, False, 1, "AUTO", "MANY")
+    t2 = DomainPlanTable(61, "main.asset.fct_student_school_association", "t2", None, False, 2, "AUTO", "MANY")
+    j1 = DomainPlanJoin(
+        join_id="j1",
+        from_workspace_table_id=20,
+        to_workspace_table_id=30,
+        join_type="INNER",
+        join_spec={"on": [{"left": {"columnName": "k_school"}, "right": {"columnName": "k_school"}}]},
+        sort_order=0,
+    )
+    j2 = DomainPlanJoin(
+        join_id="j2",
+        from_workspace_table_id=20,
+        to_workspace_table_id=61,
+        join_type="INNER",
+        join_spec={"on": [{"left": {"columnName": "k_school"}, "right": {"columnName": "k_school"}}]},
+        sort_order=1,
+    )
+    plan = DomainPlan(
+        primary=t0,
+        tables=[t0, t1, t2],
+        joins=[j1, j2],
+        alias_by_workspace_table_id={20: "t0", 30: "t1", 61: "t2"},
+        column_name_policy="DEDUP_PRIMARY_FIRST",
+    )
+    return plan, {30: [j1], 61: [j2]}
+
+
+def test_compile_split_ratio_metric_students_per_teacher() -> None:
+    plan, paths = _ratio_plan()
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(plan, paths=paths))
+    q = {
+        "domainId": 6,
+        "selects": {
+            "dimensions": ["wt20.county_fips_code"],
+            "metrics": [{"metricRef": "derived:students_per_teacher_ratio", "label": "students_per_teacher_ratio"}],
+        },
+        "derived_metrics": [
+            {
+                "kind": "ratio",
+                "name": "students_per_teacher_ratio",
+                "numerator": {"columnKey": "wt61.k_student", "agg": "count_distinct"},
+                "denominator": {"columnKey": "wt30.k_staff_school_association", "agg": "count_distinct"},
+                "safeDivide": True,
+            }
+        ],
+        "meta": {"debug": True},
+    }
+    normalized = svc.normalize(q)
+    compiled = svc.compile(normalized, mode="preview", limit=200, offset=0)
+
+    assert "WITH num AS" in compiled.sql
+    assert "den AS" in compiled.sql
+    assert "COUNT(DISTINCT t2.k_student) AS num_val" in compiled.sql
+    assert "COUNT(DISTINCT t1.k_staff_school_association) AS den_val" in compiled.sql
+    assert "NULLIF(den.den_val, 0)" in compiled.sql
+    assert "LEFT JOIN den ON num.wt20_county_fips_code = den.wt20_county_fips_code" in compiled.sql
+    assert any(col["key"] == "numerator_value" for col in compiled.output_columns)
+    assert any(col["key"] == "denominator_value" for col in compiled.output_columns)
+
+
+def test_compile_split_ratio_rejects_invalid_metric_type() -> None:
+    plan, paths = _ratio_plan()
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(plan, paths=paths))
+    q = {
+        "domainId": 6,
+        "aggs": {
+            "enabled": True,
+            "groupBy": [{"workspaceTableId": 20, "columnName": "county_fips_code"}],
+            "metrics": [
+                {
+                    "id": "m1",
+                    "fn": "expr",
+                    "label": "bad_ratio",
+                    "expr": {
+                        "kind": "ratio",
+                        "name": "bad_ratio",
+                        "numerator": {"agg": "avg", "columnKey": "wt61.k_student"},
+                        "denominator": {"agg": "count_distinct", "columnKey": "wt30.k_staff_school_association"},
+                    },
+                }
+            ],
+        },
+        "columns": [{"workspaceTableId": 20, "columnName": "county_fips_code"}],
+    }
+    with pytest.raises(ServiceError, match="derived_validation_failed: invalid_metric_type"):
+        svc.normalize(q)
+
+
+def test_compile_split_ratio_rejects_or_filter_tree() -> None:
+    plan, paths = _ratio_plan()
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(plan, paths=paths))
+    q = {
+        "domainId": 6,
+        "selects": {
+            "dimensions": ["wt20.county_fips_code"],
+            "metrics": [{"metricRef": "derived:students_per_teacher_ratio"}],
+        },
+        "derived_metrics": [
+            {
+                "kind": "ratio",
+                "name": "students_per_teacher_ratio",
+                "numerator": {"columnKey": "wt61.k_student", "agg": "count_distinct"},
+                "denominator": {"columnKey": "wt30.k_staff_school_association", "agg": "count_distinct"},
+                "safeDivide": True,
+            }
+        ],
+        "filters": {
+            "type": "group",
+            "match": "or",
+            "children": [
+                {
+                    "type": "condition",
+                    "field": {"workspaceTableId": 20, "columnName": "county_fips_code"},
+                    "op": "equals",
+                    "value": "001",
+                },
+                {
+                    "type": "condition",
+                    "field": {"workspaceTableId": 20, "columnName": "k_school"},
+                    "op": "equals",
+                    "value": "200",
+                },
+            ],
+        },
+    }
+    normalized = svc.normalize(q)
+    with pytest.raises(ServiceError, match="unsupported_filter_tree_for_split_ratio"):
+        svc.compile(normalized)

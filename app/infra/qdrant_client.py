@@ -69,6 +69,20 @@ class QdrantClientWrapper:
         self._client.upsert(collection_name=self._collection_name, points=point_list, wait=wait)
         return len(point_list)
 
+    def ensure_payload_index(self, *, key: str, schema: qdrant_models.PayloadSchemaType) -> None:
+        if not self._collection_name:
+            raise ValueError("Qdrant collection name is not set.")
+        try:
+            self._client.create_payload_index(
+                collection_name=self._collection_name,
+                field_name=key,
+                field_schema=schema,
+                wait=True,
+            )
+        except Exception:
+            logger.exception("Failed to ensure payload index key=%s collection=%s", key, self._collection_name)
+            raise
+
     def search(
         self,
         *,

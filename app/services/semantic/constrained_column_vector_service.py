@@ -4,9 +4,11 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from qdrant_client.http import models as qdrant_models
 
+from app.adapters.mysql_sql_executor import MySQLSQLExecutor
 from app.config import QDRANT_COLUMN_COLLECTION, QDRANT_COLUMN_COLLECTION_V2
 from app.infra.embedding_model import EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
+from app.ports.sql_executor import SQLExecutor
 
 COLUMN_COLLECTION_NAME = QDRANT_COLUMN_COLLECTION_V2 or QDRANT_COLUMN_COLLECTION or "column_catalog_v2"
 
@@ -17,9 +19,11 @@ class ConstrainedColumnVectorService:
         *,
         qdrant: Optional[QdrantClientWrapper] = None,
         model: Optional[EmbeddingModel] = None,
+        sql: Optional[SQLExecutor] = None,
     ) -> None:
         self._qdrant = qdrant or QdrantClientWrapper(collection_name=COLUMN_COLLECTION_NAME)
         self._model = model or EmbeddingModel()
+        self._sql = sql or MySQLSQLExecutor()
 
     def search(
         self,
@@ -29,6 +33,7 @@ class ConstrainedColumnVectorService:
         candidate_columns: Sequence[Dict[str, Any]],
         concept_hits: Sequence[Dict[str, Any]],
         max_columns: int,
+        domain_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         candidate_by_id: Dict[int, Dict[str, Any]] = {}
         for row in candidate_columns:
@@ -39,6 +44,18 @@ class ConstrainedColumnVectorService:
             existing = candidate_by_id.get(model_column_id)
             if existing is None or float(existing.get("weight") or 0.0) < float(row.get("weight") or 0.0):
                 candidate_by_id[model_column_id] = dict(row)
+
+        if domain_id is not None and candidate_by_id:
+            allowed_workspace_table_ids = self._load_domain_workspace_table_ids(
+                workspace_id=workspace_id,
+                domain_id=int(domain_id),
+            )
+            if allowed_workspace_table_ids:
+                candidate_by_id = {
+                    model_column_id: row
+                    for model_column_id, row in candidate_by_id.items()
+                    if _to_int_or_none(row.get("workspace_table_id")) in allowed_workspace_table_ids
+                }
 
         candidate_ids = sorted(candidate_by_id.keys())
         if not candidate_ids:
@@ -92,6 +109,8 @@ class ConstrainedColumnVectorService:
                 mapped = candidate_by_id[model_column_id]
                 by_id[model_column_id] = {
                     "model_column_id": model_column_id,
+                    "workspace_table_id": _to_int_or_none(payload.get("workspace_table_id"))
+                    or _to_int_or_none(mapped.get("workspace_table_id")),
                     "score": round(score, 4),
                     "table_name": payload.get("table_name") or mapped.get("table_name"),
                     "column_name": payload.get("column_name") or mapped.get("column_name"),
@@ -103,6 +122,29 @@ class ConstrainedColumnVectorService:
             "filtered_to_candidate_count": len(candidate_ids),
             "hits": hits,
         }
+
+    def _load_domain_workspace_table_ids(self, *, workspace_id: str, domain_id: int) -> set[int]:
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT dwt.workspace_table_id
+            FROM domain_workspace_table dwt
+            JOIN workspace_table wt
+              ON wt.id = dwt.workspace_table_id
+             AND wt.workspace_id = :workspace_id
+             AND wt.exists_in_dbx = 1
+            WHERE dwt.domain_id = :domain_id
+            """,
+            {
+                "workspace_id": str(workspace_id),
+                "domain_id": int(domain_id),
+            },
+        )
+        out: set[int] = set()
+        for row in rows:
+            value = _to_int_or_none(row.get("workspace_table_id"))
+            if value is not None:
+                out.add(value)
+        return out
 
 
 def _to_int_or_none(value: Any) -> Optional[int]:

@@ -1,0 +1,113 @@
+{"label": "METRIC", "pattern": "504 plan incidence"}
+{"label": "METRIC", "pattern": "ACT participation"}
+{"label": "METRIC", "pattern": "AP exam participation"}
+{"label": "METRIC", "pattern": "CTE concentrator rate"}
+{"label": "METRIC", "pattern": "EL exit rate"}
+{"label": "METRIC", "pattern": "ELA proficiency"}
+{"label": "METRIC", "pattern": "IB course completion"}
+{"label": "METRIC", "pattern": "SPED identification rate"}
+{"label": "METRIC", "pattern": "accommodation usage rate"}
+{"label": "METRIC", "pattern": "alternate assessment usage"}
+{"label": "METRIC", "pattern": "assessment invalidation rate"}
+{"label": "METRIC", "pattern": "attendance below 90%"}
+{"label": "METRIC", "pattern": "average daily attendance"}
+{"label": "METRIC", "pattern": "chronic absenteeism rate"}
+{"label": "METRIC", "pattern": "college readiness rate"}
+{"label": "METRIC", "pattern": "course failure rate"}
+{"label": "METRIC", "pattern": "credit accrual"}
+{"label": "METRIC", "pattern": "discipline disproportionality"}
+{"label": "METRIC", "pattern": "discipline incident rate"}
+{"label": "METRIC", "pattern": "dropout rate"}
+{"label": "METRIC", "pattern": "dual credit completion"}
+{"label": "METRIC", "pattern": "duplicate student records"}
+{"label": "METRIC", "pattern": "expulsion count"}
+{"label": "METRIC", "pattern": "five-year graduation rate"}
+{"label": "METRIC", "pattern": "four-year graduation rate"}
+{"label": "METRIC", "pattern": "gifted identification rate"}
+{"label": "METRIC", "pattern": "growth percentile"}
+{"label": "METRIC", "pattern": "homeless identification count"}
+{"label": "METRIC", "pattern": "math proficiency"}
+{"label": "METRIC", "pattern": "mid-year withdrawals"}
+{"label": "METRIC", "pattern": "missing demographic fields"}
+{"label": "METRIC", "pattern": "mobility rate"}
+{"label": "METRIC", "pattern": "on-track to graduate rate"}
+{"label": "METRIC", "pattern": "overlapping enrollment dates"}
+{"label": "METRIC", "pattern": "program overlap rate"}
+{"label": "METRIC", "pattern": "retention rate"}
+{"label": "METRIC", "pattern": "science proficiency"}
+{"label": "METRIC", "pattern": "state assessment participation"}
+{"label": "METRIC", "pattern": "student growth index"}
+{"label": "METRIC", "pattern": "student incident recidivism"}
+{"label": "METRIC", "pattern": "suspension rate"}
+{"label": "METRIC", "pattern": "time-to-exit ESL"}
+{"label": "SUBGROUP", "pattern": "504 students"}
+{"label": "SUBGROUP", "pattern": "9th graders"}
+{"label": "SUBGROUP", "pattern": "EL students"}
+{"label": "SUBGROUP", "pattern": "English Learners"}
+{"label": "SUBGROUP", "pattern": "dual credit students"}
+{"label": "SUBGROUP", "pattern": "early childhood students"}
+{"label": "SUBGROUP", "pattern": "economically disadvantaged students"}
+{"label": "SUBGROUP", "pattern": "former ELs"}
+{"label": "SUBGROUP", "pattern": "foster youth"}
+{"label": "SUBGROUP", "pattern": "gifted students"}
+{"label": "SUBGROUP", "pattern": "homeless students"}
+{"label": "SUBGROUP", "pattern": "kindergarteners"}
+{"label": "SUBGROUP", "pattern": "long-term ELs"}
+{"label": "SUBGROUP", "pattern": "migrant students"}
+{"label": "SUBGROUP", "pattern": "military-connected students"}
+{"label": "SUBGROUP", "pattern": "newcomer ELs"}
+{"label": "SUBGROUP", "pattern": "seniors"}
+{"label": "SUBGROUP", "pattern": "students in AP"}
+{"label": "SUBGROUP", "pattern": "students in CTE"}
+{"label": "SUBGROUP", "pattern": "students in IB"}
+{"label": "SUBGROUP", "pattern": "students in Title I schools"}
+{"label": "SUBGROUP", "pattern": "students in alternative education"}
+{"label": "SUBGROUP", "pattern": "students in juvenile justice"}
+{"label": "SUBGROUP", "pattern": "students in poverty"}
+{"label": "SUBGROUP", "pattern": "students in turnaround schools"}
+{"label": "SUBGROUP", "pattern": "students with IEPs"}
+{"label": "SUBGROUP", "pattern": "students with chronic absence"}
+{"label": "SUBGROUP", "pattern": "students with disabilities"}
+{"label": "SUBGROUP", "pattern": "students with limited internet access"}
+{"label": "SUBGROUP", "pattern": "students with repeated suspensions"}
+{"label": "TIME_RANGE", "pattern": "SY 2023-24"}
+{"label": "TIME_RANGE", "pattern": "SY 2024-25"}
+{"label": "TIME_RANGE", "pattern": "between Labor Day and winter break"}
+{"label": "TIME_RANGE", "pattern": "during Q1"}
+{"label": "TIME_RANGE", "pattern": "during Q2"}
+{"label": "TIME_RANGE", "pattern": "during the fall snapshot"}
+{"label": "TIME_RANGE", "pattern": "for the past three years"}
+{"label": "TIME_RANGE", "pattern": "for the spring administration"}
+{"label": "TIME_RANGE", "pattern": "in the current grading period"}
+{"label": "TIME_RANGE", "pattern": "in the last 30 days"}
+{"label": "TIME_RANGE", "pattern": "in the last 90 days"}
+{"label": "TIME_RANGE", "pattern": "last school year"}
+{"label": "TIME_RANGE", "pattern": "month-to-date"}
+{"label": "TIME_RANGE", "pattern": "over the last five years"}
+{"label": "TIME_RANGE", "pattern": "since August 1"}
+{"label": "TIME_RANGE", "pattern": "since the start of testing window"}
+{"label": "TIME_RANGE", "pattern": "this school year"}
+{"label": "TIME_RANGE", "pattern": "year-to-date"}
+{"label": "DIMENSION", "pattern": "by accountability subgroup"}
+{"label": "DIMENSION", "pattern": "by attendance zone"}
+{"label": "DIMENSION", "pattern": "by campus"}
+{"label": "DIMENSION", "pattern": "by charter network"}
+{"label": "DIMENSION", "pattern": "by classroom"}
+{"label": "DIMENSION", "pattern": "by county"}
+{"label": "DIMENSION", "pattern": "by course"}
+{"label": "DIMENSION", "pattern": "by district"}
+{"label": "DIMENSION", "pattern": "by feeder pattern"}
+{"label": "DIMENSION", "pattern": "by grade"}
+{"label": "DIMENSION", "pattern": "by grade band"}
+{"label": "DIMENSION", "pattern": "by locale"}
+{"label": "DIMENSION", "pattern": "by month"}
+{"label": "DIMENSION", "pattern": "by program"}
+{"label": "DIMENSION", "pattern": "by quarter"}
+{"label": "DIMENSION", "pattern": "by region"}
+{"label": "DIMENSION", "pattern": "by reporting period"}
+{"label": "DIMENSION", "pattern": "by school"}
+{"label": "DIMENSION", "pattern": "by school type"}
+{"label": "DIMENSION", "pattern": "by school year"}
+{"label": "DIMENSION", "pattern": "by semester"}
+{"label": "DIMENSION", "pattern": "by teacher"}
+{"label": "DIMENSION", "pattern": "by urbanicity"}

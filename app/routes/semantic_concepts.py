@@ -58,6 +58,14 @@ rebuild_index_model = semantic_concepts_ns.model(
         "vertical_norm": fields.String(required=False, default="generic"),
     },
 )
+backfill_primary_keys_model = semantic_concepts_ns.model(
+    "SemanticConceptBackfillPrimaryKeys",
+    {
+        "workspace_id": fields.String(required=False),
+        "vertical_norm": fields.String(required=False),
+        "dry_run": fields.Boolean(required=False, default=True),
+    },
+)
 
 alias_create_model = semantic_concept_aliases_ns.model(
     "SemanticConceptAliasCreate",
@@ -145,6 +153,29 @@ class SemanticConceptCollection(Resource):
             return {"error": "semantic concept create failed"}, 500
 
 
+@semantic_concepts_ns.route("/keys")
+class SemanticConceptKeyCollection(Resource):
+    @token_required
+    @semantic_concepts_ns.doc(
+        params={
+            "vertical": "Filter by vertical",
+        }
+    )
+    def get(self):
+        try:
+            return (
+                SemanticConceptService().list_concept_keys(
+                    vertical=request.args.get("vertical") or None,
+                ),
+                200,
+            )
+        except ServiceError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("semantic concept keys list failed")
+            return {"error": "semantic concept keys list failed"}, 500
+
+
 @semantic_concepts_ns.route("/<int:concept_id>")
 class SemanticConceptById(Resource):
     @token_required
@@ -221,6 +252,27 @@ class SemanticConceptRebuildIndex(Resource):
         except Exception:
             logger.exception("semantic concept index rebuild failed")
             return {"error": "semantic concept index rebuild failed"}, 500
+
+
+@semantic_concepts_ns.route("/backfill-primary-keys")
+class SemanticConceptBackfillPrimaryKeys(Resource):
+    @token_required
+    @semantic_concepts_ns.expect(backfill_primary_keys_model, validate=False)
+    def post(self):
+        try:
+            _require_admin()
+            body = request.get_json(silent=True) or {}
+            result = SemanticConceptService().backfill_primary_semantic_keys(
+                workspace_id=body.get("workspace_id"),
+                vertical_norm=body.get("vertical_norm"),
+                dry_run=bool(body.get("dry_run", True)),
+            )
+            return {"result": result}, 200
+        except ServiceError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("semantic concept backfill primary keys failed")
+            return {"error": "semantic concept backfill primary keys failed"}, 500
 
 
 @semantic_concept_aliases_ns.route("")
@@ -392,8 +444,11 @@ class SemanticConceptColumnMapCollection(Resource):
         params={
             "vertical": "Filter by vertical",
             "semantic_concept_id": "Filter by semantic_concept_id",
+            "concept_key": "Filter by concept_key (contains, case-insensitive)",
             "model_column_id": "Filter by model_column_id",
+            "column_name": "Filter by column_name (contains, case-insensitive)",
             "relationship_kind": "Filter by relationship_kind",
+            "q": "Type-ahead search across concept_key, concept_name, column_name, model_table_name",
             "page": "Page number",
             "page_size": "Page size",
         }
@@ -403,8 +458,11 @@ class SemanticConceptColumnMapCollection(Resource):
             result = SemanticConceptService().list_concept_column_maps(
                 vertical=request.args.get("vertical") or None,
                 semantic_concept_id=_optional_int(request.args.get("semantic_concept_id"), "semantic_concept_id"),
+                concept_key=request.args.get("concept_key") or None,
                 model_column_id=_optional_int(request.args.get("model_column_id"), "model_column_id"),
+                column_name=request.args.get("column_name") or None,
                 relationship_kind=request.args.get("relationship_kind") or None,
+                q=request.args.get("q") or None,
                 page=int_arg("page", 1),
                 page_size=int_arg("page_size", 25),
             )

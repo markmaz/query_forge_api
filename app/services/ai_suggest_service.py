@@ -25,6 +25,12 @@ from app.models.ai_suggest import (
     SuggestRequest,
 )
 from app.ports.sql_executor import SQLExecutor
+from app.services.llm.io_logging import (
+    log_llm_exception,
+    log_llm_request,
+    log_llm_response,
+    new_llm_request_id,
+)
 from app.services.sqljson_apply_service import apply_edits
 
 logger = logging.getLogger(__name__)
@@ -38,8 +44,23 @@ ALLOWED_EDIT_OPS = {"setDomain", "addSelect", "addFilter", "addGroupBy", "addAgg
 _ALLOWED_COL_KEYS = {"modelColumnId", "columnName", "workspaceTableId", "exprId", "alias"}
 LEGACY_FILTER_OPERATOR_MAP = {
     "=": "equals",
-    "!=": "equals",
+    "==": "equals",
+    "!=": "not_equals",
+    "<>": "not_equals",
+    "ne": "not_equals",
+    "not_equal": "not_equals",
+    "not_equals": "not_equals",
     "in": "in",
+    "not in": "not_in",
+    "not_in": "not_in",
+    "gte": "gte",
+    ">=": "gte",
+    "lte": "lte",
+    "<=": "lte",
+    "is null": "is_null",
+    "is_null": "is_null",
+    "is not null": "is_not_null",
+    "is_not_null": "is_not_null",
     "between": "between",
 }
 US_STATE_NAME_TO_ABBR = {
@@ -1287,7 +1308,34 @@ class AISuggestService:
 
     def health(self) -> Dict[str, Any]:
         url = f"{self.base_url}/v1/models"
-        response = requests.get(url, timeout=self.timeout)
+        request_id = new_llm_request_id()
+        log_llm_request(
+            logger,
+            client_name="AISuggestService.health",
+            request_id=request_id,
+            method="GET",
+            url=url,
+            payload=None,
+        )
+        try:
+            response = requests.get(url, timeout=self.timeout)
+        except Exception as exc:
+            log_llm_exception(
+                logger,
+                client_name="AISuggestService.health",
+                request_id=request_id,
+                method="GET",
+                url=url,
+                message=str(exc),
+            )
+            raise
+        log_llm_response(
+            logger,
+            client_name="AISuggestService.health",
+            request_id=request_id,
+            status_code=response.status_code,
+            response_text=response.text,
+        )
         response.raise_for_status()
         return response.json()
 
@@ -1300,7 +1348,34 @@ class AISuggestService:
             "top_p": self.top_p,
             "max_tokens": self.max_tokens,
         }
-        response = requests.post(url, json=payload, timeout=self.timeout)
+        request_id = new_llm_request_id()
+        log_llm_request(
+            logger,
+            client_name="AISuggestService.chat",
+            request_id=request_id,
+            method="POST",
+            url=url,
+            payload=payload,
+        )
+        try:
+            response = requests.post(url, json=payload, timeout=self.timeout)
+        except Exception as exc:
+            log_llm_exception(
+                logger,
+                client_name="AISuggestService.chat",
+                request_id=request_id,
+                method="POST",
+                url=url,
+                message=str(exc),
+            )
+            raise
+        log_llm_response(
+            logger,
+            client_name="AISuggestService.chat",
+            request_id=request_id,
+            status_code=response.status_code,
+            response_text=response.text,
+        )
         response.raise_for_status()
         return response.json()
 

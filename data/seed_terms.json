@@ -1,0 +1,40 @@
+{
+  "SUBGROUP": [
+    "english learner",
+    "el",
+    "lep",
+    "ell",
+    "sped",
+    "iep",
+    "504",
+    "homeless",
+    "economically disadvantaged",
+    "foster"
+  ],
+  "DIMENSION": [
+    "school",
+    "grade",
+    "district",
+    "teacher",
+    "program",
+    "cohort"
+  ],
+  "TIME_RANGE": [
+    "this year",
+    "last year",
+    "ytd",
+    "year to date",
+    "last month",
+    "past 3 years",
+    "past three years"
+  ],
+  "METRIC": [
+    "enrollment",
+    "attendance",
+    "chronic absenteeism",
+    "discipline incidents",
+    "assessment scores",
+    "graduation rate",
+    "proficiency"
+  ]
+}

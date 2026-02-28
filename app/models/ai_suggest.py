@@ -103,7 +103,21 @@ class AddFilterEdit(BaseModel):
 
     op: Literal["addFilter"]
     col: SqlColumnKey
-    operator: Literal["equals", "contains", "starts_with", "in", "gt", "lt", "between"]
+    operator: Literal[
+        "equals",
+        "not_equals",
+        "contains",
+        "starts_with",
+        "in",
+        "not_in",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "between",
+        "is_null",
+        "is_not_null",
+    ]
     value: Any
 
 

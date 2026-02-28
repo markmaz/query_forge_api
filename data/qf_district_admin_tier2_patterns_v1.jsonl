@@ -1,0 +1,69 @@
+{"label": "SUBGROUP", "pattern": "students who get extra language help"}
+{"label": "SUBGROUP", "pattern": "high school students"}
+{"label": "SUBGROUP", "pattern": "kids without stable housing"}
+{"label": "SUBGROUP", "pattern": "advanced learners"}
+{"label": "SUBGROUP", "pattern": "homeless students"}
+{"label": "SUBGROUP", "pattern": "students from low-income families"}
+{"label": "SUBGROUP", "pattern": "kids with learning plans"}
+{"label": "SUBGROUP", "pattern": "students in foster care"}
+{"label": "SUBGROUP", "pattern": "special education students"}
+{"label": "SUBGROUP", "pattern": "students with attendance issues"}
+{"label": "SUBGROUP", "pattern": "kids"}
+{"label": "SUBGROUP", "pattern": "gifted students"}
+{"label": "SUBGROUP", "pattern": "our students"}
+{"label": "SUBGROUP", "pattern": "elementary kids"}
+{"label": "SUBGROUP", "pattern": "learners"}
+{"label": "SUBGROUP", "pattern": "students with IEPs"}
+{"label": "SUBGROUP", "pattern": "students"}
+{"label": "SUBGROUP", "pattern": "middle schoolers"}
+{"label": "SUBGROUP", "pattern": "ninth graders"}
+{"label": "SUBGROUP", "pattern": "economically disadvantaged students"}
+{"label": "SUBGROUP", "pattern": "seniors"}
+{"label": "SUBGROUP", "pattern": "foster kids"}
+{"label": "SUBGROUP", "pattern": "third graders"}
+{"label": "SUBGROUP", "pattern": "our kids"}
+{"label": "SUBGROUP", "pattern": "English learners"}
+{"label": "SUBGROUP", "pattern": "kindergartners"}
+{"label": "SUBGROUP", "pattern": "frequently absent students"}
+{"label": "SUBGROUP", "pattern": "kids learning English"}
+{"label": "METRIC", "pattern": "how often kids show up"}
+{"label": "METRIC", "pattern": "kids being sent home"}
+{"label": "METRIC", "pattern": "reading scores"}
+{"label": "METRIC", "pattern": "course failures"}
+{"label": "METRIC", "pattern": "students leaving school early"}
+{"label": "METRIC", "pattern": "kids missing too much school"}
+{"label": "METRIC", "pattern": "dropouts"}
+{"label": "METRIC", "pattern": "chronic absenteeism"}
+{"label": "METRIC", "pattern": "math scores"}
+{"label": "METRIC", "pattern": "graduation rates"}
+{"label": "METRIC", "pattern": "discipline issues"}
+{"label": "METRIC", "pattern": "state test results"}
+{"label": "METRIC", "pattern": "student growth"}
+{"label": "METRIC", "pattern": "test scores"}
+{"label": "METRIC", "pattern": "progress over time"}
+{"label": "METRIC", "pattern": "behavior problems"}
+{"label": "METRIC", "pattern": "suspensions"}
+{"label": "METRIC", "pattern": "attendance"}
+{"label": "METRIC", "pattern": "kids failing classes"}
+{"label": "METRIC", "pattern": "kids finishing high school"}
+{"label": "TIME_RANGE", "pattern": "before winter break"}
+{"label": "TIME_RANGE", "pattern": "last semester"}
+{"label": "TIME_RANGE", "pattern": "so far this year"}
+{"label": "TIME_RANGE", "pattern": "this semester"}
+{"label": "TIME_RANGE", "pattern": "after spring break"}
+{"label": "TIME_RANGE", "pattern": "since school started"}
+{"label": "TIME_RANGE", "pattern": "over the past few years"}
+{"label": "TIME_RANGE", "pattern": "this year"}
+{"label": "TIME_RANGE", "pattern": "during testing season"}
+{"label": "TIME_RANGE", "pattern": "last year"}
+{"label": "TIME_RANGE", "pattern": "month by month"}
+{"label": "DIMENSION", "pattern": "by teacher"}
+{"label": "DIMENSION", "pattern": "by campus"}
+{"label": "DIMENSION", "pattern": "by grade"}
+{"label": "DIMENSION", "pattern": "by school"}
+{"label": "DIMENSION", "pattern": "school by school"}
+{"label": "DIMENSION", "pattern": "across the district"}
+{"label": "DIMENSION", "pattern": "by grade level"}
+{"label": "DIMENSION", "pattern": "elementary vs middle vs high school"}
+{"label": "DIMENSION", "pattern": "by building"}
+{"label": "DIMENSION", "pattern": "by classroom"}

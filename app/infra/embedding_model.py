@@ -27,6 +27,11 @@ class EmbeddingModel:
             raise ValueError(
                 f"Embedding model dimension {dimension} does not match expected {DEFAULT_VECTOR_SIZE}."
             )
+        self._dimension = dimension
+
+    @property
+    def dimension(self) -> int:
+        return int(self._dimension)
 
     def encode(self, texts: Iterable[str], *, normalize: bool = True, batch_size: int = 64) -> List[List[float]]:
         text_list = list(texts)
