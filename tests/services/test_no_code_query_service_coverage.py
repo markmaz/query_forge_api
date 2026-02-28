@@ -181,6 +181,52 @@ def _three_table_plan() -> tuple[DomainPlan, DomainPlanJoin, DomainPlanJoin]:
     return plan, join_filter, join_projected
 
 
+def _staff_two_table_plan() -> tuple[DomainPlan, DomainPlanJoin]:
+    primary = DomainPlanTable(
+        workspace_table_id=23,
+        full_name="main.asset.staff",
+        alias="staff",
+        table_alias="staff",
+        is_primary=True,
+        sort_order=0,
+        filter_mode="WHERE",
+        cardinality="ONE",
+    )
+    secondary = DomainPlanTable(
+        workspace_table_id=30,
+        full_name="main.asset.staff_assignment",
+        alias="assign",
+        table_alias="assign",
+        is_primary=False,
+        sort_order=1,
+        filter_mode="AUTO",
+        cardinality="MANY",
+    )
+    join = DomainPlanJoin(
+        join_id="j_staff",
+        from_workspace_table_id=23,
+        to_workspace_table_id=30,
+        join_type="LEFT",
+        join_spec={
+            "on": [
+                {
+                    "left": {"columnName": "k_person"},
+                    "right": {"columnName": "k_person"},
+                }
+            ]
+        },
+        sort_order=0,
+    )
+    plan = DomainPlan(
+        primary=primary,
+        tables=[primary, secondary],
+        joins=[join],
+        alias_by_workspace_table_id={23: "staff", 30: "assign"},
+        column_name_policy="DEDUP_PRIMARY_FIRST",
+    )
+    return plan, join
+
+
 def _compile_where_with_params(
     svc: NoCodeQueryService,
     node: dict | None,
@@ -1072,3 +1118,29 @@ def test_compile_two_phase_with_projection_join_lines() -> None:
     compiled = svc.compile(svc.normalize(q))
     assert "WITH base_patients AS" in compiled.sql
     assert "JOIN main.asset.visits" in compiled.sql
+
+
+def test_compile_two_phase_uses_primary_join_key_not_hardcoded_patient_id() -> None:
+    plan, join = _staff_two_table_plan()
+    resolver = FakeResolver(plan, paths={30: [join]}, workspace_id="ws")
+    svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=resolver)
+    q = {
+        "domainId": 1,
+        "columns": [{"columnName": "first_name", "workspaceTableId": 23}],
+        "filters": {
+            "type": "group",
+            "match": "and",
+            "children": [
+                {
+                    "type": "condition",
+                    "field": {"columnName": "staff_classification", "workspaceTableId": 30},
+                    "op": "equals",
+                    "value": "Principal",
+                }
+            ],
+        },
+    }
+    compiled = svc.compile(svc.normalize(q))
+    assert "WITH base_patients AS" in compiled.sql
+    assert "staff.k_person" in compiled.sql
+    assert "staff.patient_id" not in compiled.sql

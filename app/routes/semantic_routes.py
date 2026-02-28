@@ -38,7 +38,7 @@ class SemanticPlan(Resource):
             body: Dict[str, Any] = request.get_json(silent=True) or {}
             body["workspace_id"] = get_workspace_id_from_header()
             result = PlanService().plan(body, include_llm=True)
-            return result, 200
+            return _shape_plan_response(result), 200
         except ServiceError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
@@ -61,3 +61,20 @@ class SemanticSuggestColumns(Resource):
         except Exception:
             logger.exception("semantic suggest-columns failed")
             return {"error": "semantic suggest-columns failed"}, 500
+
+
+def _shape_plan_response(payload: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return payload
+    out: Dict[str, Any] = dict(payload)
+    llm_plan = out.get("llm_plan")
+    if not isinstance(llm_plan, dict):
+        return out
+
+    llm_out: Dict[str, Any] = dict(llm_plan)
+    sql_json = llm_out.get("sql_json")
+    if isinstance(sql_json, dict):
+        llm_out.setdefault("sqlJson", sql_json)
+        out.setdefault("sqlJson", sql_json)
+    out["llm_plan"] = llm_out
+    return out

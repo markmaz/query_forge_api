@@ -22,6 +22,7 @@ from app.services.domain.domain_table_read_service import DomainTableReadService
 from app.services.domain.domain_table_write_service import DomainTableWriteService
 from app.services.domain.domain_user_read_service import UserDomainReadService
 from app.services.domain.domain_user_write_service import DomainUserWriteService
+from app.services.domains.capabilities_service import DomainCapabilitiesService
 
 logger = logging.getLogger(__name__)
 domains_ns = Namespace("domains", description="Domains + Builder feed + permissions")
@@ -628,6 +629,60 @@ class DomainSummary(Resource):
         except Exception:
             logger.exception("Domain summary fetch failed")
             return {"error": "Domain summary fetch failed"}, 500
+
+
+# ----------------------------
+# Domain capabilities (Domain-first planner)
+# ----------------------------
+
+@domains_ns.route("/<int:domain_id>/capabilities")
+class DomainCapabilities(Resource):
+    @token_required
+    def get(self, domain_id: int):
+        """
+        GET /domains/<id>/capabilities
+        """
+        try:
+            workspace_id = _get_workspace_id_from_header()
+            user_id = get_user_id()
+            vertical_norm = (request.args.get("vertical_norm") or "generic").strip().lower() or "generic"
+            payload = DomainCapabilitiesService().get_domain_capabilities(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                domain_id=domain_id,
+                vertical_norm=vertical_norm,
+            )
+            return payload, 200
+        except ServiceError as e:
+            return {"error": str(e)}, getattr(e, "status_code", 400) or 400
+        except Exception:
+            logger.exception("Domain capabilities fetch failed domain_id=%s", domain_id)
+            return {"error": "Domain capabilities fetch failed"}, 500
+
+
+@domains_ns.route("/<int:domain_id>/overlay-metrics")
+class DomainOverlayMetrics(Resource):
+    @token_required
+    def get(self, domain_id: int):
+        """
+        GET /domains/<id>/overlay-metrics
+        """
+        try:
+            workspace_id = _get_workspace_id_from_header()
+            user_id = get_user_id()
+            vertical_norm = (request.args.get("vertical_norm") or "generic").strip().lower() or "generic"
+            rows = DomainCapabilitiesService().get_overlay_metrics(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                domain_id=domain_id,
+                vertical_norm=vertical_norm,
+            )
+            return {"domain_id": int(domain_id), "overlay_metrics": rows}, 200
+        except ServiceError as e:
+            return {"error": str(e)}, getattr(e, "status_code", 400) or 400
+        except Exception:
+            logger.exception("Domain overlay metrics fetch failed domain_id=%s", domain_id)
+            return {"error": "Domain overlay metrics fetch failed"}, 500
 
 
 # ----------------------------

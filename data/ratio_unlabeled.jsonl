@@ -1,0 +1,200 @@
+{"text": "Calculate average students per teacher by school for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Calculate avg students per teacher by grade band?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Calculate avg students per teacher by school in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Calculate number of students per teacher?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Calculate student teacher ratio for each school for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Calculate students per teacher by county this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Calculate students per teacher for each district last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Calculate students per teacher for each school this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Calculate students to teacher ratio by county for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Calculate teacher to student ratio by grade band for the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Calculate teacher-student ratio by school last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Calculate teacher-student ratio for each district for last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Calculate teacher-student ratio for each district this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find average students per teacher for each district?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find help-desk tickets per campus by district", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find help-desk tickets per campus by district?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find number of students per teacher by district for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find number of students per teacher by grade band for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find number of students per teacher for each school", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find pupil teacher ratio by county for the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find pupil teacher ratio by district in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find pupil teacher ratio by school for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find student teacher ratio by campus this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find student-teacher ratio by campus this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find student-teacher ratio by district?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find student-teacher ratio for each district for last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find student-teacher ratio for each school", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find student-teacher ratio for each school?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find students per teacher by district for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find students to teacher ratio by campus?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find students to teacher ratio by district", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find teacher to student ratio for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Find teacher-student ratio for each county in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me average students per teacher by campus?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me average students per teacher by school this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me average students per teacher for each district last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me avg students per teacher by county and grade band for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me avg students per teacher by grade band for last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me avg students per teacher for each county for the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me number of students per teacher for the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me pupil teacher ratio by county?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me pupil teacher ratio by grade band in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me student teacher ratio by county and grade band?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me student teacher ratio for each school for the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me student-teacher ratio by grade band for this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me student-teacher ratio by grade band in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me student-teacher ratio for each district this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me students per teacher by county and grade band", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me students to teacher ratio by grade band", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me teacher to student ratio by campus in the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me teacher to student ratio by school last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Give me teacher to student ratio for each district for this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Report avg students per teacher by school for this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Report avg students per teacher for each school this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Report number of students per teacher by district", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Report number of students per teacher for each county last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Report number of students per teacher in the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Report pupil teacher ratio by campus in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Report pupil teacher ratio by county last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Report pupil teacher ratio by school for this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Report pupil teacher ratio for each school in the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Report pupil teacher ratio for the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Report student-teacher ratio by county", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Report student-teacher ratio by county and grade band for this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Report student-teacher ratio by district this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Report student-teacher ratio for each district this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Report teacher-student ratio for each district in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Report teacher-student ratio for each school this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Show avg students per teacher for each district in the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Show number of students per teacher for each district for the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Show number of students per teacher for the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Show student teacher ratio by school for the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Show student teacher ratio for this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Show students per teacher for each district for the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Show students per teacher last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Show teacher to student ratio for each county last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Show teacher to student ratio for each school in the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Show teacher-student ratio by county for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Show teacher-student ratio by grade band", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "Show teacher-student ratio by grade band this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is average students per teacher by county and grade band last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is average students per teacher by grade band last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is average students per teacher for each county last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is average students per teacher for each district last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is average students per teacher for each district this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is avg students per teacher by county and grade band for the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is avg students per teacher for each county in the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is number of students per teacher for each district for the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is number of students per teacher in the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is pupil teacher ratio by campus in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is pupil teacher ratio by county for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is student teacher ratio by school", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is student-teacher ratio by county and grade band last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is student-teacher ratio by county and grade band this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is student-teacher ratio by district for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is student-teacher ratio for each district for this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is students per teacher for each school for last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is students to teacher ratio by county for this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is students to teacher ratio by grade band in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is students to teacher ratio for each school in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is teacher to student ratio by county and grade band for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "What is teacher-student ratio for each county this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "calculate avg students per teacher by county and grade band in the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "calculate avg students per teacher for each county this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "calculate number of students per teacher by county for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "calculate number of students per teacher by county for the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "calculate number of students per teacher by school this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "calculate number of students per teacher for each district in the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "calculate pupil teacher ratio by campus for this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "calculate student teacher ratio by school for this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "calculate student teacher ratio for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "calculate students per teacher by district?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "calculate students per teacher for each school this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "calculate students to teacher ratio by county?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "calculate students to teacher ratio by grade band", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "calculate students to teacher ratio by school last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "calculate teacher to student ratio by campus for the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "find average students per teacher by school last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "find avg students per teacher by county and grade band for last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "find avg students per teacher by school last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "find student teacher ratio by county and grade band last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "find student-teacher ratio by county for the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "find student-teacher ratio by county in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "find student-teacher ratio by grade band for this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "find student-teacher ratio for each district for this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "find student-teacher ratio for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "find students to teacher ratio by county for this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "find students to teacher ratio for each school this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "find teacher to student ratio by campus for this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "find teacher to student ratio by campus in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "find teacher to student ratio for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "find teacher-student ratio for each district for last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me average students per teacher for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me avg students per teacher by county and grade band in the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me avg students per teacher by school for this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me avg students per teacher for each district for this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me number of students per teacher by county for this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me number of students per teacher by grade band this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me number of students per teacher by school for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me pupil teacher ratio by grade band for the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me student-teacher ratio by county and grade band for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me student-teacher ratio by county?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me student-teacher ratio by grade band?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me students per teacher by grade band last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me students per teacher for each district last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me students to teacher ratio by county and grade band last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me students to teacher ratio by county this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me students to teacher ratio by school in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me students to teacher ratio for each county?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me students to teacher ratio for this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me teacher to student ratio for each district last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me teacher-student ratio by county?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me teacher-student ratio for each district in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "give me teacher-student ratio for this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "list logins per student by county", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "report avg students per teacher for each district in the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "report number of students per teacher by district for the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "report pupil teacher ratio for each school for last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "report student teacher ratio by grade band", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "report student-teacher ratio for each school in the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "report students per teacher by county for last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "report students to teacher ratio by grade band for this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "report students to teacher ratio for each county for last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "report teacher to student ratio by campus for the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "report teacher to student ratio by county this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "report teacher-student ratio by county for this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "report teacher-student ratio by county last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "report teacher-student ratio by grade band for the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "report teacher-student ratio for each county for the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "show average students per teacher by county and grade band in the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "show average students per teacher by district in the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "show average students per teacher by district this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "show average students per teacher by school", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "show number of students per teacher for each county?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "show pupil teacher ratio by county and grade band for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "show student-teacher ratio by campus this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "show student-teacher ratio by county and grade band this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "show student-teacher ratio by district in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "show students to teacher ratio by county in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "show students to teacher ratio for each school for this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "show teacher to student ratio by district?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is average students per teacher by campus in the current school year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is average students per teacher by county and grade band in the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is average students per teacher by school for this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is average students per teacher by school this year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is average students per teacher for each district last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is average students per teacher this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is avg students per teacher for last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is number of students per teacher for each school for last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is number of students per teacher for each school for this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is student teacher ratio by campus this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is student-teacher ratio for each district?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is student-teacher ratio for this year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is students per teacher by campus for the current school year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is students to teacher ratio by county last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is teacher to student ratio by campus?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is teacher to student ratio for each school", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is teacher to student ratio for each school last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is teacher-student ratio by district last year?", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}
+{"text": "what is teacher-student ratio for each district last year", "meta": {"source": "gen_ratio_prompts", "kind": "ratio_metric"}}

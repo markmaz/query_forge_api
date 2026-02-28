@@ -1,0 +1,83 @@
+title: Query Forge Tier2 spaCy Project
+description: Tier2 semantic extraction training and packaging workflow.
+spacy_version: ">=3.7.0,<3.8.0"
+
+vars:
+  vertical: generic
+  seed_jsonl: data/tier2_seed.jsonl
+  train_jsonl: data/train.jsonl
+  dev_jsonl: data/dev.jsonl
+  train_docbin: data/train.spacy
+  dev_docbin: data/dev.spacy
+  model_output: models/tier2
+  package_output: dist/tier2
+  package_name: query_forge_tier2
+  package_version: 0.1.0
+  prodigy_dataset: qf_tier2_ner_v1
+
+directories:
+  - data
+  - models
+  - dist
+
+commands:
+  - name: seed-data
+    help: Build weakly-labeled Tier2 JSONL from semantic registry tables.
+    script:
+      - python3 scripts/spacy_seed_tier2.py --out ${vars.seed_jsonl} --vertical ${vars.vertical}
+
+  - name: make-patterns
+    help: Build Prodigy weak pre-highlight patterns from seed terms.
+    script:
+      - python3 scripts/prodigy_make_patterns.py --in data/seed_terms.json --out data/patterns_tier2.jsonl
+
+  - name: export-prodigy
+    help: Export Prodigy NER annotations to train/dev JSONL.
+    script:
+      - python3 scripts/prodigy_export_tier2.py --dataset ${vars.prodigy_dataset}
+
+  - name: build-dataset
+    help: Build train/dev JSONL from template corpus files.
+    script:
+      - python3 scripts/spacy_build_dataset_from_templates.py --in-dir data/templates --train-out ${vars.train_jsonl} --dev-out ${vars.dev_jsonl}
+
+  - name: make-train-docbin
+    help: Convert train JSONL to spaCy DocBin.
+    script:
+      - python3 scripts/spacy_make_docbin.py --in ${vars.train_jsonl} --out ${vars.train_docbin}
+
+  - name: make-dev-docbin
+    help: Convert dev JSONL to spaCy DocBin.
+    script:
+      - python3 scripts/spacy_make_docbin.py --in ${vars.dev_jsonl} --out ${vars.dev_docbin}
+
+  - name: train-tier2
+    help: Train Tier2 transformer model.
+    script:
+      - python3 scripts/spacy_train_tier2.py --train ${vars.train_docbin} --dev ${vars.dev_docbin} --output ${vars.model_output} --gpu -1
+
+  - name: smoke-test
+    help: Run model smoke test prompts.
+    script:
+      - python3 scripts/tier2_smoke_test.py --model models/tier2/model-best --prompts data/smoke_prompts.txt
+
+  - name: package-tier2
+    help: Package trained Tier2 model.
+    script:
+      - python3 scripts/spacy_package_tier2.py --model-dir ${vars.model_output}/model-best --output ${vars.package_output} --name ${vars.package_name} --version ${vars.package_version} --build
+
+workflows:
+  train:
+    - build-dataset
+    - make-train-docbin
+    - make-dev-docbin
+    - train-tier2
+  ner-train:
+    - export-prodigy
+    - make-train-docbin
+    - make-dev-docbin
+    - train-tier2
+    - smoke-test
+  package:
+    - train-tier2
+    - package-tier2

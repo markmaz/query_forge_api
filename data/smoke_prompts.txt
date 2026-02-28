@@ -1,0 +1,15 @@
+Show attendance rates for English Learners by school this year
+How many students are chronically absent by grade last month
+List discipline incidents by district for the past 3 years
+Show graduation rate by subgroup last year
+Compare assessment scores in math by school this year
+How many EL students received tier 2 intervention last month
+Show proficiency by grade and district year to date
+Students suspended by school and subgroup this year
+Attendance by teacher cohort for homeless students
+Enrollment trend by program for the past three years
+Assessment scores by district for economically disadvantaged students
+Graduation rate by school for foster youth
+Discipline incidents by program for EL students this year
+Attendance by classroom for IEP students last year
+Math assessment proficiency by grade for 504 students

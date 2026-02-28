@@ -4,6 +4,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except Exception:
+        return int(default)
+
 DB_HOST =  os.getenv("DB_HOST")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
@@ -117,11 +124,21 @@ DBX_MODEL_TABLES_SNAPSHOT_TABLE = os.getenv("DBX_MODEL_TABLES_SNAPSHOT_TABLE", "
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
 QDRANT_TIMEOUT_S = int(os.getenv("QDRANT_TIMEOUT_S", "30"))
-QDRANT_DOMAIN_COLLECTION = os.getenv("QDRANT_DOMAIN_COLLECTION", "domain_catalog")
+QDRANT_DOMAIN_COLLECTION = os.getenv("QDRANT_DOMAIN_COLLECTION", "domain_catalog_v1")
 QDRANT_TABLE_COLLECTION = os.getenv("QDRANT_TABLE_COLLECTION", "table_catalog")
 QDRANT_COLUMN_COLLECTION = os.getenv("QDRANT_COLUMN_COLLECTION", "column_catalog")
 QDRANT_COLUMN_COLLECTION_V2 = os.getenv("QDRANT_COLUMN_COLLECTION_V2", "column_catalog_v2")
 QDRANT_SEMANTIC_CONCEPT_COLLECTION = os.getenv("QDRANT_SEMANTIC_CONCEPT_COLLECTION", "semantic_concepts_v1")
+
+# Embedding + vertical defaults
+EMBEDDING_MODEL_NAME = (
+    os.getenv("EMBEDDING_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2").strip()
+    or "sentence-transformers/all-MiniLM-L6-v2"
+)
+QF_VERTICAL_DEFAULT = (
+    os.getenv("QF_VERTICAL_DEFAULT", os.getenv("SEMANTIC_VERTICAL_DEFAULT", "generic")).strip().lower()
+    or "generic"
+)
 
 # Semantic suggestion backfill
 SEMANTIC_LLM_ENDPOINT = os.getenv("SEMANTIC_LLM_ENDPOINT", "http://localhost:8000/v1/chat/completions")
@@ -138,6 +155,7 @@ SEMANTIC_PLAN_LLM_MODEL = (
     os.getenv("SEMANTIC_PLAN_LLM_MODEL", VLLM_MODEL).strip() or VLLM_MODEL
 )
 SEMANTIC_PLAN_LLM_TIMEOUT_SECONDS = int(os.getenv("SEMANTIC_PLAN_LLM_TIMEOUT_SECONDS", "60"))
+SEMANTIC_PLAN_LLM_MAX_TOKENS = int(os.getenv("SEMANTIC_PLAN_LLM_MAX_TOKENS", "1200"))
 SEMANTIC_CONCEPT_SEED_ON_STARTUP = os.getenv("SEMANTIC_CONCEPT_SEED_ON_STARTUP", "").strip().lower() in (
     "1",
     "true",
@@ -145,3 +163,78 @@ SEMANTIC_CONCEPT_SEED_ON_STARTUP = os.getenv("SEMANTIC_CONCEPT_SEED_ON_STARTUP",
     "y",
     "on",
 )
+QF_PLANNER_LLM_ENABLED = os.getenv("QF_PLANNER_LLM_ENABLED", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+)
+QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED = os.getenv("QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+)
+QF_PLAN_DOMAIN_LLM_EXPLANATION_ENABLED = os.getenv("QF_PLAN_DOMAIN_LLM_EXPLANATION_ENABLED", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+)
+QF_PLAN_DOMAIN_LLM_EXPLANATION_MAX_TOKENS = _env_int("QF_PLAN_DOMAIN_LLM_EXPLANATION_MAX_TOKENS", 220)
+QF_SCHOOL_YEAR_START_MONTH = _env_int("QF_SCHOOL_YEAR_START_MONTH", 8)
+QF_SCHOOL_YEAR_END_MONTH = _env_int("QF_SCHOOL_YEAR_END_MONTH", 7)
+QF_SEMESTER_SPRING_LABEL = (os.getenv("QF_SEMESTER_SPRING_LABEL", "Spring") or "Spring").strip() or "Spring"
+QF_SEMESTER_FALL_LABEL = (os.getenv("QF_SEMESTER_FALL_LABEL", "Fall") or "Fall").strip() or "Fall"
+QF_SEMESTER_YEAR_ROUND_LABEL = (
+    os.getenv("QF_SEMESTER_YEAR_ROUND_LABEL", "Year Round") or "Year Round"
+).strip() or "Year Round"
+QF_SEMESTER_SPRING_START_MONTH = _env_int("QF_SEMESTER_SPRING_START_MONTH", 1)
+QF_SEMESTER_SPRING_END_MONTH = _env_int("QF_SEMESTER_SPRING_END_MONTH", 5)
+QF_SEMESTER_FALL_START_MONTH = _env_int("QF_SEMESTER_FALL_START_MONTH", 8)
+QF_SEMESTER_FALL_END_MONTH = _env_int("QF_SEMESTER_FALL_END_MONTH", 12)
+QF_SEMESTER_YEAR_ROUND_START_MONTH = _env_int("QF_SEMESTER_YEAR_ROUND_START_MONTH", 6)
+QF_SEMESTER_YEAR_ROUND_END_MONTH = _env_int("QF_SEMESTER_YEAR_ROUND_END_MONTH", 7)
+QF_MINIMAL_CHAT_ENABLED = os.getenv("QF_MINIMAL_CHAT_ENABLED", "1").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+)
+QF_MINIMAL_CHAT_CONVERSATION_TTL_SECONDS = int(
+    os.getenv("QF_MINIMAL_CHAT_CONVERSATION_TTL_SECONDS", "43200")
+)
+QF_PLAN_DOMAIN_CONVERSATION_TTL_SECONDS = int(
+    os.getenv("QF_PLAN_DOMAIN_CONVERSATION_TTL_SECONDS", "43200")
+)
+QF_PROMPT_FEEDBACK_MAX_PAYLOAD_BYTES = _env_int("QF_PROMPT_FEEDBACK_MAX_PAYLOAD_BYTES", 2_000_000)
+
+# Tier2 NLP (spaCy transformer)
+NLP_TIER2_ENABLED = os.getenv("NLP_TIER2_ENABLED", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+)
+NLP_TIER2_MODEL_PATH = os.getenv("NLP_TIER2_MODEL_PATH", "").strip()
+NLP_TIER2_MODEL_NAME = os.getenv("NLP_TIER2_MODEL_NAME", "roberta-base").strip() or "roberta-base"
+
+# spaCy planner extraction
+SPACY_MODEL_PATH = (
+    os.getenv("SPACY_MODEL_PATH", "").strip()
+    or NLP_TIER2_MODEL_PATH
+    or "models/tier2/model-best"
+)
+GAZETTEER_ENABLED = os.getenv("GAZETTEER_ENABLED", "1").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+)
+GAZETTEER_CSV_PATH = os.getenv("GAZETTEER_CSV_PATH", "data/school_districts.csv").strip() or "data/school_districts.csv"

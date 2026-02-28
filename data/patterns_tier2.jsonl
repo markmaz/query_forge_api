@@ -1,0 +1,30 @@
+{"label": "SUBGROUP", "pattern": [{"LOWER": "english"}, {"LOWER": "learner"}]}
+{"label": "SUBGROUP", "pattern": [{"LOWER": "el"}]}
+{"label": "SUBGROUP", "pattern": [{"LOWER": "lep"}]}
+{"label": "SUBGROUP", "pattern": [{"LOWER": "ell"}]}
+{"label": "SUBGROUP", "pattern": [{"LOWER": "sped"}]}
+{"label": "SUBGROUP", "pattern": [{"LOWER": "iep"}]}
+{"label": "SUBGROUP", "pattern": [{"LOWER": "504"}]}
+{"label": "SUBGROUP", "pattern": [{"LOWER": "homeless"}]}
+{"label": "SUBGROUP", "pattern": [{"LOWER": "economically"}, {"LOWER": "disadvantaged"}]}
+{"label": "SUBGROUP", "pattern": [{"LOWER": "foster"}]}
+{"label": "DIMENSION", "pattern": [{"LOWER": "school"}]}
+{"label": "DIMENSION", "pattern": [{"LOWER": "grade"}]}
+{"label": "DIMENSION", "pattern": [{"LOWER": "district"}]}
+{"label": "DIMENSION", "pattern": [{"LOWER": "teacher"}]}
+{"label": "DIMENSION", "pattern": [{"LOWER": "program"}]}
+{"label": "DIMENSION", "pattern": [{"LOWER": "cohort"}]}
+{"label": "TIME_RANGE", "pattern": [{"LOWER": "this"}, {"LOWER": "year"}]}
+{"label": "TIME_RANGE", "pattern": [{"LOWER": "last"}, {"LOWER": "year"}]}
+{"label": "TIME_RANGE", "pattern": [{"LOWER": "ytd"}]}
+{"label": "TIME_RANGE", "pattern": [{"LOWER": "year"}, {"LOWER": "to"}, {"LOWER": "date"}]}
+{"label": "TIME_RANGE", "pattern": [{"LOWER": "last"}, {"LOWER": "month"}]}
+{"label": "TIME_RANGE", "pattern": [{"LOWER": "past"}, {"LOWER": "3"}, {"LOWER": "years"}]}
+{"label": "TIME_RANGE", "pattern": [{"LOWER": "past"}, {"LOWER": "three"}, {"LOWER": "years"}]}
+{"label": "METRIC", "pattern": [{"LOWER": "enrollment"}]}
+{"label": "METRIC", "pattern": [{"LOWER": "attendance"}]}
+{"label": "METRIC", "pattern": [{"LOWER": "chronic"}, {"LOWER": "absenteeism"}]}
+{"label": "METRIC", "pattern": [{"LOWER": "discipline"}, {"LOWER": "incidents"}]}
+{"label": "METRIC", "pattern": [{"LOWER": "assessment"}, {"LOWER": "scores"}]}
+{"label": "METRIC", "pattern": [{"LOWER": "graduation"}, {"LOWER": "rate"}]}
+{"label": "METRIC", "pattern": [{"LOWER": "proficiency"}]}

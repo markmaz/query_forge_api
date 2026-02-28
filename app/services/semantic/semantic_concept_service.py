@@ -79,6 +79,28 @@ class SemanticConceptService:
             "page_size": size_val,
         }
 
+    def list_concept_keys(self, *, vertical: Optional[str] = None) -> Dict[str, Any]:
+        where = []
+        params: Dict[str, Any] = {}
+
+        vertical_norm = _normalize_vertical(vertical)
+        if vertical_norm is not None:
+            where.append("vertical_norm = :vertical_norm")
+            params["vertical_norm"] = vertical_norm
+
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        rows = self._sql.execute_query_mappings(
+            f"""
+            SELECT DISTINCT concept_key
+            FROM semantic_concept
+            {where_sql}
+            ORDER BY concept_key ASC
+            """,
+            params,
+        )
+        concept_keys = [str(row.get("concept_key") or "").strip() for row in rows]
+        return {"concept_keys": [key for key in concept_keys if key]}
+
     def create_concept(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         data = _normalize_concept_payload(payload, partial=False)
         try:
@@ -320,6 +342,7 @@ class SemanticConceptService:
               va.vertical_norm,
               va.semantic_concept_id,
               sc.concept_key,
+              sc.name AS concept_name,
               va.canonical_value,
               va.alias_value,
               va.match_kind,
@@ -378,6 +401,7 @@ class SemanticConceptService:
               va.vertical_norm,
               va.semantic_concept_id,
               sc.concept_key,
+              sc.name AS concept_name,
               va.canonical_value,
               va.alias_value,
               va.match_kind,
@@ -442,6 +466,9 @@ class SemanticConceptService:
         semantic_concept_id: Optional[int] = None,
         model_column_id: Optional[int] = None,
         relationship_kind: Optional[str] = None,
+        concept_key: Optional[str] = None,
+        column_name: Optional[str] = None,
+        q: Optional[str] = None,
         page: int = 1,
         page_size: int = 25,
     ) -> Dict[str, Any]:
@@ -467,6 +494,22 @@ class SemanticConceptService:
                 raise ServiceError("invalid relationship_kind", status_code=400)
             where.append("m.relationship_kind = :relationship_kind")
             params["relationship_kind"] = rel
+        if concept_key is not None and str(concept_key).strip():
+            where.append("LOWER(sc.concept_key) LIKE :concept_key")
+            params["concept_key"] = f"%{str(concept_key).strip().lower()}%"
+        if column_name is not None and str(column_name).strip():
+            where.append("LOWER(mc.column_name) LIKE :column_name")
+            params["column_name"] = f"%{str(column_name).strip().lower()}%"
+        if q is not None and str(q).strip():
+            where.append(
+                "("
+                "LOWER(sc.concept_key) LIKE :q OR "
+                "LOWER(sc.name) LIKE :q OR "
+                "LOWER(mc.column_name) LIKE :q OR "
+                "LOWER(COALESCE(mt.name, '')) LIKE :q"
+                ")"
+            )
+            params["q"] = f"%{str(q).strip().lower()}%"
 
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         rows = self._sql.execute_query_mappings(
@@ -497,6 +540,9 @@ class SemanticConceptService:
             f"""
             SELECT COUNT(*) AS total
             FROM model_column_semantic_concept_map m
+            JOIN semantic_concept sc ON sc.id = m.semantic_concept_id
+            JOIN model_column mc ON mc.id = m.model_column_id
+            LEFT JOIN model_table mt ON mt.id = mc.model_table_id
             {where_sql}
             """,
             {k: v for k, v in params.items() if k not in {"limit", "offset"}},
@@ -602,6 +648,128 @@ class SemanticConceptService:
         if int(affected or 0) <= 0:
             raise ServiceError("concept_column_map not found", status_code=404)
 
+    def backfill_primary_semantic_keys(
+        self,
+        *,
+        workspace_id: Optional[str] = None,
+        vertical_norm: Optional[str] = None,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        workspace = _normalize_workspace(workspace_id)
+        vertical = _normalize_vertical(vertical_norm)
+
+        params: Dict[str, Any] = {
+            "workspace_id": workspace,
+            "vertical_norm": vertical,
+        }
+        workspace_join = ""
+        if workspace is not None:
+            workspace_join = (
+                """
+                JOIN model_table mt
+                  ON mt.id = mc.model_table_id
+                JOIN workspace_table wt
+                  ON wt.model_table_id = mt.id
+                 AND wt.workspace_id = :workspace_id
+                 AND wt.exists_in_dbx = 1
+                JOIN workspace_column wc
+                  ON wc.workspace_table_id = wt.id
+                 AND wc.column_name = mc.column_name
+                 AND wc.exists_in_dbx = 1
+                """
+            )
+
+        count_rows = self._sql.execute_query_mappings(
+            f"""
+            WITH ranked AS (
+              SELECT
+                m.model_column_id,
+                sc.id AS semantic_concept_id,
+                sc.concept_key,
+                ROW_NUMBER() OVER (
+                  PARTITION BY m.model_column_id
+                  ORDER BY
+                    CASE
+                      WHEN :vertical_norm IS NOT NULL AND m.vertical_norm = :vertical_norm THEN 0
+                      WHEN m.vertical_norm = 'generic' THEN 1
+                      ELSE 2
+                    END,
+                    m.weight DESC,
+                    m.id ASC
+                ) AS rn
+              FROM model_column_semantic_concept_map m
+              JOIN semantic_concept sc
+                ON sc.id = m.semantic_concept_id
+              JOIN model_column mc
+                ON mc.id = m.model_column_id
+              {workspace_join}
+              WHERE m.relationship_kind = 'primary'
+                AND mc.semantic_concept_key IS NULL
+                AND (:vertical_norm IS NULL OR m.vertical_norm IN (:vertical_norm, 'generic'))
+            )
+            SELECT COUNT(*) AS total
+            FROM ranked
+            WHERE rn = 1
+            """,
+            params,
+        )
+        candidates = int((count_rows[0] or {}).get("total") or 0) if count_rows else 0
+        if bool(dry_run):
+            return {
+                "workspace_id": workspace,
+                "vertical_norm": vertical,
+                "dry_run": True,
+                "candidates": candidates,
+                "updated": 0,
+            }
+
+        updated = self._sql.execute_write(
+            f"""
+            WITH ranked AS (
+              SELECT
+                m.model_column_id,
+                sc.id AS semantic_concept_id,
+                sc.concept_key,
+                ROW_NUMBER() OVER (
+                  PARTITION BY m.model_column_id
+                  ORDER BY
+                    CASE
+                      WHEN :vertical_norm IS NOT NULL AND m.vertical_norm = :vertical_norm THEN 0
+                      WHEN m.vertical_norm = 'generic' THEN 1
+                      ELSE 2
+                    END,
+                    m.weight DESC,
+                    m.id ASC
+                ) AS rn
+              FROM model_column_semantic_concept_map m
+              JOIN semantic_concept sc
+                ON sc.id = m.semantic_concept_id
+              JOIN model_column mc
+                ON mc.id = m.model_column_id
+              {workspace_join}
+              WHERE m.relationship_kind = 'primary'
+                AND mc.semantic_concept_key IS NULL
+                AND (:vertical_norm IS NULL OR m.vertical_norm IN (:vertical_norm, 'generic'))
+            )
+            UPDATE model_column mc
+            JOIN ranked r
+              ON r.model_column_id = mc.id
+             AND r.rn = 1
+            SET mc.semantic_concept_id = r.semantic_concept_id,
+                mc.semantic_concept_key = r.concept_key,
+                mc.semantic_updated_at = CURRENT_TIMESTAMP
+            WHERE mc.semantic_concept_key IS NULL
+            """,
+            params,
+        )
+        return {
+            "workspace_id": workspace,
+            "vertical_norm": vertical,
+            "dry_run": False,
+            "candidates": candidates,
+            "updated": int(updated or 0),
+        }
+
     def seed(self, vertical: str) -> Dict[str, Any]:
         return self._seed.ensure_seeded(vertical)
 
@@ -650,6 +818,15 @@ def _normalize_vertical(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
     text = str(value).strip().lower()
+    if text == "":
+        return None
+    return text
+
+
+def _normalize_workspace(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
     if text == "":
         return None
     return text

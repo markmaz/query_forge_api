@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any, Callable, Dict, Optional
 
@@ -8,6 +9,14 @@ import httpx
 
 from app.config import SEMANTIC_LLM_ENDPOINT, SEMANTIC_LLM_MODEL, SEMANTIC_LLM_TIMEOUT_SECONDS
 from app.exceptions.service_error import ServiceError
+from app.services.llm.io_logging import (
+    log_llm_exception,
+    log_llm_request,
+    log_llm_response,
+    new_llm_request_id,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient:
@@ -30,12 +39,21 @@ class LLMClient:
         response_format: bool = True,
         retry_invalid_schema: bool = True,
         validator: Optional[Callable[[Dict[str, Any]], bool]] = None,
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
-        first = self.chat_json_with_trace(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_format=response_format,
-        )
+        if max_tokens is None:
+            first = self.chat_json_with_trace(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_format=response_format,
+            )
+        else:
+            first = self.chat_json_with_trace(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_format=response_format,
+                max_tokens=max_tokens,
+            )
         parsed = first.get("parsed") if isinstance(first.get("parsed"), dict) else None
         is_valid = parsed is not None and (validator(parsed) if validator is not None else True)
         second: Optional[Dict[str, Any]] = None
@@ -44,11 +62,19 @@ class LLMClient:
                 "Return valid JSON only. Your previous output was invalid JSON. "
                 f"Previous output: {str(first.get('content') or first.get('raw_text') or '')[:3000]}"
             )
-            second = self.chat_json_with_trace(
-                system_prompt=system_prompt,
-                user_prompt=repair_user,
-                response_format=response_format,
-            )
+            if max_tokens is None:
+                second = self.chat_json_with_trace(
+                    system_prompt=system_prompt,
+                    user_prompt=repair_user,
+                    response_format=response_format,
+                )
+            else:
+                second = self.chat_json_with_trace(
+                    system_prompt=system_prompt,
+                    user_prompt=repair_user,
+                    response_format=response_format,
+                    max_tokens=max_tokens,
+                )
             parsed = second.get("parsed") if isinstance(second.get("parsed"), dict) else None
             is_valid = parsed is not None and (validator(parsed) if validator is not None else True)
         if not is_valid or parsed is None:
@@ -68,11 +94,13 @@ class LLMClient:
         system_prompt: str,
         user_prompt: str,
         response_format: bool = True,
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         return self._chat_once_with_trace(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_format=response_format,
+            max_tokens=max_tokens,
         )
 
     def _chat_once(self, *, system_prompt: str, user_prompt: str, response_format: bool) -> str:
@@ -92,6 +120,7 @@ class LLMClient:
         system_prompt: str,
         user_prompt: str,
         response_format: bool,
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         chat_url = self._chat_url()
         payload = {
@@ -102,13 +131,36 @@ class LLMClient:
             ],
             "temperature": 0,
         }
+        if max_tokens is not None:
+            try:
+                mt = int(max_tokens)
+            except Exception:
+                mt = 0
+            if mt > 0:
+                payload["max_tokens"] = mt
         if response_format:
             payload["response_format"] = {"type": "json_object"}
 
+        request_id = new_llm_request_id()
+        log_llm_request(
+            logger,
+            client_name="LLMClient.chat",
+            request_id=request_id,
+            method="POST",
+            url=chat_url,
+            payload=payload,
+        )
         try:
             with httpx.Client(timeout=self._timeout_seconds) as client:
                 resp = client.post(chat_url, json=payload)
                 raw_text = resp.text
+                log_llm_response(
+                    logger,
+                    client_name="LLMClient.chat",
+                    request_id=request_id,
+                    status_code=resp.status_code,
+                    response_text=raw_text,
+                )
                 parsed_body: Optional[Dict[str, Any]] = None
                 content: Optional[str] = None
                 error: Optional[str] = None
@@ -117,8 +169,10 @@ class LLMClient:
                     if isinstance(body, dict):
                         parsed_body = body
                     content = self._extract_chat_content(body if isinstance(body, dict) else {})
+                    finish_reason = self._extract_finish_reason(body if isinstance(body, dict) else {})
                 except Exception as exc:
                     error = f"response_json_parse_error:{str(exc)}"
+                    finish_reason = None
 
                 if resp.status_code < 400:
                     if content is not None:
@@ -127,6 +181,7 @@ class LLMClient:
                             "raw_text": raw_text,
                             "parsed": parsed_json,
                             "content": content,
+                            "finish_reason": finish_reason,
                             "error": error,
                         }
                 fallback = self._fallback_simple_with_trace(client=client, system_prompt=system_prompt, user_prompt=user_prompt)
@@ -139,7 +194,46 @@ class LLMClient:
                     }
                 return fallback
         except Exception as exc:
-            raise ServiceError("LLM request failed", status_code=502, details={"message": str(exc)}) from exc
+            log_llm_exception(
+                logger,
+                client_name="LLMClient.chat",
+                request_id=request_id,
+                method="POST",
+                url=chat_url,
+                message=str(exc),
+            )
+            if isinstance(exc, httpx.ConnectError):
+                raise ServiceError(
+                    "LLM provider unavailable",
+                    status_code=503,
+                    details={
+                        "message": str(exc),
+                        "chat_url": chat_url,
+                        "endpoint": self._endpoint,
+                        "model": self._model,
+                        "hint": "Ensure the LLM server is running and reachable from the API host",
+                    },
+                ) from exc
+            if isinstance(exc, httpx.TimeoutException):
+                raise ServiceError(
+                    "LLM request timed out",
+                    status_code=504,
+                    details={
+                        "message": str(exc),
+                        "chat_url": chat_url,
+                        "timeout_seconds": self._timeout_seconds,
+                        "model": self._model,
+                    },
+                ) from exc
+            raise ServiceError(
+                "LLM request failed",
+                status_code=502,
+                details={
+                    "message": str(exc),
+                    "chat_url": chat_url,
+                    "model": self._model,
+                },
+            ) from exc
 
     def _fallback_simple_with_trace(
         self,
@@ -153,8 +247,24 @@ class LLMClient:
             "temperature": 0,
             "prompt": f"{system_prompt}\n\n{user_prompt}",
         }
+        request_id = new_llm_request_id()
+        log_llm_request(
+            logger,
+            client_name="LLMClient.fallback",
+            request_id=request_id,
+            method="POST",
+            url=self._endpoint,
+            payload=payload,
+        )
         resp = client.post(self._endpoint, json=payload)
         raw_text = resp.text
+        log_llm_response(
+            logger,
+            client_name="LLMClient.fallback",
+            request_id=request_id,
+            status_code=resp.status_code,
+            response_text=raw_text,
+        )
         if resp.status_code >= 400:
             return {
                 "raw_text": raw_text,
@@ -226,6 +336,16 @@ class LLMClient:
         return None
 
     @staticmethod
+    def _extract_finish_reason(body: Dict[str, Any]) -> Optional[str]:
+        choices = body.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return None
+        reason = choices[0].get("finish_reason")
+        if isinstance(reason, str) and reason.strip():
+            return reason.strip()
+        return None
+
+    @staticmethod
     def _parse_json(content: str) -> Optional[Dict[str, Any]]:
         text = str(content or "").strip()
         if text == "":
@@ -274,6 +394,7 @@ class LLMClient:
 
         return {
             "error": trace.get("error"),
+            "finish_reason": trace.get("finish_reason"),
             "provider_error": provider_error,
             "content_preview": str(trace.get("content") or "")[:500],
             "raw_text_preview": str(trace.get("raw_text") or "")[:500],

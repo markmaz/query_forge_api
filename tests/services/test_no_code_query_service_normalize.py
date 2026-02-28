@@ -142,6 +142,114 @@ def test_normalize_aggs_defaults_and_metrics_column_field() -> None:
     assert q["aggs"]["metrics"][0]["field"]["columnName"] == "id"
 
 
+def test_normalize_aggs_accepts_agg_alias_for_fn() -> None:
+    svc = _svc()
+    q = svc.normalize(
+        {
+            "domainId": 1,
+            "columns": [{"columnName": "id"}],
+            "aggs": {"metrics": [{"agg": "count", "field": {"columnName": "id"}}], "groupBy": []},
+            "sorting": [],
+        }
+    )
+    assert q["aggs"]["metrics"][0]["fn"] == "count"
+    assert q["aggs"]["metrics"][0]["field"]["columnName"] == "id"
+
+
+def test_normalize_aggs_parses_function_style_metric_fn() -> None:
+    svc = _svc()
+    q = svc.normalize(
+        {
+            "domainId": 1,
+            "columns": [{"columnName": "id"}],
+            "aggs": {"metrics": [{"fn": "count(id)"}], "groupBy": []},
+            "sorting": [],
+        }
+    )
+    assert q["aggs"]["metrics"][0]["fn"] == "count"
+    assert q["aggs"]["metrics"][0]["field"]["columnName"] == "id"
+
+
+def test_normalize_aggs_defaults_to_count_when_field_present_and_fn_missing() -> None:
+    svc = _svc()
+    q = svc.normalize(
+        {
+            "domainId": 1,
+            "columns": [{"columnName": "id"}],
+            "aggs": {"metrics": [{"field": {"columnName": "id"}}], "groupBy": []},
+            "sorting": [],
+        }
+    )
+    assert q["aggs"]["metrics"][0]["fn"] == "count"
+    assert q["aggs"]["metrics"][0]["field"]["columnName"] == "id"
+
+
+def test_normalize_aggs_accepts_metric_ref_object_shape() -> None:
+    svc = _svc()
+    q = svc.normalize(
+        {
+            "domainId": 7,
+            "columns": [{"workspaceTableId": 24, "modelColumnId": 363, "columnName": "grade_level"}],
+            "aggs": {
+                "enabled": True,
+                "metrics": [
+                    {
+                        "id": "domain_metric:enrollment_count",
+                        "metricRef": {
+                            "type": "column",
+                            "columnKey": {
+                                "workspaceTableId": 24,
+                                "modelColumnId": 363,
+                                "columnName": "grade_level",
+                                "exprId": None,
+                                "alias": None,
+                            },
+                            "agg": "count",
+                            "label": "Enrollment Count",
+                        },
+                    }
+                ],
+                "groupBy": [{"workspaceTableId": 24, "modelColumnId": 363, "columnName": "grade_level"}],
+            },
+            "sorting": [],
+        }
+    )
+    assert q["aggs"]["metrics"][0]["fn"] == "count"
+    assert q["aggs"]["metrics"][0]["field"]["columnName"] == "grade_level"
+    assert q["aggs"]["metrics"][0]["field"]["workspaceTableId"] == 24
+    assert q["aggs"]["metrics"][0]["label"] == "Enrollment Count"
+
+
+def test_normalize_aggs_count_allows_empty_field_object() -> None:
+    svc = _svc()
+    q = svc.normalize(
+        {
+            "domainId": 1,
+            "columns": [{"columnName": "id"}],
+            "aggs": {
+                "enabled": True,
+                "metrics": [
+                    {
+                        "id": "semantic_plan_metric_count",
+                        "fn": "count",
+                        "field": {
+                            "modelColumnId": None,
+                            "workspaceTableId": None,
+                            "exprId": None,
+                            "alias": None,
+                        },
+                        "label": "count",
+                    }
+                ],
+                "groupBy": [],
+            },
+            "sorting": [],
+        }
+    )
+    assert q["aggs"]["metrics"][0]["fn"] == "count"
+    assert q["aggs"]["metrics"][0]["field"] is None
+
+
 def test_normalize_metrics_item_not_object() -> None:
     svc = _svc()
     with pytest.raises(ServiceError):
@@ -254,3 +362,29 @@ def test_compile_distinct_with_aggs_rejected() -> None:
         svc.compile(
             {"domainId": 1, "columns": [{"columnName": "id"}], "aggs": {"enabled": True, "groupBy": [], "metrics": []}, "distinct": True},
         )
+
+
+def test_normalize_accepts_selects_and_derived_metrics_shape() -> None:
+    svc = _svc()
+    q = svc.normalize(
+        {
+            "domainId": 1,
+            "selects": {
+                "dimensions": ["wt1.id"],
+                "metrics": [{"metricRef": "derived:students_per_teacher_ratio"}],
+            },
+            "derived_metrics": [
+                {
+                    "kind": "ratio",
+                    "name": "students_per_teacher_ratio",
+                    "numerator": {"columnKey": "wt1.id", "agg": "count_distinct"},
+                    "denominator": {"columnKey": "wt1.id", "agg": "count_distinct"},
+                    "safeDivide": True,
+                }
+            ],
+        }
+    )
+    assert q["aggs"]["enabled"] is True
+    assert q["aggs"]["metrics"][0]["fn"] == "expr"
+    assert q["aggs"]["metrics"][0]["expr"]["kind"] == "ratio"
+    assert q["aggs"]["groupBy"][0]["workspaceTableId"] == 1

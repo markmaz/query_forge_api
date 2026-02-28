@@ -5,13 +5,14 @@ import ast
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from app.adapters.mysql_sql_executor import MySQLSQLExecutor
 from app.exceptions.service_error import ServiceError
 from app.ports.sql_executor import SQLExecutor
 from app.services.value_overrides.list_schema import TABLE_BY_TYPE
 from app.services.domain_resolver import DomainPlan, DomainResolver
+from app.services.sqljson import validate_and_normalize_derived_sqljson
 
 MAX_MANUAL_IN = 150
 
@@ -227,6 +228,7 @@ class NoCodeQueryService:
             raise ServiceError("Missing query", status_code=400)
 
         q = dict(q)
+        q, _, _ = validate_and_normalize_derived_sqljson(q, strict=True)
 
         q.setdefault("version", 1)
         q.setdefault("domainId", None)
@@ -334,22 +336,50 @@ class NoCodeQueryService:
             if not isinstance(m, dict):
                 raise ServiceError(f"aggs.metrics[{i}] must be an object", status_code=400)
 
-            fn_raw = (m.get("fn") or "").strip()
-            fn = fn_raw.lower().replace(" ", "_")
-            if fn in ("countdistinct", "count_distinct", "count-distinct"):
-                fn = "count_distinct"
-            if fn == "count":
-                fn = "count"
+            metric_ref = m.get("metricRef")
+            if metric_ref is None:
+                metric_ref = m.get("metric_ref")
 
             field = m.get("field", None)
             if field is None and "column" in m:
                 field = m.get("column")
+            fn_input = str(m.get("fn") or m.get("agg") or "").strip()
+            label = m.get("label")
+
+            if isinstance(metric_ref, dict):
+                if field is None:
+                    field = (
+                        metric_ref.get("field")
+                        or metric_ref.get("column")
+                        or metric_ref.get("columnKey")
+                        or metric_ref.get("column_key")
+                    )
+                if fn_input == "":
+                    fn_input = str(metric_ref.get("fn") or metric_ref.get("agg") or "").strip()
+                if label is None:
+                    label = metric_ref.get("label")
+
+            fn_field = self._extract_metric_field_from_fn_token(fn_input)
+            if field is None and fn_field is not None:
+                field = fn_field
+            if fn_input == "" and field is not None:
+                fn_input = "count"
+            fn = self._normalize_metric_fn_token(fn_input)
+            if fn == "":
+                raise ServiceError(f"aggs.metrics[{i}].fn is required", status_code=400)
+
+            expr = None
 
             norm_field = None
-            if field is not None:
-                norm_field = self._normalize_col_key(field, path=f"aggs.metrics[{i}].field")
+            if fn == "expr":
+                expr = self._normalize_metric_expr(m.get("expr"), path=f"aggs.metrics[{i}].expr")
+            elif field is not None:
+                # COUNT(*) is valid and may arrive as an empty field object from planner adapters.
+                if fn == "count" and self._is_empty_count_metric_field(field):
+                    norm_field = None
+                else:
+                    norm_field = self._normalize_col_key(field, path=f"aggs.metrics[{i}].field")
 
-            label = m.get("label")
             if label is not None and not isinstance(label, str):
                 raise ServiceError(f"aggs.metrics[{i}].label must be string or null", status_code=400)
             label = (label or "").strip() or None
@@ -358,7 +388,10 @@ class NoCodeQueryService:
             if mid is not None and not isinstance(mid, str):
                 raise ServiceError(f"aggs.metrics[{i}].id must be string", status_code=400)
 
-            norm_metrics.append({"id": mid or f"m{i+1}", "fn": fn, "field": norm_field, "label": label})
+            metric_row: Dict[str, Any] = {"id": mid or f"m{i+1}", "fn": fn, "field": norm_field, "label": label}
+            if expr is not None:
+                metric_row["expr"] = expr
+            norm_metrics.append(metric_row)
         aggs["metrics"] = norm_metrics
         q["aggs"] = aggs
 
@@ -516,6 +549,63 @@ class NoCodeQueryService:
 
         return q
 
+    @staticmethod
+    def _normalize_metric_fn_token(raw: Any) -> str:
+        token = str(raw or "").strip().lower()
+        if token == "":
+            return ""
+        fn_match = re.match(
+            r"^(count\s+distinct|count_distinct|countdistinct|count|sum|avg|min|max)\s*\((.*?)\)$",
+            token,
+            flags=re.IGNORECASE,
+        )
+        if fn_match:
+            token = str(fn_match.group(1) or "").strip().lower()
+        token = token.replace("-", "_").replace(" ", "_")
+        if token in {"countdistinct", "count_distinct"}:
+            return "count_distinct"
+        if token in {"count", "sum", "avg", "min", "max", "expr"}:
+            return token
+        return token
+
+    @staticmethod
+    def _extract_metric_field_from_fn_token(raw: Any) -> Optional[Dict[str, Any]]:
+        token = str(raw or "").strip()
+        if token == "":
+            return None
+        fn_match = re.match(
+            r"^(count\s+distinct|count_distinct|countdistinct|count|sum|avg|min|max)\s*\((.*?)\)$",
+            token,
+            flags=re.IGNORECASE,
+        )
+        if fn_match is None:
+            return None
+        field_token = str(fn_match.group(2) or "").strip()
+        if field_token == "" or field_token == "*":
+            return None
+        return {
+            "modelColumnId": None,
+            "columnName": field_token,
+            "exprId": None,
+        }
+
+    @staticmethod
+    def _is_empty_count_metric_field(field: Any) -> bool:
+        if field is None:
+            return True
+        if isinstance(field, dict):
+            column_name = field.get("columnName")
+            expr_id = field.get("exprId")
+            model_column_id = field.get("modelColumnId")
+            workspace_table_id = field.get("workspaceTableId")
+            if isinstance(column_name, str) and column_name.strip():
+                return False
+            return not any(
+                value not in (None, "")
+                for value in (expr_id, model_column_id, workspace_table_id)
+            )
+        return False
+
     def _normalize_col_key(self, v: Any, path: str) -> Dict[str, Any]:
         if isinstance(v, str):
             s = v.strip()
@@ -547,6 +637,57 @@ class NoCodeQueryService:
             raise ServiceError(f"{path}.workspaceTableId must be number or null", status_code=400)
 
         return {"workspaceTableId": wt_id, "modelColumnId": mid, "columnName": cn, "exprId": expr}
+
+    def _normalize_metric_expr(self, expr: Any, path: str) -> Dict[str, Any]:
+        if not isinstance(expr, dict):
+            raise ServiceError(f"{path} must be an object", status_code=400)
+        kind = str(expr.get("kind") or "").strip().lower()
+        if kind != "ratio":
+            raise ServiceError(f"{path}.kind must be ratio", status_code=400)
+
+        numerator = expr.get("numerator")
+        denominator = expr.get("denominator")
+        if not isinstance(numerator, dict):
+            raise ServiceError(f"{path}.numerator must be an object", status_code=400)
+        if not isinstance(denominator, dict):
+            raise ServiceError(f"{path}.denominator must be an object", status_code=400)
+
+        def _norm_part(part: Dict[str, Any], part_path: str) -> Dict[str, Any]:
+            fn = str(part.get("fn") or part.get("agg") or "").strip().lower().replace("-", "_")
+            if fn == "countdistinct":
+                fn = "count_distinct"
+            if fn not in {"count", "count_distinct", "sum", "avg", "min", "max"}:
+                raise ServiceError(f"{part_path}.fn is invalid", status_code=400)
+            field = part.get("field")
+            if field is None:
+                field = part.get("columnKey") or part.get("column_key")
+                if isinstance(field, str):
+                    m = re.match(r"^wt(\d+)\.([A-Za-z_][A-Za-z0-9_]*)$", field.strip())
+                    if m:
+                        field = {"workspaceTableId": int(m.group(1)), "columnName": m.group(2)}
+            if field is None:
+                if fn != "count":
+                    raise ServiceError(f"{part_path}.field is required", status_code=400)
+                norm_field = None
+            else:
+                norm_field = self._normalize_col_key(field, path=f"{part_path}.field")
+            filters = part.get("filters")
+            if filters is not None and not isinstance(filters, dict):
+                raise ServiceError(f"{part_path}.filters must be an object", status_code=400)
+            return {"fn": fn, "field": norm_field, "filters": filters}
+
+        multiply_by = expr.get("multiply_by", expr.get("multiplyBy"))
+        if multiply_by is not None and not isinstance(multiply_by, (int, float)):
+            raise ServiceError(f"{path}.multiplyBy must be numeric or null", status_code=400)
+
+        return {
+            "kind": "ratio",
+            "name": (str(expr.get("name") or "").strip() or None),
+            "numerator": _norm_part(numerator, f"{path}.numerator"),
+            "denominator": _norm_part(denominator, f"{path}.denominator"),
+            "safe_divide": bool(expr.get("safe_divide", expr.get("safeDivide", True))),
+            "multiply_by": float(multiply_by) if isinstance(multiply_by, (int, float)) else None,
+        }
 
     def _attachment_required_table_ids(
         self,
@@ -642,6 +783,245 @@ class NoCodeQueryService:
                 ids.add(wt_id_int)
         return ids
 
+    def _select_two_phase_key_column(
+        self,
+        *,
+        q: Dict[str, Any],
+        plan: DomainPlan,
+        primary_id: int,
+        filter_only_table_ids: set[int],
+    ) -> Optional[str]:
+        candidates: List[str] = []
+        candidates.extend(
+            self._primary_join_key_candidates(
+                plan=plan,
+                primary_id=primary_id,
+                filter_only_table_ids=filter_only_table_ids,
+            )
+        )
+        candidates.extend(
+            self._primary_query_key_candidates(
+                q=q,
+                primary_id=primary_id,
+            )
+        )
+
+        catalog = self._load_domain_column_catalog(plan)
+        primary_columns = {
+            col
+            for (wt_id, col), _meta in catalog.items()
+            if int(wt_id) == int(primary_id) and col
+        }
+        if primary_columns:
+            preferred = [
+                "patient_id",
+                "k_person",
+                "k_staff",
+                "staff_unique_id",
+                "local_staff_id",
+                "k_student",
+                "student_unique_id",
+                "school_id",
+                "id",
+                "oid",
+            ]
+            for name in preferred:
+                if name in primary_columns:
+                    candidates.append(name)
+            for name in sorted(primary_columns):
+                if self._looks_like_identifier_column(name):
+                    candidates.append(name)
+
+        seen: set[str] = set()
+        for raw in candidates:
+            col = str(raw or "").strip().lower()
+            if not col or col in seen:
+                continue
+            seen.add(col)
+            if not self._looks_like_identifier_column(col):
+                continue
+            if primary_columns and col not in primary_columns:
+                continue
+            return col
+        return None
+
+    def _primary_join_key_candidates(
+        self,
+        *,
+        plan: DomainPlan,
+        primary_id: int,
+        filter_only_table_ids: set[int],
+    ) -> List[str]:
+        out: List[str] = []
+        for wt_id in sorted(filter_only_table_ids):
+            try:
+                path = self._domains.get_join_path(plan, int(wt_id))
+            except Exception:
+                continue
+            for edge in path:
+                if int(edge.from_workspace_table_id) != int(primary_id):
+                    continue
+                spec = edge.join_spec or {}
+                on_list = spec.get("on") or []
+                if not isinstance(on_list, list):
+                    continue
+                for item in on_list:
+                    if not isinstance(item, dict):
+                        continue
+                    left = item.get("left") or {}
+                    col = str((left.get("columnName") or left.get("col") or "")).strip().lower()
+                    if col and "." not in col:
+                        out.append(col)
+        return out
+
+    @staticmethod
+    def _primary_query_key_candidates(*, q: Dict[str, Any], primary_id: int) -> List[str]:
+        out: List[str] = []
+        for c in list(q.get("columns") or []):
+            if not isinstance(c, dict):
+                continue
+            cn = str(c.get("columnName") or "").strip().lower()
+            wt = c.get("workspaceTableId")
+            if not cn or "." in cn:
+                continue
+            try:
+                wt_ok = wt is None or int(wt) == int(primary_id)
+            except Exception:
+                wt_ok = False
+            if wt_ok:
+                out.append(cn)
+
+        for s in list(q.get("sorting") or []):
+            if not isinstance(s, dict):
+                continue
+            col = s.get("col") if "col" in s else s.get("columnName")
+            if not isinstance(col, dict):
+                continue
+            cn = str(col.get("columnName") or "").strip().lower()
+            wt = col.get("workspaceTableId")
+            if not cn or "." in cn:
+                continue
+            try:
+                wt_ok = wt is None or int(wt) == int(primary_id)
+            except Exception:
+                wt_ok = False
+            if wt_ok:
+                out.append(cn)
+        return out
+
+    @staticmethod
+    def _looks_like_identifier_column(column_name: str) -> bool:
+        col = str(column_name or "").strip().lower()
+        if not col:
+            return False
+        if col in {"id", "oid", "k_person", "k_staff", "k_student"}:
+            return True
+        if col.startswith("k_"):
+            return True
+        if col.endswith("_id") or col.endswith("_key"):
+            return True
+        if "unique_id" in col:
+            return True
+        return False
+
+    def _load_domain_column_catalog(self, plan: DomainPlan) -> Dict[tuple[int, str], Dict[str, Any]]:
+        ws_id = getattr(self._domains, "_workspace_id", None)
+        sql = getattr(self._domains, "_sql", None)
+        if not ws_id or sql is None or not hasattr(sql, "execute_query_mappings"):
+            return {}
+        table_ids = sorted({int(t.workspace_table_id) for t in (plan.tables or [])})
+        if not table_ids:
+            return {}
+        in_clause = ", ".join(str(int(tid)) for tid in table_ids)
+        sql_text = f"""
+            SELECT
+              wc.workspace_table_id,
+              wc.column_name,
+              LOWER(COALESCE(mc.data_type, wc.data_type, '')) AS data_type
+            FROM workspace_column wc
+            JOIN workspace_table wt
+              ON wt.id = wc.workspace_table_id
+            LEFT JOIN model_column mc
+              ON mc.model_table_id = wt.model_table_id
+             AND mc.column_name = wc.column_name
+             AND mc.is_active = 1
+             AND mc.is_missing_in_source = 0
+            WHERE wt.workspace_id = :ws
+              AND wc.workspace_table_id IN ({in_clause})
+        """
+        rows = sql.execute_query_mappings(sql_text, {"ws": ws_id}) or []
+        catalog: Dict[tuple[int, str], Dict[str, Any]] = {}
+        for row in rows:
+            try:
+                wt_id = int(row.get("workspace_table_id"))
+            except Exception:
+                continue
+            col_name = str(row.get("column_name") or "").strip().lower()
+            if not col_name:
+                continue
+            catalog[(wt_id, col_name)] = {"data_type": str(row.get("data_type") or "").strip().lower()}
+        return catalog
+
+    def _validate_and_normalize_derived_for_plan(self, q: Dict[str, Any], plan: DomainPlan) -> Dict[str, Any]:
+        catalog = self._load_domain_column_catalog(plan)
+        normalized, issues, _ = validate_and_normalize_derived_sqljson(
+            q,
+            plan=plan,
+            column_catalog=catalog,
+            strict=False,
+        )
+        if issues:
+            first = issues[0]
+            raise ServiceError(
+                f"derived_validation_failed: {first.get('code')} at {first.get('path')}",
+                status_code=400,
+                details={"issues": issues},
+            )
+        return normalized
+
+    @staticmethod
+    def _is_and_only_filter_tree(node: Any) -> bool:
+        if not node:
+            return True
+        if not isinstance(node, dict):
+            return False
+        t = node.get("type")
+        if t == "condition":
+            return True
+        if t != "group":
+            return False
+        if (node.get("match") or "and").lower() != "and":
+            return False
+        children = node.get("children") or []
+        if not isinstance(children, list):
+            return False
+        return all(NoCodeQueryService._is_and_only_filter_tree(child) for child in children)
+
+    @staticmethod
+    def _flatten_and_conditions(node: Any) -> List[Dict[str, Any]]:
+        if not node:
+            return []
+        if not isinstance(node, dict):
+            return []
+        t = node.get("type")
+        if t == "condition":
+            return [node]
+        if t != "group":
+            return []
+        out: List[Dict[str, Any]] = []
+        for child in (node.get("children") or []):
+            out.extend(NoCodeQueryService._flatten_and_conditions(child))
+        return out
+
+    @staticmethod
+    def _build_and_filter_tree(conditions: Sequence[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        clean = [c for c in conditions if isinstance(c, dict)]
+        if not clean:
+            return None
+        if len(clean) == 1:
+            return clean[0]
+        return {"type": "group", "match": "and", "children": clean}
+
     def compile(self, q: Dict[str, Any], mode: str = "preview", limit: int = 200, offset: int = 0) -> CompiledQuery:
         if mode not in ("preview", "export"):
             raise ServiceError("Invalid mode", status_code=400)
@@ -652,6 +1032,19 @@ class NoCodeQueryService:
 
         domain_id = q["domainId"]
         plan = self._domains.resolve_plan(domain_id=domain_id)
+        q = self._validate_and_normalize_derived_for_plan(q, plan)
+
+        split_metric = self._detect_split_ratio_metric(q, plan)
+        if split_metric is not None:
+            return self._compile_split_ratio_query(
+                q=q,
+                plan=plan,
+                split_metric=split_metric,
+                mode=mode,
+                limit=limit,
+                offset=offset,
+            )
+
         primary_id = int(plan.primary.workspace_table_id)
         base_alias = plan.primary.alias
         alias_by_wt = plan.alias_by_workspace_table_id
@@ -878,6 +1271,7 @@ class NoCodeQueryService:
             for m in (aggs.get("metrics") or []):
                 fn = (m.get("fn") or "").lower().strip()
                 field = m.get("field")
+                expr = m.get("expr")
                 label = m.get("label")
 
                 metric_sql = self._compile_metric(
@@ -891,6 +1285,7 @@ class NoCodeQueryService:
                     base_alias,
                     alias_by_wt,
                     rewrite_by_wt_col=rewrite_by_wt_col,
+                    expr=expr,
                 )
                 output_name = _reserve_output_name(label or fn or "metric", None)
                 metric_sql += f" AS {self._safe_alias(output_name)}"
@@ -958,6 +1353,16 @@ class NoCodeQueryService:
             and not (filter_table_ids & projected_non_primary)
             and sorting_table_ids.issubset({primary_id})
         )
+        two_phase_key_col: Optional[str] = None
+        if use_two_phase:
+            two_phase_key_col = self._select_two_phase_key_column(
+                q=q,
+                plan=plan,
+                primary_id=primary_id,
+                filter_only_table_ids=filter_only_table_ids,
+            )
+            if not two_phase_key_col:
+                use_two_phase = False
 
         where_sql, exists_parts = self._compile_where(
             filters,
@@ -1016,10 +1421,10 @@ class NoCodeQueryService:
         base_patients_cte = ""
         base_patients_cte_count = ""
         if use_two_phase:
-            patient_id_col = self._safe_ident("patient_id")
+            two_phase_key_col_sql = self._safe_ident(str(two_phase_key_col or "patient_id"))
             base_patients_cte = (
                 "base_patients AS (\n"
-                f"  SELECT DISTINCT {self._safe_ident(base_alias)}.{patient_id_col}\n"
+                f"  SELECT DISTINCT {self._safe_ident(base_alias)}.{two_phase_key_col_sql}\n"
                 f"  FROM {plan.primary.full_name} {self._safe_ident(base_alias)}\n"
                 + (f"  WHERE {' AND '.join(base_where_parts)}\n" if base_where_parts else "")
                 + (f"  ORDER BY {order_sql}\n" if order_sql else "")
@@ -1029,7 +1434,7 @@ class NoCodeQueryService:
             )
             base_patients_cte_count = (
                 "base_patients AS (\n"
-                f"  SELECT DISTINCT {self._safe_ident(base_alias)}.{patient_id_col}\n"
+                f"  SELECT DISTINCT {self._safe_ident(base_alias)}.{two_phase_key_col_sql}\n"
                 f"  FROM {plan.primary.full_name} {self._safe_ident(base_alias)}\n"
                 + (f"  WHERE {' AND '.join(base_where_parts)}\n" if base_where_parts else "")
                 + ")"
@@ -1042,7 +1447,7 @@ class NoCodeQueryService:
             from_clause_sql = (
                 f"base_patients bp\n"
                 f"JOIN {plan.primary.full_name} {self._safe_ident(base_alias)} "
-                f"ON {self._safe_ident(base_alias)}.{patient_id_col} = bp.{patient_id_col}"
+                f"ON {self._safe_ident(base_alias)}.{two_phase_key_col_sql} = bp.{two_phase_key_col_sql}"
             )
             if join_lines:
                 from_clause_sql += "\n" + "\n".join(join_lines)
@@ -1101,6 +1506,360 @@ class NoCodeQueryService:
         if mode == "preview" and not use_two_phase:
             sql += f"\nLIMIT {int(limit)}\nOFFSET {int(offset)}"
 
+        return CompiledQuery(sql=sql, count_sql=count_sql, params=params, output_columns=output_columns)
+
+    def _detect_split_ratio_metric(self, q: Dict[str, Any], plan: DomainPlan) -> Optional[Dict[str, Any]]:
+        aggs = q.get("aggs") or {}
+        if not bool(aggs.get("enabled")):
+            return None
+        metrics = aggs.get("metrics") or []
+        ratio_metrics: List[Dict[str, Any]] = []
+        primary_id = int(plan.primary.workspace_table_id)
+        for metric in metrics:
+            if not isinstance(metric, dict):
+                continue
+            if str(metric.get("fn") or "").strip().lower() != "expr":
+                continue
+            expr = metric.get("expr")
+            if not isinstance(expr, dict):
+                continue
+            if str(expr.get("kind") or "").strip().lower() != "ratio":
+                continue
+            numerator = expr.get("numerator") or {}
+            denominator = expr.get("denominator") or {}
+            if not isinstance(numerator, dict) or not isinstance(denominator, dict):
+                continue
+            n_field = numerator.get("field")
+            d_field = denominator.get("field")
+            if not isinstance(n_field, dict) or not isinstance(d_field, dict):
+                continue
+            try:
+                n_table = int(n_field.get("workspaceTableId") or primary_id)
+                d_table = int(d_field.get("workspaceTableId") or primary_id)
+            except Exception:
+                continue
+            if n_table != d_table:
+                ratio_metrics.append(metric)
+
+        if not ratio_metrics:
+            return None
+        if len(ratio_metrics) > 1:
+            raise ServiceError(
+                "derived_validation_failed: unsupported_split_ratio_metric_mix at aggs.metrics",
+                status_code=400,
+                details={
+                    "issues": [
+                        {
+                            "code": "unsupported_split_ratio_metric_mix",
+                            "path": "aggs.metrics",
+                            "message": "Only one split ratio metric is supported per query",
+                        }
+                    ]
+                },
+            )
+        if len(metrics) > 1:
+            raise ServiceError(
+                "derived_validation_failed: unsupported_split_ratio_metric_mix at aggs.metrics",
+                status_code=400,
+                details={
+                    "issues": [
+                        {
+                            "code": "unsupported_split_ratio_metric_mix",
+                            "path": "aggs.metrics",
+                            "message": "Split ratio metrics cannot be mixed with other aggregate metrics",
+                        }
+                    ]
+                },
+            )
+        return ratio_metrics[0]
+
+    def _compile_split_ratio_query(
+        self,
+        *,
+        q: Dict[str, Any],
+        plan: DomainPlan,
+        split_metric: Dict[str, Any],
+        mode: str,
+        limit: int,
+        offset: int,
+    ) -> CompiledQuery:
+        primary_id = int(plan.primary.workspace_table_id)
+        base_alias = plan.primary.alias
+        alias_by_wt = plan.alias_by_workspace_table_id
+        if bool(q.get("distinct", False)):
+            raise ServiceError("distinct is not supported with aggregations", status_code=400)
+        if q.get("dataPrep"):
+            raise ServiceError("Split ratio compilation does not support dataPrep", status_code=400)
+        if q.get("value_overrideAttachments") or q.get("cohortAttachment"):
+            raise ServiceError("Split ratio compilation does not support attachments", status_code=400)
+        aggs = q.get("aggs") or {}
+        group_by = aggs.get("groupBy") or []
+        if not self._is_and_only_filter_tree(q.get("filters")):
+            raise ServiceError(
+                "derived_validation_failed: unsupported_filter_tree_for_split_ratio at filters",
+                status_code=400,
+                details={
+                    "issues": [
+                        {
+                            "code": "unsupported_filter_tree_for_split_ratio",
+                            "path": "filters",
+                            "message": "Split ratio queries support deterministic AND-only global filters",
+                        }
+                    ]
+                },
+            )
+
+        expr = split_metric.get("expr") or {}
+        numerator = expr.get("numerator") or {}
+        denominator = expr.get("denominator") or {}
+        num_field = numerator.get("field") or {}
+        den_field = denominator.get("field") or {}
+        try:
+            num_table_id = int(num_field.get("workspaceTableId") or primary_id)
+            den_table_id = int(den_field.get("workspaceTableId") or primary_id)
+        except Exception:
+            raise ServiceError("Invalid ratio metric table bindings", status_code=400)
+
+        all_conditions = self._flatten_and_conditions(q.get("filters"))
+        num_conditions: List[Dict[str, Any]] = []
+        den_conditions: List[Dict[str, Any]] = []
+        for cond in all_conditions:
+            field = cond.get("field")
+            if isinstance(field, dict):
+                wt_id = field.get("workspaceTableId")
+            else:
+                wt_id = None
+            if wt_id is None:
+                wt_id = primary_id
+            try:
+                wt_id_int = int(wt_id)
+            except Exception:
+                wt_id_int = primary_id
+
+            if wt_id_int == num_table_id:
+                num_conditions.append(cond)
+            elif wt_id_int == den_table_id:
+                den_conditions.append(cond)
+            else:
+                num_conditions.append(cond)
+                den_conditions.append(cond)
+
+        if self._is_and_only_filter_tree(numerator.get("filters")):
+            num_conditions.extend(self._flatten_and_conditions(numerator.get("filters")))
+        elif numerator.get("filters") is not None:
+            raise ServiceError(
+                "derived_validation_failed: unsupported_filter_tree_for_split_ratio at aggs.metrics[0].expr.numerator.filters",
+                status_code=400,
+                details={
+                    "issues": [
+                        {
+                            "code": "unsupported_filter_tree_for_split_ratio",
+                            "path": "aggs.metrics[0].expr.numerator.filters",
+                            "message": "Numerator filters must be deterministic AND-only trees",
+                        }
+                    ]
+                },
+            )
+
+        if self._is_and_only_filter_tree(denominator.get("filters")):
+            den_conditions.extend(self._flatten_and_conditions(denominator.get("filters")))
+        elif denominator.get("filters") is not None:
+            raise ServiceError(
+                "derived_validation_failed: unsupported_filter_tree_for_split_ratio at aggs.metrics[0].expr.denominator.filters",
+                status_code=400,
+                details={
+                    "issues": [
+                        {
+                            "code": "unsupported_filter_tree_for_split_ratio",
+                            "path": "aggs.metrics[0].expr.denominator.filters",
+                            "message": "Denominator filters must be deterministic AND-only trees",
+                        }
+                    ]
+                },
+            )
+
+        num_filter_tree = self._build_and_filter_tree(num_conditions)
+        den_filter_tree = self._build_and_filter_tree(den_conditions)
+
+        params: Dict[str, Any] = {}
+        param_counter = 0
+
+        def new_param(val: Any) -> str:
+            nonlocal param_counter
+            param_counter += 1
+            key = f"p{param_counter}"
+            params[key] = val
+            return f":{key}"
+
+        grain_aliases: List[str] = []
+        grain_exprs: List[str] = []
+        used_aliases: set[str] = set()
+        for idx, gb in enumerate(group_by):
+            expr_sql = self._col_expr(
+                gb,
+                {},
+                {},
+                {},
+                {},
+                False,
+                base_alias,
+                alias_by_wt,
+            )
+            col_name = str((gb or {}).get("columnName") or f"group_{idx+1}").strip() or f"group_{idx+1}"
+            wt_id = (gb or {}).get("workspaceTableId")
+            if isinstance(wt_id, int):
+                alias = f"wt{wt_id}_{col_name}"
+            else:
+                alias = col_name
+            alias = re.sub(r"[^A-Za-z0-9_]+", "_", alias).strip("_") or f"group_{idx+1}"
+            if alias[0].isdigit():
+                alias = f"g_{alias}"
+            base = alias
+            inc = 2
+            while alias.lower() in used_aliases:
+                alias = f"{base}_{inc}"
+                inc += 1
+            used_aliases.add(alias.lower())
+            grain_aliases.append(alias)
+            grain_exprs.append(expr_sql)
+
+        def build_side_cte(
+            *,
+            cte_name: str,
+            metric_part: Dict[str, Any],
+            metric_table_id: int,
+            filters_node: Optional[Dict[str, Any]],
+            value_alias: str,
+        ) -> str:
+            metric_field = metric_part.get("field")
+            metric_fn = str(metric_part.get("fn") or "").strip().lower()
+            if not isinstance(metric_field, dict):
+                raise ServiceError("Split ratio metric side must include a field", status_code=400)
+
+            side_query = {
+                "columns": [],
+                "aggs": {"enabled": True, "groupBy": group_by, "metrics": [{"fn": metric_fn, "field": metric_field}]},
+                "sorting": [],
+                "filters": filters_node,
+                "dataPrep": None,
+                "value_overrideAttachments": [],
+                "cohortAttachment": None,
+            }
+            required_table_ids = self._required_table_ids_from_query(side_query, plan)
+            required_table_ids.add(int(metric_table_id))
+            from_sql = self._from_clause_from_plan(plan, required_table_ids)
+
+            where_sql, exists_parts = self._compile_where(
+                filters_node,
+                {},
+                {},
+                {},
+                {},
+                False,
+                base_alias,
+                alias_by_wt,
+                plan,
+                new_param,
+            )
+            where_parts = [p for p in ([where_sql] if where_sql else []) + exists_parts if p]
+
+            metric_sql = self._compile_metric(
+                metric_fn,
+                metric_field,
+                {},
+                {},
+                {},
+                {},
+                False,
+                base_alias,
+                alias_by_wt,
+                expr=None,
+            )
+            selects = [f"{expr_sql} AS {self._safe_alias(alias)}" for expr_sql, alias in zip(grain_exprs, grain_aliases)]
+            selects.append(f"{metric_sql} AS {self._safe_alias(value_alias)}")
+            side_sql = f"{self._safe_ident(cte_name)} AS (\n  SELECT {', '.join(selects)}\n  FROM {from_sql}"
+            if where_parts:
+                side_sql += f"\n  WHERE {' AND '.join(where_parts)}"
+            if grain_exprs:
+                side_sql += f"\n  GROUP BY {', '.join(grain_exprs)}"
+            side_sql += "\n)"
+            return side_sql
+
+        num_cte = build_side_cte(
+            cte_name="num",
+            metric_part=numerator,
+            metric_table_id=num_table_id,
+            filters_node=num_filter_tree,
+            value_alias="num_val",
+        )
+        den_cte = build_side_cte(
+            cte_name="den",
+            metric_part=denominator,
+            metric_table_id=den_table_id,
+            filters_node=den_filter_tree,
+            value_alias="den_val",
+        )
+
+        metric_name = str(expr.get("name") or split_metric.get("id") or "derived_ratio")
+        metric_label = str(split_metric.get("label") or metric_name or "derived_ratio")
+        ratio_expr = "num.num_val / NULLIF(den.den_val, 0)" if bool(expr.get("safe_divide", True)) else "num.num_val / den.den_val"
+        multiply_by = expr.get("multiply_by")
+        if isinstance(multiply_by, (int, float)):
+            ratio_expr = f"({ratio_expr}) * {float(multiply_by)}"
+
+        select_list = [f"num.{self._safe_ident(alias)} AS {self._safe_alias(alias)}" for alias in grain_aliases]
+        select_list.append(f"{ratio_expr} AS {self._safe_alias(metric_label)}")
+
+        debug_enabled = bool(((q.get("meta") or {}).get("debug")))
+        if debug_enabled:
+            select_list.append("num.num_val AS numerator_value")
+            select_list.append("den.den_val AS denominator_value")
+
+        if grain_aliases:
+            join_on = " AND ".join(f"num.{self._safe_ident(alias)} = den.{self._safe_ident(alias)}" for alias in grain_aliases)
+        else:
+            join_on = "1=1"
+
+        base_sql = (
+            f"WITH {num_cte},\n{den_cte}\n"
+            f"SELECT {', '.join(select_list)}\n"
+            "FROM num\n"
+            f"LEFT JOIN den ON {join_on}"
+        )
+        count_sql = f"SELECT COUNT(*) AS total FROM (\n{base_sql}\n) q"
+
+        order_sql = ""
+        for entry in (q.get("sorting") or []):
+            if not isinstance(entry, dict):
+                continue
+            col = entry.get("col") if "col" in entry else entry.get("columnName")
+            direction = str(entry.get("dir") or "asc").strip().lower()
+            if direction not in ("asc", "desc"):
+                continue
+            alias = None
+            if isinstance(col, dict):
+                cn = str(col.get("columnName") or "").strip()
+                if cn in grain_aliases:
+                    alias = cn
+            elif isinstance(col, str) and col.strip() in grain_aliases:
+                alias = col.strip()
+            if alias:
+                order_sql = f"{self._safe_alias(alias)} {direction.upper()}"
+                break
+        if not order_sql and grain_aliases:
+            order_sql = ", ".join(f"{self._safe_alias(alias)} ASC" for alias in grain_aliases)
+
+        sql = base_sql
+        if order_sql:
+            sql += f"\nORDER BY {order_sql}"
+        if mode == "preview":
+            sql += f"\nLIMIT {int(limit)}\nOFFSET {int(offset)}"
+
+        output_columns = [{"key": alias, "label": alias} for alias in grain_aliases]
+        output_columns.append({"key": metric_label, "label": metric_label})
+        if debug_enabled:
+            output_columns.append({"key": "numerator_value", "label": "numerator_value"})
+            output_columns.append({"key": "denominator_value", "label": "denominator_value"})
         return CompiledQuery(sql=sql, count_sql=count_sql, params=params, output_columns=output_columns)
 
     # -----------------------------
@@ -1547,6 +2306,14 @@ class NoCodeQueryService:
             field = (m or {}).get("field")
             if isinstance(field, dict):
                 add_wt_id(field.get("workspaceTableId"))
+            expr = (m or {}).get("expr")
+            if isinstance(expr, dict) and str(expr.get("kind") or "").strip().lower() == "ratio":
+                numerator = expr.get("numerator")
+                denominator = expr.get("denominator")
+                if isinstance(numerator, dict) and isinstance(numerator.get("field"), dict):
+                    add_wt_id((numerator.get("field") or {}).get("workspaceTableId"))
+                if isinstance(denominator, dict) and isinstance(denominator.get("field"), dict):
+                    add_wt_id((denominator.get("field") or {}).get("workspaceTableId"))
 
         for s in (q.get("sorting") or []):
             if isinstance(s, dict):
@@ -1640,6 +2407,14 @@ class NoCodeQueryService:
             field = (m or {}).get("field")
             if field is not None:
                 add_ref(field, f"aggs.metrics[{i}].field")
+            expr = (m or {}).get("expr")
+            if isinstance(expr, dict) and str(expr.get("kind") or "").strip().lower() == "ratio":
+                numerator = expr.get("numerator")
+                denominator = expr.get("denominator")
+                if isinstance(numerator, dict) and numerator.get("field") is not None:
+                    add_ref(numerator.get("field"), f"aggs.metrics[{i}].expr.numerator.field")
+                if isinstance(denominator, dict) and denominator.get("field") is not None:
+                    add_ref(denominator.get("field"), f"aggs.metrics[{i}].expr.denominator.field")
 
         for i, s in enumerate(q.get("sorting") or []):
             if not isinstance(s, dict):
@@ -2007,6 +2782,7 @@ class NoCodeQueryService:
         alias_by_wt: Dict[int, str],
         *,
         rewrite_by_wt_col: Optional[Dict[tuple, str]] = None,
+        expr: Any = None,
     ) -> str:
         if rewrite_by_wt_col is None:
             rewrite_by_wt_col = {}
@@ -2048,6 +2824,52 @@ class NoCodeQueryService:
             if not field:
                 raise ServiceError(f"{fn} requires a field", status_code=400)
             return f"{fn.upper()}({self._col_expr(field, derived_by_exprid, derived_by_name, rewrite_by_colname, rewrite_by_modelid, using_prep, base_alias, alias_by_wt, rewrite_by_wt_col=rewrite_by_wt_col)})"
+
+        if fn == "expr":
+            if not isinstance(expr, dict):
+                raise ServiceError("expr metric requires expr payload", status_code=400)
+            kind = str(expr.get("kind") or "").strip().lower()
+            if kind != "ratio":
+                raise ServiceError("Unsupported expr metric kind", status_code=400)
+            numerator = expr.get("numerator")
+            denominator = expr.get("denominator")
+            if not isinstance(numerator, dict) or not isinstance(denominator, dict):
+                raise ServiceError("expr ratio requires numerator and denominator", status_code=400)
+            num_sql = self._compile_metric(
+                str(numerator.get("fn") or "").strip().lower(),
+                numerator.get("field"),
+                derived_by_exprid,
+                derived_by_name,
+                rewrite_by_colname,
+                rewrite_by_modelid,
+                using_prep,
+                base_alias,
+                alias_by_wt,
+                rewrite_by_wt_col=rewrite_by_wt_col,
+                expr=None,
+            )
+            den_sql = self._compile_metric(
+                str(denominator.get("fn") or "").strip().lower(),
+                denominator.get("field"),
+                derived_by_exprid,
+                derived_by_name,
+                rewrite_by_colname,
+                rewrite_by_modelid,
+                using_prep,
+                base_alias,
+                alias_by_wt,
+                rewrite_by_wt_col=rewrite_by_wt_col,
+                expr=None,
+            )
+            safe_divide = bool(expr.get("safe_divide", True))
+            multiply_by = expr.get("multiply_by")
+            if safe_divide:
+                ratio_sql = f"({num_sql}) / NULLIF(({den_sql}), 0)"
+            else:
+                ratio_sql = f"({num_sql}) / ({den_sql})"
+            if isinstance(multiply_by, (int, float)):
+                ratio_sql = f"({ratio_sql}) * {float(multiply_by)}"
+            return ratio_sql
 
         if fn.replace("_", " ").upper() in ("COUNT DISTINCT", "COUNT", "SUM", "AVG", "MIN", "MAX"):
             legacy = fn.replace("_", " ").upper()
@@ -2127,7 +2949,7 @@ class NoCodeQueryService:
                     out.append(s)
             return out
 
-        def compile_in_list(field_expr: str, values: List[Any]) -> str:
+        def compile_in_list(field_expr: str, values: List[Any], *, negate: bool = False) -> str:
             if not values:
                 return ""
             if len(values) > MAX_MANUAL_IN:
@@ -2135,32 +2957,74 @@ class NoCodeQueryService:
                     "Too many IN values; upload a list/value_override instead",
                     status_code=400,
                 )
-            expr = f"{field_expr} IN ({', '.join(new_param(v) for v in values)})"
+            in_op = "NOT IN" if negate else "IN"
+            expr = f"{field_expr} {in_op} ({', '.join(new_param(v) for v in values)})"
             if len(values) > 200:
                 expr = f"{expr} -- normalized large IN list ({len(values)} items)"
             return expr
 
-        def compile_condition_expr(field_expr: str, op: str, value: Any) -> str:
-            if op == "equals":
+        def _field_name(field_ref: Any) -> str:
+            if isinstance(field_ref, str):
+                return field_ref.strip().lower().split(".")[-1]
+            if isinstance(field_ref, dict):
+                return str(field_ref.get("columnName") or "").strip().lower()
+            return ""
+
+        def _is_person_name_field(field_ref: Any) -> bool:
+            col = _field_name(field_ref)
+            if col == "" or "name" not in col:
+                return False
+            # Keep geo/institution names as exact semantics unless caller explicitly uses contains.
+            if any(token in col for token in ("county", "district", "school", "city", "state", "country")):
+                return False
+            return True
+
+        def compile_condition_expr(field_expr: str, op: str, value: Any, *, field_ref: Any = None) -> str:
+            op_norm = str(op or "").strip().lower()
+            if op_norm in {"equals", "=", "==", "eq"}:
+                if value is None:
+                    return f"{field_expr} IS NULL"
+                if isinstance(value, str):
+                    if _is_person_name_field(field_ref):
+                        return f"LOWER({field_expr}) LIKE LOWER({new_param(f'%{value}%')})"
+                    return f"LOWER({field_expr}) = LOWER({new_param(value)})"
                 return f"{field_expr} = {new_param(value)}"
-            if op == "contains":
+            if op_norm in {"not_equals", "!=", "<>", "ne", "not_equal"}:
+                if value is None:
+                    return f"{field_expr} IS NOT NULL"
+                if isinstance(value, str):
+                    if _is_person_name_field(field_ref):
+                        return f"LOWER({field_expr}) NOT LIKE LOWER({new_param(f'%{value}%')})"
+                    return f"LOWER({field_expr}) <> LOWER({new_param(value)})"
+                return f"{field_expr} <> {new_param(value)}"
+            if op_norm in {"contains", "like"}:
+                if isinstance(value, str):
+                    return f"LOWER({field_expr}) LIKE LOWER({new_param(f'%{value}%')})"
                 return f"{field_expr} LIKE {new_param(f'%{value}%')}"
-            if op == "starts_with":
+            if op_norm in {"starts_with", "startswith", "prefix"}:
+                if isinstance(value, str):
+                    return f"LOWER({field_expr}) LIKE LOWER({new_param(f'{value}%')})"
                 return f"{field_expr} LIKE {new_param(f'{value}%')}"
-            if op == "gt":
+            if op_norm in {"gt", ">"}:
                 return f"{field_expr} > {new_param(value)}"
-            if op == "lt":
+            if op_norm in {"gte", ">="}:
+                return f"{field_expr} >= {new_param(value)}"
+            if op_norm in {"lt", "<"}:
                 return f"{field_expr} < {new_param(value)}"
-            if op == "in":
+            if op_norm in {"lte", "<="}:
+                return f"{field_expr} <= {new_param(value)}"
+            if op_norm in {"in", "not_in", "not in"}:
+                negate = op_norm in {"not_in", "not in"}
                 if isinstance(value, dict) and value.get("mode"):
                     mode = value.get("mode")
                     if mode == "manual":
                         vals = _normalize_in_values(value.get("values"))
-                        return compile_in_list(field_expr, vals)
+                        return compile_in_list(field_expr, vals, negate=negate)
                     if mode == "cohort":
                         view_name = value.get("viewName") or self._resolve_cohort_view_name(value.get("cohortId"))
                         view_sql = self._safe_table_full_name(view_name)
-                        return f"{field_expr} IN (SELECT {self._safe_ident('patient_id')} FROM {view_sql})"
+                        in_op = "NOT IN" if negate else "IN"
+                        return f"{field_expr} {in_op} (SELECT {self._safe_ident('patient_id')} FROM {view_sql})"
                     if mode == "value_override":
                         list_type = value.get("listType")
                         list_id = value.get("listId")
@@ -2173,18 +3037,23 @@ class NoCodeQueryService:
                             raise ServiceError("Invalid value_override listType for IN filter", status_code=400)
                         col = VALUE_OVERRIDE_IN_COLUMN_BY_TYPE[list_type]
                         table_sql = self._safe_table_full_name(table)
+                        in_op = "NOT IN" if negate else "IN"
                         return (
-                            f"{field_expr} IN (SELECT {self._safe_ident(col)} "
+                            f"{field_expr} {in_op} (SELECT {self._safe_ident(col)} "
                             f"FROM {table_sql} WHERE list_id = {new_param(list_id)})"
                         )
                     raise ServiceError("Unsupported IN mode", status_code=400)
 
                 vals = _normalize_in_values(value)
-                return compile_in_list(field_expr, vals)
-            if op == "between":
+                return compile_in_list(field_expr, vals, negate=negate)
+            if op_norm == "between":
                 if not isinstance(value, list) or len(value) != 2:
                     raise ServiceError("between requires [min,max]", status_code=400)
                 return f"{field_expr} BETWEEN {new_param(value[0])} AND {new_param(value[1])}"
+            if op_norm in {"is_null", "is null", "not_exists"}:
+                return f"{field_expr} IS NULL"
+            if op_norm in {"is_not_null", "is not null", "exists"}:
+                return f"{field_expr} IS NOT NULL"
             raise ServiceError(f"Unsupported filter op: {op}", status_code=400)
 
         def field_expr_for_exists(field: Any, sub_alias: str) -> str:
@@ -2247,7 +3116,14 @@ class NoCodeQueryService:
             pred_sqls = []
             for cond in group_info["predicates"]:
                 field_expr = field_expr_for_exists(cond["field"], current_alias)
-                pred_sqls.append(compile_condition_expr(field_expr, cond["op"], cond["value"]))
+                pred_sqls.append(
+                    compile_condition_expr(
+                        field_expr,
+                        cond["op"],
+                        cond["value"],
+                        field_ref=cond.get("field"),
+                    )
+                )
 
             all_where = [p for p in where_preds + pred_sqls if p]
             if not all_where:
@@ -2343,7 +3219,7 @@ class NoCodeQueryService:
                             alias_by_wt,
                             rewrite_by_wt_col=rewrite_by_wt_col,
                         )
-                    return compile_condition_expr(field_expr, op, value), {}
+                    return compile_condition_expr(field_expr, op, value, field_ref=field), {}
 
                 if mode == "EXISTS":
                     key = n.get("existsScopeId") or str(wt_id)

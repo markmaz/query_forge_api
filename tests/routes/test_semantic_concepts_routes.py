@@ -45,6 +45,19 @@ def test_list_concepts_route(client, monkeypatch):
     assert resp.json["rows"][0]["concept_key"] == "SCHOOL_YEAR"
 
 
+def test_list_concept_keys_route(client, monkeypatch):
+    class _Svc:
+        def list_concept_keys(self, **kwargs):
+            assert kwargs["vertical"] == "education"
+            return {"concept_keys": ["ATTENDANCE_RATE", "SCHOOL_YEAR"]}
+
+    monkeypatch.setattr(semantic_concepts, "SemanticConceptService", _Svc)
+
+    resp = client.get("/api/v1/semantic/concepts/keys?vertical=education", headers=_headers(monkeypatch))
+    assert resp.status_code == 200
+    assert resp.json["concept_keys"] == ["ATTENDANCE_RATE", "SCHOOL_YEAR"]
+
+
 def test_create_concept_requires_admin(client, monkeypatch):
     resp = client.post(
         "/api/v1/semantic/concepts",
@@ -114,6 +127,31 @@ def test_rebuild_index_route(client, monkeypatch):
     assert resp.json["result"]["points_upserted"] == 10
 
 
+def test_backfill_primary_keys_route(client, monkeypatch):
+    class _Svc:
+        def backfill_primary_semantic_keys(self, *, workspace_id, vertical_norm, dry_run):
+            assert workspace_id == "ws-1"
+            assert vertical_norm == "education"
+            assert dry_run is True
+            return {
+                "workspace_id": workspace_id,
+                "vertical_norm": vertical_norm,
+                "dry_run": dry_run,
+                "candidates": 4,
+                "updated": 0,
+            }
+
+    monkeypatch.setattr(semantic_concepts, "SemanticConceptService", _Svc)
+
+    resp = client.post(
+        "/api/v1/semantic/concepts/backfill-primary-keys",
+        json={"workspace_id": "ws-1", "vertical_norm": "education", "dry_run": True},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["result"]["candidates"] == 4
+
+
 def test_delete_concept_route(client, monkeypatch):
     class _Svc:
         def delete_concept(self, concept_id):
@@ -159,7 +197,12 @@ def test_alias_crud_routes(client, monkeypatch):
 def test_value_alias_crud_routes(client, monkeypatch):
     class _Svc:
         def list_value_aliases(self, **kwargs):
-            return {"rows": [{"id": 1}], "total": 1, "page": kwargs["page"], "page_size": kwargs["page_size"]}
+            return {
+                "rows": [{"id": 1, "semantic_concept_id": 10, "concept_name": "District Name"}],
+                "total": 1,
+                "page": kwargs["page"],
+                "page_size": kwargs["page_size"],
+            }
 
         def create_value_alias(self, payload):
             return {"id": 2, **payload}
@@ -179,6 +222,7 @@ def test_value_alias_crud_routes(client, monkeypatch):
     list_resp = client.get("/api/v1/semantic/value-aliases?page=1&page_size=10", headers=_headers(monkeypatch))
     assert list_resp.status_code == 200
     assert list_resp.json["total"] == 1
+    assert list_resp.json["rows"][0]["concept_name"] == "District Name"
 
     create_resp = client.post(
         "/api/v1/semantic/value-aliases",
@@ -212,6 +256,9 @@ def test_value_alias_crud_routes(client, monkeypatch):
 def test_concept_column_map_crud_routes(client, monkeypatch):
     class _Svc:
         def list_concept_column_maps(self, **kwargs):
+            assert kwargs["concept_key"] == "district"
+            assert kwargs["column_name"] == "lea"
+            assert kwargs["q"] == "district"
             return {"rows": [{"id": 5}], "total": 1, "page": kwargs["page"], "page_size": kwargs["page_size"]}
 
         def create_concept_column_map(self, payload):
@@ -229,7 +276,10 @@ def test_concept_column_map_crud_routes(client, monkeypatch):
 
     monkeypatch.setattr(semantic_concepts, "SemanticConceptService", _Svc)
 
-    list_resp = client.get("/api/v1/semantic/concept-column-maps?page=1&page_size=10", headers=_headers(monkeypatch))
+    list_resp = client.get(
+        "/api/v1/semantic/concept-column-maps?page=1&page_size=10&concept_key=district&column_name=lea&q=district",
+        headers=_headers(monkeypatch),
+    )
     assert list_resp.status_code == 200
     assert list_resp.json["total"] == 1
 

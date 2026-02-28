@@ -73,6 +73,28 @@ def test_apply_edits_add_aggregate_creates_aggs_enabled_metrics_and_groupby() ->
     assert metric["label"] == "student_count"
 
 
+def test_apply_edits_add_filter_supports_extended_operators() -> None:
+    edits = [
+        AddFilterEdit(op="addFilter", col=_col(1, "name"), operator="not_equals", value="Alice"),
+        AddFilterEdit(op="addFilter", col=_col(2, "state"), operator="not_in", value=["CA", "NY"]),
+        AddFilterEdit(op="addFilter", col=_col(3, "middle_name"), operator="is_null", value=None),
+        AddFilterEdit(op="addFilter", col=_col(4, "nickname"), operator="is_not_null", value=None),
+        AddFilterEdit(op="addFilter", col=_col(5, "score"), operator="gte", value=80),
+        AddFilterEdit(op="addFilter", col=_col(6, "score"), operator="lte", value=100),
+    ]
+    sqljson = apply_edits(None, edits, prompt="extended operators")
+
+    children = ((sqljson.get("filters") or {}).get("children") or [])
+    assert [item.get("op") for item in children] == [
+        "not_equals",
+        "not_in",
+        "is_null",
+        "is_not_null",
+        "gte",
+        "lte",
+    ]
+
+
 def test_apply_edits_add_sort_appends_sorting_and_dedupes() -> None:
     edits = [
         AddSortEdit(op="addSort", col=_col(351, "school_year"), dir="asc"),

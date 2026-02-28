@@ -71,3 +71,34 @@ def test_plan_endpoint_contract_shape(client, monkeypatch):
     assert "column_vector" in body
     assert "llm_plan" in body
     assert "debug" in body
+    assert body["sqlJson"] == {"version": 1}
+    assert body["llm_plan"]["sqlJson"] == {"version": 1}
+
+
+def test_plan_endpoint_sql_json_alias_passthrough(client, monkeypatch):
+    class _Svc:
+        def plan(self, payload, *, include_llm=True):
+            del payload, include_llm
+            return {
+                "llm_plan": {
+                    "model": "qwen25-14b",
+                    "sql_json": {"domainId": 10, "columns": []},
+                    "selected_columns": [],
+                    "filters": [],
+                    "join_plan": {},
+                    "confidence": 0.9,
+                    "notes": [],
+                }
+            }
+
+    monkeypatch.setattr(semantic_routes, "PlanService", _Svc)
+
+    resp = client.post(
+        "/api/v1/semantic/plan",
+        json={"workspace_id": "ws-1", "vertical_norm": "education", "prompt": "students by district"},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["sqlJson"] == {"domainId": 10, "columns": []}
+    assert resp.json["llm_plan"]["sql_json"] == {"domainId": 10, "columns": []}
+    assert resp.json["llm_plan"]["sqlJson"] == {"domainId": 10, "columns": []}
