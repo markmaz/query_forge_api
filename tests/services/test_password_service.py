@@ -35,6 +35,23 @@ def test_check_is_string(monkeypatch: pytest.MonkeyPatch) -> None:
         password_service.check_is_string(password="weak")
 
 
+def test_validate_password_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(password_service, "check_password_length", lambda _pw: 200)
+    monkeypatch.setattr(password_service, "check_is_string", lambda _pw: 200)
+    monkeypatch.setattr(password_service, "check_breach", lambda _pw: 200)
+    assert password_service.validate_password_policy(password="Strong1!") == 200
+
+
+def test_validate_password_policy_raises_on_any_check_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        password_service,
+        "check_password_length",
+        lambda _pw: (_ for _ in ()).throw(ServiceError("bad", 422)),
+    )
+    with pytest.raises(ServiceError):
+        password_service.validate_password_policy(password="weak")
+
+
 def test_generate_otp_secret() -> None:
     secret = password_service.generate_otp_secret()
     assert isinstance(secret, str)

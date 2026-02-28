@@ -23,6 +23,31 @@ def test_domains_get_missing_workspace(client, auth_headers):
     assert "Missing X-Workspace-Id" in resp.json["error"]
 
 
+def test_domains_get_forbidden_workspace(client, monkeypatch):
+    import app.decorators.security as security
+
+    monkeypatch.setattr(
+        security.auth_service,
+        "verify_token",
+        lambda _token: {"sub": "user-1", "username": "user-1"},
+    )
+
+    def _deny_workspace_access(*, user_id: str, workspace_id: str) -> str:
+        raise ServiceError("You do not have access to this workspace", status_code=403)
+
+    monkeypatch.setattr(
+        "app.decorators.security.workspace_access_service.assert_workspace_access",
+        _deny_workspace_access,
+    )
+
+    resp = client.get(
+        "/api/v1/domains/",
+        headers={"Authorization": "Bearer token-1", "X-Workspace-Id": "ws-2"},
+    )
+    assert resp.status_code == 403
+    assert "workspace" in resp.json["error"].lower()
+
+
 def test_domains_get_service_error(client, auth_headers, monkeypatch):
     class _Svc:
         def list_user_domains(self, *, workspace_id: str, user_id: str):

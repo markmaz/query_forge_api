@@ -252,13 +252,13 @@ def test_normalize_filters_no_collapse(node: dict) -> None:
     assert out.get("type") == "group"
 
 
-def test_normalize_crosswalk_and_cohort_attachments_dict_input() -> None:
+def test_normalize_value_override_and_cohort_attachments_dict_input() -> None:
     svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(_single_table_plan()))
     q = svc.normalize(
         {
             "domainId": 1,
             "columns": [{"columnName": "id"}],
-            "crosswalkAttachments": {
+            "value_overrideAttachments": {
                 "a": {
                     "id": "cw1",
                     "listType": "regions",
@@ -279,22 +279,22 @@ def test_normalize_crosswalk_and_cohort_attachments_dict_input() -> None:
             },
         }
     )
-    cw = q["crosswalkAttachments"][0]
-    assert cw["crosswalkJoinColumns"] == ["zipcode"]
+    cw = q["value_overrideAttachments"][0]
+    assert cw["value_overrideJoinColumns"] == ["zipcode"]
     assert q["cohortAttachment"]["cohortTableAlias"] == "cohort"
 
 
-def test_normalize_crosswalk_none_inputs() -> None:
+def test_normalize_value_override_none_inputs() -> None:
     svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(_single_table_plan()))
     q = svc.normalize(
         {
             "domainId": 1,
             "columns": [{"columnName": "id"}],
-            "crosswalkAttachments": None,
-            "crosswalks": None,
+            "value_overrideAttachments": None,
+            "value_overrides": None,
         }
     )
-    assert q["crosswalkAttachments"] == []
+    assert q["value_overrideAttachments"] == []
 
 
 @pytest.mark.parametrize(
@@ -305,14 +305,14 @@ def test_normalize_crosswalk_none_inputs() -> None:
         {"listType": "regions", "listId": None, "mode": "join", "domainJoinColumns": []},
         {"listType": "regions", "listId": "l1", "mode": "bad", "domainJoinColumns": []},
         {"listType": "regions", "listId": "l1", "mode": "join", "domainJoinColumns": "bad"},
-        {"listType": "regions", "listId": "l1", "mode": "join", "domainJoinColumns": [], "crosswalkJoinColumns": "bad"},
+        {"listType": "regions", "listId": "l1", "mode": "join", "domainJoinColumns": [], "value_overrideJoinColumns": "bad"},
         {"listType": "regions", "listId": "l1", "mode": "join", "domainJoinColumns": [], "projectFields": "bad"},
     ],
 )
-def test_normalize_crosswalk_errors(bad_cw: object) -> None:
+def test_normalize_value_override_errors(bad_cw: object) -> None:
     svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(_single_table_plan()))
     with pytest.raises(ServiceError):
-        svc.normalize({"domainId": 1, "columns": [{"columnName": "id"}], "crosswalkAttachments": [bad_cw]})
+        svc.normalize({"domainId": 1, "columns": [{"columnName": "id"}], "value_overrideAttachments": [bad_cw]})
 
 
 @pytest.mark.parametrize(
@@ -358,13 +358,13 @@ def test_normalize_filters_or_children_non_condition() -> None:
     assert normalized["children"][1]["op"] == "gt"
 
 
-def test_normalize_crosswalk_domain_join_column() -> None:
+def test_normalize_value_override_domain_join_column() -> None:
     svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(_single_table_plan()))
     normalized = svc.normalize(
         {
             "domainId": 1,
             "columns": [{"columnName": "id"}],
-            "crosswalkAttachments": [
+            "value_overrideAttachments": [
                 {
                     "listType": "regions",
                     "listId": "l1",
@@ -374,14 +374,14 @@ def test_normalize_crosswalk_domain_join_column() -> None:
             ],
         }
     )
-    cw = normalized["crosswalkAttachments"][0]
+    cw = normalized["value_overrideAttachments"][0]
     assert cw["domainJoinColumns"][0]["columnName"] == "zip"
 
 
-def test_normalize_crosswalks_invalid_type() -> None:
+def test_normalize_value_overrides_invalid_type() -> None:
     svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(_single_table_plan()))
     with pytest.raises(ServiceError):
-        svc.normalize({"domainId": 1, "columns": [{"columnName": "id"}], "crosswalkAttachments": "bad"})
+        svc.normalize({"domainId": 1, "columns": [{"columnName": "id"}], "value_overrideAttachments": "bad"})
 
 
 def test_attachment_required_table_ids() -> None:
@@ -544,7 +544,7 @@ def test_compile_where_in_normalization_edges(monkeypatch: pytest.MonkeyPatch) -
     assert params == {"p1": "a", "p2": "b"}
 
 
-def test_compile_where_in_manual_errors_and_crosswalk_modes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_compile_where_in_manual_errors_and_value_override_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     plan = _single_table_plan()
     svc = NoCodeQueryService(executor=ArrayExec(), domain_resolver=FakeResolver(plan))
     manual = {
@@ -561,16 +561,16 @@ def test_compile_where_in_manual_errors_and_crosswalk_modes(monkeypatch: pytest.
     with pytest.raises(ServiceError):
         _compile_where_with_params(svc, bad_mode, plan)
 
-    bad_list_type = {"type": "condition", "field": {"columnName": "code"}, "op": "in", "value": {"mode": "crosswalk", "listType": "bad", "listId": "x"}}
+    bad_list_type = {"type": "condition", "field": {"columnName": "code"}, "op": "in", "value": {"mode": "value_override", "listType": "bad", "listId": "x"}}
     with pytest.raises(ServiceError):
         _compile_where_with_params(svc, bad_list_type, plan)
 
-    missing_list_id = {"type": "condition", "field": {"columnName": "code"}, "op": "in", "value": {"mode": "crosswalk", "listType": "regions"}}
+    missing_list_id = {"type": "condition", "field": {"columnName": "code"}, "op": "in", "value": {"mode": "value_override", "listType": "regions"}}
     with pytest.raises(ServiceError):
         _compile_where_with_params(svc, missing_list_id, plan)
 
     monkeypatch.setitem(TABLE_BY_TYPE, "regions", None)
-    bad_table = {"type": "condition", "field": {"columnName": "code"}, "op": "in", "value": {"mode": "crosswalk", "listType": "regions", "listId": "x"}}
+    bad_table = {"type": "condition", "field": {"columnName": "code"}, "op": "in", "value": {"mode": "value_override", "listType": "regions", "listId": "x"}}
     with pytest.raises(ServiceError):
         _compile_where_with_params(svc, bad_table, plan)
 
@@ -605,7 +605,7 @@ def test_compile_where_in_no_array_raises_for_large() -> None:
         _compile_where_with_params(svc, node, plan)
 
 
-def test_compile_attachments_crosswalk_filter_and_join() -> None:
+def test_compile_attachments_value_override_filter_and_join() -> None:
     plan, join = _two_table_plan()
     resolver = FakeResolver(plan, paths={2: [join]}, workspace_id="ws")
     svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=resolver)
@@ -615,7 +615,7 @@ def test_compile_attachments_crosswalk_filter_and_join() -> None:
         return f":p{_counter[0]}"
 
     ctx = svc._compile_attachments(
-        crosswalk_attachments=[
+        value_override_attachments=[
             {
                 "listType": "regions",
                 "listId": "l1",
@@ -663,7 +663,7 @@ def test_compile_attachments_join_separate_aliases_and_needs_base_alias() -> Non
         return f":p{_counter[0]}"
 
     ctx = svc._compile_attachments(
-        crosswalk_attachments=[
+        value_override_attachments=[
             {
                 "id": "att1",
                 "listType": "npiCategories",
@@ -704,7 +704,7 @@ def test_compile_attachments_duplicate_cte_names() -> None:
         return f":p{_counter[0]}"
 
     ctx = svc._compile_attachments(
-        crosswalk_attachments=[
+        value_override_attachments=[
             {
                 "listType": "regions",
                 "listId": "l1",
@@ -746,7 +746,7 @@ def test_compile_attachments_table_missing(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setitem(TABLE_BY_TYPE, "regions", None)
     with pytest.raises(ServiceError):
         svc._compile_attachments(
-            crosswalk_attachments=[
+            value_override_attachments=[
                 {
                     "listType": "regions",
                     "listId": "l1",
@@ -783,7 +783,7 @@ def test_compile_attachments_join_default_suffix(monkeypatch: pytest.MonkeyPatch
         lambda _col, _path: {"columnName": "patient_id", "workspaceTableId": 1, "modelColumnId": None, "exprId": None},
     )
     ctx = svc._compile_attachments(
-        crosswalk_attachments=[
+        value_override_attachments=[
             {
                 "id": "att1",
                 "listType": "npiCategories",
@@ -823,7 +823,7 @@ def test_compile_attachments_join_default_suffix(monkeypatch: pytest.MonkeyPatch
         ({"listType": "regions", "listId": "x", "mode": "join", "domainJoinColumns": [{"columnName": "zip"}]}, None),
     ],
 )
-def test_compile_attachments_crosswalk_errors(bad_cw: object, workspace_id: str | None) -> None:
+def test_compile_attachments_value_override_errors(bad_cw: object, workspace_id: str | None) -> None:
     plan, join = _two_table_plan()
     resolver = FakeResolver(plan, paths={2: [join]}, workspace_id=workspace_id)
     svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=resolver)
@@ -834,7 +834,7 @@ def test_compile_attachments_crosswalk_errors(bad_cw: object, workspace_id: str 
 
     with pytest.raises(ServiceError):
         svc._compile_attachments(
-            crosswalk_attachments=[bad_cw],
+            value_override_attachments=[bad_cw],
             cohort_attachment=None,
             derived_by_exprid={},
             derived_by_name={},
@@ -858,7 +858,7 @@ def test_compile_attachments_cohort_join_and_filter() -> None:
         return f":p{_counter[0]}"
 
     ctx = svc._compile_attachments(
-        crosswalk_attachments=[],
+        value_override_attachments=[],
         cohort_attachment={
             "id": "co1",
             "mode": "filter",
@@ -882,7 +882,7 @@ def test_compile_attachments_cohort_join_and_filter() -> None:
     assert ctx["where"] and "EXISTS" in ctx["where"][0]
 
     ctx = svc._compile_attachments(
-        crosswalk_attachments=[],
+        value_override_attachments=[],
         cohort_attachment={
             "id": "co2",
             "mode": "join",
@@ -932,7 +932,7 @@ def test_compile_attachments_cohort_errors(bad_cohort: object) -> None:
 
     with pytest.raises(ServiceError):
         svc._compile_attachments(
-            crosswalk_attachments=[],
+            value_override_attachments=[],
             cohort_attachment=bad_cohort,
             derived_by_exprid={},
             derived_by_name={},
@@ -956,7 +956,7 @@ def test_compile_skips_attachment_select_duplicates() -> None:
             {"columnName": "cw_region", "exprId": "cw:att1:cw:region"},
             {"columnName": "cw_subregion", "exprId": "cw:att1:cw:subregion"},
         ],
-        "crosswalkAttachments": [
+        "value_overrideAttachments": [
             {
                 "id": "att1",
                 "listType": "regions",
@@ -980,7 +980,7 @@ def test_compile_aggs_with_attachment_selects_raises() -> None:
         "domainId": 1,
         "columns": [{"columnName": "patient_id"}],
         "aggs": {"enabled": True, "groupBy": [{"columnName": "patient_id"}], "metrics": []},
-        "crosswalkAttachments": [
+        "value_overrideAttachments": [
             {
                 "listType": "regions",
                 "listId": "l1",
@@ -1006,7 +1006,7 @@ def test_compile_uses_prep_alias_with_attachment_needs_base_alias() -> None:
                 {"id": "r1", "op": "fill_empty", "target": {"columnName": "zip"}, "output": {"columnName": "zip"}, "value": ""}
             ]
         },
-        "crosswalkAttachments": [
+        "value_overrideAttachments": [
             {
                 "id": "att1",
                 "listType": "regions",
@@ -1035,7 +1035,7 @@ def test_compile_two_phase_preview_with_filter_only_table() -> None:
                 {"type": "condition", "field": {"columnName": "code", "workspaceTableId": 2}, "op": "equals", "value": "A1"}
             ],
         },
-        "crosswalkAttachments": [
+        "value_overrideAttachments": [
             {
                 "id": "att1",
                 "listType": "regions",

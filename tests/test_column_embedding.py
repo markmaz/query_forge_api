@@ -26,6 +26,7 @@ def test_build_workspace_column_payload_schema() -> None:
         "model_data_type": "INT",
         "workspace_data_type": "INT",
         "column_description": "Student identifier",
+        "semantic_type": "identifier.student_id",
         "model_is_active": 1,
     }
 
@@ -39,4 +40,5 @@ def test_build_workspace_column_payload_schema() -> None:
     assert payload["model_column_id"] == 9
     assert payload["column_name"] == "student_id"
     assert payload["data_type"] == "INT"
+    assert payload["semantic_type"] == "identifier.student_id"
     assert payload["is_active"] is True

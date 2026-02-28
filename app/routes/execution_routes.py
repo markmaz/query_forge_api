@@ -31,7 +31,7 @@ class ExecutionStart(Resource):
         -H "Authorization: Bearer <token>" \\
         -H "X-Workspace-Id: <workspace_id>" \\
         -H "Content-Type: application/json" \\
-        -d '{"sql":"SELECT 1","params":{},"kind":"query_builder"}'
+        -d '{"sqlJson":{"domainId":"<domain-id>","select":[{"field":"*"}]},"kind":"query_builder"}'
     """
 
     @token_required

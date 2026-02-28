@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from app.exceptions.service_error import ServiceError
@@ -42,6 +44,22 @@ def test_get_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
     svc = WorkspaceService()
     ws = svc.get_workspace("1")
     assert ws["workspace_id"] == "1"
+
+
+def test_get_workspace_does_not_log_auth_header(caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.services.workspace_service.get_headers",
+        lambda *_args, **_kwargs: {"Authorization": "Bearer super-secret"},
+    )
+    monkeypatch.setattr("app.services.workspace_service.requests.get", lambda *_args, **_kwargs: _Resp(200))
+    monkeypatch.setattr(
+        "app.services.workspace_service.process_response",
+        lambda _resp: {"workspace_id": "1", "workspace_name": "One", "deployment_name": "https://dbx"},
+    )
+    svc = WorkspaceService()
+    with caplog.at_level(logging.DEBUG, logger="app.services.workspace_service"):
+        svc.get_workspace("1")
+    assert not any("super-secret" in rec.message for rec in caplog.records)
 
 
 def test_get_workspace_users_from_dbx(monkeypatch: pytest.MonkeyPatch) -> None:

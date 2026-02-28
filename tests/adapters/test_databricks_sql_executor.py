@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from typing import Any, Dict, Optional
 
 import pyarrow as pa
@@ -216,3 +217,50 @@ def test_rows_from_result_json_inline() -> None:
 def test_rows_from_result_json_list() -> None:
     payload = {"result": [{"a": 1}]}
     assert _rows_from_result_json(payload) == [{"a": 1}]
+
+
+def test_submit_statement_logs_redacted_payload(caplog: pytest.LogCaptureFixture) -> None:
+    session = _Session()
+    session.set_post(_Resp({"statement_id": "s1"}))
+    exec = DatabricksSQLExecutor(
+        base_url="https://dbx",
+        token_provider=_TokenProvider("tok"),
+        http=session,
+        default_warehouse_id="wh",
+    )
+
+    secret_sql = "SELECT * FROM users WHERE email='secret@example.com'"
+    with caplog.at_level(logging.DEBUG, logger="app.adapters.databricks_sql_executor"):
+        exec.submit_statement(secret_sql, parameters={"api_key": "shhh"}, wait=False)
+
+    messages = [rec.message for rec in caplog.records]
+    assert any("Submitting SQL statement" in msg for msg in messages)
+    assert not any("secret@example.com" in msg for msg in messages)
+    assert not any("shhh" in msg for msg in messages)
+    assert any("statement_len" in msg for msg in messages)
+
+
+def test_poll_status_logs_only_state(caplog: pytest.LogCaptureFixture) -> None:
+    session = _Session()
+    session.set_get(
+        _Resp(
+            {
+                "status": {"state": "RUNNING"},
+                "debug_payload": {"token": "secret-token", "sql": "SELECT secret"},
+            }
+        )
+    )
+    exec = DatabricksSQLExecutor(
+        base_url="https://dbx",
+        token_provider=_TokenProvider("tok"),
+        http=session,
+        default_warehouse_id="wh",
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="app.adapters.databricks_sql_executor"):
+        exec.poll_status("s1")
+
+    messages = [rec.message for rec in caplog.records]
+    assert any("Polled status for s1: state=RUNNING" in msg for msg in messages)
+    assert not any("secret-token" in msg for msg in messages)
+    assert not any("SELECT secret" in msg for msg in messages)

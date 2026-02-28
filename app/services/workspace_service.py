@@ -86,7 +86,7 @@ class WorkspaceService:
         Raises:
             ServiceError: If the request fails
         """
-        logger.info(get_headers(DATABRICKS_TOKEN))
+        logger.debug("Fetching workspace metadata for workspace_id=%s", workspace_id)
         response = requests.get(build_url(DATABRICKS_BASE_ACCOUNT_URL, DATABRICKS_WORKSPACES, workspace_id), headers=get_headers(DATABRICKS_TOKEN))
         data = process_response(response)
 

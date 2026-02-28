@@ -13,21 +13,38 @@ from flask_restx import Api
 from app.adapters.databricks_token_manager import DatabricksTokenManager
 from app.adapters.sigma_token_manager import SigmaTokenManager
 from app.celery_app import celery, init_celery
-from app.config import LOG_QUEUE, VALKEY_ADDRESS, VALKEY_CONFIG, VALKEY_PORT
+from app.config import (
+    AWS_ACCESS_KEY_ID,
+    AWS_REGION,
+    AWS_SECRET_ACCESS_KEY,
+    AWS_SESSION_TOKEN,
+    LLM_INSTANCE_ID,
+    LLM_STATUS_CACHE_SECONDS,
+    LOG_QUEUE,
+    SEMANTIC_CONCEPT_SEED_ON_STARTUP,
+    SEMANTIC_VERTICAL_DEFAULT,
+    VALKEY_ADDRESS,
+    VALKEY_CONFIG,
+    VALKEY_PORT,
+    VLLM_BASE_URL,
+    VLLM_MODEL,
+    VLLM_TIMEOUT,
+)
 from app.config.logging_config import configure_logging
 from app.config.mail_config import MailConfig
 from app.exceptions.service_error import ServiceError
 from app.extensions import mail
 from app.routes.admin_routes import admin_ns
+from app.routes.ai import ai_ns
 from app.routes.auth_routes import auth_ns
 from app.routes.connection_routes import connection_ns
-from app.routes.crosswalk_routes import crosswalk_ns
+from app.routes.value_override_routes import value_override_ns
 from app.routes.dashboard_routes import dashboard_ns
 from app.routes.domain_routes import domains_ns
 from app.routes.embeddings import embeddings_ns
 from app.routes.execution_routes import executions_ns
 from app.routes.export_routes import exports_ns
-from app.routes.functions_routes import functions_ns
+from app.routes.data_environment import data_environment_ns
 from app.routes.model_routes import model_ns
 from app.routes.nlp_routes import nlp_ns
 from app.routes.no_code_query_routes import nocode_ns
@@ -37,6 +54,17 @@ from app.routes.product_routes import product_ns
 from app.routes.public_sales_inquiry import public_ns
 from app.routes.query_tree_routes import saved_query_ns, tree_ns
 from app.routes.role_routes import role_ns
+from app.routes.semantic_concepts import (
+    semantic_concept_aliases_ns,
+    semantic_concept_column_maps_ns,
+    semantic_concepts_ns,
+    semantic_value_aliases_ns,
+)
+from app.routes.semantic_mappings import semantic_mappings_ns
+from app.routes.semantic_registry import semantic_registry_ns
+from app.routes.semantic_relationships import semantic_relationships_ns
+from app.routes.semantic_routes import semantic_ns
+from app.routes.semantic_suggestions import semantic_suggestions_ns
 from app.routes.user_routes import user_ns
 from app.routes.user_workspace_routes import user_workspace_ns
 from app.routes.workspace_inventory_routes import wsinv_ns
@@ -44,6 +72,7 @@ from app.routes.workspace_routes import workspace_ns
 from app.routes.workspace_table_routes import workspace_tables_ns
 from app.services.auth_service import AuthService
 from app.services.base_service import build_url
+from app.services.semantic.concept_seed import ConceptSeedService
 
 NAME = "api"
 VERSION = "v1"
@@ -77,6 +106,21 @@ def create_app():
     app = Flask(__name__)
     app.config["RESTX_MASK_SWAGGER"] = False
     app.url_map.strict_slashes = False
+    app.config["VLLM_BASE_URL"] = VLLM_BASE_URL
+    app.config["VLLM_MODEL"] = VLLM_MODEL
+    app.config["VLLM_TIMEOUT"] = VLLM_TIMEOUT
+    app.config["AWS_REGION"] = AWS_REGION
+    app.config["AWS_ACCESS_KEY_ID"] = AWS_ACCESS_KEY_ID
+    app.config["AWS_SECRET_ACCESS_KEY"] = AWS_SECRET_ACCESS_KEY
+    app.config["AWS_SESSION_TOKEN"] = AWS_SESSION_TOKEN
+    app.config["LLM_INSTANCE_ID"] = LLM_INSTANCE_ID
+    app.config["LLM_STATUS_CACHE_SECONDS"] = LLM_STATUS_CACHE_SECONDS
+    if not app.config["LLM_INSTANCE_ID"]:
+        raise RuntimeError("LLM_INSTANCE_ID environment variable is required")
+    if not app.config["AWS_ACCESS_KEY_ID"] or not app.config["AWS_SECRET_ACCESS_KEY"]:
+        raise RuntimeError(
+            "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables are required"
+        )
     authorizations = {"BearerAuth": {"type": "apiKey", "in": "header", "name": "Authorization"}}
 
     app.config.from_object(MailConfig)
@@ -114,12 +158,11 @@ def create_app():
     api.add_namespace(connection_ns, path=build_url("/", NAME, VERSION, "connections"))
     api.add_namespace(user_workspace_ns, path=build_url("/", NAME, VERSION, "user-workspaces"))
     api.add_namespace(role_ns, path=build_url("/", NAME, VERSION, "roles"))
-    api.add_namespace(functions_ns, path=build_url("/", NAME, VERSION, "functions"))
     api.add_namespace(admin_ns, path=build_url("/", NAME, VERSION, "admin"))
     api.add_namespace(product_ns, path=build_url("/", NAME, VERSION, "products"))
     api.add_namespace(otp_ns, path=build_url("/", NAME, VERSION, "otp"))
     api.add_namespace(product_group_ns, path=build_url("/", NAME, VERSION, "product-groups"))
-    api.add_namespace(crosswalk_ns, path=build_url("/", NAME, VERSION, "crosswalks"))
+    api.add_namespace(value_override_ns, path=build_url("/", NAME, VERSION, "value_overrides"))
     api.add_namespace(public_ns, path=build_url("/", NAME, VERSION, "public"))
     api.add_namespace(domains_ns, path=build_url("/", NAME, VERSION, "domains"))
     api.add_namespace(embeddings_ns, path=build_url("/", NAME, VERSION, "embeddings"))
@@ -131,10 +174,28 @@ def create_app():
     api.add_namespace(nocode_ns, path=build_url("/", NAME, VERSION, "query"))
     api.add_namespace(tree_ns, path=build_url("/", NAME, VERSION, "query-tree"))
     api.add_namespace(saved_query_ns, path=build_url("/", NAME, VERSION, "saved-queries"))
+    api.add_namespace(ai_ns, path=build_url("/", NAME, VERSION, "ai"))
+    api.add_namespace(semantic_concepts_ns, path=build_url("/", NAME, VERSION, "semantic", "concepts"))
+    api.add_namespace(semantic_concept_aliases_ns, path=build_url("/", NAME, VERSION, "semantic", "concept-aliases"))
+    api.add_namespace(semantic_value_aliases_ns, path=build_url("/", NAME, VERSION, "semantic", "value-aliases"))
+    api.add_namespace(semantic_concept_column_maps_ns, path=build_url("/", NAME, VERSION, "semantic", "concept-column-maps"))
+    api.add_namespace(semantic_registry_ns, path=build_url("/", NAME, VERSION, "semantic", "registry"))
+    api.add_namespace(semantic_mappings_ns, path=build_url("/", NAME, VERSION, "semantic", "mappings"))
+    api.add_namespace(semantic_relationships_ns, path=build_url("/", NAME, VERSION, "semantic", "relationships"))
+    api.add_namespace(semantic_suggestions_ns, path=build_url("/", NAME, VERSION, "semantic", "suggestions"))
+    api.add_namespace(semantic_ns, path=build_url("/", NAME, VERSION, "semantic"))
+    api.add_namespace(data_environment_ns, path=f"/{NAME}/{VERSION}/data-environment")
 
     configure_logging()
     logger = logging.getLogger(__name__)
     logger.info("Starting the application...")
+
+    if SEMANTIC_CONCEPT_SEED_ON_STARTUP:
+        try:
+            ConceptSeedService().ensure_seeded(SEMANTIC_VERTICAL_DEFAULT)
+            logger.info("Seeded semantic concepts on startup for vertical=%s", SEMANTIC_VERTICAL_DEFAULT)
+        except Exception:
+            logger.exception("Semantic concept startup seed failed")
 
     databricks_token_manager = DatabricksTokenManager()
     sigma_token_manager = SigmaTokenManager()

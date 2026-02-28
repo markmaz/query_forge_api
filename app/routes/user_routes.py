@@ -12,6 +12,7 @@ from app.services.user_service import UserService
 logger = logging.getLogger(__name__)
 
 user_ns = Namespace("users", description="User management operations")
+SENSITIVE_USER_FIELDS = {"password", "otp_secret"}
 # Define parser globally
 user_parser = reqparse.RequestParser()
 user_parser.add_argument('status', type=str, default='All', help='Filter by status', action='store', location='args')  # Single value
@@ -40,12 +41,37 @@ mapping_model = user_ns.model('UserWorkspaceMapping', {
     'workspace_id': fields.String(required=True, description='The ID of the workspace'),
 })
 
+user_role_add_model = user_ns.model(
+    "UserRoleAdd",
+    {
+        "role_id": fields.String(required=True, description="Role ID to assign directly to the user"),
+    },
+)
+
+user_role_replace_model = user_ns.model(
+    "UserRoleReplace",
+    {
+        "role_ids": fields.List(fields.String, required=True, description="Complete direct role id list"),
+    },
+)
+
+user_role_update_model = user_ns.model(
+    "UserRoleUpdate",
+    {
+        "role_id": fields.String(required=True, description="Replacement role id"),
+    },
+)
+
 pagination_response = user_ns.model('PaginationResponse', {
     'users': fields.List(fields.Nested(user_model)),
     'next_cursor': fields.String(description='Cursor for next page', default=None),
     'prev_cursor': fields.String(description='Cursor for previous page', default=None),
     'total_count': fields.Integer(description='Total number of users'),
 })
+
+
+def _public_user_payload(user: User) -> dict:
+    return user.model_dump(mode="json", exclude=SENSITIVE_USER_FIELDS)
 
 @user_ns.route("/")
 class UserList(Resource):
@@ -82,7 +108,7 @@ class UserList(Resource):
                 username=args['q']
             )
             return {
-                'users': [user.model_dump(mode="json") for user in users],
+                'users': [_public_user_payload(user) for user in users],
                 'next_cursor': next_cursor,
                 'prev_cursor': prev_cursor,
                 'total_count': total_count
@@ -96,6 +122,7 @@ class UserList(Resource):
 class UserUpdates(Resource):
     @user_ns.response(200, "User updated")
     @user_ns.doc(security='BearerAuth')
+    @token_required
     def put(self, user_id):
         """
         Update an existing user
@@ -105,7 +132,7 @@ class UserUpdates(Resource):
         userService = UserService()
         result = userService.update_user(user_id=user_id, update_data=user)
         
-        return jsonify(result.model_dump(mode="json"))
+        return jsonify(_public_user_payload(result))
 
     @user_ns.response(200, "User deleted")
     @user_ns.doc(security='BearerAuth')
@@ -127,9 +154,7 @@ class UserUpdates(Resource):
         """
         userService = UserService()
         result = userService.get_user(user_id)
-        result.password = None
-        result.otp_secret = None
-        return jsonify(result.model_dump(mode="json"))
+        return jsonify(_public_user_payload(result))
     
     def options(self, user_id):
         return {}, 200
@@ -144,6 +169,62 @@ class UserWorkspaces(Resource):
         userService = UserService()
         results = userService.get_user_workspaces(user_id)
         return results
+
+
+@user_ns.route("/<string:user_id>/roles")
+class UserDirectRoles(Resource):
+    @token_required
+    def get(self, user_id):
+        user_service = UserService()
+        direct_roles = user_service.get_user_direct_roles(user_id)
+        effective_roles = user_service.get_user_effective_roles(user_id)
+        return {
+            "user_id": user_id,
+            "direct_roles": direct_roles,
+            "effective_roles": effective_roles,
+        }, 200
+
+    @token_required
+    @user_ns.expect(user_role_add_model, validate=False)
+    def post(self, user_id):
+        data = request.get_json(silent=True) or {}
+        role_id = str(data.get("role_id") or "").strip()
+        if not role_id:
+            return {"error": "role_id is required"}, 400
+        user_service = UserService()
+        mapping = user_service.add_user_direct_role(user_id, role_id)
+        return {"mapping": mapping}, 200
+
+    @token_required
+    @user_ns.expect(user_role_replace_model, validate=False)
+    def put(self, user_id):
+        data = request.get_json(silent=True) or {}
+        role_ids = data.get("role_ids")
+        if not isinstance(role_ids, list):
+            return {"error": "role_ids must be an array"}, 400
+        user_service = UserService()
+        result = user_service.replace_user_direct_roles(user_id, role_ids)
+        return result, 200
+
+
+@user_ns.route("/<string:user_id>/roles/<string:role_id>")
+class UserDirectRoleById(Resource):
+    @token_required
+    @user_ns.expect(user_role_update_model, validate=False)
+    def patch(self, user_id, role_id):
+        data = request.get_json(silent=True) or {}
+        new_role_id = str(data.get("role_id") or "").strip()
+        if not new_role_id:
+            return {"error": "role_id is required"}, 400
+        user_service = UserService()
+        result = user_service.update_user_direct_role(user_id, role_id, new_role_id)
+        return result, 200
+
+    @token_required
+    def delete(self, user_id, role_id):
+        user_service = UserService()
+        result = user_service.remove_user_direct_role(user_id, role_id)
+        return result, 200
 
 @user_ns.route("/<string:user_id>/workspaces/<string:workspace_id>/dashboards/<string:dashboard_id>/embed")
 class UserWorkspaceDashboard(Resource):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from flask import g
 
 from app.exceptions.service_error import ServiceError
 from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
@@ -77,3 +78,18 @@ def test_resolve_default_warehouse_missing(monkeypatch: pytest.MonkeyPatch) -> N
     builder = WorkspaceContextBuilder()
     with pytest.raises(ServiceError):
         builder._resolve_default_warehouse_id("ws-1")
+
+
+def test_build_context_forbidden_workspace_in_request_context(app, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _deny_workspace_access(self, *, user_id: str, workspace_id: str) -> str:
+        raise ServiceError("You do not have access to this workspace", status_code=403)
+
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.WorkspaceAccessService.assert_workspace_access",
+        _deny_workspace_access,
+    )
+    with app.test_request_context("/"):
+        g.user_id = "user-1"
+        with pytest.raises(ServiceError) as exc:
+            WorkspaceContextBuilder().build("ws-1")
+    assert exc.value.status_code == 403

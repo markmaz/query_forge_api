@@ -28,5 +28,13 @@ def check_is_string(password):
     else:
         raise ServiceError("Password does not contain at least 1 upper case letter, 1 lower case letter, or 1 special symbol", 422)
     
+
+def validate_password_policy(password: str) -> int:
+    check_password_length(password)
+    check_is_string(password)
+    check_breach(password)
+    return 200
+
+
 def generate_otp_secret():
     return pyotp.random_base32()

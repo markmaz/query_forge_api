@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional, Tuple
 import jwt
 import redis
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.config import (
     ACCESS_TOKEN_TTL_SECONDS,
@@ -24,6 +24,7 @@ from app.decorators.validate import validate_params
 from app.exceptions.service_error import ServiceError
 from app.models.user import User
 from app.services.user_service import UserService
+from app.utils.jwt_claims import claim_has_role
 from app.utils.token_utils import generate_token as generate
 
 cache = redis.Redis.from_url(VALKEY_CONFIG, decode_responses=True)
@@ -32,6 +33,7 @@ TTL_SECONDS = 3600
 KEY_PREFIX = "reset:token:"
 REFRESH_PREFIX = "auth:refresh:"
 DEFAULT_LEEWAY_SECONDS = 30
+_DUMMY_PASSWORD_HASH = generate_password_hash("dummy-password-value")
 
 def hash_token(t):
     return hashlib.sha256(t.encode()).hexdigest()
@@ -54,6 +56,14 @@ class AuthService:
     
     def _norm_status(self, s: object) -> str:
         return (str(s or "")).strip().lower()
+
+    def _consume_password_check_for_missing_user(self, password: str) -> None:
+        # Keep timing closer for missing-user vs bad-password paths.
+        check_password_hash(_DUMMY_PASSWORD_HASH, password or "")
+
+    def _raise_invalid_credentials(self, username: str) -> None:
+        logger.info("Invalid credentials for username=%s", username)
+        raise ServiceError("Invalid credentials", 401)
     
     
     @validate_params("username", "password")
@@ -72,19 +82,20 @@ class AuthService:
 
         try:
             user_service = UserService()
-            user = user_service.get_user_by_username(username)
-            status = self._norm_status(user.status)
+            user = user_service.find_user_by_username(username)
+            if not user:
+                self._consume_password_check_for_missing_user(password)
+                self._raise_invalid_credentials(username)
 
-            if user and status in "deactivated":
-                logger.error(f"User {username} with status {status} is not an activce user.")
-                raise ServiceError("User is not active.", 404)
-            
-            if user and check_password_hash(user.password, password):
+            status = self._norm_status(user.status)
+            if status == "deactivated":
+                self._consume_password_check_for_missing_user(password)
+                self._raise_invalid_credentials(username)
+
+            if check_password_hash(user.password, password):
                 user_service.update_last_login(user.user_id)
                 return user
-            else:
-                logger.error(f"User not found: {username}")
-                raise ServiceError("User not authenticated", 404)
+            self._raise_invalid_credentials(username)
         except OperationalError as e:
             logger.error(f"Operation failed: {str(e)}")
             raise ServiceError("Operation failed: Connection failure.", 500)
@@ -112,19 +123,20 @@ class AuthService:
 
         try:
             user_service = UserService()
-            user = user_service.get_user_by_username(username)
-            status = self._norm_status(user.status)
+            user = user_service.find_user_by_username(username)
+            if not user:
+                self._consume_password_check_for_missing_user(password)
+                self._raise_invalid_credentials(username)
 
-            if user and status in "deactivated":
-                logger.error(f"User {username} with status {status} is not an activce user.")
-                raise ServiceError("User is not active.", 404)
-            
-            if user and check_password_hash(user.password, password):
+            status = self._norm_status(user.status)
+            if status == "deactivated":
+                self._consume_password_check_for_missing_user(password)
+                self._raise_invalid_credentials(username)
+
+            if check_password_hash(user.password, password):
                 user_service.update_last_login(user.user_id)
                 return {"user_id": user.user_id, "requires_otp": True, "email": user.email}
-            else:
-                logger.error(f"User not found: {username}")
-                raise ServiceError("User not authenticated", 404)
+            self._raise_invalid_credentials(username)
         except OperationalError as e:
             logger.error(f"Operation failed: {str(e)}")
             raise ServiceError("Operation failed: Connection failure.", 500)
@@ -147,7 +159,7 @@ class AuthService:
         """
         return self.generate_access_token(
             user.user_id,
-            extra_claims={"username": user.user_name},
+            extra_claims=self.get_access_claims_for_user(user.user_id, username=user.user_name),
         )
 
     def _encode(self, payload: Dict[str, Any]) -> str:
@@ -199,6 +211,14 @@ class AuthService:
 
     def generate_access_token(self, user_id: str, extra_claims: Optional[Dict[str, Any]] = None) -> str:
         now = datetime.datetime.utcnow()
+        claims = dict(extra_claims or {})
+        if "roles" not in claims or "is_admin" not in claims:
+            resolved = self.get_access_claims_for_user(
+                user_id,
+                username=claims.get("username"),
+            )
+            for key, value in resolved.items():
+                claims.setdefault(key, value)
         payload = {
             "sub": str(user_id),
             "typ": "access",
@@ -206,8 +226,8 @@ class AuthService:
             "iat": int(now.timestamp()),
             "exp": now + datetime.timedelta(seconds=self.access_ttl_seconds),
         }
-        if extra_claims:
-            payload.update(extra_claims)
+        if claims:
+            payload.update(claims)
         return self._encode(payload)
 
     def _generate_refresh_token_with_jti(self, user_id: str) -> Tuple[str, str]:
@@ -237,9 +257,10 @@ class AuthService:
         return bool(cache.exists(f"{REFRESH_PREFIX}{jti}"))
 
     def issue_tokens(self, user: User) -> Dict[str, Any]:
+        extra_claims = self.get_access_claims_for_user(user.user_id, username=user.user_name)
         access_token = self.generate_access_token(
             user.user_id,
-            extra_claims={"username": user.user_name},
+            extra_claims=extra_claims,
         )
         refresh_token, jti = self._generate_refresh_token_with_jti(user.user_id)
         self.store_refresh_jti(jti, user.user_id, self.refresh_ttl_seconds)
@@ -248,6 +269,37 @@ class AuthService:
             "refresh_token": refresh_token,
             "expires_in": self.access_ttl_seconds,
         }
+
+    def get_access_claims_for_user(self, user_id: str, *, username: Optional[str] = None) -> Dict[str, Any]:
+        claims: Dict[str, Any] = {}
+        if username:
+            claims["username"] = str(username)
+
+        role_names: list[str] = []
+        try:
+            role_names = UserService().get_user_effective_role_names(str(user_id))
+        except Exception as exc:
+            logger.warning("Unable to load RBAC roles for user_id=%s: %s", user_id, exc)
+
+        normalized_roles = self._normalize_role_names(role_names)
+        claims["roles"] = normalized_roles
+        claims["is_admin"] = claim_has_role({"roles": normalized_roles}, "admin")
+        return claims
+
+    @staticmethod
+    def _normalize_role_names(role_names: list[str]) -> list[str]:
+        out: list[str] = []
+        seen = set()
+        for role_name in role_names or []:
+            text = str(role_name or "").strip()
+            if not text:
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(text)
+        return out
 
     def rotate_refresh_token(self, refresh_token: str) -> Tuple[str, str]:
         payload = self.decode_and_verify(refresh_token, expected_typ="refresh")
@@ -291,7 +343,7 @@ class AuthService:
     @validate_params("email")
     def send_reset_request(self, email: str) -> dict:
         service = UserService()
-        user = service.get_user_by_username(email)
+        user = service.find_user_by_username(email)
 
         if user:
             token = generate(user.user_id)

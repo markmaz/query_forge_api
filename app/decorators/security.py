@@ -1,15 +1,18 @@
 import functools
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 from flask import g, make_response, request
 
 from app.exceptions.service_error import ServiceError
 from app.services.auth_service import AuthService
+from app.services.workspace_access_service import WorkspaceAccessService
+from app.utils.jwt_claims import claim_is_admin, get_roles_from_claim
 
 auth_service = AuthService()
+workspace_access_service = WorkspaceAccessService()
 
 
-def _extract_user_context(payload: Dict[str, Any]) -> Tuple[str, str, bool]:
+def _extract_user_context(payload: Dict[str, Any]) -> Tuple[str, str, bool, List[str]]:
     # Identity
     user_id = (
         payload.get("user_id")
@@ -28,18 +31,10 @@ def _extract_user_context(payload: Dict[str, Any]) -> Tuple[str, str, bool]:
         or user_id
     )
 
-    # Admin
-    is_admin = bool(payload.get("is_admin") or payload.get("admin"))
+    roles = get_roles_from_claim(payload)
+    is_admin = claim_is_admin(payload)
 
-    roles = payload.get("roles")
-    if isinstance(roles, list) and any(str(r).lower() == "admin" for r in roles):
-        is_admin = True
-
-    groups = payload.get("groups")
-    if isinstance(groups, list) and any(str(gr).lower() == "admin" for gr in groups):
-        is_admin = True
-
-    return str(user_id or "").strip(), str(display_name or "").strip(), is_admin
+    return str(user_id or "").strip(), str(display_name or "").strip(), is_admin, roles
 
 
 def token_required(f):
@@ -76,13 +71,21 @@ def token_required(f):
         g.user_data = payload
 
         # Store normalized user context for services
-        user_id, display_name, is_admin = _extract_user_context(payload)
+        user_id, display_name, is_admin, roles = _extract_user_context(payload)
         if not user_id:
             raise ServiceError("Invalid token payload: missing user identity", status_code=401)
 
         g.user_id = user_id
         g.user_display_name = display_name
         g.is_admin = is_admin
+        g.user_roles = roles
+
+        workspace_id = (request.headers.get("X-Workspace-Id") or "").strip()
+        if workspace_id:
+            workspace_access_service.assert_workspace_access(
+                user_id=user_id,
+                workspace_id=workspace_id,
+            )
 
         return f(*args, **kwargs)
 

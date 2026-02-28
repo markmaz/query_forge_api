@@ -570,7 +570,7 @@ def test_compile_exprid_projection_alias() -> None:
     assert compiled.output_columns == [{"key": "Full Name", "label": "Full Name"}]
 
 
-def test_compile_crosswalk_exprid_projection_alias() -> None:
+def test_compile_value_override_exprid_projection_alias() -> None:
     plan = _single_table_plan()
     resolver = FakeResolver(plan)
     resolver._workspace_id = "ws"
@@ -582,7 +582,7 @@ def test_compile_crosswalk_exprid_projection_alias() -> None:
         ],
         "filters": None,
         "sorting": [],
-        "crosswalkAttachments": [
+        "value_overrideAttachments": [
             {
                 "id": "att1",
                 "listType": "regions",
@@ -659,7 +659,7 @@ def test_compile_exprid_projection_dedupes() -> None:
         ],
         "filters": None,
         "sorting": [],
-        "crosswalkAttachments": [
+        "value_overrideAttachments": [
             {
                 "id": "att1",
                 "listType": "regions",
@@ -1316,14 +1316,14 @@ def test_compile_where_in_manual_cap() -> None:
         _compile_where_with_params(svc, node, plan)
 
 
-def test_compile_where_in_crosswalk_mode() -> None:
+def test_compile_where_in_value_override_mode() -> None:
     plan = _single_table_plan()
     svc = NoCodeQueryService(executor=FakeSQLExecutor(), domain_resolver=FakeResolver(plan))
     node = {
         "type": "condition",
         "field": "zipcode",
         "op": "in",
-        "value": {"mode": "crosswalk", "listType": "regions", "listId": "list-1"},
+        "value": {"mode": "value_override", "listType": "regions", "listId": "list-1"},
     }
     where_sql, exists_parts, params = _compile_where_with_params(svc, node, plan)
     assert exists_parts == []

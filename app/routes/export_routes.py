@@ -25,6 +25,7 @@ from app.services.exports.export_policy import (
     set_cached_rowcount,
 )
 from app.services.no_code_query_service import NoCodeQueryService
+from app.services.sql_guard_service import assert_no_disallowed_client_sql_fields, assert_read_only_sql_statement
 from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
 
 logger = logging.getLogger(__name__)
@@ -111,33 +112,32 @@ class ExcelExport(Resource):
             signature = (payload.get("signature") or "").strip() or None
             total_rows = get_cached_rowcount(signature) if signature else None
 
-            sql_json = payload.get("sqlJson")
-            sql = payload.get("sql")
-            params = payload.get("params") or {}
-            count_sql = payload.get("countSql")
+            assert_no_disallowed_client_sql_fields(payload)
 
-            if sql_json is None and not sql:
-                raise ServiceError("sqlJson or sql is required", status_code=400)
-            if sql_json is not None and not isinstance(sql_json, dict):
+            sql_json = payload.get("sqlJson") or payload.get("sql_json")
+            if sql_json is None:
+                raise ServiceError("sqlJson is required", status_code=400)
+            if not isinstance(sql_json, dict):
                 raise ServiceError("sqlJson must be an object", status_code=400)
-            if params and not isinstance(params, dict):
-                raise ServiceError("params must be an object", status_code=400)
 
             ctx = WorkspaceContextBuilder().build(workspace_id)
-
-            if sql_json is not None:
-                domain_resolver = DomainResolver(workspace_id=workspace_id)
-                svc = NoCodeQueryService(executor=ctx.sql_exec, domain_resolver=domain_resolver)
-                normalized = svc.normalize(sql_json)
-                compiled = svc.compile(normalized, mode="export", limit=0, offset=0)
-                sql = compiled.sql
-                params = compiled.params
-                count_sql = compiled.count_sql
+            domain_resolver = DomainResolver(workspace_id=workspace_id)
+            svc = NoCodeQueryService(executor=ctx.sql_exec, domain_resolver=domain_resolver)
+            normalized = svc.normalize(sql_json)
+            compiled = svc.compile(normalized, mode="export", limit=0, offset=0)
+            sql = compiled.sql
+            params = compiled.params or {}
+            count_sql = compiled.count_sql
 
             if not isinstance(sql, str):
                 raise ServiceError("sql must be a string", status_code=400)
+            if params and not isinstance(params, dict):
+                raise ServiceError("Compiled params must be an object", status_code=500)
+
+            assert_read_only_sql_statement(sql, context="Compiled SQL statement")
             if not count_sql:
                 count_sql = f"SELECT COUNT(*) AS total FROM (\n{sql}\n) q"
+            assert_read_only_sql_statement(str(count_sql), context="Compiled count SQL statement")
 
             signature = signature or make_rowcount_signature(sql, params)
 
@@ -196,6 +196,10 @@ class ExcelDownload(Resource):
             filename = payload.get("filename") or "export.xlsx"
             if not isinstance(sql, str):
                 raise ServiceError("Export not available", status_code=404)
+            if params and not isinstance(params, dict):
+                raise ServiceError("Export not available", status_code=404)
+
+            assert_read_only_sql_statement(sql, context="Stored export SQL statement")
 
             ctx = WorkspaceContextBuilder().build(workspace_id)
             data_resp = ctx.sql_exec.submit_statement(

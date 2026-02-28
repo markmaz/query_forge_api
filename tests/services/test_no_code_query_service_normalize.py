@@ -42,6 +42,51 @@ def test_normalize_columns_type() -> None:
         svc.normalize({"domainId": 1, "columns": [{"columnName": "id", "workspaceTableId": "x"}]})
 
 
+def test_normalize_columns_accepts_field_and_col_shapes() -> None:
+    svc = _svc()
+    q = svc.normalize(
+        {
+            "domainId": 1,
+            "columns": [
+                {
+                    "field": {
+                        "modelColumnId": 101,
+                        "columnName": "first_name",
+                        "workspaceTableId": 24,
+                        "exprId": None,
+                    },
+                    "alias": "first_name",
+                },
+                {
+                    "col": {
+                        "modelColumnId": 102,
+                        "columnName": "last_name",
+                        "workspaceTableId": 24,
+                        "exprId": None,
+                    },
+                    "alias": "last_name",
+                },
+            ],
+        }
+    )
+    assert q["columns"][0]["columnName"] == "first_name"
+    assert q["columns"][0]["modelColumnId"] == 101
+    assert q["columns"][0]["workspaceTableId"] == 24
+    assert q["columns"][0]["alias"] == "first_name"
+    assert q["columns"][1]["columnName"] == "last_name"
+    assert q["columns"][1]["modelColumnId"] == 102
+    assert q["columns"][1]["workspaceTableId"] == 24
+    assert q["columns"][1]["alias"] == "last_name"
+
+
+def test_normalize_columns_field_shape_validation() -> None:
+    svc = _svc()
+    with pytest.raises(ServiceError, match="columns\\[0\\]\\.field must be an object"):
+        svc.normalize({"domainId": 1, "columns": [{"field": "bad"}]})
+    with pytest.raises(ServiceError, match="columns\\[0\\]\\.col must be an object"):
+        svc.normalize({"domainId": 1, "columns": [{"col": "bad"}]})
+
+
 def test_normalize_rejects_qualified_column() -> None:
     svc = _svc()
     with pytest.raises(ServiceError):

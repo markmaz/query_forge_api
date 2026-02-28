@@ -24,8 +24,31 @@ def _install_valkey(monkeypatch):
     return client
 
 
+def _install_nocode_prepare(monkeypatch, *, sql="SELECT 1", params=None, sql_rendered=None, count_sql=None):
+    class _Prepared:
+        pass
+
+    prepared = _Prepared()
+    prepared.sql = sql
+    prepared.params = params or {}
+    prepared.sql_rendered = sql if sql_rendered is None else sql_rendered
+    prepared.count_sql = count_sql
+
+    class _NoCodeService:
+        def __init__(self, executor, domain_resolver):
+            self.executor = executor
+            self.domain_resolver = domain_resolver
+
+        def prepare(self, raw_query, mode="preview", limit=200, offset=0):
+            return prepared
+
+    monkeypatch.setattr(execution_service, "NoCodeQueryService", _NoCodeService)
+    monkeypatch.setattr(execution_service, "DomainResolver", lambda workspace_id: object())
+
+
 def test_execution_start_status_cancel(client, auth_headers, monkeypatch):
     _install_valkey(monkeypatch)
+    _install_nocode_prepare(monkeypatch, sql="SELECT 1", params={})
 
     class _SqlExec:
         def __init__(self):
@@ -54,7 +77,7 @@ def test_execution_start_status_cancel(client, auth_headers, monkeypatch):
     resp = client.post(
         "/api/v1/executions/start",
         headers=auth_headers,
-        json={"sql": "SELECT 1", "params": {}, "kind": "query_builder"},
+        json={"sqlJson": {"domainId": 1}, "kind": "query_builder"},
     )
     assert resp.status_code == 200
     job_id = resp.json["jobId"]
@@ -82,7 +105,7 @@ def test_execution_start_validation_error(client, auth_headers, monkeypatch):
     resp = client.post(
         "/api/v1/executions/start",
         headers=auth_headers,
-        json={"sql": "", "params": {}, "kind": "query_builder"},
+        json={},
     )
     assert resp.status_code == 400
 
@@ -102,6 +125,7 @@ def test_execution_status_not_found(client, auth_headers, monkeypatch):
 
 def test_execution_results_success(client, auth_headers, monkeypatch):
     _install_valkey(monkeypatch)
+    _install_nocode_prepare(monkeypatch, sql="SELECT 1", params={"a": 1}, sql_rendered="SELECT 1")
 
     class _SqlExec:
         def submit_statement_async(self, sql, parameters, **_kwargs):
@@ -134,10 +158,8 @@ def test_execution_results_success(client, auth_headers, monkeypatch):
         "/api/v1/executions/start",
         headers=auth_headers,
         json={
-            "sql": "SELECT 1",
-            "params": {"a": 1},
+            "sqlJson": {"domainId": 1},
             "kind": "query_builder",
-            "sqlRendered": "SELECT 1",
             "limit": 5,
             "offset": 10,
         },
@@ -160,6 +182,7 @@ def test_execution_results_success(client, auth_headers, monkeypatch):
 
 def test_execution_results_running(client, auth_headers, monkeypatch):
     _install_valkey(monkeypatch)
+    _install_nocode_prepare(monkeypatch, sql="SELECT 1", params={})
 
     class _SqlExec:
         def submit_statement_async(self, sql, parameters, **_kwargs):
@@ -181,7 +204,7 @@ def test_execution_results_running(client, auth_headers, monkeypatch):
     resp = client.post(
         "/api/v1/executions/start",
         headers=auth_headers,
-        json={"sql": "SELECT 1", "params": {}, "kind": "query_builder"},
+        json={"sqlJson": {"domainId": 1}, "kind": "query_builder"},
     )
     assert resp.status_code == 200
     job_id = resp.json["jobId"]
@@ -193,6 +216,7 @@ def test_execution_results_running(client, auth_headers, monkeypatch):
 
 def test_execution_results_failed(client, auth_headers, monkeypatch):
     _install_valkey(monkeypatch)
+    _install_nocode_prepare(monkeypatch, sql="SELECT 1", params={})
 
     class _SqlExec:
         def submit_statement_async(self, sql, parameters, **_kwargs):
@@ -214,7 +238,7 @@ def test_execution_results_failed(client, auth_headers, monkeypatch):
     resp = client.post(
         "/api/v1/executions/start",
         headers=auth_headers,
-        json={"sql": "SELECT 1", "params": {}, "kind": "query_builder"},
+        json={"sqlJson": {"domainId": 1}, "kind": "query_builder"},
     )
     assert resp.status_code == 200
     job_id = resp.json["jobId"]
@@ -277,3 +301,21 @@ def test_execution_start_sql_json(client, auth_headers, monkeypatch):
     assert job["limit"] == 25
     assert job["offset"] == 5
     assert job["countSql"] == "SELECT COUNT(*) AS total FROM t"
+
+
+def test_execution_start_rejects_raw_sql_fields(client, auth_headers, monkeypatch):
+    _install_valkey(monkeypatch)
+
+    class _Builder:
+        def build(self, workspace_id: str):
+            raise AssertionError("Builder should not be called")
+
+    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+
+    resp = client.post(
+        "/api/v1/executions/start",
+        headers=auth_headers,
+        json={"sqlJson": {"domainId": 1}, "sql": "SELECT 1", "kind": "query_builder"},
+    )
+    assert resp.status_code == 400
+    assert "Raw SQL fields are not allowed" in resp.json["error"]

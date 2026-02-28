@@ -10,36 +10,36 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from app.adapters.mysql_sql_executor import MySQLSQLExecutor
 from app.exceptions.service_error import ServiceError
 from app.ports.sql_executor import SQLExecutor
-from app.services.crosswalks.list_schema import TABLE_BY_TYPE
+from app.services.value_overrides.list_schema import TABLE_BY_TYPE
 from app.services.domain_resolver import DomainPlan, DomainResolver
 
 MAX_MANUAL_IN = 150
 
-CROSSWALK_IN_COLUMN_BY_TYPE = {
+VALUE_OVERRIDE_IN_COLUMN_BY_TYPE = {
     "regions": "zipcode",
     "npiCategories": "npi",
     "serviceLines": "procedure_code",
 }
 
-CROSSWALK_KEY_BY_TYPE = {
+VALUE_OVERRIDE_KEY_BY_TYPE = {
     "regions": "zipcode",
     "npiCategories": "npi",
     "serviceLines": "procedure_code",
 }
 
-CROSSWALK_JOIN_ALIAS_BY_TYPE = {
+VALUE_OVERRIDE_JOIN_ALIAS_BY_TYPE = {
     "regions": "cw_regions",
     "npiCategories": "cw_npi",
     "serviceLines": "cw_sl",
 }
 
-CROSSWALK_FIELDS_BY_TYPE = {
+VALUE_OVERRIDE_FIELDS_BY_TYPE = {
     "regions": ["region", "subregion"],
     "npiCategories": ["npi_type_code", "customer_npi_category_1", "customer_npi_category_2"],
     "serviceLines": ["customer_service_line", "customer_sub_service_line"],
 }
 
-CROSSWALK_PROJECT_ALIASES_BY_TYPE = {
+VALUE_OVERRIDE_PROJECT_ALIASES_BY_TYPE = {
     "regions": {
         "region": "cw_region",
         "subregion": "cw_subregion",
@@ -236,9 +236,9 @@ class NoCodeQueryService:
         q.setdefault("aggs", {"enabled": False, "metrics": [], "groupBy": []})
         q.setdefault("sorting", [])
         q.setdefault("distinct", False)
-        q.setdefault("crosswalkAttachments", [])
+        q.setdefault("value_overrideAttachments", [])
         q.setdefault("cohortAttachment", None)
-        q.setdefault("crosswalks", [])
+        q.setdefault("value_overrides", [])
         q.setdefault("cohortJoin", None)
         q.setdefault("meta", {})
 
@@ -259,40 +259,48 @@ class NoCodeQueryService:
             if not isinstance(c, dict):
                 raise ServiceError(f"columns[{i}] must be an object", status_code=400)
 
-            col_name = c.get("columnName")
-            if not col_name or not isinstance(col_name, str):
-                raise ServiceError(f"columns[{i}].columnName is required", status_code=400)
+            col_source: Any = c
+            if "columnName" not in c:
+                if "field" in c:
+                    if not isinstance(c.get("field"), dict):
+                        raise ServiceError(f"columns[{i}].field must be an object", status_code=400)
+                    col_source = c.get("field")
+                elif "col" in c:
+                    if not isinstance(c.get("col"), dict):
+                        raise ServiceError(f"columns[{i}].col must be an object", status_code=400)
+                    col_source = c.get("col")
 
-            if "." in col_name:
-                raise ServiceError(
-                    f"columns[{i}].columnName must be an unqualified column name (no dots): {col_name}",
-                    status_code=400,
-                )
+            norm_col = self._normalize_col_key(col_source, path=f"columns[{i}]")
+            col_name = norm_col.get("columnName")
 
             alias = c.get("alias")
+            if alias is None and isinstance(col_source, dict):
+                alias = col_source.get("alias")
             if alias is not None and not isinstance(alias, str):
                 raise ServiceError(f"columns[{i}].alias must be a string or null", status_code=400)
             alias = (alias or "").strip() or None
 
-            expr_id = c.get("exprId", None)
-            if expr_id is not None and not isinstance(expr_id, str):
-                raise ServiceError(f"columns[{i}].exprId must be a string or null", status_code=400)
-
-            wt_id = c.get("workspaceTableId", None)
-            if wt_id is not None and not isinstance(wt_id, int):
-                raise ServiceError(f"columns[{i}].workspaceTableId must be number or null", status_code=400)
-
             norm_cols.append(
                 {
-                    "workspaceTableId": wt_id,
-                    "modelColumnId": c.get("modelColumnId"),
+                    "workspaceTableId": norm_col.get("workspaceTableId"),
+                    "modelColumnId": norm_col.get("modelColumnId"),
                     "columnName": col_name,
-                    "exprId": expr_id,
-                    "modelTableId": c.get("modelTableId"),
-                    "modelTableName": c.get("modelTableName"),
-                    "fullName": c.get("fullName"),
-                    "dataType": c.get("dataType"),
-                    "nullable": c.get("nullable"),
+                    "exprId": norm_col.get("exprId"),
+                    "modelTableId": c.get("modelTableId")
+                    if "modelTableId" in c
+                    else (col_source.get("modelTableId") if isinstance(col_source, dict) else None),
+                    "modelTableName": c.get("modelTableName")
+                    if "modelTableName" in c
+                    else (col_source.get("modelTableName") if isinstance(col_source, dict) else None),
+                    "fullName": c.get("fullName")
+                    if "fullName" in c
+                    else (col_source.get("fullName") if isinstance(col_source, dict) else None),
+                    "dataType": c.get("dataType")
+                    if "dataType" in c
+                    else (col_source.get("dataType") if isinstance(col_source, dict) else None),
+                    "nullable": c.get("nullable")
+                    if "nullable" in c
+                    else (col_source.get("nullable") if isinstance(col_source, dict) else None),
                     "alias": alias,
                 }
             )
@@ -391,21 +399,21 @@ class NoCodeQueryService:
         if (not q.get("columns")) and not bool(q.get("aggs", {}).get("enabled")):
             raise ServiceError("Select at least one column (or enable aggregations).", status_code=400)
 
-        def norm_crosswalk_attachment(cw: Any, idx: int) -> Dict[str, Any]:
+        def norm_value_override_attachment(cw: Any, idx: int) -> Dict[str, Any]:
             if not isinstance(cw, dict):
-                raise ServiceError(f"crosswalkAttachments[{idx}] must be an object", status_code=400)
+                raise ServiceError(f"value_overrideAttachments[{idx}] must be an object", status_code=400)
 
             list_type = cw.get("listType") or cw.get("type")
-            if not list_type or list_type not in CROSSWALK_KEY_BY_TYPE:
-                raise ServiceError("Invalid crosswalk listType", status_code=400)
+            if not list_type or list_type not in VALUE_OVERRIDE_KEY_BY_TYPE:
+                raise ServiceError("Invalid value_override listType", status_code=400)
 
             list_id = cw.get("listId")
             if not list_id or not isinstance(list_id, str):
-                raise ServiceError("crosswalk listId is required", status_code=400)
+                raise ServiceError("value_override listId is required", status_code=400)
 
             mode = (cw.get("mode") or "filter").strip().lower()
             if mode not in ("filter", "join"):
-                raise ServiceError("crosswalk mode must be filter or join", status_code=400)
+                raise ServiceError("value_override mode must be filter or join", status_code=400)
 
             raw_cols = cw.get("domainJoinColumns")
             if raw_cols is None:
@@ -415,15 +423,15 @@ class NoCodeQueryService:
                 raise ServiceError("domainJoinColumns must be a list", status_code=400)
 
             norm_cols = [
-                self._normalize_col_key(col, path=f"crosswalkAttachments[{idx}].domainJoinColumns[{j}]")
+                self._normalize_col_key(col, path=f"value_overrideAttachments[{idx}].domainJoinColumns[{j}]")
                 for j, col in enumerate(raw_cols)
             ]
 
-            crosswalk_join_cols = cw.get("crosswalkJoinColumns")
-            if crosswalk_join_cols is None:
-                crosswalk_join_cols = [CROSSWALK_KEY_BY_TYPE[list_type]]
-            if not isinstance(crosswalk_join_cols, list):
-                raise ServiceError("crosswalkJoinColumns must be a list", status_code=400)
+            value_override_join_cols = cw.get("value_overrideJoinColumns")
+            if value_override_join_cols is None:
+                value_override_join_cols = [VALUE_OVERRIDE_KEY_BY_TYPE[list_type]]
+            if not isinstance(value_override_join_cols, list):
+                raise ServiceError("value_overrideJoinColumns must be a list", status_code=400)
 
             project_fields = cw.get("projectFields") or []
             if not isinstance(project_fields, list):
@@ -435,7 +443,7 @@ class NoCodeQueryService:
                 "listId": str(list_id),
                 "mode": mode,
                 "domainJoinColumns": norm_cols,
-                "crosswalkJoinColumns": crosswalk_join_cols,
+                "value_overrideJoinColumns": value_override_join_cols,
                 "projectFields": project_fields,
                 "supportsSeparateAliasJoins": bool(
                     cw.get("supportsSeparateAliasJoins") or cw.get("separateAliasJoins")
@@ -489,13 +497,13 @@ class NoCodeQueryService:
                 return raw
             if isinstance(raw, dict):
                 return [v for v in raw.values() if v]
-            raise ServiceError("crosswalks must be a list or object", status_code=400)
+            raise ServiceError("value_overrides must be a list or object", status_code=400)
 
-        raw_crosswalk_attachments = q.get("crosswalkAttachments")
-        if not raw_crosswalk_attachments:
-            raw_crosswalk_attachments = q.get("crosswalks")
-        q["crosswalkAttachments"] = [
-            norm_crosswalk_attachment(cw, idx) for idx, cw in enumerate(as_attachment_list(raw_crosswalk_attachments))
+        raw_value_override_attachments = q.get("value_overrideAttachments")
+        if not raw_value_override_attachments:
+            raw_value_override_attachments = q.get("value_overrides")
+        q["value_overrideAttachments"] = [
+            norm_value_override_attachment(cw, idx) for idx, cw in enumerate(as_attachment_list(raw_value_override_attachments))
         ]
 
         raw_cohort_attachment = q.get("cohortAttachment")
@@ -542,20 +550,20 @@ class NoCodeQueryService:
 
     def _attachment_required_table_ids(
         self,
-        crosswalk_attachments: List[Any],
+        value_override_attachments: List[Any],
         cohort_attachment: Optional[Dict[str, Any]],
         primary_id: int,
     ) -> set[int]:
         needed: set[int] = set()
 
-        for i, cw in enumerate(crosswalk_attachments or []):
+        for i, cw in enumerate(value_override_attachments or []):
             if not isinstance(cw, dict):
-                raise ServiceError("crosswalkAttachments entries must be objects", status_code=400)
+                raise ServiceError("value_overrideAttachments entries must be objects", status_code=400)
             cols = cw.get("domainJoinColumns") or []
             if not isinstance(cols, list):
-                raise ServiceError(f"crosswalkAttachments[{i}].domainJoinColumns must be a list", status_code=400)
+                raise ServiceError(f"value_overrideAttachments[{i}].domainJoinColumns must be a list", status_code=400)
             for j, col in enumerate(cols):
-                norm = self._normalize_col_key(col, f"crosswalkAttachments[{i}].domainJoinColumns[{j}]")
+                norm = self._normalize_col_key(col, f"value_overrideAttachments[{i}].domainJoinColumns[{j}]")
                 wt_id = norm.get("workspaceTableId") or primary_id
                 needed.add(int(wt_id))
 
@@ -647,7 +655,7 @@ class NoCodeQueryService:
         primary_id = int(plan.primary.workspace_table_id)
         base_alias = plan.primary.alias
         alias_by_wt = plan.alias_by_workspace_table_id
-        crosswalk_attachments = q.get("crosswalkAttachments") or []
+        value_override_attachments = q.get("value_overrideAttachments") or []
         cohort_attachment = q.get("cohortAttachment")
         base_required_table_ids = self._required_table_ids_from_query(q, plan)
         q_no_filters = dict(q)
@@ -655,7 +663,7 @@ class NoCodeQueryService:
         projected_table_ids = self._required_table_ids_from_query(q_no_filters, plan)
         filter_only_table_ids = (base_required_table_ids - projected_table_ids) - {primary_id}
         attachment_required_table_ids = self._attachment_required_table_ids(
-            crosswalk_attachments,
+            value_override_attachments,
             cohort_attachment,
             primary_id,
         )
@@ -728,7 +736,7 @@ class NoCodeQueryService:
             return f":{key}"
 
         attach_ctx = self._compile_attachments(
-            crosswalk_attachments=crosswalk_attachments,
+            value_override_attachments=value_override_attachments,
             cohort_attachment=cohort_attachment,
             derived_by_exprid=derived_by_exprid,
             derived_by_name=derived_by_name,
@@ -1661,14 +1669,14 @@ class NoCodeQueryService:
 
         walk_filters(q.get("filters"))
 
-        for i, cw in enumerate(q.get("crosswalkAttachments") or []):
+        for i, cw in enumerate(q.get("value_overrideAttachments") or []):
             if not isinstance(cw, dict):
                 continue
             cols = cw.get("domainJoinColumns") or []
             if not isinstance(cols, list):
                 continue
             for j, col in enumerate(cols):
-                add_ref(col, f"crosswalkAttachments[{i}].domainJoinColumns[{j}]")
+                add_ref(col, f"value_overrideAttachments[{i}].domainJoinColumns[{j}]")
 
         cohort = q.get("cohortAttachment")
         if isinstance(cohort, dict):
@@ -2124,7 +2132,7 @@ class NoCodeQueryService:
                 return ""
             if len(values) > MAX_MANUAL_IN:
                 raise ServiceError(
-                    "Too many IN values; upload a list/crosswalk instead",
+                    "Too many IN values; upload a list/value_override instead",
                     status_code=400,
                 )
             expr = f"{field_expr} IN ({', '.join(new_param(v) for v in values)})"
@@ -2153,17 +2161,17 @@ class NoCodeQueryService:
                         view_name = value.get("viewName") or self._resolve_cohort_view_name(value.get("cohortId"))
                         view_sql = self._safe_table_full_name(view_name)
                         return f"{field_expr} IN (SELECT {self._safe_ident('patient_id')} FROM {view_sql})"
-                    if mode == "crosswalk":
+                    if mode == "value_override":
                         list_type = value.get("listType")
                         list_id = value.get("listId")
-                        if not list_type or list_type not in CROSSWALK_IN_COLUMN_BY_TYPE:
-                            raise ServiceError("Invalid crosswalk listType for IN filter", status_code=400)
+                        if not list_type or list_type not in VALUE_OVERRIDE_IN_COLUMN_BY_TYPE:
+                            raise ServiceError("Invalid value_override listType for IN filter", status_code=400)
                         if not list_id:
-                            raise ServiceError("crosswalk IN requires listId", status_code=400)
+                            raise ServiceError("value_override IN requires listId", status_code=400)
                         table = TABLE_BY_TYPE.get(list_type)
                         if not table:
-                            raise ServiceError("Invalid crosswalk listType for IN filter", status_code=400)
-                        col = CROSSWALK_IN_COLUMN_BY_TYPE[list_type]
+                            raise ServiceError("Invalid value_override listType for IN filter", status_code=400)
+                        col = VALUE_OVERRIDE_IN_COLUMN_BY_TYPE[list_type]
                         table_sql = self._safe_table_full_name(table)
                         return (
                             f"{field_expr} IN (SELECT {self._safe_ident(col)} "
@@ -2357,7 +2365,7 @@ class NoCodeQueryService:
     def _compile_attachments(
         self,
         *,
-        crosswalk_attachments: List[Any],
+        value_override_attachments: List[Any],
         cohort_attachment: Optional[Dict[str, Any]],
         derived_by_exprid: Dict[str, str],
         derived_by_name: Dict[str, str],
@@ -2424,34 +2432,34 @@ class NoCodeQueryService:
                 suffix = f"c_{suffix}"
             return suffix
 
-        for i, cw in enumerate(crosswalk_attachments or []):
+        for i, cw in enumerate(value_override_attachments or []):
             if not isinstance(cw, dict):
-                raise ServiceError("crosswalks entries must be objects", status_code=400)
+                raise ServiceError("value_overrides entries must be objects", status_code=400)
             mode = (cw.get("mode") or "").strip().lower()
             if mode not in ("filter", "join"):
-                raise ServiceError("crosswalk mode must be filter or join", status_code=400)
+                raise ServiceError("value_override mode must be filter or join", status_code=400)
 
             list_type = cw.get("listType")
             list_id = cw.get("listId")
-            if list_type not in CROSSWALK_KEY_BY_TYPE:
-                raise ServiceError("Invalid crosswalk listType", status_code=400)
+            if list_type not in VALUE_OVERRIDE_KEY_BY_TYPE:
+                raise ServiceError("Invalid value_override listType", status_code=400)
             if not list_id:
-                raise ServiceError("crosswalk listId is required", status_code=400)
+                raise ServiceError("value_override listId is required", status_code=400)
             if not workspace_id:
-                raise ServiceError("workspace_id is required for crosswalks", status_code=400)
+                raise ServiceError("workspace_id is required for value_overrides", status_code=400)
 
             cols = cw.get("domainJoinColumns") or []
             if not isinstance(cols, list):
-                raise ServiceError(f"crosswalks[{i}].domainJoinColumns must be a list", status_code=400)
+                raise ServiceError(f"value_overrides[{i}].domainJoinColumns must be a list", status_code=400)
             if not cols:
-                raise ServiceError("crosswalks requires domainJoinColumns", status_code=400)
+                raise ServiceError("value_overrides requires domainJoinColumns", status_code=400)
 
-            domain_exprs = [domain_col_expr(col, f"crosswalks[{i}].domainJoinColumns[{j}]") for j, col in enumerate(cols)]
+            domain_exprs = [domain_col_expr(col, f"value_overrides[{i}].domainJoinColumns[{j}]") for j, col in enumerate(cols)]
 
-            key_col = CROSSWALK_KEY_BY_TYPE[list_type]
+            key_col = VALUE_OVERRIDE_KEY_BY_TYPE[list_type]
             table = TABLE_BY_TYPE.get(list_type)
             if not table:
-                raise ServiceError("Invalid crosswalk listType", status_code=400)
+                raise ServiceError("Invalid value_override listType", status_code=400)
             table_sql = self._safe_table_full_name(table)
 
             ws_param = new_param(workspace_id)
@@ -2481,11 +2489,11 @@ class NoCodeQueryService:
                 where.append(exists_sql)
                 continue
 
-            cte_base = CROSSWALK_JOIN_ALIAS_BY_TYPE[list_type]
+            cte_base = VALUE_OVERRIDE_JOIN_ALIAS_BY_TYPE[list_type]
             cte_name = unique_cte_name(cte_base)
 
             agg_fields = ", ".join(
-                f"MAX({self._safe_ident(f)}) AS {self._safe_ident(f)}" for f in CROSSWALK_FIELDS_BY_TYPE[list_type]
+                f"MAX({self._safe_ident(f)}) AS {self._safe_ident(f)}" for f in VALUE_OVERRIDE_FIELDS_BY_TYPE[list_type]
             )
             cte_sql = (
                 f"{self._safe_ident(cte_name)} AS (\n"
@@ -2499,11 +2507,11 @@ class NoCodeQueryService:
 
             project_fields = cw.get("projectFields") or []
             if not isinstance(project_fields, list):
-                raise ServiceError("crosswalk projectFields must be a list", status_code=400)
-            allowed = set(CROSSWALK_FIELDS_BY_TYPE[list_type])
+                raise ServiceError("value_override projectFields must be a list", status_code=400)
+            allowed = set(VALUE_OVERRIDE_FIELDS_BY_TYPE[list_type])
             for field in project_fields:
                 if field not in allowed:
-                    raise ServiceError("Invalid crosswalk project field", status_code=400)
+                    raise ServiceError("Invalid value_override project field", status_code=400)
 
             att_id = (cw.get("id") or f"cw{i+1}")
 
@@ -2532,7 +2540,7 @@ class NoCodeQueryService:
             joins.append(f"JOIN {self._safe_ident(cte_name)} {join_alias} ON {on_pred}")
 
             for field in project_fields:
-                out_name = CROSSWALK_PROJECT_ALIASES_BY_TYPE[list_type].get(field) or f"cw_{field}"
+                out_name = VALUE_OVERRIDE_PROJECT_ALIASES_BY_TYPE[list_type].get(field) or f"cw_{field}"
                 expr_sql = f"{join_alias}.{self._safe_ident(field)} AS {self._safe_alias(out_name)}"
                 selects.append((expr_sql, out_name))
                 exprid_sql[f"cw:{att_id}:cw:{field}"] = f"{join_alias}.{self._safe_ident(field)}"

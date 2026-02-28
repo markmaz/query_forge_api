@@ -113,6 +113,7 @@ class EmbeddingIndexService:
           mc.id AS model_column_id,
           mc.data_type AS model_data_type,
           mc.description AS column_description,
+          mc.semantic_type AS semantic_type,
           mc.is_active AS model_is_active
         FROM workspace_table wt
         JOIN workspace_column wc ON wc.workspace_table_id = wt.id
@@ -256,6 +257,7 @@ def build_workspace_column_payload(row: Dict[str, Any]) -> Dict[str, Any]:
         "column_name": row.get("column_name"),
         "data_type": data_type,
         "description": description,
+        "semantic_type": row.get("semantic_type"),
         "origin": row.get("model_origin"),
         "is_active": _coerce_bool(row.get("model_is_active"), default=True),
     }

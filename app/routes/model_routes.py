@@ -9,6 +9,7 @@ from app.adapters.mysql_sql_executor import MySQLSQLExecutor
 from app.decorators.security import token_required
 from app.exceptions.service_error import ServiceError
 from app.routes._route_utils import bool_arg, get_user_id, get_workspace_id_from_header, int_arg
+from app.services.models.model_column_search_service import ModelColumnSearchService
 from app.services.models.model_read_service import ModelReadService
 from app.services.models.model_sample_read_service import ModelColumnSampleReadService
 from app.services.models.model_sample_write_service import ModelSampleService
@@ -238,6 +239,36 @@ class ModelColumnById(Resource):
         except Exception:
             logger.exception("Model column patch failed")
             return {"error": "Model column patch failed"}, 500
+
+
+@model_ns.route("/columns/search")
+class ModelColumnSearch(Resource):
+    @token_required
+    def get(self):
+        """
+        GET /model/columns/search?q=&limit=
+        Type-ahead search on model_column.column_name (workspace scoped).
+        """
+        try:
+            workspace_id = get_workspace_id_from_header()
+
+            q = (request.args.get("q") or "").strip()
+            if len(q) < 3:
+                raise ServiceError("Query must be at least 3 characters", status_code=400)
+
+            limit = int_arg("limit", 20)
+            rows = ModelColumnSearchService().search_columns(
+                workspace_id=workspace_id,
+                q=q,
+                limit=limit,
+            )
+            return {"rows": rows}, 200
+
+        except ServiceError as e:
+            return _handle_service_error(e)
+        except Exception:
+            logger.exception("Model column search failed")
+            return {"error": "Model column search failed"}, 500
 
 
 # ----------------------------
