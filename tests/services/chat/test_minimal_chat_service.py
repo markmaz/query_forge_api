@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.exceptions.service_error import ServiceError
-from app.services.chat.minimal_chat_service import MinimalChatService
+from app.services.chat.minimal_chat_service import ForgeInsightsChatService, MinimalChatService
 
 
 class _FakeResponse:
@@ -59,6 +59,55 @@ class _MemoryStore:
     def save_messages(self, *, workspace_id: str, user_id: str, conversation_id: str, messages, ttl_seconds: int):
         del ttl_seconds
         self.rows[(workspace_id, user_id, conversation_id)] = [dict(m) for m in messages]
+
+
+class _ConversationStoreV2:
+    def __init__(self) -> None:
+        self.rows = {}
+
+    def get_conversation(self, *, workspace_id: str, user_id: str, conversation_id: str):
+        row = self.rows.get((workspace_id, user_id, conversation_id))
+        if row is None:
+            return None
+        return dict(row)
+
+    def save_conversation(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        conversation_id: str,
+        conversation,
+        ttl_seconds: int,
+    ):
+        del ttl_seconds
+        self.rows[(workspace_id, user_id, conversation_id)] = dict(conversation)
+
+    def list_conversations(self, *, workspace_id: str, user_id: str, limit: int):
+        del limit
+        items = []
+        for (ws, uid, conv_id), row in self.rows.items():
+            if ws != workspace_id or uid != user_id:
+                continue
+            items.append(
+                {
+                    "conversation_id": conv_id,
+                    "title": row.get("title"),
+                    "last_user_message": row.get("last_user_message"),
+                    "created_at": row.get("created_at"),
+                    "updated_at": row.get("updated_at"),
+                    "message_count": row.get("message_count"),
+                    "has_summary": bool(row.get("summary")),
+                }
+            )
+        return items
+
+    def delete_conversation(self, *, workspace_id: str, user_id: str, conversation_id: str):
+        key = (workspace_id, user_id, conversation_id)
+        if key not in self.rows:
+            return False
+        self.rows.pop(key, None)
+        return True
 
 
 def _valid_body(*, debug: bool = False) -> dict:
@@ -216,3 +265,105 @@ def test_unknown_conversation_id_returns_404(monkeypatch) -> None:
             user_id="u1",
         )
     assert exc.value.status_code == 404
+
+
+def test_forge_insights_uses_fi_conversation_id_prefix(monkeypatch) -> None:
+    import app.services.chat.minimal_chat_service as mod
+
+    monkeypatch.setattr(
+        mod.httpx,
+        "Client",
+        lambda *args, **kwargs: _FakeClient(
+            response=_FakeResponse(
+                200,
+                body={"choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}], "usage": {}},
+            ),
+            **kwargs,
+        ),
+    )
+
+    svc = ForgeInsightsChatService(
+        base_url="http://localhost:8000",
+        model="qwen",
+        timeout_seconds=10,
+        conversation_store=_ConversationStoreV2(),
+    )
+    out = svc.chat(_valid_body(), workspace_id="ws-1", user_id="user-1")
+    assert out["conversation_id"].startswith("fi_")
+
+
+def test_forge_insights_list_get_and_reset_conversation(monkeypatch) -> None:
+    import app.services.chat.minimal_chat_service as mod
+
+    monkeypatch.setattr(
+        mod.httpx,
+        "Client",
+        lambda *args, **kwargs: _FakeClient(
+            response=_FakeResponse(
+                200,
+                body={"choices": [{"message": {"role": "assistant", "content": "Ready"}, "finish_reason": "stop"}], "usage": {}},
+            ),
+            **kwargs,
+        ),
+    )
+
+    store = _ConversationStoreV2()
+    svc = ForgeInsightsChatService(
+        base_url="http://localhost:8000",
+        model="qwen",
+        timeout_seconds=10,
+        conversation_store=store,
+    )
+
+    created = svc.chat({"messages": [{"role": "user", "content": "Show me principals"}]}, workspace_id="ws-1", user_id="u1")
+    conv_id = created["conversation_id"]
+
+    listed = svc.list_conversations(workspace_id="ws-1", user_id="u1")
+    assert listed["feature"] == "ForgeInsights"
+    assert listed["count"] == 1
+    assert listed["items"][0]["conversation_id"] == conv_id
+
+    detail = svc.get_conversation(workspace_id="ws-1", user_id="u1", conversation_id=conv_id)
+    assert detail["feature"] == "ForgeInsights"
+    assert detail["conversation_id"] == conv_id
+    assert detail["message_count"] >= 2
+
+    deleted = svc.reset_conversation(workspace_id="ws-1", user_id="u1", conversation_id=conv_id)
+    assert deleted["deleted"] is True
+
+    with pytest.raises(ServiceError) as exc:
+        svc.get_conversation(workspace_id="ws-1", user_id="u1", conversation_id=conv_id)
+    assert exc.value.status_code == 404
+
+
+def test_forge_insights_unknown_conversation_id_bootstraps_instead_of_404(monkeypatch) -> None:
+    import app.services.chat.minimal_chat_service as mod
+
+    monkeypatch.setattr(
+        mod.httpx,
+        "Client",
+        lambda *args, **kwargs: _FakeClient(
+            response=_FakeResponse(
+                200,
+                body={"choices": [{"message": {"role": "assistant", "content": "Started"}, "finish_reason": "stop"}], "usage": {}},
+            ),
+            **kwargs,
+        ),
+    )
+    svc = ForgeInsightsChatService(
+        base_url="http://localhost:8000",
+        model="qwen",
+        timeout_seconds=10,
+        conversation_store=_ConversationStoreV2(),
+    )
+
+    out = svc.chat(
+        {
+            "conversation_id": "fi_4108afad574b459eb9ef9845ba0ee78b",
+            "messages": [{"role": "user", "content": "Hello"}],
+        },
+        workspace_id="ws-1",
+        user_id="u1",
+    )
+    assert out["conversation_id"] == "fi_4108afad574b459eb9ef9845ba0ee78b"
+    assert out["message"]["content"] == "Started"

@@ -227,6 +227,7 @@ class PlanDomainRequest(BaseModel):
     vertical_norm: str = "generic"
     base_domain_id: Optional[int] = None
     debug: bool = False
+    allow_unknown_conversation: bool = False
 
     @field_validator("conversation_id")
     @classmethod
@@ -327,6 +328,8 @@ class PlannerDomainService:
                     seed_plan_json_v2=seed_plan,
                     seed_last_prompt=seed_last_prompt,
                 )
+            elif req.allow_unknown_conversation:
+                prior_state = None
             else:
                 raise ServiceError("Conversation not found", status_code=404, details={"conversation_id": conversation_id})
         context = _plan_conversation_context_from_state(

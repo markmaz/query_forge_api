@@ -13,6 +13,9 @@ def test_plan_v2_prompt_contains_district_county_disambiguation_rules() -> None:
 
     assert "DISAMBIGUATION RULES (IMPORTANT):" in prompt
     assert '"Davidson County district" => filter lea_name = "Davidson County".' in prompt
+    assert '"Montgomery County School District" => filter lea_name = "Montgomery County".' in prompt
+    assert "Normalize the district filter value to the core proper noun by removing generic suffix words." in prompt
+    assert "Remove terms such as \"school\", \"schools\", \"district\", \"school district\", \"LEA\", \"local education agency\" from the value." in prompt
     assert "Do NOT map it to a county column just because it contains the word \"County\"." in prompt
     assert "Only filter by county columns" in prompt
     assert "briefly decide (internally) whether each proper noun filter refers to a district/LEA name vs a geographic county." in prompt
@@ -43,6 +46,7 @@ def test_plan_v2_prompt_contains_district_county_disambiguation_rules() -> None:
     assert "set entity=\"students\" and intent=\"list\"" in slot_prompt
     assert '"Show me where Jennifer Gilstrap works" => entity="staff", intent="list".' in slot_prompt
     assert '"What school does Jennifer Gilstrap go to" => entity="students", intent="list".' in slot_prompt
+    assert '"Montgomery County School District" => value_hint="Montgomery County".' in slot_prompt
     assert "prompts about where someone works/employment/teaching should use staff entity/domain" in prompt
     assert 'User: "Show me where Jennifer Gilstrap works"' in prompt
     assert "Expected: choose staff-oriented domain (not student demographics)" in prompt

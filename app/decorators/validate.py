@@ -1,4 +1,5 @@
 import functools
+import inspect
 import logging
 
 from app.exceptions.service_error import ServiceError
@@ -11,16 +12,19 @@ def validate_params(*required_params):
     """
     def decorator(func):
         @functools.wraps(func)
-        def wrapper(self, *args, **kwargs):
-            # Convert positional args to kwargs if possible
-            func_params = func.__code__.co_varnames  # Get function argument names
-            all_kwargs = {**dict(zip(func_params[1:], args)), **kwargs}  # Merge args into kwargs
-            
+        def wrapper(*args, **kwargs):
+            # Works for both bound methods and plain functions.
+            try:
+                bound = inspect.signature(func).bind_partial(*args, **kwargs)
+                provided = dict(bound.arguments)
+            except TypeError:
+                provided = dict(kwargs)
+
             for param in required_params:
-                if param not in all_kwargs or all_kwargs[param] is None:
-                    logger.error(f"Missing data {all_kwargs}")
+                if param not in provided or provided[param] is None:
+                    logger.error(f"Missing data {provided}")
                     raise ServiceError(f"Missing data ({param})", 400)
             
-            return func(self, *args, **kwargs)
+            return func(*args, **kwargs)
         return wrapper
     return decorator
