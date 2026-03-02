@@ -5,5 +5,5 @@ log_file
 venv/
 .DS_Store
 .venv
-models/
+/models/
 infra/qdrant/storage/
