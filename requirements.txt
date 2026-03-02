@@ -80,7 +80,6 @@ peewee==3.16.3
 pluggy==1.6.0
 portalocker==3.2.0
 preshed==3.0.12
-prodigy @ file:///Users/mmaslak/Downloads/prodigy-1.18.4-py3-none-any.whl#sha256=bcbcd7820d96338e95468611d17525648039d5534e53e2934935dea8989900a5
 prompt_toolkit==3.0.52
 protobuf==6.33.5
 pyarrow==22.0.0

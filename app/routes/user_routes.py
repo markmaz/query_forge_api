@@ -5,6 +5,7 @@ from flask_restx import Namespace, Resource, fields, reqparse
 from pydantic import ValidationError
 
 from app.decorators.security import token_required
+from app.exceptions.service_error import ServiceError
 from app.models.user import User
 from app.models.user_invitation import UserInvitation
 from app.services.user_service import UserService
@@ -73,6 +74,7 @@ pagination_response = user_ns.model('PaginationResponse', {
 def _public_user_payload(user: User) -> dict:
     return user.model_dump(mode="json", exclude=SENSITIVE_USER_FIELDS)
 
+
 @user_ns.route("/")
 class UserList(Resource):
     @user_ns.response(201, "User invite created")
@@ -127,8 +129,11 @@ class UserUpdates(Resource):
         """
         Update an existing user
         """
-        user = User(**request.json)
-        print(f"This is the USER: {user}")
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            raise ServiceError("Invalid JSON body", status_code=400)
+
+        user = User(**body)
         userService = UserService()
         result = userService.update_user(user_id=user_id, update_data=user)
         

@@ -178,6 +178,12 @@ def test_execution_results_success(client, auth_headers, monkeypatch):
     assert results.json["params"] == {"a": 1}
     assert results.json["limit"] == 5
     assert results.json["offset"] == 10
+    assistant = results.json.get("assistant_message") or {}
+    assert assistant.get("role") == "assistant"
+    assert assistant.get("kind") == "execution_result"
+    assert assistant.get("format") == "markdown"
+    assert "Query complete." in str(assistant.get("content") or "")
+    assert "| a |" in str(assistant.get("content") or "")
 
 
 def test_execution_results_running(client, auth_headers, monkeypatch):

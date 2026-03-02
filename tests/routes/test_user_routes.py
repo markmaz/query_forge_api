@@ -84,3 +84,15 @@ def test_users_put_redacts_sensitive_fields(client, monkeypatch):
     assert resp.status_code == 200
     assert "password" not in resp.json
     assert "otp_secret" not in resp.json
+
+
+def test_users_put_without_bearer_or_invite_token_rejected(client):
+    resp = client.put("/api/v1/users/u1", json={"first_name": "Nope"})
+    assert resp.status_code == 403
+    assert "Token is missing" in str(resp.json.get("error") or "")
+
+
+def test_users_put_with_invite_query_token_but_no_bearer_rejected(client):
+    resp = client.put("/api/v1/users/u1?token=invite-token-1", json={"first_name": "Nope"})
+    assert resp.status_code == 403
+    assert "Token is missing" in str(resp.json.get("error") or "")

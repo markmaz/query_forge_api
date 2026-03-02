@@ -1,8 +1,12 @@
+from typing import Any, Dict
+
 from flask import jsonify, make_response, request
 from flask_restx import Namespace, Resource, fields
 
 from app.config import COOKIE_SAMESITE, COOKIE_SECURE, REFRESH_COOKIE_PATH
 from app.exceptions.service_error import ServiceError
+from app.models.status_enum import UserStatus
+from app.models.user import User
 from app.services.auth_service import AuthService, hash_token
 from app.services.otp_service import OTP_CHALLENGE_TTL_S, issue_otp_challenge
 from app.services.user_service import UserService
@@ -14,6 +18,27 @@ login_model = auth_ns.model('Login', {
     'username': fields.String(required=True, description="Username"),
     'password': fields.String(required=True, description="Password")
 })
+
+invite_accept_model = auth_ns.model(
+    "InviteAcceptRequest",
+    {
+        "token": fields.String(required=False, description="Invite token (or use ?token=...)"),
+        "first_name": fields.String(required=False),
+        "last_name": fields.String(required=False),
+        "password": fields.String(required=True),
+        "email": fields.String(required=False, description="Must match invited email if provided"),
+        "tos_accepted": fields.Boolean(required=False),
+        "eula_accepted": fields.Boolean(required=False),
+        "two_factor_preference": fields.String(required=False),
+    },
+)
+
+
+def _extract_invite_token(body: Dict[str, Any]) -> str:
+    body_token = str((body or {}).get("token") or "").strip()
+    if body_token:
+        return body_token
+    return str(request.args.get("token") or "").strip()
 
 @auth_ns.route('/auth')
 @auth_ns.expect(login_model)
@@ -192,6 +217,77 @@ class InviteValidationResource(Resource):
             return {"email": user.email, "user_id": user_id}
         except Exception:
             return {"error": "Invalid or expired token"}, 400
+
+
+@auth_ns.route("/invite/accept")
+class InviteAcceptResource(Resource):
+    @auth_ns.expect(invite_accept_model, validate=False)
+    @auth_ns.doc(security=[])
+    def post(self):
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            return {"error": "Invalid request body"}, 400
+
+        token = _extract_invite_token(body)
+        if not token:
+            return {"error": "Missing token"}, 400
+
+        try:
+            user_id = str(validate_token(token)).strip()
+        except Exception:
+            return {"error": "Invalid or expired token"}, 400
+        if not user_id:
+            return {"error": "Invalid or expired token"}, 400
+
+        password = str(body.get("password") or "").strip()
+        if not password:
+            return {"error": "password is required"}, 400
+
+        tos_accepted = body.get("tos_accepted")
+        if tos_accepted is None:
+            tos_accepted = True
+
+        eula_accepted = body.get("eula_accepted")
+        if eula_accepted is None:
+            eula_accepted = True
+
+        two_factor_preference = str(body.get("two_factor_preference") or "").strip() or "Email"
+
+        user_service = UserService()
+        try:
+            current_user = user_service.get_user(user_id)
+        except ServiceError:
+            return {"error": "Invalid or expired token"}, 400
+
+        status_text = str(getattr(current_user, "status", "") or "").strip().lower()
+        if status_text not in {str(UserStatus.INVITED).lower(), "invited"}:
+            return {"error": "Invite already accepted or inactive"}, 409
+
+        email_in = str(body.get("email") or "").strip()
+        invited_email = str(getattr(current_user, "email", "") or "").strip()
+        if email_in and invited_email and email_in.lower() != invited_email.lower():
+            return {"error": "Email does not match invited account"}, 403
+
+        update_payload = User(
+            first_name=str(body.get("first_name") or "").strip() or None,
+            last_name=str(body.get("last_name") or "").strip() or None,
+            password=password,
+            tos_accepted=bool(tos_accepted),
+            eula_accepted=bool(eula_accepted),
+            two_factor_preference=two_factor_preference,
+            status=UserStatus.ACTIVE,
+        )
+
+        try:
+            updated = user_service.update_user(user_id=user_id, update_data=update_payload)
+        except ServiceError as exc:
+            return exc.to_dict(), exc.status_code
+
+        return {
+            "user_id": str(updated.user_id),
+            "email": str(updated.email or ""),
+            "status": str(updated.status or UserStatus.ACTIVE),
+        }, 200
 
 @auth_ns.route("/reset/request")
 class ResetPasswordRequest(Resource):

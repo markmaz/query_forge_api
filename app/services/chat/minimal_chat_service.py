@@ -7,9 +7,15 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Protocol, Sequence
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
 from app.config import (
+    QF_FORGE_INSIGHTS_CONVERSATION_TTL_SECONDS,
+    QF_FORGE_INSIGHTS_LIST_LIMIT,
+    QF_FORGE_INSIGHTS_MAX_CONTEXT_CHARS,
+    QF_FORGE_INSIGHTS_MAX_HISTORY_MESSAGES,
+    QF_FORGE_INSIGHTS_SUMMARY_ENABLED,
+    QF_FORGE_INSIGHTS_SUMMARY_TRIGGER_MESSAGES,
     QF_MINIMAL_CHAT_CONVERSATION_TTL_SECONDS,
     VALKEY_ADDRESS,
     VALKEY_PORT,
@@ -30,8 +36,10 @@ logger = logging.getLogger(__name__)
 _MAX_MESSAGES = 30
 _MAX_CONTENT_LEN = 8000
 _RAW_PREVIEW_LEN = 2000
+_MAX_SUMMARY_LEN = 5000
+_MAX_SUMMARY_LINES = 28
 _ALLOWED_ROLES = {"user", "assistant", "system"}
-_MAX_HISTORY_MESSAGES = 80
+_DEFAULT_HISTORY_LIMIT = 80
 _IN_MEMORY_CONV_STORE: Dict[str, str] = {}
 _valkey_client: Any = None
 
@@ -138,27 +146,14 @@ class ConversationStore(Protocol):
 
 
 class HybridConversationStore:
+    def __init__(self, *, namespace: str = "minimal") -> None:
+        self._namespace = str(namespace or "minimal").strip().lower() or "minimal"
+
     def get_messages(self, *, workspace_id: str, user_id: str, conversation_id: str) -> Optional[List[Dict[str, str]]]:
-        key = _conversation_store_key(workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id)
-        payload = self._read(key)
-        if payload is None:
+        convo = self.get_conversation(workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id)
+        if convo is None:
             return None
-        try:
-            data = json.loads(payload)
-        except Exception:
-            logger.debug("minimal chat conversation payload parse failed key=%s", key)
-            return None
-        if not isinstance(data, list):
-            return None
-        out: List[Dict[str, str]] = []
-        for item in data:
-            if not isinstance(item, Mapping):
-                continue
-            role = str(item.get("role") or "").strip().lower()
-            content = str(item.get("content") or "")
-            if role in _ALLOWED_ROLES and content.strip() != "":
-                out.append({"role": role, "content": content})
-        return out
+        return list(convo.get("messages") or [])
 
     def save_messages(
         self,
@@ -169,18 +164,129 @@ class HybridConversationStore:
         messages: Sequence[Mapping[str, Any]],
         ttl_seconds: int,
     ) -> None:
-        key = _conversation_store_key(workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id)
-        payload = json.dumps(
-            [
-                {
-                    "role": str(m.get("role") or "").strip().lower(),
-                    "content": str(m.get("content") or ""),
-                }
-                for m in messages
-                if isinstance(m, Mapping)
-            ]
+        now_iso = _utc_now_iso()
+        existing = self.get_conversation(workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id) or {}
+        convo = _normalize_conversation_record(
+            {
+                "conversation_id": conversation_id,
+                "messages": list(messages or []),
+                "summary": str(existing.get("summary") or ""),
+                "title": existing.get("title"),
+                "created_at": str(existing.get("created_at") or now_iso),
+                "updated_at": now_iso,
+            },
+            conversation_id=conversation_id,
         )
+        self.save_conversation(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            conversation=convo,
+            ttl_seconds=ttl_seconds,
+        )
+
+    def get_conversation(self, *, workspace_id: str, user_id: str, conversation_id: str) -> Optional[Dict[str, Any]]:
+        key = _conversation_store_key(
+            namespace=self._namespace,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        payload = self._read(key)
+        if payload is None:
+            return None
+        try:
+            raw = json.loads(payload)
+        except Exception:
+            logger.debug("forge insights conversation payload parse failed key=%s", key)
+            return None
+        if isinstance(raw, list):
+            return _normalize_conversation_record({"messages": raw}, conversation_id=conversation_id)
+        if isinstance(raw, Mapping):
+            return _normalize_conversation_record(raw, conversation_id=conversation_id)
+        return None
+
+    def save_conversation(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        conversation_id: str,
+        conversation: Mapping[str, Any],
+        ttl_seconds: int,
+    ) -> None:
+        key = _conversation_store_key(
+            namespace=self._namespace,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        convo = _normalize_conversation_record(conversation, conversation_id=conversation_id)
+        payload = json.dumps(convo, separators=(",", ":"))
         self._write(key, payload, ttl_seconds)
+
+    def list_conversations(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        prefix = _conversation_store_prefix(namespace=self._namespace, workspace_id=workspace_id, user_id=user_id)
+        keys = self._keys_by_prefix(prefix)
+        out: List[Dict[str, Any]] = []
+        for key in keys:
+            conversation_id = key[len(prefix) :]
+            convo = self.get_conversation(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
+            )
+            if convo is None:
+                continue
+            out.append(
+                {
+                    "conversation_id": conversation_id,
+                    "title": convo.get("title"),
+                    "last_user_message": convo.get("last_user_message"),
+                    "created_at": convo.get("created_at"),
+                    "updated_at": convo.get("updated_at"),
+                    "message_count": int(convo.get("message_count") or 0),
+                    "has_summary": bool(str(convo.get("summary") or "").strip()),
+                }
+            )
+        out.sort(key=lambda row: str(row.get("updated_at") or ""), reverse=True)
+        return out[: max(1, int(limit or 1))]
+
+    def delete_conversation(self, *, workspace_id: str, user_id: str, conversation_id: str) -> bool:
+        key = _conversation_store_key(
+            namespace=self._namespace,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        deleted = self._delete(key)
+        if not deleted:
+            return False
+        return True
+
+    def _keys_by_prefix(self, prefix: str) -> List[str]:
+        client = _get_valkey_client()
+        keys: List[str] = []
+        if client is not None:
+            try:
+                for item in client.scan_iter(match=f"{prefix}*"):
+                    if isinstance(item, bytes):
+                        token = item.decode("utf-8", errors="ignore")
+                    else:
+                        token = str(item or "")
+                    if token:
+                        keys.append(token)
+            except Exception:
+                logger.debug("forge insights valkey scan failed", exc_info=True)
+        if not keys:
+            keys.extend([k for k in _IN_MEMORY_CONV_STORE.keys() if str(k).startswith(prefix)])
+        return list(dict.fromkeys(keys))
 
     def _read(self, key: str) -> Optional[str]:
         client = _get_valkey_client()
@@ -192,7 +298,7 @@ class HybridConversationStore:
                 if isinstance(value, str):
                     return value
             except Exception:
-                logger.debug("minimal chat valkey read failed", exc_info=True)
+                logger.debug("forge insights valkey read failed", exc_info=True)
         return _IN_MEMORY_CONV_STORE.get(key)
 
     def _write(self, key: str, value: str, ttl_seconds: int) -> None:
@@ -202,8 +308,21 @@ class HybridConversationStore:
                 client.setex(key, int(ttl_seconds), value)
                 return
             except Exception:
-                logger.debug("minimal chat valkey write failed", exc_info=True)
+                logger.debug("forge insights valkey write failed", exc_info=True)
         _IN_MEMORY_CONV_STORE[key] = value
+
+    def _delete(self, key: str) -> bool:
+        client = _get_valkey_client()
+        deleted = False
+        if client is not None:
+            try:
+                deleted = bool(int(client.delete(key) or 0))
+            except Exception:
+                logger.debug("forge insights valkey delete failed", exc_info=True)
+        if key in _IN_MEMORY_CONV_STORE:
+            _IN_MEMORY_CONV_STORE.pop(key, None)
+            deleted = True
+        return deleted
 
 
 class MinimalChatService:
@@ -215,15 +334,34 @@ class MinimalChatService:
         timeout_seconds: Optional[int] = None,
         conversation_store: Optional[ConversationStore] = None,
         conversation_ttl_seconds: Optional[int] = None,
+        feature_name: str = "MinimalChat",
+        conversation_prefix: str = "conv_",
+        conversation_namespace: str = "minimal",
+        max_history_messages: Optional[int] = None,
+        max_context_chars: Optional[int] = None,
+        summary_enabled: Optional[bool] = None,
+        summary_trigger_messages: Optional[int] = None,
+        list_limit: Optional[int] = None,
+        require_existing_conversation: bool = True,
     ) -> None:
         self._base_url = str(base_url or VLLM_BASE_URL or "").strip()
         self._model = str(model or VLLM_MODEL or "").strip() or "qwen"
         self._timeout_seconds = int(timeout_seconds or VLLM_TIMEOUT or 60)
-        self._conversation_store = conversation_store or HybridConversationStore()
-        self._conversation_ttl_seconds = max(
-            60,
-            int(conversation_ttl_seconds or QF_MINIMAL_CHAT_CONVERSATION_TTL_SECONDS or 43200),
-        )
+        self._feature_name = str(feature_name or "MinimalChat").strip() or "MinimalChat"
+        self._conversation_prefix = str(conversation_prefix or "conv_").strip() or "conv_"
+        self._conversation_namespace = str(conversation_namespace or "minimal").strip().lower() or "minimal"
+        self._conversation_store = conversation_store or HybridConversationStore(namespace=self._conversation_namespace)
+
+        default_ttl = QF_FORGE_INSIGHTS_CONVERSATION_TTL_SECONDS
+        if self._conversation_namespace == "minimal":
+            default_ttl = QF_MINIMAL_CHAT_CONVERSATION_TTL_SECONDS
+        self._conversation_ttl_seconds = max(60, int(conversation_ttl_seconds or default_ttl or 43200))
+        self._max_history_messages = max(10, int(max_history_messages or QF_FORGE_INSIGHTS_MAX_HISTORY_MESSAGES or _DEFAULT_HISTORY_LIMIT))
+        self._max_context_chars = max(2000, int(max_context_chars or QF_FORGE_INSIGHTS_MAX_CONTEXT_CHARS or 24000))
+        self._summary_enabled = bool(QF_FORGE_INSIGHTS_SUMMARY_ENABLED if summary_enabled is None else summary_enabled)
+        self._summary_trigger_messages = max(8, int(summary_trigger_messages or QF_FORGE_INSIGHTS_SUMMARY_TRIGGER_MESSAGES or 24))
+        self._list_limit = max(1, int(list_limit or QF_FORGE_INSIGHTS_LIST_LIMIT or 50))
+        self._require_existing_conversation = bool(require_existing_conversation)
 
     def chat(self, body: Mapping[str, Any], *, workspace_id: str, user_id: str) -> Dict[str, Any]:
         try:
@@ -237,17 +375,26 @@ class MinimalChatService:
         except ValueError as exc:
             raise ServiceError("Invalid chat request", status_code=400, details={"message": str(exc)}) from exc
 
-        conversation_id = req.conversation_id or _new_conversation_id()
-        prior_history = self._conversation_store.get_messages(
+        conversation_id = req.conversation_id or _new_conversation_id(prefix=self._conversation_prefix)
+        prior_conversation = self._get_conversation(
             workspace_id=workspace_id,
             user_id=user_id,
             conversation_id=conversation_id,
         )
-        if req.conversation_id and prior_history is None:
+        if req.conversation_id and prior_conversation is None and self._require_existing_conversation:
             raise ServiceError("Conversation not found", status_code=404, details={"conversation_id": conversation_id})
-        history = list(prior_history or [])
+
+        conversation = prior_conversation or _new_conversation_record(conversation_id=conversation_id)
+        history = list(conversation.get("messages") or [])
+        summary = str(conversation.get("summary") or "")
         new_messages = [m.model_dump(mode="json") for m in req.messages]
-        provider_messages = _trim_messages_for_context(history + new_messages)
+        provider_messages = _build_provider_messages(
+            summary=summary,
+            messages=history + new_messages,
+            max_messages=self._max_history_messages,
+            max_context_chars=self._max_context_chars,
+            feature_name=self._feature_name,
+        )
 
         provider_payload = {
             "model": self._model,
@@ -265,13 +412,13 @@ class MinimalChatService:
                 details={"message": "missing assistant message content"},
             )
 
-        body = trace["body"]
-        usage = _normalize_usage(body.get("usage"))
-        finish_reason = _extract_finish_reason(body)
-        provider_model = str(body.get("model") or self._model).strip() or self._model
+        provider_body = trace["body"]
+        usage = _normalize_usage(provider_body.get("usage"))
+        finish_reason = _extract_finish_reason(provider_body)
+        provider_model = str(provider_body.get("model") or self._model).strip() or self._model
 
         response: Dict[str, Any] = {
-            "id": str(body.get("id") or f"chatcmpl_local_{uuid.uuid4().hex[:12]}"),
+            "id": str(provider_body.get("id") or f"chatcmpl_local_{uuid.uuid4().hex[:12]}"),
             "model": provider_model,
             "created_at": _utc_now_iso(),
             "conversation_id": conversation_id,
@@ -279,34 +426,81 @@ class MinimalChatService:
             "usage": usage,
             "debug": None,
         }
-        updated_history = _trim_messages_for_context(
-            history + new_messages + [{"role": "assistant", "content": assistant_content}],
-            max_messages=_MAX_HISTORY_MESSAGES,
+
+        combined_messages = history + new_messages + [{"role": "assistant", "content": assistant_content}]
+        compressed_summary, compressed_messages, was_compacted = _compact_conversation_context(
+            summary=summary,
+            messages=combined_messages,
+            max_messages=self._max_history_messages,
+            max_context_chars=self._max_context_chars,
+            summary_enabled=self._summary_enabled,
+            summary_trigger_messages=self._summary_trigger_messages,
         )
-        self._conversation_store.save_messages(
+        updated_conversation = _normalize_conversation_record(
+            {
+                "conversation_id": conversation_id,
+                "messages": compressed_messages,
+                "summary": compressed_summary,
+                "created_at": conversation.get("created_at"),
+                "title": conversation.get("title") or _derive_conversation_title(history + new_messages),
+                "updated_at": _utc_now_iso(),
+            },
+            conversation_id=conversation_id,
+        )
+        self._save_conversation(
             workspace_id=workspace_id,
             user_id=user_id,
             conversation_id=conversation_id,
-            messages=updated_history,
+            conversation=updated_conversation,
             ttl_seconds=self._conversation_ttl_seconds,
         )
+
         if req.debug:
             response["debug"] = {
+                "feature": self._feature_name,
                 "provider_model": provider_model,
                 "finish_reason": finish_reason,
                 "request_preview": _truncate_preview(provider_payload),
                 "response_preview": _truncate_preview(trace.get("raw_text")),
                 "status_code": trace.get("status_code"),
-                "conversation_history_count": len(updated_history),
+                "conversation_history_count": int(updated_conversation.get("message_count") or 0),
+                "conversation_compacted": bool(was_compacted),
+                "conversation_has_summary": bool(str(updated_conversation.get("summary") or "").strip()),
             }
         return response
+
+    def list_conversations(self, *, workspace_id: str, user_id: str, limit: Optional[int] = None) -> Dict[str, Any]:
+        capped = max(1, min(int(limit or self._list_limit), 200))
+        items = self._list_store_conversations(workspace_id=workspace_id, user_id=user_id, limit=capped)
+        return {"feature": self._feature_name, "items": items, "count": len(items)}
+
+    def get_conversation(self, *, workspace_id: str, user_id: str, conversation_id: str) -> Dict[str, Any]:
+        token = str(conversation_id or "").strip()
+        if token == "":
+            raise ServiceError("conversation_id is required", status_code=400)
+        convo = self._get_conversation(workspace_id=workspace_id, user_id=user_id, conversation_id=token)
+        if convo is None:
+            raise ServiceError("Conversation not found", status_code=404, details={"conversation_id": token})
+        out = dict(convo)
+        out["feature"] = self._feature_name
+        return out
+
+    def reset_conversation(self, *, workspace_id: str, user_id: str, conversation_id: str) -> Dict[str, Any]:
+        token = str(conversation_id or "").strip()
+        if token == "":
+            raise ServiceError("conversation_id is required", status_code=400)
+        deleted = self._delete_store_conversation(workspace_id=workspace_id, user_id=user_id, conversation_id=token)
+        if not deleted:
+            raise ServiceError("Conversation not found", status_code=404, details={"conversation_id": token})
+        return {"feature": self._feature_name, "conversation_id": token, "deleted": True}
 
     def _call_provider(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
         chat_url = self._chat_url()
         request_id = new_llm_request_id()
+        client_name = f"{self._feature_name}ChatService"
         log_llm_request(
             logger,
-            client_name="MinimalChatService",
+            client_name=client_name,
             request_id=request_id,
             method="POST",
             url=chat_url,
@@ -318,7 +512,7 @@ class MinimalChatService:
         except Exception as exc:
             log_llm_exception(
                 logger,
-                client_name="MinimalChatService",
+                client_name=client_name,
                 request_id=request_id,
                 method="POST",
                 url=chat_url,
@@ -329,13 +523,13 @@ class MinimalChatService:
         raw_text = resp.text
         log_llm_response(
             logger,
-            client_name="MinimalChatService",
+            client_name=client_name,
             request_id=request_id,
             status_code=resp.status_code,
             response_text=raw_text,
         )
         if resp.status_code >= 400:
-            logger.warning("minimal chat provider http_error status=%s", resp.status_code)
+            logger.warning("forge insights provider http_error status=%s", resp.status_code)
             raise ServiceError(
                 "Chat provider request failed",
                 status_code=502,
@@ -363,6 +557,100 @@ class MinimalChatService:
         if self._base_url.endswith("/"):
             return f"{self._base_url}v1/chat/completions"
         return f"{self._base_url}/v1/chat/completions"
+
+    def _get_conversation(self, *, workspace_id: str, user_id: str, conversation_id: str) -> Optional[Dict[str, Any]]:
+        get_conv = getattr(self._conversation_store, "get_conversation", None)
+        if callable(get_conv):
+            convo = get_conv(workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id)
+            if convo is None:
+                return None
+            return _normalize_conversation_record(convo, conversation_id=conversation_id)
+        get_messages = getattr(self._conversation_store, "get_messages", None)
+        if not callable(get_messages):
+            return None
+        rows = get_messages(workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id)
+        if rows is None:
+            return None
+        return _normalize_conversation_record({"messages": rows}, conversation_id=conversation_id)
+
+    def _save_conversation(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        conversation_id: str,
+        conversation: Mapping[str, Any],
+        ttl_seconds: int,
+    ) -> None:
+        save_conv = getattr(self._conversation_store, "save_conversation", None)
+        if callable(save_conv):
+            save_conv(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                conversation=conversation,
+                ttl_seconds=ttl_seconds,
+            )
+            return
+        save_messages = getattr(self._conversation_store, "save_messages", None)
+        if callable(save_messages):
+            save_messages(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                messages=list(conversation.get("messages") or []),
+                ttl_seconds=ttl_seconds,
+            )
+            return
+        raise ServiceError("Conversation store does not support saving", status_code=500)
+
+    def _list_store_conversations(self, *, workspace_id: str, user_id: str, limit: int) -> List[Dict[str, Any]]:
+        list_fn = getattr(self._conversation_store, "list_conversations", None)
+        if not callable(list_fn):
+            return []
+        try:
+            rows = list_fn(workspace_id=workspace_id, user_id=user_id, limit=limit)
+        except Exception:
+            logger.exception("forge insights list conversations failed")
+            return []
+        out: List[Dict[str, Any]] = []
+        for row in rows or []:
+            if isinstance(row, Mapping):
+                out.append(dict(row))
+        return out
+
+    def _delete_store_conversation(self, *, workspace_id: str, user_id: str, conversation_id: str) -> bool:
+        delete_fn = getattr(self._conversation_store, "delete_conversation", None)
+        if callable(delete_fn):
+            try:
+                return bool(delete_fn(workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id))
+            except Exception:
+                logger.exception("forge insights delete conversation failed")
+                return False
+        return False
+
+
+class ForgeInsightsChatService(MinimalChatService):
+    def __init__(
+        self,
+        *,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None,
+        timeout_seconds: Optional[int] = None,
+        conversation_store: Optional[ConversationStore] = None,
+        conversation_ttl_seconds: Optional[int] = None,
+    ) -> None:
+        super().__init__(
+            base_url=base_url,
+            model=model,
+            timeout_seconds=timeout_seconds,
+            conversation_store=conversation_store,
+            conversation_ttl_seconds=conversation_ttl_seconds,
+            feature_name="ForgeInsights",
+            conversation_prefix="fi_",
+            conversation_namespace="forge_insights",
+            require_existing_conversation=False,
+        )
 
 
 def _extract_assistant_content(body: Mapping[str, Any]) -> Optional[str]:
@@ -433,7 +721,7 @@ def _truncate_preview(value: Any, *, max_len: int = _RAW_PREVIEW_LEN) -> str:
 def _trim_messages_for_context(
     messages: Sequence[Mapping[str, Any]],
     *,
-    max_messages: int = _MAX_HISTORY_MESSAGES,
+    max_messages: int = _DEFAULT_HISTORY_LIMIT,
 ) -> List[Dict[str, str]]:
     rows: List[Dict[str, str]] = []
     for item in messages:
@@ -449,12 +737,174 @@ def _trim_messages_for_context(
     return rows[-max_messages:]
 
 
-def _conversation_store_key(*, workspace_id: str, user_id: str, conversation_id: str) -> str:
-    return f"chat:minimal:{workspace_id}:{user_id}:{conversation_id}"
+def _build_provider_messages(
+    *,
+    summary: str,
+    messages: Sequence[Mapping[str, Any]],
+    max_messages: int,
+    max_context_chars: int,
+    feature_name: str,
+) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    summary_text = str(summary or "").strip()
+    if summary_text:
+        rows.append(
+            {
+                "role": "system",
+                "content": (
+                    f"{feature_name} conversation summary for context. "
+                    "Use this as prior context and continue the same thread.\n"
+                    f"{summary_text}"
+                ),
+            }
+        )
+    rows.extend(_trim_messages_for_context(messages, max_messages=max_messages))
+    return _enforce_context_char_budget(rows, max_chars=max_context_chars)
 
 
-def _new_conversation_id() -> str:
-    return f"conv_{uuid.uuid4().hex}"
+def _compact_conversation_context(
+    *,
+    summary: str,
+    messages: Sequence[Mapping[str, Any]],
+    max_messages: int,
+    max_context_chars: int,
+    summary_enabled: bool,
+    summary_trigger_messages: int,
+) -> tuple[str, List[Dict[str, str]], bool]:
+    rows = _trim_messages_for_context(messages, max_messages=max(8, max_messages * 2))
+    summary_text = str(summary or "").strip()
+    needs_compaction = len(rows) > max_messages or _message_chars(rows) > max_context_chars
+    if not summary_enabled:
+        final_rows = _trim_messages_for_context(rows, max_messages=max_messages)
+        return summary_text, final_rows, needs_compaction
+    if not needs_compaction and len(rows) <= summary_trigger_messages:
+        return summary_text, rows, False
+
+    keep_tail = max(8, min(max_messages, summary_trigger_messages))
+    old_rows = rows[:-keep_tail] if len(rows) > keep_tail else []
+    tail_rows = rows[-keep_tail:] if old_rows else rows
+    if old_rows:
+        delta = _summarize_messages(old_rows)
+        summary_text = _merge_summaries(summary_text, delta)
+    compact_rows = _trim_messages_for_context(tail_rows, max_messages=max_messages)
+    compact_rows = _enforce_context_char_budget(compact_rows, max_chars=max_context_chars)
+    return summary_text, compact_rows, True
+
+
+def _summarize_messages(messages: Sequence[Mapping[str, Any]]) -> str:
+    lines: List[str] = []
+    for item in messages:
+        if not isinstance(item, Mapping):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        content = str(item.get("content") or "").strip()
+        if role not in {"user", "assistant"} or content == "":
+            continue
+        prefix = "User" if role == "user" else "Assistant"
+        lines.append(f"{prefix}: {_truncate_preview(content, max_len=220)}")
+        if len(lines) >= _MAX_SUMMARY_LINES:
+            break
+    if not lines:
+        return ""
+    return "\n".join(lines)
+
+
+def _merge_summaries(existing: str, delta: str) -> str:
+    left = str(existing or "").strip()
+    right = str(delta or "").strip()
+    if left and right:
+        merged = f"{left}\n{right}"
+    else:
+        merged = left or right
+    return _truncate_preview(merged, max_len=_MAX_SUMMARY_LEN)
+
+
+def _message_chars(messages: Sequence[Mapping[str, Any]]) -> int:
+    return sum(len(str(item.get("content") or "")) for item in messages if isinstance(item, Mapping))
+
+
+def _enforce_context_char_budget(messages: Sequence[Mapping[str, Any]], *, max_chars: int) -> List[Dict[str, str]]:
+    rows = _trim_messages_for_context(messages, max_messages=max(1, len(list(messages))))
+    if _message_chars(rows) <= max_chars:
+        return rows
+    system_rows = [row for row in rows if row.get("role") == "system"]
+    tail_rows = [row for row in rows if row.get("role") != "system"]
+    while tail_rows and (_message_chars(system_rows + tail_rows) > max_chars):
+        tail_rows.pop(0)
+    return system_rows + tail_rows
+
+
+def _new_conversation_record(*, conversation_id: str) -> Dict[str, Any]:
+    now_iso = _utc_now_iso()
+    return {
+        "conversation_id": conversation_id,
+        "messages": [],
+        "summary": "",
+        "title": None,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+        "message_count": 0,
+        "last_user_message": None,
+    }
+
+
+def _normalize_conversation_record(raw: Mapping[str, Any], *, conversation_id: str) -> Dict[str, Any]:
+    now_iso = _utc_now_iso()
+    rows = _trim_messages_for_context(list(raw.get("messages") or []), max_messages=max(1, 10_000))
+    created_at = str(raw.get("created_at") or now_iso)
+    updated_at = str(raw.get("updated_at") or now_iso)
+    title = raw.get("title")
+    summary = _truncate_preview(str(raw.get("summary") or "").strip(), max_len=_MAX_SUMMARY_LEN)
+    out = {
+        "conversation_id": str(raw.get("conversation_id") or conversation_id),
+        "messages": rows,
+        "summary": summary,
+        "title": str(title).strip() if isinstance(title, str) and str(title).strip() else None,
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "message_count": len(rows),
+        "last_user_message": _last_user_message(rows),
+    }
+    if out["title"] is None:
+        out["title"] = _derive_conversation_title(rows)
+    return out
+
+
+def _derive_conversation_title(messages: Sequence[Mapping[str, Any]]) -> Optional[str]:
+    for row in messages:
+        if not isinstance(row, Mapping):
+            continue
+        if str(row.get("role") or "").strip().lower() != "user":
+            continue
+        text = " ".join(str(row.get("content") or "").split()).strip()
+        if text == "":
+            continue
+        return _truncate_preview(text, max_len=80)
+    return None
+
+
+def _last_user_message(messages: Sequence[Mapping[str, Any]]) -> Optional[str]:
+    for row in reversed(list(messages)):
+        if not isinstance(row, Mapping):
+            continue
+        if str(row.get("role") or "").strip().lower() != "user":
+            continue
+        text = " ".join(str(row.get("content") or "").split()).strip()
+        if text:
+            return _truncate_preview(text, max_len=240)
+    return None
+
+
+def _conversation_store_prefix(*, namespace: str, workspace_id: str, user_id: str) -> str:
+    return f"chat:{namespace}:{workspace_id}:{user_id}:"
+
+
+def _conversation_store_key(*, namespace: str, workspace_id: str, user_id: str, conversation_id: str) -> str:
+    return f"{_conversation_store_prefix(namespace=namespace, workspace_id=workspace_id, user_id=user_id)}{conversation_id}"
+
+
+def _new_conversation_id(*, prefix: str = "conv_") -> str:
+    return f"{prefix}{uuid.uuid4().hex}"
 
 
 def _get_valkey_client() -> Any:
@@ -470,7 +920,7 @@ def _get_valkey_client() -> Any:
     try:
         _valkey_client = valkey.StrictValkey(host=host, port=port, decode_responses=True)
     except Exception:
-        logger.debug("minimal chat valkey init failed", exc_info=True)
+        logger.debug("forge insights valkey init failed", exc_info=True)
         _valkey_client = None
     return _valkey_client
 
@@ -488,4 +938,4 @@ def _safe_validation_errors(exc: ValidationError) -> List[Dict[str, Any]]:
     return rows
 
 
-__all__ = ["MinimalChatService", "MinimalChatRequest", "ChatMessage"]
+__all__ = ["MinimalChatService", "ForgeInsightsChatService", "MinimalChatRequest", "ChatMessage"]
