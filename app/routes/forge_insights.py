@@ -184,6 +184,7 @@ class ForgeInsightsThreadsRoute(Resource):
             project_id_raw = request.args.get("project_id")
             project_id = int(project_id_raw) if project_id_raw not in (None, "") else None
             include_archived = bool_arg("include_archived", False) is True
+            include_stale = bool_arg("include_stale", False) is True
             limit = int_arg("limit", 50)
             offset = int_arg("offset", 0)
             items = _service().list_threads(
@@ -191,6 +192,7 @@ class ForgeInsightsThreadsRoute(Resource):
                 user_id=user_id,
                 project_id=project_id,
                 include_archived=include_archived,
+                include_stale=include_stale,
                 limit=limit,
                 offset=offset,
             )

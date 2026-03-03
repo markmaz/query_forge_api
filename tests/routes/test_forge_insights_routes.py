@@ -116,6 +116,27 @@ def test_create_thread_route(client, monkeypatch):
     assert resp.json["conversation_id"] == "fi_123"
 
 
+def test_list_threads_route_excludes_stale_by_default(client, monkeypatch):
+    class _Svc:
+        def list_threads(self, *, workspace_id, user_id, project_id, include_archived, include_stale, limit, offset):
+            assert workspace_id == "ws-1"
+            assert user_id == "user-1"
+            assert project_id is None
+            assert include_archived is False
+            assert include_stale is False
+            assert limit == 200
+            assert offset == 0
+            return [_thread(31)]
+
+    monkeypatch.setattr(forge_insights_route, "ForgeInsightsThreadsService", _Svc)
+    resp = client.get(
+        "/api/v1/forge-insights/threads?include_archived=false&limit=200&offset=0",
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["items"][0]["id"] == 31
+
+
 def test_patch_thread_route(client, monkeypatch):
     class _Svc:
         def update_thread(self, *, workspace_id, user_id, thread_id, **kwargs):
