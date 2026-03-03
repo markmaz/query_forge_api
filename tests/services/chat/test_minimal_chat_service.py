@@ -367,3 +367,14 @@ def test_forge_insights_unknown_conversation_id_bootstraps_instead_of_404(monkey
     )
     assert out["conversation_id"] == "fi_4108afad574b459eb9ef9845ba0ee78b"
     assert out["message"]["content"] == "Started"
+
+
+def test_forge_insights_defaults_to_db_conversation_store(monkeypatch) -> None:
+    import app.services.chat.forge_insights_conversation_store as store_mod
+
+    class _Store:
+        pass
+
+    monkeypatch.setattr(store_mod, "ForgeInsightsConversationStore", lambda: _Store())
+    svc = ForgeInsightsChatService(base_url="http://localhost:8000", model="qwen", timeout_seconds=10)
+    assert isinstance(svc._conversation_store, _Store)

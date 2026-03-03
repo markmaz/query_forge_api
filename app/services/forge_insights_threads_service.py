@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -7,6 +8,8 @@ from typing import Any, Dict, List, Optional
 from app.adapters.mysql_sql_executor import MySQLSQLExecutor
 from app.exceptions.service_error import ServiceError
 from app.ports.sql_executor import SQLExecutor
+
+logger = logging.getLogger(__name__)
 
 
 class ForgeInsightsThreadsService:
@@ -245,6 +248,7 @@ class ForgeInsightsThreadsService:
         user_id: str,
         project_id: Optional[int] = None,
         include_archived: bool = False,
+        include_stale: bool = False,
         limit: int = 50,
         offset: int = 0,
     ) -> List[Dict[str, Any]]:
@@ -253,39 +257,110 @@ class ForgeInsightsThreadsService:
         project_key = _optional_int(project_id, "project_id")
         safe_limit = max(1, min(int(limit), 200))
         safe_offset = max(0, int(offset))
-        rows = self._sql.execute_query_mappings(
-            """
-            SELECT
-              id,
-              workspace_id,
-              user_id,
-              project_id,
-              conversation_id,
-              title,
-              preview_text,
-              is_pinned,
-              is_archived,
-              last_message_at,
-              created_at,
-              updated_at
-            FROM forge_insights_thread
-            WHERE workspace_id = :workspace_id
-              AND user_id = :user_id
-              AND (:project_filter_enabled = 0 OR project_id = :project_id)
-              AND (:include_archived = 1 OR is_archived = 0)
-            ORDER BY is_pinned DESC, COALESCE(last_message_at, updated_at) DESC, id DESC
-            LIMIT :limit_value OFFSET :offset_value
-            """,
-            {
-                "workspace_id": ws,
-                "user_id": uid,
-                "project_filter_enabled": 1 if project_key is not None else 0,
-                "project_id": project_key,
-                "include_archived": 1 if include_archived else 0,
-                "limit_value": safe_limit,
-                "offset_value": safe_offset,
-            },
-        )
+        params = {
+            "workspace_id": ws,
+            "user_id": uid,
+            "project_filter_enabled": 1 if project_key is not None else 0,
+            "project_id": project_key,
+            "include_archived": 1 if include_archived else 0,
+            "include_stale": 1 if include_stale else 0,
+            "limit_value": safe_limit,
+            "offset_value": safe_offset,
+        }
+        try:
+            rows = self._sql.execute_query_mappings(
+                """
+                SELECT
+                  t.id,
+                  t.workspace_id,
+                  t.user_id,
+                  t.project_id,
+                  t.conversation_id,
+                  t.title,
+                  t.preview_text,
+                  t.is_pinned,
+                  t.is_archived,
+                  t.last_message_at,
+                  t.created_at,
+                  t.updated_at
+                FROM forge_insights_thread t
+                LEFT JOIN forge_insights_conversation c
+                  ON c.workspace_id = t.workspace_id
+                 AND c.user_id = t.user_id
+                 AND c.conversation_id = t.conversation_id
+                WHERE t.workspace_id = :workspace_id
+                  AND t.user_id = :user_id
+                  AND (:project_filter_enabled = 0 OR t.project_id = :project_id)
+                  AND (:include_archived = 1 OR t.is_archived = 0)
+                  AND (:include_stale = 1 OR c.id IS NOT NULL)
+                ORDER BY t.is_pinned DESC, COALESCE(t.last_message_at, t.updated_at) DESC, t.id DESC
+                LIMIT :limit_value OFFSET :offset_value
+                """,
+                params,
+            )
+        except Exception:
+            # Backward-compatible fallback for environments that have not run V024 yet.
+            logger.warning(
+                "forge insights conversation table unavailable; falling back to legacy thread listing",
+                exc_info=True,
+            )
+            rows = self._sql.execute_query_mappings(
+                """
+                SELECT
+                  id,
+                  workspace_id,
+                  user_id,
+                  project_id,
+                  conversation_id,
+                  title,
+                  preview_text,
+                  is_pinned,
+                  is_archived,
+                  last_message_at,
+                  created_at,
+                  updated_at
+                FROM forge_insights_thread
+                WHERE workspace_id = :workspace_id
+                  AND user_id = :user_id
+                  AND (:project_filter_enabled = 0 OR project_id = :project_id)
+                  AND (:include_archived = 1 OR is_archived = 0)
+                ORDER BY is_pinned DESC, COALESCE(last_message_at, updated_at) DESC, id DESC
+                LIMIT :limit_value OFFSET :offset_value
+                """,
+                {
+                    "workspace_id": ws,
+                    "user_id": uid,
+                    "project_filter_enabled": 1 if project_key is not None else 0,
+                    "project_id": project_key,
+                    "include_archived": 1 if include_archived else 0,
+                    "limit_value": safe_limit,
+                    "offset_value": safe_offset,
+                },
+            )
+            if not include_stale:
+                try:
+                    from app.services.chat.minimal_chat_service import HybridConversationStore
+
+                    cache_store = HybridConversationStore(namespace="forge_insights")
+                    filtered_rows: List[Dict[str, Any]] = []
+                    for row in rows:
+                        conv_id = str(row.get("conversation_id") or "").strip()
+                        if conv_id == "":
+                            continue
+                        convo = cache_store.get_conversation(
+                            workspace_id=ws,
+                            user_id=uid,
+                            conversation_id=conv_id,
+                        )
+                        if convo is None:
+                            continue
+                        filtered_rows.append(row)
+                    rows = filtered_rows
+                except Exception:
+                    logger.warning(
+                        "forge insights stale-thread cache filter failed; returning legacy thread rows",
+                        exc_info=True,
+                    )
         return [_normalize_thread_row(r) for r in rows]
 
     def get_thread(self, *, workspace_id: str, user_id: str, thread_id: int) -> Dict[str, Any]:

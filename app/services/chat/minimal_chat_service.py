@@ -640,6 +640,10 @@ class ForgeInsightsChatService(MinimalChatService):
         conversation_store: Optional[ConversationStore] = None,
         conversation_ttl_seconds: Optional[int] = None,
     ) -> None:
+        if conversation_store is None:
+            from app.services.chat.forge_insights_conversation_store import ForgeInsightsConversationStore
+
+            conversation_store = ForgeInsightsConversationStore()
         super().__init__(
             base_url=base_url,
             model=model,
