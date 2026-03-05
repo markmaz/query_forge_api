@@ -47,6 +47,42 @@ SLOT_JSON_SCHEMA: Dict[str, Any] = {
     },
 }
 
+NEXT_ACTIONS_JSON_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "required": ["next_actions"],
+    "properties": {
+        "next_actions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["label", "prompt", "reason", "intent", "dimensions", "filters", "metrics", "confidence"],
+                "properties": {
+                    "label": {"type": "string"},
+                    "prompt": {"type": "string"},
+                    "reason": {"type": "string"},
+                    "intent": {"type": "string", "enum": ["list", "aggregate", "trend"]},
+                    "dimensions": {"type": "array", "items": {"type": "string"}},
+                    "filters": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["column_key", "op"],
+                            "properties": {
+                                "column_key": {"type": "string"},
+                                "op": {"type": "string"},
+                                "value": {},
+                                "values": {"type": "array"},
+                            },
+                        },
+                    },
+                    "metrics": {"type": "array", "items": {"type": "string"}},
+                    "confidence": {"type": "number"},
+                },
+            },
+        }
+    },
+}
+
 
 def build_system_prompt() -> str:
     return (
@@ -190,6 +226,55 @@ def build_developer_prompt(
         "- Include at least one filter when constraints exist.\n"
         "- Before emitting the final JSON, briefly decide (internally) whether each proper noun filter refers to a district/LEA name vs a geographic county.\n"
         "- Do not output the rationale field; only use it to choose the correct column_key.\n"
+        "ADM (Average Daily Membership) Rules:\n"
+        "- If the prompt asks for ADM/base ADM/average daily membership, treat it as an aggregate request unless the user explicitly asks for a raw row listing.\n"
+        "- Prefer a SUM metric over the normalized ADM field (for example normalized_adm) when available.\n"
+        "- If allowed filter columns include is_primary_school, you MAY apply is_primary_school = true only for broad ADM summaries (district/school/time rollups).\n"
+        "- If allowed filter columns include grade_level_adm, you MAY exclude placeholders with grade_level_adm NOT IN ['P3','P4'] only for broad ADM summaries when user did not request pre-k.\n"
+        "- Do NOT auto-add is_primary_school or grade_level_adm filters for person-specific prompts (for example named student/staff requests) unless the user explicitly asks for those constraints.\n"
+        "- If user specifies school year, apply a school_year filter.\n"
+        "- If user asks by report period, include report_period in grouping.group_by.\n"
+        "- If user asks by school, include school_name (or closest school label column) in grouping.group_by.\n"
+        "- If user asks by student, include student identity dimensions in grouping.group_by.\n"
+        "- SQL PIVOT is not part of PlanV2/SQL JSON contract; represent pivot requests as grouped rows (for example group by school_year + report_period) so client can pivot for display.\n"
+        "ADM Examples:\n"
+        "- Example: \"Show ADM by report period for 2026\"\n"
+        "  {\n"
+        "    \"intent\": \"aggregate\",\n"
+        "    \"selects\": {\n"
+        "      \"dimensions\": [\n"
+        "        {\"column_key\": \"wtXX.school_year\"},\n"
+        "        {\"column_key\": \"wtXX.report_period\"}\n"
+        "      ],\n"
+        "      \"metrics\": [{\"metric_ref\": \"domain_metric:adm_total\"}]\n"
+        "    },\n"
+        "    \"filters\": [\n"
+        "      {\"column_key\": \"wtXX.is_primary_school\", \"op\": \"=\", \"value\": true},\n"
+        "      {\"column_key\": \"wtXX.school_year\", \"op\": \"=\", \"value\": \"2026\"},\n"
+        "      {\"column_key\": \"wtXX.grade_level_adm\", \"op\": \"not_in\", \"values\": [\"P3\", \"P4\"]}\n"
+        "    ],\n"
+        "    \"grouping\": {\n"
+        "      \"group_by\": [\"wtXX.school_year\", \"wtXX.report_period\"],\n"
+        "      \"order_by\": [{\"by\": \"wtXX.report_period\", \"dir\": \"asc\"}]\n"
+        "    }\n"
+        "  }\n"
+        "- Example: \"Show ADM by school for 2026\"\n"
+        "  {\n"
+        "    \"intent\": \"aggregate\",\n"
+        "    \"selects\": {\n"
+        "      \"dimensions\": [{\"column_key\": \"wtXX.school_name\"}],\n"
+        "      \"metrics\": [{\"metric_ref\": \"domain_metric:adm_total\"}]\n"
+        "    },\n"
+        "    \"filters\": [\n"
+        "      {\"column_key\": \"wtXX.is_primary_school\", \"op\": \"=\", \"value\": true},\n"
+        "      {\"column_key\": \"wtXX.school_year\", \"op\": \"=\", \"value\": \"2026\"},\n"
+        "      {\"column_key\": \"wtXX.grade_level_adm\", \"op\": \"not_in\", \"values\": [\"P3\", \"P4\"]}\n"
+        "    ],\n"
+        "    \"grouping\": {\n"
+        "      \"group_by\": [\"wtXX.school_name\"],\n"
+        "      \"order_by\": [{\"by\": \"wtXX.school_name\", \"dir\": \"asc\"}]\n"
+        "    }\n"
+        "  }\n"
         "School Listing Output Contract:\n"
         "- If this is a school listing request (entity is schools and intent is list, or prompt asks to find/list/show schools), enforce this output contract.\n"
         "- For school listing output, selects.dimensions MUST include these columns in this order when allowed:\n"
@@ -372,12 +457,61 @@ def build_json_repair_prompt(*, schema: Dict[str, Any], broken_json: str) -> str
     )
 
 
+def build_next_actions_developer_prompt() -> str:
+    return (
+        "Task: Generate smart follow-up suggestions for the same analytics domain.\n"
+        "Output JSON only with key next_actions.\n"
+        "Hard constraints:\n"
+        "- Use ONLY allowed column_key values in dimensions/filters.\n"
+        "- Use ONLY allowed metric refs in metrics.\n"
+        "- Stay strictly in the current domain context; do not suggest cross-domain analysis.\n"
+        "- Keep user context from the current plan (existing filter intent and scope) when appropriate.\n"
+        "- Suggestions must be practical and relatable for school/district data users.\n"
+        "- No SQL, no table IDs, no internal debug text.\n"
+        "- Return 2 to 4 suggestions.\n"
+        "Few-shot example A:\n"
+        "Input context: current prompt=\"Show me all schools in Clarksville, TN\"; "
+        "allowed dimensions include school_name, lea_name, school_type; "
+        "allowed filters include city,state_code,school_type; allowed metrics include domain_metric:enrollment_count.\n"
+        "Good outputs:\n"
+        "1) label=\"Enrollment by school\", prompt=\"Show enrollment count by school in Clarksville, TN\", "
+        "intent=\"aggregate\", dimensions=[\"wt20.school_name\"], filters city/state, metrics=[\"domain_metric:enrollment_count\"].\n"
+        "2) label=\"Schools by district\", prompt=\"Show schools grouped by district in Clarksville, TN\", "
+        "intent=\"list\" or \"aggregate\", dimensions include district + school, filters city/state.\n"
+        "Few-shot example B:\n"
+        "Input context: current prompt=\"Show me the principal at Barksdale Elementary\"; "
+        "allowed dimensions include school_name, first_name, last_name, position_title; "
+        "allowed filters include school_name, position_title.\n"
+        "Good outputs:\n"
+        "1) label=\"Assistant principals\", prompt=\"Show assistant principals at Barksdale Elementary\", "
+        "filters include school_name + position_title.\n"
+        "2) label=\"All staff roles\", prompt=\"Show staff at Barksdale Elementary grouped by position title\", "
+        "dimensions include position_title.\n"
+        "Return JSON only.\n"
+        f"Schema:\n{json.dumps(NEXT_ACTIONS_JSON_SCHEMA, ensure_ascii=True)}"
+    )
+
+
+def build_next_actions_user_prompt(
+    *,
+    payload: Mapping[str, Any],
+) -> str:
+    return (
+        "Generate next action suggestions for this completed plan context.\n"
+        f"input: {json.dumps(dict(payload), ensure_ascii=True)}\n"
+        "Return JSON only."
+    )
+
+
 __all__ = [
     "build_developer_prompt",
     "build_json_repair_prompt",
+    "build_next_actions_developer_prompt",
+    "build_next_actions_user_prompt",
     "build_slot_developer_prompt",
     "build_slot_user_prompt",
     "build_system_prompt",
     "build_user_prompt",
+    "NEXT_ACTIONS_JSON_SCHEMA",
     "SLOT_JSON_SCHEMA",
 ]

@@ -156,6 +156,17 @@ def _domain_metric_to_sql_metric(
     label: Optional[str],
 ) -> Optional[Dict[str, Any]]:
     data = dict(metric or {})
+    sql_metric = data.get("sql_metric")
+    if isinstance(sql_metric, Mapping):
+        out = dict(sql_metric)
+        out.setdefault("id", f"domain_metric:{metric_key}")
+        if label is not None:
+            out["label"] = label
+        else:
+            out.setdefault("label", str(data.get("label") or metric_key))
+        out["metric_ref"] = f"domain_metric:{metric_key}"
+        return out
+
     agg = str(data.get("agg") or "").strip().lower()
     if agg not in {"count", "count_distinct", "sum", "avg", "min", "max"}:
         agg = "count"

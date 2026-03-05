@@ -1946,3 +1946,113 @@ def test_compile_split_ratio_rejects_or_filter_tree() -> None:
     normalized = svc.normalize(q)
     with pytest.raises(ServiceError, match="unsupported_filter_tree_for_split_ratio"):
         svc.compile(normalized)
+
+
+def _severity_plan(*, secondary_filter_mode: str = "AUTO") -> tuple[DomainPlan, dict[int, list[DomainPlanJoin]]]:
+    t0 = DomainPlanTable(1, "main.asset.patients", "t0", None, True, 0, "AUTO", "ONE")
+    t1 = DomainPlanTable(2, "main.asset.codes", "t1", None, False, 1, secondary_filter_mode, "MANY")
+    j1 = DomainPlanJoin(
+        join_id="j1",
+        from_workspace_table_id=1,
+        to_workspace_table_id=2,
+        join_type="LEFT",
+        join_spec={"on": [{"left": {"columnName": "patient_id"}, "right": {"columnName": "patient_id"}}]},
+        sort_order=0,
+    )
+    plan = DomainPlan(
+        primary=t0,
+        tables=[t0, t1],
+        joins=[j1],
+        alias_by_workspace_table_id={1: "t0", 2: "t1"},
+        column_name_policy="DEDUP_PRIMARY_FIRST",
+    )
+    return plan, {2: [j1]}
+
+
+def _catalog_with_severity() -> list[dict]:
+    return [
+        {"workspace_table_id": 1, "column_name": "patient_id", "data_type": "string"},
+        {"workspace_table_id": 1, "column_name": "gender", "data_type": "string"},
+        {"workspace_table_id": 1, "column_name": "tdoe_severity_code", "data_type": "int"},
+        {"workspace_table_id": 2, "column_name": "patient_id", "data_type": "string"},
+        {"workspace_table_id": 2, "column_name": "code", "data_type": "string"},
+        {"workspace_table_id": 2, "column_name": "tdoe_severity_code", "data_type": "int"},
+    ]
+
+
+def test_compile_applies_default_tdoe_severity_filter() -> None:
+    plan, paths = _severity_plan()
+    sql = FakeSQLExecutor()
+    sql.query_mappings_responses.append(_catalog_with_severity())
+    svc = NoCodeQueryService(executor=sql, domain_resolver=_ResolverWithWorkspaceSql(plan, sql, workspace_id="ws-1"))
+
+    q = {
+        "domainId": 1,
+        "columns": [
+            {"workspaceTableId": 1, "columnName": "patient_id"},
+            {"workspaceTableId": 2, "columnName": "code"},
+        ],
+        "filters": None,
+        "sorting": [],
+        "aggs": {"enabled": False, "metrics": [], "groupBy": []},
+    }
+    svc._domains._paths = paths  # type: ignore[attr-defined]
+    compiled = svc.compile(svc.normalize(q))
+
+    assert "WHERE t0.tdoe_severity_code < 4" in compiled.sql
+    assert "ON t0.patient_id = t1.patient_id AND t1.tdoe_severity_code < 4" in compiled.sql
+
+
+def test_compile_can_disable_tdoe_severity_filter_with_flag() -> None:
+    plan, paths = _severity_plan()
+    sql = FakeSQLExecutor()
+    sql.query_mappings_responses.append(_catalog_with_severity())
+    svc = NoCodeQueryService(executor=sql, domain_resolver=_ResolverWithWorkspaceSql(plan, sql, workspace_id="ws-1"))
+
+    q = {
+        "domainId": 1,
+        "columns": [
+            {"workspaceTableId": 1, "columnName": "patient_id"},
+            {"workspaceTableId": 2, "columnName": "code"},
+        ],
+        "meta": {"apply_tdoe_severity_filter": False},
+        "filters": None,
+        "sorting": [],
+        "aggs": {"enabled": False, "metrics": [], "groupBy": []},
+    }
+    svc._domains._paths = paths  # type: ignore[attr-defined]
+    compiled = svc.compile(svc.normalize(q))
+
+    assert "tdoe_severity_code < 4" not in compiled.sql
+
+
+def test_compile_exists_subquery_applies_tdoe_severity_filter() -> None:
+    plan, paths = _severity_plan(secondary_filter_mode="EXISTS")
+    sql = FakeSQLExecutor()
+    sql.query_mappings_responses.append(_catalog_with_severity())
+    svc = NoCodeQueryService(executor=sql, domain_resolver=_ResolverWithWorkspaceSql(plan, sql, workspace_id="ws-1"))
+
+    q = {
+        "domainId": 1,
+        "columns": [{"workspaceTableId": 1, "columnName": "patient_id"}],
+        "filters": {
+            "type": "group",
+            "match": "and",
+            "children": [
+                {
+                    "type": "condition",
+                    "field": {"workspaceTableId": 2, "columnName": "code"},
+                    "op": "equals",
+                    "value": "A1",
+                }
+            ],
+        },
+        "sorting": [],
+        "aggs": {"enabled": False, "metrics": [], "groupBy": []},
+    }
+    svc._domains._paths = paths  # type: ignore[attr-defined]
+    compiled = svc.compile(svc.normalize(q))
+
+    assert "WHERE t0.tdoe_severity_code < 4" in compiled.sql
+    assert "EXISTS (" in compiled.sql
+    assert "e1.tdoe_severity_code < 4" in compiled.sql

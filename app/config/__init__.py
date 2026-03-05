@@ -192,6 +192,51 @@ QF_PLAN_DOMAIN_LLM_EXPLANATION_ENABLED = os.getenv("QF_PLAN_DOMAIN_LLM_EXPLANATI
     "on",
 )
 QF_PLAN_DOMAIN_LLM_EXPLANATION_MAX_TOKENS = _env_int("QF_PLAN_DOMAIN_LLM_EXPLANATION_MAX_TOKENS", 220)
+QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_ENABLED = os.getenv("QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_ENABLED", "1").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+)
+QF_PLAN_DOMAIN_FAST_MODE_DEFAULT = os.getenv("QF_PLAN_DOMAIN_FAST_MODE_DEFAULT", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+)
+PLANNER_UNIFIED_LLM = os.getenv("PLANNER_UNIFIED_LLM", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+)
+QF_PLAN_DOMAIN_FAST_MODE_PLAN_MAX_TOKENS = _env_int("QF_PLAN_DOMAIN_FAST_MODE_PLAN_MAX_TOKENS", 300)
+QF_PLAN_DOMAIN_FAST_MODE_SLOT_MAX_TOKENS = _env_int("QF_PLAN_DOMAIN_FAST_MODE_SLOT_MAX_TOKENS", 220)
+QF_PLAN_DOMAIN_FAST_MODE_MAX_DIMENSIONS = _env_int("QF_PLAN_DOMAIN_FAST_MODE_MAX_DIMENSIONS", 40)
+QF_PLAN_DOMAIN_FAST_MODE_MAX_FILTER_COLUMNS = _env_int("QF_PLAN_DOMAIN_FAST_MODE_MAX_FILTER_COLUMNS", 45)
+QF_PLAN_DOMAIN_NEXT_ACTIONS_ASYNC_DEFAULT = os.getenv("QF_PLAN_DOMAIN_NEXT_ACTIONS_ASYNC_DEFAULT", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+)
+QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_MAX_TOKENS = _env_int("QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_MAX_TOKENS", 380)
+QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_MAX_ITEMS = _env_int("QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_MAX_ITEMS", 3)
+QF_PLAN_DOMAIN_TIMING_PROFILE_ENABLED = os.getenv("QF_PLAN_DOMAIN_TIMING_PROFILE_ENABLED", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+)
+QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE = (
+    os.getenv("QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE", "logs/plan_domain_pipeline_timing.log").strip()
+    or "logs/plan_domain_pipeline_timing.log"
+)
 QF_SCHOOL_YEAR_START_MONTH = _env_int("QF_SCHOOL_YEAR_START_MONTH", 8)
 QF_SCHOOL_YEAR_END_MONTH = _env_int("QF_SCHOOL_YEAR_END_MONTH", 7)
 QF_SEMESTER_SPRING_LABEL = (os.getenv("QF_SEMESTER_SPRING_LABEL", "Spring") or "Spring").strip() or "Spring"

@@ -82,6 +82,51 @@ def test_map_to_sqljson_emits_overlay_metric_node() -> None:
     assert overlay["metric_ref"] == "overlay:students_per_teacher"
 
 
+def test_map_to_sqljson_prefers_domain_metric_sql_metric_when_present() -> None:
+    capabilities = _capabilities()
+    capabilities["domain_metrics"] = [
+        {
+            "metric_key": "adm_total",
+            "label": "Total ADM",
+            "kind": "sum",
+            "agg": "sum",
+            "sql_metric": {
+                "fn": "sum",
+                "field": {
+                    "workspaceTableId": 31,
+                    "modelColumnId": 900,
+                    "columnName": "normalized_adm",
+                    "exprId": None,
+                },
+                "label": "Total ADM",
+            },
+        }
+    ]
+    plan = {
+        "schema_version": 2,
+        "trace_id": "trace-adm-1",
+        "workspace_id": "ws-1",
+        "vertical_norm": "education",
+        "base_domain_id": 6,
+        "intent": "aggregate",
+        "selects": {
+            "dimensions": [{"column_key": "wt20.county_fips_code", "label": "County"}],
+            "metrics": [{"metric_ref": "domain_metric:adm_total", "label": "ADM"}],
+        },
+        "filters": [],
+        "time": {},
+        "grouping": {"group_by": ["wt20.county_fips_code"], "order_by": []},
+    }
+    out = map_plan_v2_to_sqljson(plan_json=plan, capabilities=capabilities, prompt="adm by county")
+    metrics = ((out.get("aggs") or {}).get("metrics") or [])
+    assert metrics
+    metric = metrics[0]
+    assert metric["fn"] == "sum"
+    assert (metric.get("field") or {}).get("columnName") == "normalized_adm"
+    assert metric["metric_ref"] == "domain_metric:adm_total"
+    assert metric["label"] == "ADM"
+
+
 def test_map_to_sqljson_list_intent_without_metrics_disables_aggs_and_keeps_columns() -> None:
     capabilities = {
         "domain_id": 6,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import app.routes.planner_domain as planner_domain_route
+from app.exceptions.service_error import ServiceError
 
 
 def _headers(monkeypatch):
@@ -117,3 +118,63 @@ def test_plan_domain_route_passes_seed_context_fields(client, monkeypatch):
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 200
+
+
+def test_plan_domain_profile_route_returns_service_payload(client, monkeypatch):
+    class _Svc:
+        def get_pipeline_profile(self, *, trace_id, workspace_id, user_id):
+            assert trace_id == "trace-123"
+            assert workspace_id == "ws-1"
+            assert user_id == "user-1"
+            return {
+                "trace_id": "trace-123",
+                "workspace_id": "ws-1",
+                "user_id": "user-1",
+                "total_ms": 812,
+                "steps": [{"index": 1, "label": "Domain selection", "ms": 25}],
+            }
+
+    monkeypatch.setattr(planner_domain_route, "PlannerDomainService", _Svc)
+    resp = client.get(
+        "/api/v1/planner/plan_domain/profile/trace-123",
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["trace_id"] == "trace-123"
+    assert resp.json["total_ms"] == 812
+
+
+def test_plan_domain_profile_route_not_found(client, monkeypatch):
+    class _Svc:
+        def get_pipeline_profile(self, *, trace_id, workspace_id, user_id):
+            del workspace_id, user_id
+            raise ServiceError("Pipeline profile not found", status_code=404, details={"trace_id": trace_id})
+
+    monkeypatch.setattr(planner_domain_route, "PlannerDomainService", _Svc)
+    resp = client.get(
+        "/api/v1/planner/plan_domain/profile/missing-trace",
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 404
+    assert resp.json["error"] == "Pipeline profile not found"
+
+
+def test_plan_domain_next_actions_route_returns_service_payload(client, monkeypatch):
+    class _Svc:
+        def generate_next_actions(self, payload, *, user_id):
+            assert payload["workspace_id"] == "ws-1"
+            assert user_id == "user-1"
+            assert payload["prompt"] == "show follow ups"
+            return {
+                "next_actions": [{"label": "A", "prompt": "B", "reason": "C", "intent": "list"}],
+                "next_actions_status": "ready",
+            }
+
+    monkeypatch.setattr(planner_domain_route, "PlannerDomainService", _Svc)
+    resp = client.post(
+        "/api/v1/planner/plan_domain/next_actions",
+        json={"workspace_id": "ws-1", "prompt": "show follow ups", "plan_json_v2": {"base_domain_id": 5}},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["next_actions_status"] == "ready"

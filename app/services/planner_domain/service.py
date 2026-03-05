@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import uuid
 from dataclasses import dataclass
@@ -15,10 +16,22 @@ from qdrant_client.http import models as qdrant_models
 from app.adapters.mysql_sql_executor import MySQLSQLExecutor
 from app.config import (
     EMBEDDING_MODEL_NAME,
+    PLANNER_UNIFIED_LLM,
     QDRANT_COLUMN_COLLECTION_V2,
+    QF_PLAN_DOMAIN_FAST_MODE_DEFAULT,
+    QF_PLAN_DOMAIN_FAST_MODE_MAX_DIMENSIONS,
+    QF_PLAN_DOMAIN_FAST_MODE_MAX_FILTER_COLUMNS,
+    QF_PLAN_DOMAIN_FAST_MODE_PLAN_MAX_TOKENS,
+    QF_PLAN_DOMAIN_FAST_MODE_SLOT_MAX_TOKENS,
     QF_PLAN_DOMAIN_LLM_EXPLANATION_ENABLED,
     QF_PLAN_DOMAIN_LLM_EXPLANATION_MAX_TOKENS,
+    QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_ENABLED,
+    QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_MAX_ITEMS,
+    QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_MAX_TOKENS,
+    QF_PLAN_DOMAIN_NEXT_ACTIONS_ASYNC_DEFAULT,
     QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED,
+    QF_PLAN_DOMAIN_TIMING_PROFILE_ENABLED,
+    QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE,
     QF_SCHOOL_YEAR_END_MONTH,
     QF_SCHOOL_YEAR_START_MONTH,
     QF_SEMESTER_FALL_END_MONTH,
@@ -41,14 +54,18 @@ from app.infra.qdrant_client import QdrantClientWrapper
 from app.services.domains.capabilities_service import DomainCapabilitiesService
 from app.services.llm.llm_client import LLMClient
 from app.services.llm.prompts_plan_v2 import (
+    NEXT_ACTIONS_JSON_SCHEMA,
     SLOT_JSON_SCHEMA,
     build_developer_prompt,
     build_json_repair_prompt,
+    build_next_actions_developer_prompt,
+    build_next_actions_user_prompt,
     build_slot_developer_prompt,
     build_slot_user_prompt,
     build_system_prompt,
     build_user_prompt,
 )
+from app.services.planner.unified_llm_planner import build_plan_and_slots
 from app.services.planner.value_normalizers.country import is_country_iso2_column, normalize_country_values
 from app.services.planner.value_normalizers.school_year import is_school_year_column, normalize_school_year_values
 from app.services.planner.value_normalizers.semester import is_semester_column, normalize_semester_values
@@ -107,6 +124,10 @@ _DISCIPLINE_HINT_RE = re.compile(
     r"\b(discipline|incident|suspension|expulsion|referral|behavior|behaviour)\b",
     re.IGNORECASE,
 )
+_ADM_HINT_RE = re.compile(
+    r"\b(adm|average\s+daily\s+membership|base\s+adm|daily\s+membership|normalized\s+adm)\b",
+    re.IGNORECASE,
+)
 _FOLLOWUP_EDIT_HINT_RE = re.compile(
     r"\b(sort(ed)?|order(ed)?|arrange(d)?|limit|top|first|add|remove|drop|exclude|include|hide|also|now|then|keep|same)\b",
     re.IGNORECASE,
@@ -119,6 +140,34 @@ _SORT_BY_RE = re.compile(
     r"\b(?:sort|order|arrange)(?:\s+the\s+results)?\s+by\s+(?P<field>[a-z0-9_ \-]+?)(?:\s+(?P<dir>asc|desc|ascending|descending))?\s*$",
     re.IGNORECASE,
 )
+_NEXT_ACTION_ALLOWED_FILTER_OPS = {
+    "=",
+    "==",
+    "eq",
+    "equals",
+    "!=",
+    "<>",
+    "ne",
+    "not_equals",
+    "in",
+    "not_in",
+    "contains",
+    "like",
+    "starts_with",
+    "ends_with",
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "is_null",
+    "is_not_null",
+}
+_PIPELINE_PROFILE_HEADER_RE = re.compile(
+    r"plan_domain_pipeline\s+trace_id=(?P<trace_id>\S+)\s+workspace_id=(?P<workspace_id>\S+)\s+"
+    r"user_id=(?P<user_id>\S+)\s+conversation_id=(?P<conversation_id>\S+)\s+total_ms=(?P<total_ms>\d+)"
+)
+_PIPELINE_PROFILE_STEP_RE = re.compile(r"^\s*(?P<index>\d+)\.\s+(?P<label>.+):\s+(?P<ms>\d+)ms\s*$")
+_PIPELINE_PROFILE_TIMESTAMP_RE = re.compile(r"^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+[0-9:,]+)")
 _SEMESTER_BUCKET_CONCEPT_KEYS: Dict[str, set[str]] = {
     "spring": {
         "SEMESTER_SPRING_FLAG",
@@ -214,6 +263,8 @@ _US_STATE_ABBR = {
 }
 
 logger = logging.getLogger(__name__)
+_PROFILE_LOGGER_NAME = "planner_domain.pipeline_profile"
+_PROFILE_LOGGER_INITIALIZED = False
 
 
 class PlanDomainRequest(BaseModel):
@@ -228,6 +279,9 @@ class PlanDomainRequest(BaseModel):
     base_domain_id: Optional[int] = None
     debug: bool = False
     allow_unknown_conversation: bool = False
+    profile_pipeline: bool = False
+    fast_mode: Optional[bool] = None
+    next_actions_async: Optional[bool] = None
 
     @field_validator("conversation_id")
     @classmethod
@@ -268,6 +322,30 @@ class PlanConversationContext:
     seeded_from_client: bool
 
 
+class PlanDomainNextActionsRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    workspace_id: str = Field(min_length=1)
+    prompt: str = Field(min_length=1)
+    plan_json_v2: Dict[str, Any]
+    vertical_norm: str = "generic"
+    base_domain_id: Optional[int] = None
+    conversation_id: Optional[str] = None
+    trace_id: Optional[str] = None
+
+    @field_validator("conversation_id")
+    @classmethod
+    def _validate_conversation_id(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        token = str(value).strip()
+        if token == "":
+            return None
+        if len(token) > 128:
+            raise ValueError("conversation_id too long")
+        return token
+
+
 class PlannerDomainService:
     def __init__(
         self,
@@ -305,6 +383,11 @@ class PlannerDomainService:
         except ValidationError as exc:
             raise ServiceError("Invalid plan_domain request", status_code=400, details={"errors": exc.errors()}) from exc
 
+        profile_enabled = bool(QF_PLAN_DOMAIN_TIMING_PROFILE_ENABLED or req.profile_pipeline)
+        pipeline_profile_steps: List[Dict[str, Any]] = []
+        t0 = perf_counter()
+        t_context = perf_counter()
+
         conversation_id = req.conversation_id or new_conversation_id()
         seeded_from_client = False
         seed_plan = dict(req.context_seed_plan_json_v2 or {}) if isinstance(req.context_seed_plan_json_v2, Mapping) else {}
@@ -339,15 +422,30 @@ class PlannerDomainService:
             force_followup=seeded_from_client,
             seeded_from_client=seeded_from_client,
         )
+        _add_pipeline_step(
+            profile_steps=pipeline_profile_steps,
+            enabled=profile_enabled,
+            step="conversation_context",
+            label="Load and prepare conversation context",
+            started_at=t_context,
+        )
 
+        fast_mode = bool(req.fast_mode) if req.fast_mode is not None else bool(QF_PLAN_DOMAIN_FAST_MODE_DEFAULT)
         trace_id = str(uuid.uuid4())
         timings: Dict[str, int] = {}
-        t0 = perf_counter()
 
+        t_prompt_norm = perf_counter()
         normalized_prompt = normalize_plan_prompt(req.prompt)
         vertical = _norm_vertical(req.vertical_norm)
         if context is not None and vertical == "generic" and context.prior_vertical_norm in {"education", "healthcare"}:
             vertical = context.prior_vertical_norm
+        _add_pipeline_step(
+            profile_steps=pipeline_profile_steps,
+            enabled=profile_enabled,
+            step="normalize_prompt_and_vertical",
+            label="Normalize prompt and effective vertical",
+            started_at=t_prompt_norm,
+        )
 
         effective_domain_id = req.base_domain_id
         if effective_domain_id is None and context is not None and context.followup_mode:
@@ -360,7 +458,13 @@ class PlannerDomainService:
             prompt=normalized_prompt,
             provided_domain_id=effective_domain_id,
         )
-        timings["domain_selection"] = _elapsed_ms(t_domain)
+        timings["domain_selection"] = _add_pipeline_step(
+            profile_steps=pipeline_profile_steps,
+            enabled=profile_enabled,
+            step="domain_selection",
+            label="Select candidate domains from vector index",
+            started_at=t_domain,
+        )
 
         t_caps = perf_counter()
         selected_domain_id, capabilities, shortlisted_columns, ranking_debug = self._select_domain_and_shortlist_columns(
@@ -376,54 +480,145 @@ class PlannerDomainService:
             vertical_norm=vertical,
             capabilities=capabilities_full,
         )
-        timings["capabilities"] = _elapsed_ms(t_caps)
-
-        t_slots = perf_counter()
-        slots_result = self._call_llm_slots(
-            normalized_prompt=normalized_prompt,
-            workspace_id=req.workspace_id,
-            vertical_norm=vertical,
-            base_domain_id=selected_domain_id,
-            conversation_context=context,
+        timings["capabilities"] = _add_pipeline_step(
+            profile_steps=pipeline_profile_steps,
+            enabled=profile_enabled,
+            step="capabilities",
+            label="Load capabilities, shortlist columns, resolve semester indicators",
+            started_at=t_caps,
         )
+
+        selected_domain_name = _selected_domain_name(domain_candidates=domain_candidates, selected_domain_id=selected_domain_id)
         semantic_value_alias_constraints = self._semantic_value_alias_constraints(
             prompt=normalized_prompt,
             vertical_norm=vertical,
         )
-        slot_hints = self._merge_slot_hints(
-            prompt=normalized_prompt,
-            slot_payload=slots_result.payload,
-            semantic_constraints=semantic_value_alias_constraints,
-        )
-        timings["llm_slots"] = _elapsed_ms(t_slots)
-        capabilities_llm = self._compact_capabilities_for_llm(
-            capabilities=capabilities,
-            shortlisted_columns=shortlisted_columns,
-            prompt=normalized_prompt,
-            slot_hints=slot_hints,
-        )
-
+        unified_trace: Dict[str, Any] = {}
         schema = plan_v2_json_schema()
-        t_llm = perf_counter()
-        llm_result = self._call_llm_plan(
-            normalized_prompt=normalized_prompt,
-            workspace_id=req.workspace_id,
-            vertical_norm=vertical,
-            base_domain_id=selected_domain_id,
-            capabilities=capabilities_llm,
-            schema=schema,
-            slot_hints=slot_hints,
-            conversation_context=context,
-        )
-        timings["llm"] = _elapsed_ms(t_llm)
+        if PLANNER_UNIFIED_LLM:
+            t_caps_compact = perf_counter()
+            capabilities_llm = self._compact_capabilities_for_llm(
+                capabilities=capabilities,
+                shortlisted_columns=shortlisted_columns,
+                prompt=normalized_prompt,
+                slot_hints=None,
+                fast_mode=fast_mode,
+            )
+            _add_pipeline_step(
+                profile_steps=pipeline_profile_steps,
+                enabled=profile_enabled,
+                step="capabilities_compaction",
+                label="Compact capabilities payload for plan generation",
+                started_at=t_caps_compact,
+            )
+            t_llm = perf_counter()
+            unified_result = self._call_llm_unified(
+                prompt=req.prompt,
+                normalized_prompt=normalized_prompt,
+                workspace_id=req.workspace_id,
+                vertical_norm=vertical,
+                base_domain_id=selected_domain_id,
+                domain_name=selected_domain_name,
+                capabilities=capabilities_llm,
+                conversation_context=context,
+                trace_id=trace_id,
+                fast_mode=fast_mode,
+            )
+            slot_hints = self._merge_slot_hints(
+                prompt=normalized_prompt,
+                slot_payload=unified_result.get("slot_hints") if isinstance(unified_result.get("slot_hints"), Mapping) else {},
+                semantic_constraints=semantic_value_alias_constraints,
+            )
+            llm_result = LLMPlanResult(
+                plan_json=dict(unified_result.get("plan_json_v2") or {}),
+                raw_content=str(unified_result.get("llm_raw_json") or ""),
+                attempts=max(1, _to_int(unified_result.get("attempts")) or 1),
+                repaired=bool(unified_result.get("repaired")),
+            )
+            slots_result = SlotExtractionResult(
+                payload=dict(unified_result.get("slot_hints") or {}),
+                raw_content=str(unified_result.get("llm_raw_json") or ""),
+                attempts=max(1, _to_int(unified_result.get("attempts")) or 1),
+                repaired=bool(unified_result.get("repaired")),
+            )
+            unified_trace = {
+                "llm_model": str(unified_result.get("llm_model") or ""),
+                "llm_tokens": dict(unified_result.get("llm_tokens") or {}),
+            }
+            if "explanation_draft" in unified_result:
+                unified_trace["explanation_draft"] = unified_result.get("explanation_draft")
+            timings["llm"] = _add_pipeline_step(
+                profile_steps=pipeline_profile_steps,
+                enabled=profile_enabled,
+                step="llm_unified",
+                label="Generate slots+plan with LLM (unified)",
+                started_at=t_llm,
+            )
+        else:
+            t_slots = perf_counter()
+            slots_result = self._call_llm_slots(
+                normalized_prompt=normalized_prompt,
+                workspace_id=req.workspace_id,
+                vertical_norm=vertical,
+                base_domain_id=selected_domain_id,
+                conversation_context=context,
+                fast_mode=fast_mode,
+            )
+            slot_hints = self._merge_slot_hints(
+                prompt=normalized_prompt,
+                slot_payload=slots_result.payload,
+                semantic_constraints=semantic_value_alias_constraints,
+            )
+            timings["llm_slots"] = _add_pipeline_step(
+                profile_steps=pipeline_profile_steps,
+                enabled=profile_enabled,
+                step="llm_slots",
+                label="Extract intent/constraints slot hints via LLM",
+                started_at=t_slots,
+            )
+            t_caps_compact = perf_counter()
+            capabilities_llm = self._compact_capabilities_for_llm(
+                capabilities=capabilities,
+                shortlisted_columns=shortlisted_columns,
+                prompt=normalized_prompt,
+                slot_hints=slot_hints,
+                fast_mode=fast_mode,
+            )
+            _add_pipeline_step(
+                profile_steps=pipeline_profile_steps,
+                enabled=profile_enabled,
+                step="capabilities_compaction",
+                label="Compact capabilities payload for plan generation",
+                started_at=t_caps_compact,
+            )
+            t_llm = perf_counter()
+            llm_result = self._call_llm_plan(
+                normalized_prompt=normalized_prompt,
+                workspace_id=req.workspace_id,
+                vertical_norm=vertical,
+                base_domain_id=selected_domain_id,
+                capabilities=capabilities_llm,
+                schema=schema,
+                slot_hints=slot_hints,
+                conversation_context=context,
+                fast_mode=fast_mode,
+            )
+            timings["llm"] = _add_pipeline_step(
+                profile_steps=pipeline_profile_steps,
+                enabled=profile_enabled,
+                step="llm_plan",
+                label="Generate PlanV2 with LLM",
+                started_at=t_llm,
+            )
 
+        t_plan_normalize = perf_counter()
         llm_plan = self._normalize_llm_plan(
             raw_plan=llm_result.plan_json,
             trace_id=trace_id,
             workspace_id=req.workspace_id,
             vertical_norm=vertical,
             base_domain_id=selected_domain_id,
-            base_domain_name=_selected_domain_name(domain_candidates=domain_candidates, selected_domain_id=selected_domain_id),
+            base_domain_name=selected_domain_name,
         )
         llm_plan = _merge_followup_plan_with_context(
             prompt=normalized_prompt,
@@ -454,7 +649,26 @@ class PlannerDomainService:
             capabilities=capabilities_full,
             prompt=normalized_prompt,
         )
-        normalization_issues = country_issues + school_year_issues + semester_issues + school_name_issues + staff_role_issues
+        llm_plan, adm_default_issues, adm_default_debug = _normalize_adm_default_filters_in_plan(
+            plan_json=llm_plan,
+            capabilities=capabilities_full,
+            prompt=normalized_prompt,
+        )
+        _add_pipeline_step(
+            profile_steps=pipeline_profile_steps,
+            enabled=profile_enabled,
+            step="plan_normalization",
+            label="Normalize plan and apply deterministic value/filter normalizers",
+            started_at=t_plan_normalize,
+        )
+        normalization_issues = (
+            country_issues
+            + school_year_issues
+            + semester_issues
+            + school_name_issues
+            + staff_role_issues
+            + adm_default_issues
+        )
 
         t_validate = perf_counter()
         validated = validate_and_repair_plan_v2(
@@ -464,14 +678,24 @@ class PlannerDomainService:
             expected_base_domain_id=selected_domain_id,
             extra_issues=normalization_issues,
         )
-        timings["validation"] = _elapsed_ms(t_validate)
+        timings["validation"] = _add_pipeline_step(
+            profile_steps=pipeline_profile_steps,
+            enabled=profile_enabled,
+            step="validation",
+            label="Validate and repair plan against capabilities",
+            started_at=t_validate,
+        )
 
         district_county_retry_hint = _district_county_retry_hint(
             normalized_prompt=normalized_prompt,
             plan_json=llm_plan,
             capabilities=capabilities_full,
         )
-        if (not validated.is_valid and _should_retry_after_validation(validated.issues)) or district_county_retry_hint:
+        retry_needed = (
+            (not validated.is_valid and (_should_retry_after_validation(validated.issues) or fast_mode))
+            or (not fast_mode and bool(district_county_retry_hint))
+        )
+        if retry_needed:
             t_llm_retry = perf_counter()
             retry_feedback = _format_validation_feedback(validated.issues)
             llm_retry = self._call_llm_plan(
@@ -485,16 +709,24 @@ class PlannerDomainService:
                 validation_feedback=retry_feedback,
                 retry_hint=district_county_retry_hint or "",
                 conversation_context=context,
+                fast_mode=fast_mode,
             )
-            timings["llm_retry"] = _elapsed_ms(t_llm_retry)
+            timings["llm_retry"] = _add_pipeline_step(
+                profile_steps=pipeline_profile_steps,
+                enabled=profile_enabled,
+                step="llm_retry",
+                label="Retry PlanV2 generation after validation feedback",
+                started_at=t_llm_retry,
+            )
 
+            t_retry_normalize = perf_counter()
             retry_plan = self._normalize_llm_plan(
                 raw_plan=llm_retry.plan_json,
                 trace_id=trace_id,
                 workspace_id=req.workspace_id,
                 vertical_norm=vertical,
                 base_domain_id=selected_domain_id,
-                base_domain_name=_selected_domain_name(domain_candidates=domain_candidates, selected_domain_id=selected_domain_id),
+                base_domain_name=selected_domain_name,
             )
             retry_plan = _merge_followup_plan_with_context(
                 prompt=normalized_prompt,
@@ -525,12 +757,25 @@ class PlannerDomainService:
                 capabilities=capabilities_full,
                 prompt=normalized_prompt,
             )
+            retry_plan, retry_adm_default_issues, retry_adm_default_debug = _normalize_adm_default_filters_in_plan(
+                plan_json=retry_plan,
+                capabilities=capabilities_full,
+                prompt=normalized_prompt,
+            )
             retry_normalization_issues = (
                 retry_country_issues
                 + retry_school_year_issues
                 + retry_semester_issues
                 + retry_school_name_issues
                 + retry_staff_role_issues
+                + retry_adm_default_issues
+            )
+            _add_pipeline_step(
+                profile_steps=pipeline_profile_steps,
+                enabled=profile_enabled,
+                step="retry_plan_normalization",
+                label="Normalize retry plan and re-apply deterministic normalizers",
+                started_at=t_retry_normalize,
             )
             t_validate_retry = perf_counter()
             validated = validate_and_repair_plan_v2(
@@ -540,13 +785,20 @@ class PlannerDomainService:
                 expected_base_domain_id=selected_domain_id,
                 extra_issues=retry_normalization_issues,
             )
-            timings["validation_retry"] = _elapsed_ms(t_validate_retry)
+            timings["validation_retry"] = _add_pipeline_step(
+                profile_steps=pipeline_profile_steps,
+                enabled=profile_enabled,
+                step="validation_retry",
+                label="Validate and repair retry plan",
+                started_at=t_validate_retry,
+            )
             llm_result = llm_retry
             country_debug = retry_country_debug
             school_year_debug = retry_school_year_debug
             semester_debug = retry_semester_debug
             school_name_debug = retry_school_name_debug
             staff_role_debug = retry_staff_role_debug
+            adm_default_debug = retry_adm_default_debug
 
         t_map = perf_counter()
         sql_json = (
@@ -554,9 +806,15 @@ class PlannerDomainService:
             if validated.is_valid
             else {}
         )
-        timings["map_to_sqljson"] = _elapsed_ms(t_map)
-        timings["total"] = _elapsed_ms(t0)
+        timings["map_to_sqljson"] = _add_pipeline_step(
+            profile_steps=pipeline_profile_steps,
+            enabled=profile_enabled,
+            step="map_to_sqljson",
+            label="Map validated plan to SQL JSON",
+            started_at=t_map,
+        )
 
+        t_explanation = perf_counter()
         explanation = _build_plan_explanation(
             selected_domain_id=selected_domain_id,
             plan_json=validated.plan_json,
@@ -568,10 +826,57 @@ class PlannerDomainService:
             school_year_debug=school_year_debug,
             semester_debug=semester_debug,
         )
+        _add_pipeline_step(
+            profile_steps=pipeline_profile_steps,
+            enabled=profile_enabled,
+            step="explanation_build",
+            label="Build deterministic explanation object",
+            started_at=t_explanation,
+        )
+        t_explanation_polish = perf_counter()
         explanation, explanation_summary_trace = self._maybe_polish_explanation_summary(
             prompt=normalized_prompt,
             explanation=explanation,
         )
+        _add_pipeline_step(
+            profile_steps=pipeline_profile_steps,
+            enabled=profile_enabled,
+            step="explanation_polish",
+            label="Optionally polish explanation summary with LLM",
+            started_at=t_explanation_polish,
+        )
+        next_actions_async = (
+            bool(req.next_actions_async)
+            if req.next_actions_async is not None
+            else bool(QF_PLAN_DOMAIN_NEXT_ACTIONS_ASYNC_DEFAULT)
+        )
+        if next_actions_async:
+            next_actions = []
+            next_actions_trace = {"enabled": True, "used": False, "deferred": True}
+            _add_pipeline_step(
+                profile_steps=pipeline_profile_steps,
+                enabled=profile_enabled,
+                step="next_actions",
+                label="Defer next action generation (async)",
+                started_at=perf_counter(),
+            )
+        else:
+            t_next_actions = perf_counter()
+            next_actions, next_actions_trace = self._maybe_generate_next_actions(
+                prompt=normalized_prompt,
+                selected_domain_id=selected_domain_id,
+                selected_domain_name=str(validated.plan_json.get("domain_name") or "").strip()
+                or selected_domain_name,
+                plan_json=validated.plan_json,
+                capabilities=capabilities_full,
+            )
+            _add_pipeline_step(
+                profile_steps=pipeline_profile_steps,
+                enabled=profile_enabled,
+                step="next_actions",
+                label="Generate in-domain next action suggestions",
+                started_at=t_next_actions,
+            )
 
         response: Dict[str, Any] = {
             "plan_json_v2": validated.plan_json,
@@ -582,10 +887,20 @@ class PlannerDomainService:
                 "repairs_applied": validated.repairs_applied,
             },
             "explanation": explanation,
+            "next_actions": next_actions,
+            "next_actions_status": "deferred" if next_actions_async else "ready",
             "trace_id": trace_id,
             "conversation_id": conversation_id,
+            "technical_details": {
+                "trace_id": trace_id,
+                "conversation_id": conversation_id,
+                "fast_mode": fast_mode,
+                "planner_unified_llm": bool(PLANNER_UNIFIED_LLM),
+            },
             "timings_ms": timings,
         }
+        if req.profile_pipeline:
+            response["pipeline_profile"] = pipeline_profile_steps
         if req.debug:
             response["debug"] = {
                 "normalized_prompt": normalized_prompt,
@@ -611,12 +926,24 @@ class PlannerDomainService:
                 "semester_value_normalization": semester_debug,
                 "school_name_filter_normalization": school_name_debug,
                 "staff_role_filter_normalization": staff_role_debug,
+                "adm_filter_normalization": adm_default_debug,
                 "district_county_retry_hint": district_county_retry_hint,
                 "llm_raw_json": llm_result.raw_content,
                 "llm_attempts": llm_result.attempts,
                 "llm_repaired": llm_result.repaired,
+                "planner_unified_llm": bool(PLANNER_UNIFIED_LLM),
+                "unified_llm_trace": unified_trace,
                 "explanation_summary_trace": explanation_summary_trace,
+                "next_actions_trace": next_actions_trace,
+                "technical_details": {
+                    "trace_id": trace_id,
+                    "conversation_id": conversation_id,
+                    "fast_mode": fast_mode,
+                    "planner_unified_llm": bool(PLANNER_UNIFIED_LLM),
+                },
             }
+            if profile_enabled:
+                response["debug"]["pipeline_profile"] = pipeline_profile_steps
         state = build_conversation_state(
             workspace_id=req.workspace_id,
             user_id=str(user_id),
@@ -626,6 +953,7 @@ class PlannerDomainService:
             plan_json_v2=validated.plan_json,
             sql_json=sql_json,
         )
+        t_state_save = perf_counter()
         try:
             self._conversation_store.save_state(
                 workspace_id=req.workspace_id,
@@ -636,7 +964,99 @@ class PlannerDomainService:
             )
         except Exception as exc:
             logger.warning("planner_domain conversation save failed conversation_id=%s err=%s", conversation_id, exc)
+
+        _add_pipeline_step(
+            profile_steps=pipeline_profile_steps,
+            enabled=profile_enabled,
+            step="conversation_state_save",
+            label="Persist conversation state for follow-up context",
+            started_at=t_state_save,
+        )
+        timings["total"] = _elapsed_ms(t0)
+        _emit_pipeline_profile_log(
+            enabled=profile_enabled,
+            trace_id=trace_id,
+            workspace_id=req.workspace_id,
+            user_id=str(user_id),
+            conversation_id=conversation_id,
+            prompt=normalized_prompt,
+            total_ms=int(timings.get("total") or 0),
+            steps=pipeline_profile_steps,
+        )
         return response
+
+    def get_pipeline_profile(
+        self,
+        *,
+        trace_id: str,
+        workspace_id: str,
+        user_id: str,
+    ) -> Dict[str, Any]:
+        token = str(trace_id or "").strip()
+        if token == "":
+            raise ServiceError("trace_id is required", status_code=400)
+        return _read_pipeline_profile_from_log(
+            trace_id=token,
+            workspace_id=str(workspace_id or "").strip(),
+            user_id=str(user_id or "").strip(),
+        )
+
+    def list_pipeline_profiles(self, *, limit: int = 50) -> List[Dict[str, Any]]:
+        return _list_pipeline_profiles_from_log(limit=limit)
+
+    def generate_next_actions(
+        self,
+        payload: Dict[str, Any],
+        *,
+        user_id: str,
+    ) -> Dict[str, Any]:
+        try:
+            req = PlanDomainNextActionsRequest.model_validate(payload or {})
+        except ValidationError as exc:
+            raise ServiceError("Invalid next actions request", status_code=400, details={"errors": exc.errors()}) from exc
+
+        plan_json = dict(req.plan_json_v2 or {}) if isinstance(req.plan_json_v2, Mapping) else {}
+        if not plan_json:
+            raise ServiceError("plan_json_v2 is required", status_code=400)
+
+        normalized_prompt = normalize_plan_prompt(req.prompt)
+        domain_id = _to_int(req.base_domain_id)
+        if domain_id is None:
+            domain_id = _to_int(plan_json.get("base_domain_id"))
+        if domain_id is None or domain_id <= 0:
+            raise ServiceError("base_domain_id is required", status_code=400)
+
+        t0 = perf_counter()
+        capabilities = self._capabilities.get_domain_capabilities(
+            workspace_id=req.workspace_id,
+            user_id=str(user_id),
+            domain_id=domain_id,
+            vertical_norm=_norm_vertical(req.vertical_norm),
+        )
+        capabilities_full = self._full_capabilities_for_execution(capabilities=capabilities)
+        selected_domain_name = str(plan_json.get("domain_name") or f"domain_{domain_id}").strip() or f"domain_{domain_id}"
+        next_actions, next_actions_trace = self._maybe_generate_next_actions(
+            prompt=normalized_prompt,
+            selected_domain_id=domain_id,
+            selected_domain_name=selected_domain_name,
+            plan_json=plan_json,
+            capabilities=capabilities_full,
+        )
+        timing_ms = _elapsed_ms(t0)
+        trace_id = str(req.trace_id or uuid.uuid4()).strip() or str(uuid.uuid4())
+        conversation_id = str(req.conversation_id or "").strip()
+        return {
+            "next_actions": next_actions,
+            "next_actions_status": "ready",
+            "trace_id": trace_id,
+            "conversation_id": conversation_id,
+            "technical_details": {
+                "trace_id": trace_id,
+                "conversation_id": conversation_id,
+            },
+            "timings_ms": {"next_actions": timing_ms},
+            "debug": {"next_actions_trace": next_actions_trace} if next_actions_trace else {},
+        }
 
     def _get_domain_candidates(
         self,
@@ -785,6 +1205,11 @@ class PlannerDomainService:
             score += 0.14
         if _prompt_implies_student_school_context(prompt) and _has_student_identity_column(shortlisted_columns):
             score += 0.12
+        if _prompt_has_adm_intent(prompt):
+            if _has_adm_signal_columns(shortlisted_columns):
+                score += 0.2
+            if _has_adm_metric(capabilities):
+                score += 0.12
         score += _domain_name_intent_bias(prompt=prompt, candidate=candidate)
         if len(shortlisted_columns) < 5:
             score -= 0.1
@@ -890,13 +1315,15 @@ class PlannerDomainService:
         shortlisted_columns: Sequence[Mapping[str, Any]],
         prompt: str,
         slot_hints: Optional[Mapping[str, Any]] = None,
+        fast_mode: bool = False,
     ) -> Dict[str, Any]:
         full_dims = [dict(row) for row in list(capabilities.get("dimensions") or []) if isinstance(row, dict)]
         full_time = [dict(row) for row in list(capabilities.get("time_columns") or []) if isinstance(row, dict)]
         full_filter_candidates = _merge_dimension_rows(dimensions=full_dims, time_columns=full_time)
         dim_by_key = {_norm_key(row.get("column_key")): row for row in full_dims if _norm_key(row.get("column_key"))}
-        is_student_listing = _looks_like_list_students_prompt(prompt) or _slot_implies_student_listing(slot_hints)
         is_school_listing = _looks_like_list_schools_prompt(prompt) or _slot_implies_school_listing(slot_hints)
+        prompt_mentions_students = _prompt_mentions_students(prompt) or _slot_mentions_students(slot_hints)
+        prompt_mentions_school_district = _prompt_mentions_school_or_district(prompt)
         city_state_pattern = _prompt_has_city_state_pattern(prompt)
         has_preferred_state = _has_preferred_state_column(rows=full_dims)
         prefer_human_school_filter = (
@@ -937,7 +1364,7 @@ class PlannerDomainService:
                     selected_dims.append(row)
                     seen.add(key)
 
-        if is_student_listing:
+        if prompt_mentions_students:
             selected_dims = _prepend_student_identity_dimensions(selected_dims=selected_dims, full_dims=full_dims)
             seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
             for row in full_dims:
@@ -950,6 +1377,16 @@ class PlannerDomainService:
                     seen.add(key)
                     if len(selected_dims) >= 55:
                         break
+        if prompt_mentions_school_district:
+            lea_dim = _find_dimension_by_column_name_candidates(
+                full_dims=full_dims,
+                targets=("lea_name", "district_name", "district"),
+            )
+            if lea_dim is not None:
+                lea_key = _norm_key(lea_dim.get("column_key"))
+                if lea_key and lea_key not in seen:
+                    selected_dims.append(dict(lea_dim))
+                    seen.add(lea_key)
         if is_school_listing:
             selected_dims = _prepend_school_listing_dimensions(selected_dims=selected_dims, full_dims=full_dims)
             seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
@@ -1038,8 +1475,10 @@ class PlannerDomainService:
                     selected_dims.append(row)
                     seen.add(key)
 
-        selected_dims = _cap_columns_per_table(selected_dims, max_columns=70, per_table_cap=14)
-        selected_time = [dict(row) for row in full_time[:12]]
+        max_columns = max(12, int(QF_PLAN_DOMAIN_FAST_MODE_MAX_DIMENSIONS)) if fast_mode else 70
+        per_table_cap = 8 if fast_mode else 14
+        selected_dims = _cap_columns_per_table(selected_dims, max_columns=max_columns, per_table_cap=per_table_cap)
+        selected_time = [dict(row) for row in full_time[: (8 if fast_mode else 12)]]
 
         filter_columns: List[Dict[str, Any]] = []
         filter_seen: set[str] = set()
@@ -1077,6 +1516,10 @@ class PlannerDomainService:
                 col_name = str(row.get("column_name") or "").strip().lower()
                 if _is_name_column_needed_for_prompt(prompt=prompt, column_name=col_name):
                     _add_filter_row(row)
+
+        max_filter_columns = max(12, int(QF_PLAN_DOMAIN_FAST_MODE_MAX_FILTER_COLUMNS)) if fast_mode else len(filter_columns)
+        if len(filter_columns) > max_filter_columns:
+            filter_columns = filter_columns[:max_filter_columns]
 
         return {
             "domain_id": _to_int(capabilities.get("domain_id")) or 0,
@@ -1117,6 +1560,7 @@ class PlannerDomainService:
         vertical_norm: str,
         base_domain_id: int,
         conversation_context: Optional[PlanConversationContext] = None,
+        fast_mode: bool = False,
     ) -> SlotExtractionResult:
         system_prompt = build_system_prompt()
         composed_user = (
@@ -1133,19 +1577,45 @@ class PlannerDomainService:
 
         attempts = 0
         last_raw = ""
-        for _ in range(2):
+        max_attempts = 1 if fast_mode else 2
+        slot_max_tokens = (
+            max(80, min(int(QF_PLAN_DOMAIN_FAST_MODE_SLOT_MAX_TOKENS), int(SEMANTIC_PLAN_LLM_MAX_TOKENS)))
+            if fast_mode
+            else min(800, SEMANTIC_PLAN_LLM_MAX_TOKENS)
+        )
+        for _ in range(max_attempts):
             attempts += 1
             trace = self._llm.chat_json_with_trace(
                 system_prompt=system_prompt,
                 user_prompt=composed_user,
                 response_format=True,
-                max_tokens=min(800, SEMANTIC_PLAN_LLM_MAX_TOKENS),
+                max_tokens=slot_max_tokens,
             )
             parsed = trace.get("parsed") if isinstance(trace.get("parsed"), dict) else None
             raw_content = str(trace.get("content") or trace.get("raw_text") or "")
             last_raw = raw_content
             if parsed is not None and _looks_like_slot_payload(parsed):
                 return SlotExtractionResult(payload=parsed, raw_content=raw_content, attempts=attempts, repaired=False)
+
+        if fast_mode:
+            fallback_subgroups = _extract_subgroup_terms(normalized_prompt)
+            fallback_intent = "list" if _looks_like_list_students_prompt(normalized_prompt) else "unknown"
+            fallback_payload = {
+                "intent": fallback_intent,
+                "entity": "students" if "student" in normalized_prompt.lower() else "",
+                "constraints": [
+                    {
+                        "kind": "demographic",
+                        "text": value,
+                        "op": "unknown",
+                        "value_hint": value,
+                        "notes": None,
+                    }
+                    for value in fallback_subgroups
+                ],
+                "time_phrases": _extract_time_phrases(normalized_prompt),
+            }
+            return SlotExtractionResult(payload=fallback_payload, raw_content=last_raw, attempts=attempts, repaired=False)
 
         repair_prompt = build_json_repair_prompt(schema=SLOT_JSON_SCHEMA, broken_json=last_raw)
         repair_trace = self._llm.chat_json_with_trace(
@@ -1177,6 +1647,55 @@ class PlannerDomainService:
             "time_phrases": _extract_time_phrases(normalized_prompt),
         }
         return SlotExtractionResult(payload=fallback_payload, raw_content=raw_content, attempts=3, repaired=True)
+
+    def _call_llm_unified(
+        self,
+        *,
+        prompt: str,
+        normalized_prompt: str,
+        workspace_id: str,
+        vertical_norm: str,
+        base_domain_id: int,
+        domain_name: Optional[str],
+        capabilities: Mapping[str, Any],
+        conversation_context: Optional[PlanConversationContext] = None,
+        trace_id: str,
+        fast_mode: bool = False,
+    ) -> Dict[str, Any]:
+        plan_max_tokens = (
+            max(120, min(int(QF_PLAN_DOMAIN_FAST_MODE_PLAN_MAX_TOKENS), int(SEMANTIC_PLAN_LLM_MAX_TOKENS)))
+            if fast_mode
+            else int(SEMANTIC_PLAN_LLM_MAX_TOKENS)
+        )
+        if fast_mode:
+            slot_max_tokens = max(
+                80,
+                min(int(QF_PLAN_DOMAIN_FAST_MODE_SLOT_MAX_TOKENS), int(SEMANTIC_PLAN_LLM_MAX_TOKENS)),
+            )
+            unified_max_tokens = min(
+                int(SEMANTIC_PLAN_LLM_MAX_TOKENS),
+                max(plan_max_tokens + slot_max_tokens, 420),
+            )
+        else:
+            unified_max_tokens = int(SEMANTIC_PLAN_LLM_MAX_TOKENS)
+        conversation_payload = (
+            _conversation_context_payload(conversation_context)
+            if conversation_context is not None and conversation_context.followup_mode
+            else {}
+        )
+        return build_plan_and_slots(
+            prompt=prompt,
+            normalized_prompt=normalized_prompt,
+            workspace_id=workspace_id,
+            vertical_norm=vertical_norm,
+            base_domain_id=base_domain_id,
+            domain_name=domain_name,
+            capabilities_compact=dict(capabilities or {}),
+            conversation_context=conversation_payload,
+            trace_id=trace_id,
+            llm_client=self._llm,
+            max_tokens=unified_max_tokens,
+        )
 
     def _merge_slot_hints(
         self,
@@ -1263,6 +1782,7 @@ class PlannerDomainService:
         validation_feedback: str = "",
         retry_hint: str = "",
         conversation_context: Optional[PlanConversationContext] = None,
+        fast_mode: bool = False,
     ) -> LLMPlanResult:
         system_prompt = build_system_prompt()
         developer_prompt = build_developer_prompt(
@@ -1291,19 +1811,39 @@ class PlannerDomainService:
 
         attempts = 0
         last_raw = ""
-        for _ in range(2):
+        plan_max_tokens = (
+            max(120, min(int(QF_PLAN_DOMAIN_FAST_MODE_PLAN_MAX_TOKENS), int(SEMANTIC_PLAN_LLM_MAX_TOKENS)))
+            if fast_mode
+            else int(SEMANTIC_PLAN_LLM_MAX_TOKENS)
+        )
+        max_attempts = 1 if fast_mode else 2
+        for _ in range(max_attempts):
             attempts += 1
             trace = self._llm.chat_json_with_trace(
                 system_prompt=system_prompt,
                 user_prompt=composed_user,
                 response_format=True,
-                max_tokens=SEMANTIC_PLAN_LLM_MAX_TOKENS,
+                max_tokens=plan_max_tokens,
             )
             parsed = trace.get("parsed") if isinstance(trace.get("parsed"), dict) else None
             raw_content = str(trace.get("content") or trace.get("raw_text") or "")
             last_raw = raw_content
             if parsed is not None and _looks_like_plan_v2(parsed):
                 return LLMPlanResult(plan_json=parsed, raw_content=raw_content, attempts=attempts, repaired=False)
+
+        if fast_mode:
+            repair_prompt = build_json_repair_prompt(schema=schema, broken_json=last_raw)
+            repair_trace = self._llm.chat_json_with_trace(
+                system_prompt=system_prompt,
+                user_prompt=repair_prompt,
+                response_format=True,
+                max_tokens=max(120, min(220, plan_max_tokens)),
+            )
+            parsed = repair_trace.get("parsed") if isinstance(repair_trace.get("parsed"), dict) else None
+            raw_content = str(repair_trace.get("content") or repair_trace.get("raw_text") or "")
+            if parsed is not None and _looks_like_plan_v2(parsed):
+                return LLMPlanResult(plan_json=parsed, raw_content=raw_content, attempts=attempts + 1, repaired=True)
+            raise ServiceError("plan_domain invalid model JSON", status_code=502, details={"raw": raw_content[:4000]})
 
         repair_prompt = build_json_repair_prompt(schema=schema, broken_json=last_raw)
         repair_trace = self._llm.chat_json_with_trace(
@@ -1502,6 +2042,104 @@ class PlannerDomainService:
             "error": trace.get("error"),
             "finish_reason": trace.get("finish_reason"),
             "content_preview": str(trace.get("content") or "")[:300],
+        }
+
+    def _maybe_generate_next_actions(
+        self,
+        *,
+        prompt: str,
+        selected_domain_id: int,
+        selected_domain_name: str,
+        plan_json: Mapping[str, Any],
+        capabilities: Mapping[str, Any],
+    ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        if not QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_ENABLED:
+            return [], {"enabled": False, "used": False}
+
+        max_items = max(1, min(int(QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_MAX_ITEMS or 3), 6))
+        capability_payload = _next_action_capability_payload(capabilities=capabilities)
+        if not capability_payload.get("allowed_dimensions") and not capability_payload.get("allowed_metric_refs"):
+            return [], {"enabled": True, "used": False, "reason": "no_capabilities"}
+
+        input_payload = {
+            "user_question": str(prompt or "").strip(),
+            "domain": {
+                "domain_id": int(selected_domain_id),
+                "domain_name": str(selected_domain_name or "").strip(),
+                "domain_version": _to_int(capabilities.get("domain_version")) or 0,
+            },
+            "current_plan": _next_action_plan_context(plan_json=plan_json),
+            "capabilities": capability_payload,
+            "rules": {
+                "stay_in_domain": True,
+                "suggestion_count": {"min": 2, "max": max_items},
+            },
+            "schema": NEXT_ACTIONS_JSON_SCHEMA,
+        }
+        composed_user = (
+            f"{build_next_actions_developer_prompt()}\n\n"
+            f"{build_next_actions_user_prompt(payload=input_payload)}"
+        )
+        try:
+            trace = self._llm.chat_json_with_trace(
+                system_prompt=build_system_prompt(),
+                user_prompt=composed_user,
+                response_format=True,
+                max_tokens=QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_MAX_TOKENS,
+            )
+        except Exception as exc:
+            logger.warning("planner_domain next actions generation failed err=%s", exc)
+            return [], {"enabled": True, "used": False, "error": str(exc)}
+
+        parsed = trace.get("parsed") if isinstance(trace.get("parsed"), Mapping) else {}
+        raw_actions = list((parsed or {}).get("next_actions") or [])
+        normalized = _normalize_next_actions(
+            actions=raw_actions,
+            original_prompt=prompt,
+            capabilities=capabilities,
+            max_items=max_items,
+        )
+        retry_trace: Optional[Dict[str, Any]] = None
+        if not normalized:
+            retry_user_prompt = (
+                f"{composed_user}\n\n"
+                "Retry requirements:\n"
+                "- Use exact allowed column_key values from capabilities.\n"
+                "- If a column is uncertain, omit it.\n"
+                "- Return at least 2 safe suggestions that remain inside this domain."
+            )
+            try:
+                retry_trace = self._llm.chat_json_with_trace(
+                    system_prompt=build_system_prompt(),
+                    user_prompt=retry_user_prompt,
+                    response_format=True,
+                    max_tokens=QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_MAX_TOKENS,
+                )
+                retry_parsed = retry_trace.get("parsed") if isinstance(retry_trace.get("parsed"), Mapping) else {}
+                retry_raw_actions = list((retry_parsed or {}).get("next_actions") or [])
+                normalized = _normalize_next_actions(
+                    actions=retry_raw_actions,
+                    original_prompt=prompt,
+                    capabilities=capabilities,
+                    max_items=max_items,
+                )
+                if retry_raw_actions:
+                    raw_actions = retry_raw_actions
+            except Exception as exc:
+                logger.warning("planner_domain next actions retry failed err=%s", exc)
+
+        return normalized, {
+            "enabled": True,
+            "used": bool(normalized),
+            "requested_items": len(raw_actions),
+            "returned_items": len(normalized),
+            "error": trace.get("error"),
+            "finish_reason": trace.get("finish_reason"),
+            "content_preview": str(trace.get("content") or "")[:300],
+            "retried": retry_trace is not None,
+            "retry_error": (retry_trace or {}).get("error") if retry_trace is not None else None,
+            "retry_finish_reason": (retry_trace or {}).get("finish_reason") if retry_trace is not None else None,
+            "retry_content_preview": str((retry_trace or {}).get("content") or "")[:300] if retry_trace is not None else "",
         }
 
     @staticmethod
@@ -1828,6 +2466,215 @@ def _norm_vertical(vertical_norm: str) -> str:
     return "generic"
 
 
+def _pipeline_profile_logger() -> logging.Logger:
+    global _PROFILE_LOGGER_INITIALIZED
+
+    profile_logger = logging.getLogger(_PROFILE_LOGGER_NAME)
+    if _PROFILE_LOGGER_INITIALIZED:
+        return profile_logger
+
+    profile_logger.setLevel(logging.INFO)
+    profile_logger.propagate = False
+    try:
+        log_path = str(QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE or "").strip() or "logs/plan_domain_pipeline_timing.log"
+        log_dir = os.path.dirname(log_path)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+        handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s - %(message)s"))
+        profile_logger.addHandler(handler)
+        _PROFILE_LOGGER_INITIALIZED = True
+    except Exception as exc:
+        logger.warning("planner_domain timing profile logger init failed err=%s", exc)
+    return profile_logger
+
+
+def _add_pipeline_step(
+    *,
+    profile_steps: List[Dict[str, Any]],
+    enabled: bool,
+    step: str,
+    label: str,
+    started_at: float,
+) -> int:
+    elapsed = _elapsed_ms(started_at)
+    if enabled:
+        profile_steps.append(
+            {
+                "step": step,
+                "label": label,
+                "ms": elapsed,
+            }
+        )
+    return elapsed
+
+
+def _emit_pipeline_profile_log(
+    *,
+    enabled: bool,
+    trace_id: str,
+    workspace_id: str,
+    user_id: str,
+    conversation_id: str,
+    prompt: str,
+    total_ms: int,
+    steps: Sequence[Mapping[str, Any]],
+) -> None:
+    if not enabled:
+        return
+    try:
+        lines = [
+            (
+                f"plan_domain_pipeline trace_id={trace_id} workspace_id={workspace_id} user_id={user_id} "
+                f"conversation_id={conversation_id} total_ms={total_ms}"
+            ),
+            f"prompt={prompt[:240]}",
+        ]
+        for idx, row in enumerate(steps, start=1):
+            label = str(row.get("label") or row.get("step") or "").strip()
+            ms = int(row.get("ms") or 0)
+            lines.append(f"{idx}. {label}: {ms}ms")
+        _pipeline_profile_logger().info("\n".join(lines))
+    except Exception as exc:
+        logger.warning("planner_domain timing profile emit failed trace_id=%s err=%s", trace_id, exc)
+
+
+def _read_pipeline_profile_from_log(
+    *,
+    trace_id: str,
+    workspace_id: str,
+    user_id: str,
+) -> Dict[str, Any]:
+    log_path = str(QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE or "").strip() or "logs/plan_domain_pipeline_timing.log"
+    if not os.path.exists(log_path):
+        raise ServiceError(
+            "Pipeline profile log not found",
+            status_code=404,
+            details={"trace_id": trace_id, "log_file": log_path},
+        )
+    try:
+        with open(log_path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except Exception as exc:
+        raise ServiceError(
+            "Failed to read pipeline profile log",
+            status_code=500,
+            details={"trace_id": trace_id, "log_file": log_path, "error": str(exc)},
+        ) from exc
+
+    records: List[Tuple[str, List[str]]] = []
+    current_header: Optional[str] = None
+    current_lines: List[str] = []
+    for line in lines:
+        if "plan_domain_pipeline trace_id=" in line:
+            if current_header is not None:
+                records.append((current_header, list(current_lines)))
+            current_header = line
+            current_lines = []
+            continue
+        if current_header is not None:
+            current_lines.append(line)
+    if current_header is not None:
+        records.append((current_header, list(current_lines)))
+
+    for header_line, detail_lines in reversed(records):
+        parsed = _parse_pipeline_profile_record(header_line=header_line, detail_lines=detail_lines)
+        if not parsed:
+            continue
+        if str(parsed.get("trace_id") or "") != trace_id:
+            continue
+        if workspace_id and str(parsed.get("workspace_id") or "") != workspace_id:
+            continue
+        if user_id and str(parsed.get("user_id") or "") != user_id:
+            continue
+        parsed["log_file"] = log_path
+        parsed["profiling_enabled"] = bool(QF_PLAN_DOMAIN_TIMING_PROFILE_ENABLED)
+        return parsed
+
+    raise ServiceError(
+        "Pipeline profile not found",
+        status_code=404,
+        details={"trace_id": trace_id, "workspace_id": workspace_id, "user_id": user_id, "log_file": log_path},
+    )
+
+
+def _list_pipeline_profiles_from_log(*, limit: int = 50) -> List[Dict[str, Any]]:
+    log_path = str(QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE or "").strip() or "logs/plan_domain_pipeline_timing.log"
+    if not os.path.exists(log_path):
+        return []
+    try:
+        with open(log_path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except Exception:
+        logger.exception("Failed to read pipeline profile log for listing")
+        return []
+
+    records: List[Tuple[str, List[str]]] = []
+    current_header: Optional[str] = None
+    current_lines: List[str] = []
+    for line in lines:
+        if "plan_domain_pipeline trace_id=" in line:
+            if current_header is not None:
+                records.append((current_header, list(current_lines)))
+            current_header = line
+            current_lines = []
+            continue
+        if current_header is not None:
+            current_lines.append(line)
+    if current_header is not None:
+        records.append((current_header, list(current_lines)))
+
+    profiles: List[Dict[str, Any]] = []
+    for header_line, detail_lines in reversed(records):
+        parsed = _parse_pipeline_profile_record(header_line=header_line, detail_lines=detail_lines)
+        if parsed:
+            profiles.append(parsed)
+        if len(profiles) >= limit:
+            break
+    return profiles
+
+
+def _parse_pipeline_profile_record(*, header_line: str, detail_lines: Sequence[str]) -> Optional[Dict[str, Any]]:
+    header_match = _PIPELINE_PROFILE_HEADER_RE.search(str(header_line or ""))
+    if header_match is None:
+        return None
+
+    total_ms = _to_int(header_match.group("total_ms")) or 0
+    timestamp_match = _PIPELINE_PROFILE_TIMESTAMP_RE.search(str(header_line or ""))
+    timestamp = str((timestamp_match.group("timestamp") if timestamp_match else "") or "").strip()
+
+    prompt = ""
+    steps: List[Dict[str, Any]] = []
+    for raw in detail_lines:
+        text = str(raw or "").strip()
+        if text == "":
+            continue
+        if text.startswith("prompt="):
+            prompt = text.removeprefix("prompt=").strip()
+            continue
+        step_match = _PIPELINE_PROFILE_STEP_RE.match(text)
+        if step_match is None:
+            continue
+        steps.append(
+            {
+                "index": _to_int(step_match.group("index")) or 0,
+                "label": str(step_match.group("label") or "").strip(),
+                "ms": _to_int(step_match.group("ms")) or 0,
+            }
+        )
+
+    return {
+        "trace_id": str(header_match.group("trace_id") or "").strip(),
+        "workspace_id": str(header_match.group("workspace_id") or "").strip(),
+        "user_id": str(header_match.group("user_id") or "").strip(),
+        "conversation_id": str(header_match.group("conversation_id") or "").strip(),
+        "total_ms": total_ms,
+        "timestamp": timestamp,
+        "prompt": prompt,
+        "steps": steps,
+    }
+
+
 def _elapsed_ms(start: float) -> int:
     return int((perf_counter() - start) * 1000)
 
@@ -1942,6 +2789,24 @@ def _looks_like_list_schools_prompt(prompt: str) -> bool:
     if _LIST_SCHOOLS_RE.search(text) is not None:
         return True
     return re.search(r"\b(school|schools)\b", text, flags=re.IGNORECASE) is not None
+
+
+def _prompt_mentions_students(prompt: str) -> bool:
+    return re.search(r"\b(student|students|kid|kids)\b", str(prompt or ""), flags=re.IGNORECASE) is not None
+
+
+def _slot_mentions_students(slot_hints: Optional[Mapping[str, Any]]) -> bool:
+    if not isinstance(slot_hints, Mapping):
+        return False
+    entity = str(slot_hints.get("entity") or "").strip().lower()
+    return entity in {"student", "students", "kid", "kids"}
+
+
+def _prompt_mentions_school_or_district(prompt: str) -> bool:
+    text = str(prompt or "")
+    if re.search(r"\b(school|schools)\b", text, flags=re.IGNORECASE) is not None:
+        return True
+    return _DISTRICT_LEA_TERM_RE.search(text) is not None
 
 
 def _selected_domain_name(*, domain_candidates: Sequence[Mapping[str, Any]], selected_domain_id: int) -> Optional[str]:
@@ -2110,6 +2975,14 @@ def _build_column_query_texts(prompt: str) -> List[str]:
         out.append("district lea")
     if "school year" in text_l or "this year" in text_l or "last year" in text_l:
         out.append("school year date")
+    if _prompt_has_adm_intent(text):
+        out.extend(
+            [
+                "average daily membership adm base adm",
+                "normalized_adm report_period school_year",
+                "is_primary_school grade_level_adm",
+            ]
+        )
     return _dedupe_text_items(out)
 
 
@@ -2127,6 +3000,14 @@ def _build_domain_query_texts(prompt: str) -> List[str]:
         out.extend(["discipline incidents", "student behavior"])
     if "district" in text_l or "lea" in text_l:
         out.append("school district lea")
+    if _prompt_has_adm_intent(text):
+        out.extend(
+            [
+                "average daily membership adm base adm",
+                "student base adm attendance membership",
+                "enrollment adm report period school year",
+            ]
+        )
     return _dedupe_text_items(out)
 
 
@@ -2147,10 +3028,14 @@ def _required_column_keys(*, prompt: str, rows: Sequence[Mapping[str, Any]]) -> 
         _prompt_prefers_canonical_name_columns(text)
         and _has_canonical_name_columns(rows=rows)
     )
+    prompt_has_adm_intent = _prompt_has_adm_intent(text)
     for row in rows:
         key = _norm_key(row.get("column_key"))
         col_name = str(row.get("column_name") or "").strip().lower()
         if key == "":
+            continue
+        if prompt_has_adm_intent and _is_adm_signal_column_name(col_name):
+            required.append(key)
             continue
         if city_state_pattern:
             if _is_city_column_name(col_name):
@@ -2205,6 +3090,12 @@ def _column_heuristic_boost(*, prompt: str, row: Mapping[str, Any]) -> float:
     )
     prefer_staff_role_title_filter = _prompt_prefers_staff_role_title_filter(text)
     prefer_canonical_name_columns = _prompt_prefers_canonical_name_columns(text)
+    prompt_has_adm_intent = _prompt_has_adm_intent(text)
+    if prompt_has_adm_intent:
+        if _is_adm_signal_column_name(col_name):
+            score += 0.42
+        elif any(token in col_name for token in ("calendar", "term", "semester", "grading_period")):
+            score -= 0.18
     if city_state_pattern:
         if _is_city_column_name(col_name):
             score += 0.36
@@ -2329,6 +3220,43 @@ def _has_staff_identity_column(rows: Sequence[Mapping[str, Any]]) -> bool:
     return False
 
 
+def _prompt_has_adm_intent(prompt: str) -> bool:
+    text = str(prompt or "").strip().lower()
+    if text == "":
+        return False
+    return _ADM_HINT_RE.search(text) is not None
+
+
+def _is_adm_signal_column_name(col_name: str) -> bool:
+    token = str(col_name or "").strip().lower()
+    if token == "":
+        return False
+    if token in {"normalized_adm", "report_period", "school_year", "grade_level_adm", "is_primary_school"}:
+        return True
+    if "adm" in token:
+        return True
+    return False
+
+
+def _has_adm_signal_columns(rows: Sequence[Mapping[str, Any]]) -> bool:
+    for row in rows:
+        col_name = str(row.get("column_name") or "").strip().lower()
+        if _is_adm_signal_column_name(col_name):
+            return True
+    return False
+
+
+def _has_adm_metric(capabilities: Mapping[str, Any]) -> bool:
+    for row in list(capabilities.get("domain_metrics") or []):
+        if not isinstance(row, Mapping):
+            continue
+        key = str(row.get("metric_key") or "").strip().lower()
+        label = str(row.get("label") or "").strip().lower()
+        if "adm" in key or "average daily membership" in label or "adm" in label:
+            return True
+    return False
+
+
 def _prompt_implies_staff_work_context(prompt: str) -> bool:
     text = str(prompt or "").strip().lower()
     if text == "":
@@ -2370,6 +3298,12 @@ def _domain_name_intent_bias(*, prompt: str, candidate: Mapping[str, Any]) -> fl
 
     if _DISCIPLINE_HINT_RE.search(prompt_text) is not None and "discipline" in name:
         bias += 0.2
+
+    if _prompt_has_adm_intent(prompt_text):
+        if any(token in name for token in ("adm", "average daily membership", "membership", "enrollment", "attendance")):
+            bias += 0.22
+        if any(token in name for token in ("calendar", "academic time", "term", "semester")):
+            bias -= 0.24
 
     return bias
 
@@ -3060,6 +3994,109 @@ def _normalize_staff_role_filters_in_plan(
     return plan, [], debug_rows
 
 
+def _prompt_mentions_primary_school(prompt: str) -> bool:
+    text = str(prompt or "").strip().lower()
+    if text == "":
+        return False
+    return any(
+        token in text
+        for token in (
+            "primary school",
+            "primary-school",
+            "is primary school",
+            "primary flag",
+        )
+    )
+
+
+def _prompt_mentions_grade_level_constraint(prompt: str) -> bool:
+    text = str(prompt or "").strip().lower()
+    if text == "":
+        return False
+    return any(
+        token in text
+        for token in (
+            "grade level",
+            "grades",
+            "grade ",
+            "pre-k",
+            "prek",
+            "prekindergarten",
+            "p3",
+            "p4",
+        )
+    )
+
+
+def _normalize_adm_default_filters_in_plan(
+    *,
+    plan_json: Mapping[str, Any],
+    capabilities: Mapping[str, Any],
+    prompt: str,
+) -> Tuple[Dict[str, Any], List[Dict[str, str]], List[Dict[str, Any]]]:
+    plan = dict(plan_json or {})
+    filters = [dict(item) for item in list(plan.get("filters") or []) if isinstance(item, dict)]
+    if not filters:
+        return plan, [], []
+    if not _prompt_has_adm_intent(prompt):
+        return plan, [], []
+
+    col_lookup = {
+        _norm_key(row.get("column_key")): dict(row)
+        for row in (
+            list(capabilities.get("filter_columns") or [])
+            + list(capabilities.get("dimensions") or [])
+            + list(capabilities.get("time_columns") or [])
+        )
+        if isinstance(row, dict) and _norm_key(row.get("column_key"))
+    }
+    if not col_lookup:
+        return plan, [], []
+
+    has_person_name_filter = False
+    for row in filters:
+        key = _norm_key(row.get("column_key"))
+        col_name = str((col_lookup.get(key) or {}).get("column_name") or "").strip().lower()
+        if col_name in {"first_name", "last_name"}:
+            has_person_name_filter = True
+            break
+    if not has_person_name_filter:
+        return plan, [], []
+
+    preserve_primary_filter = _prompt_mentions_primary_school(prompt)
+    preserve_grade_level_filter = _prompt_mentions_grade_level_constraint(prompt)
+    debug_rows: List[Dict[str, Any]] = []
+    normalized_filters: List[Dict[str, Any]] = []
+
+    for row in filters:
+        key = _norm_key(row.get("column_key"))
+        col_name = str((col_lookup.get(key) or {}).get("column_name") or "").strip().lower()
+        if col_name == "is_primary_school" and not preserve_primary_filter:
+            debug_rows.append(
+                {
+                    "action": "dropped_default_filter",
+                    "column_key": key,
+                    "column_name": col_name,
+                    "reason": "person_specific_adm_prompt",
+                }
+            )
+            continue
+        if col_name == "grade_level_adm" and not preserve_grade_level_filter:
+            debug_rows.append(
+                {
+                    "action": "dropped_default_filter",
+                    "column_key": key,
+                    "column_name": col_name,
+                    "reason": "person_specific_adm_prompt",
+                }
+            )
+            continue
+        normalized_filters.append(row)
+
+    plan["filters"] = normalized_filters
+    return plan, [], debug_rows
+
+
 def _normalize_school_year_filters_in_plan(
     *,
     plan_json: Mapping[str, Any],
@@ -3571,6 +4608,363 @@ def _normalize_explanation_summary(value: str) -> str:
     if len(text) > 600:
         text = text[:600].rstrip()
     return text
+
+
+def _next_action_capability_payload(*, capabilities: Mapping[str, Any]) -> Dict[str, Any]:
+    dims = [dict(row) for row in list(capabilities.get("dimensions") or []) if isinstance(row, Mapping)]
+    time_columns = [dict(row) for row in list(capabilities.get("time_columns") or []) if isinstance(row, Mapping)]
+    filter_columns = [dict(row) for row in list(capabilities.get("filter_columns") or []) if isinstance(row, Mapping)]
+
+    dim_rows: List[Dict[str, Any]] = []
+    seen_dim_keys: set[str] = set()
+    for row in dims + time_columns:
+        key = _norm_key(row.get("column_key"))
+        if key == "" or key in seen_dim_keys:
+            continue
+        seen_dim_keys.add(key)
+        dim_rows.append(
+            {
+                "column_key": key,
+                "label": str(row.get("label") or "").strip(),
+                "data_type": str(row.get("data_type") or "").strip().lower(),
+            }
+        )
+
+    filter_rows: List[Dict[str, Any]] = []
+    seen_filter_keys: set[str] = set()
+    for row in filter_columns:
+        if row.get("filterable") is False:
+            continue
+        key = _norm_key(row.get("column_key"))
+        if key == "" or key in seen_filter_keys:
+            continue
+        seen_filter_keys.add(key)
+        filter_rows.append(
+            {
+                "column_key": key,
+                "label": str(row.get("label") or "").strip(),
+                "data_type": str(row.get("data_type") or "").strip().lower(),
+            }
+        )
+
+    metric_catalog: List[Dict[str, Any]] = []
+    for row in list(capabilities.get("domain_metrics") or []):
+        if not isinstance(row, Mapping):
+            continue
+        key = _norm_key(row.get("metric_key"))
+        if key:
+            metric_catalog.append(
+                {
+                    "metric_ref": f"domain_metric:{key}",
+                    "label": str(row.get("label") or "").strip(),
+                }
+            )
+    for row in list(capabilities.get("user_metrics") or []):
+        if not isinstance(row, Mapping):
+            continue
+        key = _norm_key(row.get("metric_id") or row.get("id"))
+        if key:
+            metric_catalog.append(
+                {
+                    "metric_ref": f"user_metric:{key}",
+                    "label": str(row.get("label") or "").strip(),
+                }
+            )
+    for row in list(capabilities.get("overlay_metrics") or []):
+        if not isinstance(row, Mapping):
+            continue
+        key = _norm_key(row.get("overlay_key"))
+        if key:
+            metric_catalog.append(
+                {
+                    "metric_ref": f"overlay:{key}",
+                    "label": str(row.get("label") or "").strip(),
+                }
+            )
+
+    return {
+        "allowed_dimensions": dim_rows[:80],
+        "allowed_filter_columns": filter_rows[:80],
+        "allowed_metric_refs": [str(row.get("metric_ref") or "") for row in metric_catalog],
+        "metric_catalog": metric_catalog,
+    }
+
+
+def _next_action_plan_context(*, plan_json: Mapping[str, Any]) -> Dict[str, Any]:
+    selects = plan_json.get("selects") or {}
+    return {
+        "intent": str(plan_json.get("intent") or "").strip().lower() or "list",
+        "dimensions": [
+            _norm_key((row or {}).get("column_key"))
+            for row in list(selects.get("dimensions") or [])
+            if isinstance(row, Mapping) and _norm_key((row or {}).get("column_key"))
+        ],
+        "metrics": [
+            _norm_key((row or {}).get("metric_ref"))
+            for row in list(selects.get("metrics") or [])
+            if isinstance(row, Mapping) and _norm_key((row or {}).get("metric_ref"))
+        ],
+        "filters": [
+            {
+                "column_key": _norm_key(row.get("column_key")),
+                "op": str(row.get("op") or "").strip().lower(),
+                "value": row.get("value"),
+                "values": row.get("values"),
+            }
+            for row in list(plan_json.get("filters") or [])
+            if isinstance(row, Mapping) and _norm_key(row.get("column_key"))
+        ],
+    }
+
+
+def _allowed_metric_refs_from_capabilities(*, capabilities: Mapping[str, Any]) -> set[str]:
+    out: set[str] = set()
+    for row in list(capabilities.get("domain_metrics") or []):
+        if not isinstance(row, Mapping):
+            continue
+        key = _norm_key(row.get("metric_key"))
+        if key:
+            out.add(f"domain_metric:{key}")
+    for row in list(capabilities.get("user_metrics") or []):
+        if not isinstance(row, Mapping):
+            continue
+        key = _norm_key(row.get("metric_id") or row.get("id"))
+        if key:
+            out.add(f"user_metric:{key}")
+    for row in list(capabilities.get("overlay_metrics") or []):
+        if not isinstance(row, Mapping):
+            continue
+        key = _norm_key(row.get("overlay_key"))
+        if key:
+            out.add(f"overlay:{key}")
+    return out
+
+
+def _normalize_next_actions(
+    *,
+    actions: Sequence[Any],
+    original_prompt: str,
+    capabilities: Mapping[str, Any],
+    max_items: int,
+) -> List[Dict[str, Any]]:
+    allowed_dim_keys = {
+        _norm_key(row.get("column_key"))
+        for row in list(capabilities.get("dimensions") or []) + list(capabilities.get("time_columns") or [])
+        if isinstance(row, Mapping) and _norm_key(row.get("column_key"))
+    }
+    allowed_filter_keys = {
+        _norm_key(row.get("column_key"))
+        for row in list(capabilities.get("filter_columns") or [])
+        if isinstance(row, Mapping) and row.get("filterable") is not False and _norm_key(row.get("column_key"))
+    }
+    dim_key_by_column_name = _unique_allowed_key_by_column_name(allowed_dim_keys)
+    filter_key_by_column_name = _unique_allowed_key_by_column_name(allowed_filter_keys)
+    allowed_metric_refs = _allowed_metric_refs_from_capabilities(capabilities=capabilities)
+
+    out: List[Dict[str, Any]] = []
+    seen_prompts: set[str] = set()
+    source_prompt = " ".join(str(original_prompt or "").strip().lower().split())
+    for raw in list(actions or []):
+        normalized = _normalize_next_action_item(
+            item=raw,
+            allowed_dim_keys=allowed_dim_keys,
+            dim_key_by_column_name=dim_key_by_column_name,
+            allowed_filter_keys=allowed_filter_keys,
+            filter_key_by_column_name=filter_key_by_column_name,
+            allowed_metric_refs=allowed_metric_refs,
+        )
+        if normalized is None:
+            continue
+        prompt_key = " ".join(str(normalized.get("prompt") or "").strip().lower().split())
+        if prompt_key == "" or prompt_key in seen_prompts or prompt_key == source_prompt:
+            continue
+        seen_prompts.add(prompt_key)
+        out.append(normalized)
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def _normalize_next_action_item(
+    *,
+    item: Any,
+    allowed_dim_keys: set[str],
+    dim_key_by_column_name: Mapping[str, str],
+    allowed_filter_keys: set[str],
+    filter_key_by_column_name: Mapping[str, str],
+    allowed_metric_refs: set[str],
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(item, Mapping):
+        return None
+
+    label = _normalize_next_action_text(item.get("label"), max_len=80)
+    prompt = _normalize_next_action_text(item.get("prompt"), max_len=220)
+    reason = _normalize_next_action_text(item.get("reason"), max_len=220)
+    if not label or not prompt or not reason:
+        return None
+
+    intent = _normalize_next_action_intent(item.get("intent"))
+    confidence = _normalize_next_action_confidence(item.get("confidence"))
+
+    dimensions: List[str] = []
+    for raw in list(item.get("dimensions") or []):
+        key = _repair_allowed_key(
+            key=_norm_key(raw),
+            allowed_keys=allowed_dim_keys,
+            unique_key_by_column_name=dim_key_by_column_name,
+        )
+        if key == "":
+            continue
+        if key not in dimensions:
+            dimensions.append(key)
+
+    metrics: List[str] = []
+    for raw in list(item.get("metrics") or []):
+        if isinstance(raw, Mapping):
+            token = _norm_key(raw.get("metric_ref"))
+        else:
+            token = _norm_key(raw)
+        if token == "":
+            continue
+        if token not in allowed_metric_refs:
+            continue
+        if token not in metrics:
+            metrics.append(token)
+
+    filters: List[Dict[str, Any]] = []
+    for raw in list(item.get("filters") or []):
+        if not isinstance(raw, Mapping):
+            continue
+        key = _repair_allowed_key(
+            key=_norm_key(raw.get("column_key")),
+            allowed_keys=allowed_filter_keys,
+            unique_key_by_column_name=filter_key_by_column_name,
+        )
+        if key == "":
+            continue
+        op = _normalize_next_action_filter_op(raw.get("op"))
+        if op == "":
+            continue
+        row: Dict[str, Any] = {"column_key": key, "op": op}
+        values = raw.get("values")
+        value = raw.get("value")
+        if op in {"in", "not_in"}:
+            if isinstance(values, Sequence) and not isinstance(values, (str, bytes)):
+                cleaned = [v for v in list(values) if v is not None]
+            elif value is not None:
+                cleaned = [value]
+            else:
+                cleaned = []
+            if not cleaned:
+                continue
+            row["values"] = cleaned[:20]
+        elif op in {"is_null", "is_not_null"}:
+            pass
+        elif value is not None:
+            row["value"] = value
+        elif isinstance(values, Sequence) and not isinstance(values, (str, bytes)) and list(values):
+            row["value"] = list(values)[0]
+        else:
+            continue
+        filters.append(row)
+
+    if intent == "aggregate" and not metrics:
+        return None
+    if not dimensions and not metrics and not filters:
+        return None
+
+    return {
+        "label": label,
+        "prompt": prompt,
+        "reason": reason,
+        "intent": intent,
+        "confidence": confidence,
+        "dimensions": dimensions,
+        "metrics": metrics,
+        "filters": filters,
+    }
+
+
+def _column_name_from_key(key: Any) -> str:
+    token = _norm_key(key)
+    if token == "" or "." not in token:
+        return ""
+    return token.split(".", 1)[1]
+
+
+def _unique_allowed_key_by_column_name(allowed_keys: Sequence[str]) -> Dict[str, str]:
+    by_name: Dict[str, set[str]] = {}
+    for raw_key in allowed_keys:
+        key = _norm_key(raw_key)
+        col_name = _column_name_from_key(key)
+        if key == "" or col_name == "":
+            continue
+        by_name.setdefault(col_name, set()).add(key)
+    return {
+        col_name: sorted(keys)[0]
+        for col_name, keys in by_name.items()
+        if len(keys) == 1
+    }
+
+
+def _repair_allowed_key(
+    *,
+    key: str,
+    allowed_keys: set[str],
+    unique_key_by_column_name: Mapping[str, str],
+) -> str:
+    if key == "":
+        return ""
+    if key in allowed_keys:
+        return key
+    col_name = _column_name_from_key(key)
+    if col_name == "":
+        return ""
+    return _norm_key(unique_key_by_column_name.get(col_name))
+
+
+def _normalize_next_action_text(value: Any, *, max_len: int) -> str:
+    text = " ".join(str(value or "").strip().split())
+    if text == "":
+        return ""
+    if len(text) > max_len:
+        text = text[:max_len].rstrip()
+    return text
+
+
+def _normalize_next_action_intent(value: Any) -> str:
+    token = str(value or "").strip().lower()
+    if token in {"aggregate", "agg", "summary"}:
+        return "aggregate"
+    if token in {"trend", "timeseries", "time_series", "time-series"}:
+        return "trend"
+    return "list"
+
+
+def _normalize_next_action_confidence(value: Any) -> float:
+    try:
+        number = float(value)
+    except Exception:
+        number = 0.7
+    if number < 0.0:
+        number = 0.0
+    if number > 1.0:
+        number = 1.0
+    return round(number, 2)
+
+
+def _normalize_next_action_filter_op(value: Any) -> str:
+    token = str(value or "").strip().lower().replace(" ", "_")
+    alias = {
+        "not_equals": "ne",
+        "equals": "eq",
+        "notin": "not_in",
+        "isnull": "is_null",
+        "isnotnull": "is_not_null",
+    }.get(token, token)
+    if alias not in _NEXT_ACTION_ALLOWED_FILTER_OPS:
+        return ""
+    return alias
 
 
 __all__ = ["PlannerDomainService", "normalize_plan_prompt"]

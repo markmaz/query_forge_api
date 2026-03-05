@@ -15,6 +15,8 @@ from app.services.domain_resolver import DomainPlan, DomainResolver
 from app.services.sqljson import validate_and_normalize_derived_sqljson
 
 MAX_MANUAL_IN = 150
+GLOBAL_ROW_QUALITY_COLUMN = "tdoe_severity_code"
+GLOBAL_ROW_QUALITY_MAX_EXCLUSIVE = 4
 
 VALUE_OVERRIDE_IN_COLUMN_BY_TYPE = {
     "regions": "zipcode",
@@ -962,8 +964,78 @@ class NoCodeQueryService:
             catalog[(wt_id, col_name)] = {"data_type": str(row.get("data_type") or "").strip().lower()}
         return catalog
 
-    def _validate_and_normalize_derived_for_plan(self, q: Dict[str, Any], plan: DomainPlan) -> Dict[str, Any]:
-        catalog = self._load_domain_column_catalog(plan)
+    @staticmethod
+    def _workspace_table_ids_with_column(
+        plan: DomainPlan,
+        *,
+        column_name: str,
+        column_catalog: Optional[Dict[tuple[int, str], Dict[str, Any]]] = None,
+    ) -> set[int]:
+        wanted = str(column_name or "").strip().lower()
+        if not wanted:
+            return set()
+        catalog = column_catalog or {}
+        out: set[int] = set()
+        for t in (plan.tables or []):
+            wt_id = int(t.workspace_table_id)
+            if (wt_id, wanted) in catalog:
+                out.add(wt_id)
+        return out
+
+    @staticmethod
+    def _optional_bool(value: Any) -> Optional[bool]:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            v = value.strip().lower()
+            if v in {"1", "true", "t", "yes", "y", "on"}:
+                return True
+            if v in {"0", "false", "f", "no", "n", "off"}:
+                return False
+        return None
+
+    @classmethod
+    def _is_tdoe_severity_filter_enabled(cls, q: Dict[str, Any]) -> bool:
+        meta = q.get("meta")
+        meta_obj = meta if isinstance(meta, dict) else {}
+
+        direct_flag = cls._optional_bool(meta_obj.get("apply_tdoe_severity_filter"))
+        if direct_flag is None:
+            direct_flag = cls._optional_bool(q.get("apply_tdoe_severity_filter"))
+        if direct_flag is not None:
+            return direct_flag
+
+        include_error_rows = cls._optional_bool(meta_obj.get("include_error_rows"))
+        if include_error_rows is None:
+            include_error_rows = cls._optional_bool(q.get("include_error_rows"))
+        if include_error_rows is not None:
+            return not include_error_rows
+
+        return True
+
+    @staticmethod
+    def _severity_predicate_for_alias(
+        *,
+        alias: str,
+        workspace_table_id: int,
+        severity_table_ids: set[int],
+    ) -> str:
+        if int(workspace_table_id) not in severity_table_ids:
+            return ""
+        return f"{alias}.{GLOBAL_ROW_QUALITY_COLUMN} < {GLOBAL_ROW_QUALITY_MAX_EXCLUSIVE}"
+
+    def _validate_and_normalize_derived_for_plan(
+        self,
+        q: Dict[str, Any],
+        plan: DomainPlan,
+        *,
+        column_catalog: Optional[Dict[tuple[int, str], Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        catalog = column_catalog if column_catalog is not None else self._load_domain_column_catalog(plan)
         normalized, issues, _ = validate_and_normalize_derived_sqljson(
             q,
             plan=plan,
@@ -1032,7 +1104,19 @@ class NoCodeQueryService:
 
         domain_id = q["domainId"]
         plan = self._domains.resolve_plan(domain_id=domain_id)
-        q = self._validate_and_normalize_derived_for_plan(q, plan)
+        column_catalog = self._load_domain_column_catalog(plan)
+        q = self._validate_and_normalize_derived_for_plan(q, plan, column_catalog=column_catalog)
+
+        severity_filter_enabled = self._is_tdoe_severity_filter_enabled(q)
+        severity_table_ids = (
+            self._workspace_table_ids_with_column(
+                plan,
+                column_name=GLOBAL_ROW_QUALITY_COLUMN,
+                column_catalog=column_catalog,
+            )
+            if severity_filter_enabled
+            else set()
+        )
 
         split_metric = self._detect_split_ratio_metric(q, plan)
         if split_metric is not None:
@@ -1043,6 +1127,7 @@ class NoCodeQueryService:
                 mode=mode,
                 limit=limit,
                 offset=offset,
+                severity_table_ids=severity_table_ids,
             )
 
         primary_id = int(plan.primary.workspace_table_id)
@@ -1062,7 +1147,11 @@ class NoCodeQueryService:
         )
         required_table_ids = base_required_table_ids | attachment_required_table_ids
         required_table_ids.discard(0)
-        base_from_sql = self._from_clause_from_plan(plan, required_table_ids)
+        base_from_sql = self._from_clause_from_plan(
+            plan,
+            required_table_ids,
+            severity_table_ids=severity_table_ids,
+        )
 
         dp_meta = self._compile_data_prep_meta(
             q.get("dataPrep"),
@@ -1079,6 +1168,11 @@ class NoCodeQueryService:
         rewrite_by_modelid = dp_meta["rewrite_by_modelid"]
         rewrite_by_wt_col: Dict[tuple, str] = {}
         using_prep = bool(dp_meta["exprs"])
+        primary_severity_pred = self._severity_predicate_for_alias(
+            alias=self._safe_ident(base_alias),
+            workspace_table_id=primary_id,
+            severity_table_ids=severity_table_ids,
+        )
 
         required_cols = self._collect_required_column_keys(
             q,
@@ -1112,6 +1206,7 @@ class NoCodeQueryService:
                 base_from_sql=base_from_sql,
                 base_selects=base_selects,
                 exprs=dp_meta["exprs"],
+                base_where_sql=primary_severity_pred,
             )
             from_clause_sql = "prep"
         else:
@@ -1377,6 +1472,7 @@ class NoCodeQueryService:
             new_param,
             rewrite_by_wt_col=rewrite_by_wt_col,
             force_exists_for_tables=filter_only_table_ids if use_two_phase else None,
+            severity_table_ids=severity_table_ids,
         )
         if attach_ctx["selects"]:
             if aggs and bool(aggs.get("enabled")):
@@ -1417,6 +1513,8 @@ class NoCodeQueryService:
             for p in ([where_sql] if where_sql else []) + (exists_parts or []) + attach_ctx["where"]
             if p
         ]
+        if (not using_prep) and primary_severity_pred:
+            base_where_parts.insert(0, primary_severity_pred)
 
         base_patients_cte = ""
         base_patients_cte_count = ""
@@ -1441,13 +1539,20 @@ class NoCodeQueryService:
             )
 
             projection_table_ids = (projected_table_ids | attachment_required_table_ids | {primary_id}) - {0}
-            projection_from_sql = self._from_clause_from_plan(plan, projection_table_ids)
+            projection_from_sql = self._from_clause_from_plan(
+                plan,
+                projection_table_ids,
+                severity_table_ids=severity_table_ids,
+            )
             projection_lines = projection_from_sql.split("\n")
             join_lines = projection_lines[1:] if len(projection_lines) > 1 else []
+            primary_join_parts = [f"{self._safe_ident(base_alias)}.{two_phase_key_col_sql} = bp.{two_phase_key_col_sql}"]
+            if primary_severity_pred:
+                primary_join_parts.append(primary_severity_pred)
             from_clause_sql = (
                 f"base_patients bp\n"
                 f"JOIN {plan.primary.full_name} {self._safe_ident(base_alias)} "
-                f"ON {self._safe_ident(base_alias)}.{two_phase_key_col_sql} = bp.{two_phase_key_col_sql}"
+                f"ON {' AND '.join(primary_join_parts)}"
             )
             if join_lines:
                 from_clause_sql += "\n" + "\n".join(join_lines)
@@ -1582,10 +1687,18 @@ class NoCodeQueryService:
         mode: str,
         limit: int,
         offset: int,
+        severity_table_ids: Optional[set[int]] = None,
     ) -> CompiledQuery:
+        if severity_table_ids is None:
+            severity_table_ids = set()
         primary_id = int(plan.primary.workspace_table_id)
         base_alias = plan.primary.alias
         alias_by_wt = plan.alias_by_workspace_table_id
+        primary_severity_pred = self._severity_predicate_for_alias(
+            alias=self._safe_ident(base_alias),
+            workspace_table_id=primary_id,
+            severity_table_ids=severity_table_ids,
+        )
         if bool(q.get("distinct", False)):
             raise ServiceError("distinct is not supported with aggregations", status_code=400)
         if q.get("dataPrep"):
@@ -1747,7 +1860,11 @@ class NoCodeQueryService:
             }
             required_table_ids = self._required_table_ids_from_query(side_query, plan)
             required_table_ids.add(int(metric_table_id))
-            from_sql = self._from_clause_from_plan(plan, required_table_ids)
+            from_sql = self._from_clause_from_plan(
+                plan,
+                required_table_ids,
+                severity_table_ids=severity_table_ids,
+            )
 
             where_sql, exists_parts = self._compile_where(
                 filters_node,
@@ -1760,8 +1877,11 @@ class NoCodeQueryService:
                 alias_by_wt,
                 plan,
                 new_param,
+                severity_table_ids=severity_table_ids,
             )
             where_parts = [p for p in ([where_sql] if where_sql else []) + exists_parts if p]
+            if primary_severity_pred:
+                where_parts.insert(0, primary_severity_pred)
 
             metric_sql = self._compile_metric(
                 metric_fn,
@@ -2161,21 +2281,33 @@ class NoCodeQueryService:
         base_from_sql: str,
         base_selects: List[str],
         exprs: List[str],
+        base_where_sql: str = "",
     ) -> str:
         if not exprs:
             return ""
         select_exprs = list(base_selects or [])
         select_exprs.extend(exprs)
         joined_exprs = ",\n    ".join(select_exprs)
-        return (
+        sql = (
             "WITH prep AS (\n"
             "  SELECT\n"
             f"    {joined_exprs}\n"
             f"  FROM {base_from_sql}\n"
-            ")"
         )
+        if base_where_sql:
+            sql += f"  WHERE {base_where_sql}\n"
+        sql += ")"
+        return sql
 
-    def _from_clause_from_plan(self, plan: DomainPlan, required_table_ids: set[int]) -> str:
+    def _from_clause_from_plan(
+        self,
+        plan: DomainPlan,
+        required_table_ids: set[int],
+        *,
+        severity_table_ids: Optional[set[int]] = None,
+    ) -> str:
+        if severity_table_ids is None:
+            severity_table_ids = set()
         tables_by_id = {t.workspace_table_id: t for t in plan.tables}
         needed_edges: Dict[str, bool] = {}
         for wt_id in required_table_ids:
@@ -2203,6 +2335,13 @@ class NoCodeQueryService:
 
             to_table = tables_by_id[edge.to_workspace_table_id]
             on_sql = self._compile_join_on(edge, plan.alias_by_workspace_table_id)
+            severity_pred = self._severity_predicate_for_alias(
+                alias=self._safe_ident(to_table.alias),
+                workspace_table_id=int(to_table.workspace_table_id),
+                severity_table_ids=severity_table_ids,
+            )
+            if severity_pred:
+                on_sql = f"{on_sql} AND {severity_pred}"
             clauses.append(
                 f"{join_type} JOIN {to_table.full_name} {self._safe_ident(to_table.alias)} ON {on_sql}"
             )
@@ -2904,9 +3043,12 @@ class NoCodeQueryService:
         *,
         rewrite_by_wt_col: Optional[Dict[tuple, str]] = None,
         force_exists_for_tables: Optional[set[int]] = None,
+        severity_table_ids: Optional[set[int]] = None,
     ) -> Tuple[str, List[str]]:
         if rewrite_by_wt_col is None:
             rewrite_by_wt_col = {}
+        if severity_table_ids is None:
+            severity_table_ids = set()
         if not node:
             return "", []
         exists_counter = 0
@@ -3094,6 +3236,13 @@ class NoCodeQueryService:
 
             where_preds: List[str] = []
             where_preds.extend(self._join_predicates(first_edge, from_alias, to_alias))
+            first_severity_pred = self._severity_predicate_for_alias(
+                alias=self._safe_ident(to_alias),
+                workspace_table_id=first_to,
+                severity_table_ids=severity_table_ids,
+            )
+            if first_severity_pred:
+                where_preds.append(first_severity_pred)
 
             current_alias = to_alias
             current_id = first_to
@@ -3106,9 +3255,17 @@ class NoCodeQueryService:
                 if not next_table:
                     raise ServiceError("Join path invalid for EXISTS", status_code=400)
                 next_alias = f"{sub_alias}_{next_id}"
+                join_preds = self._join_predicates(edge, current_alias, next_alias)
+                next_severity_pred = self._severity_predicate_for_alias(
+                    alias=self._safe_ident(next_alias),
+                    workspace_table_id=next_id,
+                    severity_table_ids=severity_table_ids,
+                )
+                if next_severity_pred:
+                    join_preds.append(next_severity_pred)
                 join_clauses.append(
                     f"JOIN {next_table.full_name} {self._safe_ident(next_alias)} "
-                    f"ON {' AND '.join(self._join_predicates(edge, current_alias, next_alias))}"
+                    f"ON {' AND '.join(join_preds)}"
                 )
                 current_alias = next_alias
                 current_id = next_id

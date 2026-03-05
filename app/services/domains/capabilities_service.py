@@ -204,6 +204,7 @@ class DomainCapabilitiesService:
                         "kind": str(item.get("kind") or _infer_metric_kind(key)).strip().lower(),
                         "agg": str(item.get("agg") or _default_metric_agg(key)).strip().lower(),
                         "column_key": str(item.get("column_key") or "").strip().lower() or None,
+                        "sql_metric": dict(item.get("sql_metric") or {}) if isinstance(item.get("sql_metric"), Mapping) else None,
                     }
                 )
         return out
