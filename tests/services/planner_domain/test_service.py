@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import pytest
+
 from app.services.planner_domain import service as planner_domain_service_module
 from app.services.planner_domain.service import (
+    LLMPlanResult,
     PlannerDomainService,
+    SlotExtractionResult,
     _district_county_retry_hint,
 )
+
+
+@pytest.fixture(autouse=True)
+def _disable_unified_llm(monkeypatch):
+    monkeypatch.setattr(planner_domain_service_module, "PLANNER_UNIFIED_LLM", False)
 
 
 class _FakeCapabilitiesService:
@@ -238,6 +247,148 @@ class _FakeLLMStudentIdentityPlan:
         }
 
 
+class _FakeStaffCapabilitiesService:
+    def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
+        del workspace_id, user_id, vertical_norm
+        assert domain_id == 5
+        return {
+            "domain_id": 5,
+            "domain_version": 1,
+            "dimensions": [
+                {
+                    "column_key": "wt20.school_name",
+                    "label": "School Name",
+                    "data_type": "string",
+                    "filterable": True,
+                    "workspace_table_id": 20,
+                    "model_column_id": 99,
+                    "column_name": "school_name",
+                },
+                {
+                    "column_key": "wt30.position_title",
+                    "label": "Position Title",
+                    "data_type": "string",
+                    "filterable": True,
+                    "workspace_table_id": 30,
+                    "model_column_id": 602,
+                    "column_name": "position_title",
+                },
+                {
+                    "column_key": "wt23.first_name",
+                    "label": "First Name",
+                    "data_type": "string",
+                    "filterable": True,
+                    "workspace_table_id": 23,
+                    "model_column_id": 315,
+                    "column_name": "first_name",
+                },
+                {
+                    "column_key": "wt23.last_name",
+                    "label": "Last Name",
+                    "data_type": "string",
+                    "filterable": True,
+                    "workspace_table_id": 23,
+                    "model_column_id": 316,
+                    "column_name": "last_name",
+                },
+            ],
+            "domain_metrics": [
+                {
+                    "metric_key": "staff_count",
+                    "label": "Staff Count",
+                    "kind": "count",
+                    "agg": "count",
+                }
+            ],
+            "user_metrics": [],
+            "overlay_metrics": [],
+            "time_columns": [],
+        }
+
+
+class _FakeLLMWithNextActions:
+    def chat_json_with_trace(self, **kwargs):
+        user_prompt = str(kwargs.get("user_prompt") or "")
+        if "Task: Extract lightweight planning slots" in user_prompt:
+            return {
+                "parsed": {
+                    "intent": "list",
+                    "entity": "staff",
+                    "constraints": [],
+                    "time_phrases": [],
+                },
+                "content": "{}",
+                "raw_text": "{}",
+            }
+        if "Generate next action suggestions for this completed plan context." in user_prompt:
+            return {
+                "parsed": {
+                    "next_actions": [
+                        {
+                            "label": "Assistant Principals",
+                            "prompt": "Show assistant principals at Barksdale Elementary",
+                            "reason": "This keeps the same school context and changes role focus.",
+                            "intent": "list",
+                            "dimensions": ["wt23.first_name", "wt23.last_name", "wt30.position_title"],
+                            "filters": [
+                                {"column_key": "wt20.school_name", "op": "eq", "value": "Barksdale Elementary"},
+                                {"column_key": "wt30.position_title", "op": "eq", "value": "Assistant Principal"},
+                            ],
+                            "metrics": [],
+                            "confidence": 0.91,
+                        },
+                        {
+                            "label": "Out of Domain Suggestion",
+                            "prompt": "Show transportation routes for Barksdale Elementary",
+                            "reason": "This should be rejected by validator because columns are outside domain.",
+                            "intent": "list",
+                            "dimensions": ["wt999.route_name"],
+                            "filters": [{"column_key": "wt999.route_name", "op": "eq", "value": "Route A"}],
+                            "metrics": [],
+                            "confidence": 0.83,
+                        },
+                        {
+                            "label": "Staff Count by Role",
+                            "prompt": "Show staff count by position title at Barksdale Elementary",
+                            "reason": "Adds a quick aggregate in the same domain and school context.",
+                            "intent": "aggregate",
+                            "dimensions": ["wt30.position_title"],
+                            "filters": [{"column_key": "wt20.school_name", "op": "eq", "value": "Barksdale Elementary"}],
+                            "metrics": ["domain_metric:staff_count"],
+                            "confidence": 0.88,
+                        },
+                    ]
+                },
+                "content": "{\"next_actions\":[]}",
+                "raw_text": "{\"next_actions\":[]}",
+            }
+        return {
+            "parsed": {
+                "intent": "list",
+                "selects": {
+                    "dimensions": [
+                        {"column_key": "wt30.position_title"},
+                        {"column_key": "wt23.first_name"},
+                        {"column_key": "wt23.last_name"},
+                    ],
+                    "metrics": [],
+                },
+                "filters": [
+                    {"column_key": "wt30.position_title", "op": "=", "value": "Principal"},
+                    {"column_key": "wt20.school_name", "op": "=", "value": "Barksdale Elementary"},
+                ],
+                "time": {},
+                "grouping": {
+                    "group_by": ["wt30.position_title", "wt23.first_name", "wt23.last_name"],
+                    "order_by": [],
+                    "limit": None,
+                },
+            },
+            "content": "{}",
+            "raw_text": "{}",
+        }
+
+
 def test_golden_students_per_teacher_by_county_prefers_overlay_metric() -> None:
     svc = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
@@ -259,6 +410,8 @@ def test_golden_students_per_teacher_by_county_prefers_overlay_metric() -> None:
     assert out["validation"]["is_valid"] is True
     assert out["plan_json_v2"]["base_domain_id"] == 6
     assert out["plan_json_v2"]["domain_name"] == "domain_6"
+    assert out["technical_details"]["trace_id"] == out["trace_id"]
+    assert out["technical_details"]["conversation_id"] == out["conversation_id"]
     assert out["plan_json_v2"]["selects"]["metrics"][0]["metric_ref"] == "overlay:students_per_teacher"
     assert out["plan_json_v2"]["selects"]["dimensions"][0]["column_key"] == "wt20.county_fips_code"
     assert "explanation" in out
@@ -270,6 +423,233 @@ def test_golden_students_per_teacher_by_county_prefers_overlay_metric() -> None:
     assert sql_metrics
     assert sql_metrics[0]["fn"] == "overlay_metric"
     assert sql_metrics[0]["overlay_key"] == "students_per_teacher"
+
+
+def test_plan_pipeline_profile_can_be_enabled_per_request(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_TIMING_PROFILE_ENABLED", False)
+    monkeypatch.setattr(
+        planner_domain_service_module,
+        "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE",
+        str(tmp_path / "plan_domain_pipeline_timing.log"),
+    )
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+    )
+
+    out = svc.plan(
+        {
+            "workspace_id": "ws-1",
+            "vertical_norm": "education",
+            "base_domain_id": 6,
+            "prompt": "students per teacher by county",
+            "profile_pipeline": True,
+        },
+        user_id="user-1",
+    )
+
+    profile_steps = list(out.get("pipeline_profile") or [])
+    assert profile_steps
+    step_names = {str(row.get("step") or "") for row in profile_steps}
+    assert "domain_selection" in step_names
+    assert "llm_plan" in step_names
+    assert int(out["timings_ms"].get("total") or 0) >= 0
+
+
+def test_plan_fast_mode_is_passed_to_slot_and_plan_calls(monkeypatch) -> None:
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_ENABLED", False)
+    captured = {"slot_fast_mode": None, "plan_fast_mode": None}
+
+    def _fake_slots(
+        self,
+        *,
+        normalized_prompt,
+        workspace_id,
+        vertical_norm,
+        base_domain_id,
+        conversation_context=None,
+        fast_mode=False,
+    ):
+        del self, normalized_prompt, workspace_id, vertical_norm, base_domain_id, conversation_context
+        captured["slot_fast_mode"] = fast_mode
+        return SlotExtractionResult(
+            payload={"intent": "list", "entity": "students", "constraints": [], "time_phrases": []},
+            raw_content="{}",
+            attempts=1,
+            repaired=False,
+        )
+
+    def _fake_plan(
+        self,
+        *,
+        normalized_prompt,
+        workspace_id,
+        vertical_norm,
+        base_domain_id,
+        capabilities,
+        schema,
+        slot_hints,
+        validation_feedback="",
+        retry_hint="",
+        conversation_context=None,
+        fast_mode=False,
+    ):
+        del (
+            self,
+            normalized_prompt,
+            workspace_id,
+            vertical_norm,
+            base_domain_id,
+            capabilities,
+            schema,
+            slot_hints,
+            validation_feedback,
+            retry_hint,
+            conversation_context,
+        )
+        captured["plan_fast_mode"] = fast_mode
+        return LLMPlanResult(
+            plan_json={
+                "intent": "list",
+                "selects": {"dimensions": [{"column_key": "wt20.county_fips_code"}], "metrics": []},
+                "filters": [],
+                "time": {},
+                "grouping": {"group_by": ["wt20.county_fips_code"], "order_by": [], "limit": 200},
+            },
+            raw_content="{}",
+            attempts=1,
+            repaired=False,
+        )
+
+    monkeypatch.setattr(PlannerDomainService, "_call_llm_slots", _fake_slots)
+    monkeypatch.setattr(PlannerDomainService, "_call_llm_plan", _fake_plan)
+
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+    )
+
+    out = svc.plan(
+        {
+            "workspace_id": "ws-1",
+            "vertical_norm": "education",
+            "base_domain_id": 6,
+            "prompt": "students per teacher by county",
+            "fast_mode": True,
+        },
+        user_id="user-1",
+    )
+
+    assert out["validation"]["is_valid"] is True
+    assert captured["slot_fast_mode"] is True
+    assert captured["plan_fast_mode"] is True
+    assert out["technical_details"]["fast_mode"] is True
+
+
+def test_fast_mode_retries_when_first_plan_is_invalid(monkeypatch) -> None:
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_ENABLED", False)
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_LLM_EXPLANATION_ENABLED", False)
+
+    call_counter = {"plan_calls": 0}
+
+    def _fake_slots(
+        self,
+        *,
+        normalized_prompt,
+        workspace_id,
+        vertical_norm,
+        base_domain_id,
+        conversation_context=None,
+        fast_mode=False,
+    ):
+        del self, normalized_prompt, workspace_id, vertical_norm, base_domain_id, conversation_context, fast_mode
+        return SlotExtractionResult(
+            payload={"intent": "list", "entity": "students", "constraints": [], "time_phrases": []},
+            raw_content="{}",
+            attempts=1,
+            repaired=False,
+        )
+
+    def _fake_plan(
+        self,
+        *,
+        normalized_prompt,
+        workspace_id,
+        vertical_norm,
+        base_domain_id,
+        capabilities,
+        schema,
+        slot_hints,
+        validation_feedback="",
+        retry_hint="",
+        conversation_context=None,
+        fast_mode=False,
+    ):
+        del (
+            self,
+            normalized_prompt,
+            workspace_id,
+            vertical_norm,
+            base_domain_id,
+            capabilities,
+            schema,
+            slot_hints,
+            validation_feedback,
+            retry_hint,
+            conversation_context,
+        )
+        call_counter["plan_calls"] += 1
+        if call_counter["plan_calls"] == 1:
+            return LLMPlanResult(
+                plan_json={
+                    "intent": "list",
+                    "selects": {"dimensions": [{"column_key": "wt999.not_allowed"}], "metrics": []},
+                    "filters": [],
+                    "time": {},
+                    "grouping": {"group_by": ["wt999.not_allowed"], "order_by": [], "limit": 200},
+                },
+                raw_content="{}",
+                attempts=1,
+                repaired=False,
+            )
+        return LLMPlanResult(
+            plan_json={
+                "intent": "list",
+                "selects": {"dimensions": [{"column_key": "wt20.county_fips_code"}], "metrics": []},
+                "filters": [],
+                "time": {},
+                "grouping": {"group_by": ["wt20.county_fips_code"], "order_by": [], "limit": 200},
+            },
+            raw_content="{}",
+            attempts=1,
+            repaired=False,
+        )
+
+    monkeypatch.setattr(PlannerDomainService, "_call_llm_slots", _fake_slots)
+    monkeypatch.setattr(PlannerDomainService, "_call_llm_plan", _fake_plan)
+
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+    )
+
+    out = svc.plan(
+        {
+            "workspace_id": "ws-1",
+            "vertical_norm": "education",
+            "base_domain_id": 6,
+            "prompt": "students per teacher by county",
+            "fast_mode": True,
+        },
+        user_id="user-1",
+    )
+
+    assert out["validation"]["is_valid"] is True
+    assert call_counter["plan_calls"] == 2
+    assert "llm_retry" in out["timings_ms"]
 
 
 def test_explanation_summary_can_be_polished_by_llm(monkeypatch) -> None:
@@ -345,6 +725,105 @@ def test_explanation_summary_can_be_polished_by_llm(monkeypatch) -> None:
     assert out["validation"]["is_valid"] is True
     assert out["explanation"]["summary_source"] == "llm"
     assert "I used Staff & Assignments" in out["explanation"]["summary"]
+
+
+def test_next_actions_generated_and_validated_in_domain(monkeypatch) -> None:
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_ENABLED", True)
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_MAX_ITEMS", 4)
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_NEXT_ACTIONS_ASYNC_DEFAULT", False)
+    svc = PlannerDomainService(
+        capabilities_service=_FakeStaffCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLMWithNextActions(),
+    )
+
+    out = svc.plan(
+        {
+            "workspace_id": "ws-1",
+            "vertical_norm": "education",
+            "base_domain_id": 5,
+            "prompt": "Show me the principal for Barksdale Elementary",
+            "debug": True,
+        },
+        user_id="user-1",
+    )
+
+    next_actions = list(out.get("next_actions") or [])
+    assert len(next_actions) == 2
+    assert all("wt999" not in str(item) for item in next_actions)
+    assert any(item.get("intent") == "aggregate" for item in next_actions)
+    assert any(item.get("metrics") == ["domain_metric:staff_count"] for item in next_actions)
+
+
+def test_plan_domain_can_defer_next_actions_async(monkeypatch) -> None:
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_NEXT_ACTIONS_ASYNC_DEFAULT", False)
+
+    def _fail_if_called(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("_maybe_generate_next_actions should not be called when async is enabled")
+
+    monkeypatch.setattr(PlannerDomainService, "_maybe_generate_next_actions", _fail_if_called)
+    svc = PlannerDomainService(
+        capabilities_service=_FakeStaffCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLMWithNextActions(),
+    )
+
+    out = svc.plan(
+        {
+            "workspace_id": "ws-1",
+            "vertical_norm": "education",
+            "base_domain_id": 5,
+            "prompt": "Show me the principal for Barksdale Elementary",
+            "next_actions_async": True,
+        },
+        user_id="user-1",
+    )
+
+    assert out["next_actions_status"] == "deferred"
+    assert out["next_actions"] == []
+
+
+def test_generate_next_actions_from_plan_payload(monkeypatch) -> None:
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_ENABLED", True)
+    svc = PlannerDomainService(
+        capabilities_service=_FakeStaffCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLMWithNextActions(),
+    )
+
+    out = svc.generate_next_actions(
+        {
+            "workspace_id": "ws-1",
+            "vertical_norm": "education",
+            "prompt": "Show me the principal for Barksdale Elementary",
+            "plan_json_v2": {
+                "base_domain_id": 5,
+                "domain_name": "Staff & Assignments",
+                "intent": "list",
+                "selects": {
+                    "dimensions": [
+                        {"column_key": "wt30.position_title"},
+                        {"column_key": "wt23.first_name"},
+                        {"column_key": "wt23.last_name"},
+                    ],
+                    "metrics": [],
+                },
+                "filters": [
+                    {"column_key": "wt30.position_title", "op": "=", "value": "Principal"},
+                    {"column_key": "wt20.school_name", "op": "=", "value": "Barksdale Elementary"},
+                ],
+            },
+            "conversation_id": "pdc_abc123",
+            "trace_id": "trace-abc",
+        },
+        user_id="user-1",
+    )
+
+    assert out["next_actions_status"] == "ready"
+    assert len(list(out.get("next_actions") or [])) >= 1
+    assert out["trace_id"] == "trace-abc"
+    assert out["conversation_id"] == "pdc_abc123"
 
 
 def test_plan_accepts_llm_payload_missing_time_block() -> None:
@@ -1076,6 +1555,84 @@ def test_score_domain_candidate_work_prompt_penalizes_student_domain_name() -> N
     assert staff_score > student_score
 
 
+def test_score_domain_candidate_prefers_adm_columns_for_adm_prompt() -> None:
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+    )
+    candidate = {"score": 0.5}
+    capabilities = {
+        "dimensions": [{"column_key": "wt31.normalized_adm"}] * 20,
+        "domain_metrics": [{"metric_key": "adm_total", "label": "Total ADM"}],
+    }
+    adm_shortlist = [
+        {"column_name": "normalized_adm"},
+        {"column_name": "report_period"},
+        {"column_name": "school_year"},
+        {"column_name": "grade_level_adm"},
+        {"column_name": "is_primary_school"},
+    ]
+    calendar_shortlist = [
+        {"column_name": "calendar_date"},
+        {"column_name": "term_name"},
+        {"column_name": "semester"},
+        {"column_name": "month_name"},
+        {"column_name": "school_calendar_name"},
+    ]
+
+    adm_score = svc._score_domain_candidate(  # noqa: SLF001
+        prompt="Show base ADM by report period for school year 2026",
+        candidate=candidate,
+        capabilities=capabilities,
+        shortlisted_columns=adm_shortlist,
+    )
+    calendar_score = svc._score_domain_candidate(  # noqa: SLF001
+        prompt="Show base ADM by report period for school year 2026",
+        candidate=candidate,
+        capabilities={"dimensions": [{"column_key": "wt40.calendar_date"}] * 20, "domain_metrics": []},
+        shortlisted_columns=calendar_shortlist,
+    )
+
+    assert adm_score > calendar_score
+
+
+def test_score_domain_candidate_adm_prompt_penalizes_calendar_domain_name() -> None:
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+    )
+    capabilities = {
+        "dimensions": [{"column_key": "wt31.normalized_adm"}] * 20,
+        "domain_metrics": [{"metric_key": "adm_total", "label": "Total ADM"}],
+    }
+    shortlist = [
+        {"column_name": "normalized_adm"},
+        {"column_name": "report_period"},
+        {"column_name": "school_year"},
+        {"column_name": "is_primary_school"},
+    ]
+
+    adm_candidate = {"score": 0.5, "name": "ADM & Enrollment"}
+    calendar_candidate = {"score": 0.5, "name": "Academic Calendar & Terms"}
+
+    adm_score = svc._score_domain_candidate(  # noqa: SLF001
+        prompt="Show base ADM by report period for school year 2026",
+        candidate=adm_candidate,
+        capabilities=capabilities,
+        shortlisted_columns=shortlist,
+    )
+    calendar_score = svc._score_domain_candidate(  # noqa: SLF001
+        prompt="Show base ADM by report period for school year 2026",
+        candidate=calendar_candidate,
+        capabilities=capabilities,
+        shortlisted_columns=shortlist,
+    )
+
+    assert adm_score > calendar_score
+
+
 def test_get_domain_candidates_expands_work_prompt_and_includes_staff_domain() -> None:
     class _CapturingDomainVector:
         def __init__(self) -> None:
@@ -1106,6 +1663,38 @@ def test_get_domain_candidates_expands_work_prompt_and_includes_staff_domain() -
     assert any("staff assignments" in query.lower() for query in vector.queries)
     assert out[0]["domain_id"] == 5
     assert any(int(row.get("domain_id") or 0) == 6 for row in out)
+
+
+def test_get_domain_candidates_expands_adm_prompt_and_includes_adm_domain() -> None:
+    class _CapturingDomainVector:
+        def __init__(self) -> None:
+            self.queries = []
+
+        def search_domains(self, **kwargs):
+            query = str(kwargs.get("query") or "")
+            self.queries.append(query)
+            if "average daily membership" in query.lower() or "base adm" in query.lower():
+                return {"results": [{"domain_id": 9, "name": "ADM & Membership", "score": 0.94}]}
+            return {"results": [{"domain_id": 4, "name": "Academic Calendar & Time", "score": 0.9}]}
+
+    vector = _CapturingDomainVector()
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=vector,
+        llm_client=_FakeLLM(),
+    )
+
+    out = svc._get_domain_candidates(  # noqa: SLF001
+        workspace_id="ws-1",
+        vertical_norm="education",
+        prompt="Show base ADM by report period for school year 2026",
+        provided_domain_id=None,
+    )
+
+    assert len(vector.queries) > 1
+    assert any("average daily membership" in query.lower() for query in vector.queries)
+    assert out[0]["domain_id"] == 9
+    assert any(int(row.get("domain_id") or 0) == 4 for row in out)
 
 
 def test_semantic_value_alias_constraints_feature_flag_off(monkeypatch) -> None:

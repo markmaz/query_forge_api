@@ -8,6 +8,7 @@ CREATE TABLE `domain_profile` (
   `keywords` json NULL,                      -- ["attendance","chronic absenteeism","ADA",...]
   `entities` json NULL,                      -- ["student","school","calendar_date",...]
   `metrics` json NULL,                       -- ["attendance_rate","absences_count",...]
+  `attributes` json NULL,                    -- ["student_id","school_id","attendance_date",...]
   `synonyms` json NULL,                      -- [{"term":"sped","means":["special education"]}, ...]
   `acronyms` json NULL,                      -- [{"abbr":"ADA","expansion":"Average Daily Attendance"}, ...]
   `notes` text NULL,                         -- anything else helpful

@@ -306,3 +306,110 @@ def test_validator_preserves_domain_name_field() -> None:
     )
     assert result.is_valid is True
     assert result.plan_json["domain_name"] == "Enrollment"
+
+
+def test_validator_remaps_dimension_key_when_column_name_is_unique() -> None:
+    capabilities = _capabilities()
+    capabilities["dimensions"] = [
+        {
+            "column_key": "wt20.school_name",
+            "label": "School Name",
+            "data_type": "string",
+            "filterable": True,
+            "workspace_table_id": 20,
+            "model_column_id": 99,
+            "column_name": "school_name",
+        },
+        {
+            "column_key": "wt20.lea_name",
+            "label": "LEA Name",
+            "data_type": "string",
+            "filterable": True,
+            "workspace_table_id": 20,
+            "model_column_id": 266,
+            "column_name": "lea_name",
+        },
+    ]
+    capabilities["time_columns"] = []
+    capabilities["filter_columns"] = [
+        {
+            "column_key": "wt20.school_name",
+            "label": "School Name",
+            "data_type": "string",
+            "filterable": True,
+            "workspace_table_id": 20,
+            "model_column_id": 99,
+            "column_name": "school_name",
+        }
+    ]
+    plan = {
+        "schema_version": 2,
+        "trace_id": "t1",
+        "workspace_id": "ws-1",
+        "vertical_norm": "education",
+        "base_domain_id": 6,
+        "intent": "list",
+        "selects": {"dimensions": [{"column_key": "wt34.lea_name"}], "metrics": []},
+        "filters": [{"column_key": "wt34.school_name", "op": "equals", "value": "Barksdale Elementary"}],
+        "time": {},
+        "grouping": {"group_by": [], "order_by": []},
+    }
+
+    result = validate_and_repair_plan_v2(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="Show schools for Barksdale Elementary",
+        expected_base_domain_id=6,
+    )
+    assert result.is_valid is True
+    assert result.plan_json["selects"]["dimensions"][0]["column_key"] == "wt20.lea_name"
+    assert result.plan_json["filters"][0]["column_key"] == "wt20.school_name"
+    assert "remapped_dimension_column:wt34.lea_name->wt20.lea_name" in result.repairs_applied
+    assert "remapped_filter_column:wt34.school_name->wt20.school_name" in result.repairs_applied
+
+
+def test_validator_does_not_remap_when_column_name_is_ambiguous() -> None:
+    capabilities = _capabilities()
+    capabilities["dimensions"] = [
+        {
+            "column_key": "wt20.lea_name",
+            "label": "LEA Name (School)",
+            "data_type": "string",
+            "filterable": True,
+            "workspace_table_id": 20,
+            "model_column_id": 266,
+            "column_name": "lea_name",
+        },
+        {
+            "column_key": "wt34.lea_name",
+            "label": "LEA Name (ADM)",
+            "data_type": "string",
+            "filterable": True,
+            "workspace_table_id": 34,
+            "model_column_id": 9000,
+            "column_name": "lea_name",
+        },
+    ]
+    capabilities["time_columns"] = []
+    capabilities["filter_columns"] = []
+    plan = {
+        "schema_version": 2,
+        "trace_id": "t1",
+        "workspace_id": "ws-1",
+        "vertical_norm": "education",
+        "base_domain_id": 6,
+        "intent": "list",
+        "selects": {"dimensions": [{"column_key": "wt99.lea_name"}], "metrics": []},
+        "filters": [],
+        "time": {},
+        "grouping": {"group_by": [], "order_by": []},
+    }
+
+    result = validate_and_repair_plan_v2(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="Show LEA",
+        expected_base_domain_id=6,
+    )
+    assert result.is_valid is False
+    assert any(issue["code"] == "invalid_dimension_column" for issue in result.issues)

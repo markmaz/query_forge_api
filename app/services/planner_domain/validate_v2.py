@@ -64,6 +64,9 @@ def validate_and_repair_plan_v2(
         for row in time_rows
         if _norm_key(row.get("column_key"))
     }
+    dim_key_by_column_name = _unique_allowed_key_by_column_name(allowed_dim_keys)
+    filter_key_by_column_name = _unique_allowed_key_by_column_name(allowed_filter_keys)
+    time_key_by_column_name = _unique_allowed_key_by_column_name(allowed_time_keys)
 
     allowed_metric_refs = set()
     for row in domain_metrics:
@@ -99,8 +102,15 @@ def validate_and_repair_plan_v2(
 
     dims = list((plan.get("selects") or {}).get("dimensions") or [])
     for idx, item in enumerate(dims):
-        key = _norm_key(item.get("column_key"))
+        original_key = _norm_key(item.get("column_key"))
+        key = _repair_column_key_by_name(
+            key=original_key,
+            allowed_keys=allowed_dim_keys,
+            unique_by_column_name=dim_key_by_column_name,
+        )
         item["column_key"] = key
+        if key != original_key and original_key:
+            repairs.append(f"remapped_dimension_column:{original_key}->{key}")
         if key not in allowed_dim_keys:
             issues.append(
                 ValidationIssue(
@@ -120,12 +130,19 @@ def validate_and_repair_plan_v2(
     kept_filters: List[Dict[str, Any]] = []
     norm_prompt = _norm_text(prompt)
     for idx, item in enumerate(filters):
-        key = _norm_key(item.get("column_key"))
+        original_key = _norm_key(item.get("column_key"))
+        key = _repair_column_key_by_name(
+            key=original_key,
+            allowed_keys=allowed_filter_keys,
+            unique_by_column_name=filter_key_by_column_name,
+        )
         op = str(item.get("op") or "").strip().lower()
         value = item.get("value")
 
         item["column_key"] = key
         item["op"] = op or "="
+        if key != original_key and original_key:
+            repairs.append(f"remapped_filter_column:{original_key}->{key}")
 
         if key not in allowed_filter_keys:
             repairs.append(f"dropped_invalid_filter:{key}")
@@ -170,7 +187,14 @@ def validate_and_repair_plan_v2(
             )
 
     time_block = plan.get("time") if isinstance(plan.get("time"), dict) else {}
-    time_col = _norm_key(time_block.get("time_column_key"))
+    original_time_col = _norm_key(time_block.get("time_column_key"))
+    time_col = _repair_column_key_by_name(
+        key=original_time_col,
+        allowed_keys=allowed_time_keys,
+        unique_by_column_name=time_key_by_column_name,
+    )
+    if time_col != original_time_col and original_time_col:
+        repairs.append(f"remapped_time_column:{original_time_col}->{time_col}")
     if time_col and time_col not in allowed_time_keys:
         issues.append(
             ValidationIssue(
@@ -303,6 +327,49 @@ def _split_order_by(value: str) -> Tuple[str, str]:
     if token.startswith("metric:"):
         return "metric", token.split(":", 1)[1].strip()
     return "", token
+
+
+def _column_name_from_key(value: str) -> str:
+    token = _norm_key(value)
+    if token == "":
+        return ""
+    if "." in token:
+        return token.split(".", 1)[1].strip()
+    return token
+
+
+def _unique_allowed_key_by_column_name(allowed_keys: Sequence[str]) -> Dict[str, str]:
+    counts: Dict[str, int] = {}
+    first: Dict[str, str] = {}
+    for raw in list(allowed_keys or []):
+        key = _norm_key(raw)
+        if key == "":
+            continue
+        column_name = _column_name_from_key(key)
+        if column_name == "":
+            continue
+        counts[column_name] = int(counts.get(column_name) or 0) + 1
+        if column_name not in first:
+            first[column_name] = key
+    return {column_name: key for column_name, key in first.items() if int(counts.get(column_name) or 0) == 1}
+
+
+def _repair_column_key_by_name(
+    *,
+    key: str,
+    allowed_keys: set[str],
+    unique_by_column_name: Mapping[str, str],
+) -> str:
+    token = _norm_key(key)
+    if token in allowed_keys:
+        return token
+    column_name = _column_name_from_key(token)
+    if column_name == "":
+        return token
+    candidate = _norm_key(unique_by_column_name.get(column_name))
+    if candidate and candidate in allowed_keys:
+        return candidate
+    return token
 
 
 def _is_overlong_filter_value(*, op: str, value: Any) -> bool:
