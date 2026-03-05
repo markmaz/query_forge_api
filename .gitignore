@@ -7,3 +7,4 @@ venv/
 .venv
 /models/
 infra/qdrant/storage/
+/logs
