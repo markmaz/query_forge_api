@@ -60,8 +60,7 @@ class DetailedHealth(Resource):
         try:
             _require_admin()
             result = AdminHealthService().check_all()
-            status_code = 200 if result["overall"] == "healthy" else 503
-            return result, status_code
+            return result, 200
         except ServiceError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
