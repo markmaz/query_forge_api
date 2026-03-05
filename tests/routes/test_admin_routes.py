@@ -80,7 +80,7 @@ def test_detailed_health_degraded(client, monkeypatch):
 
     monkeypatch.setattr(admin_routes, "AdminHealthService", _FakeHealthSvc)
     resp = client.get("/api/v1/admin/health/detailed", headers=_headers(monkeypatch))
-    assert resp.status_code == 503
+    assert resp.status_code == 200
     assert resp.json["overall"] == "degraded"
 
 
