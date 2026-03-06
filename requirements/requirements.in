@@ -1,0 +1,75 @@
+# Core web framework
+Flask
+flask-cors
+flask-restx
+Flask-Mail
+
+# WSGI server
+gunicorn
+
+# Database
+SQLAlchemy
+PyMySQL
+peewee
+
+# Auth / security
+PyJWT
+pyotp
+cryptography
+email_validator
+
+# Async tasks
+celery
+redis
+valkey
+
+# HTTP / API clients
+requests
+httpx
+
+# AI / ML
+torch
+transformers
+sentence-transformers
+huggingface_hub
+
+# Vector database
+qdrant-client
+
+# Data / analytics
+pandas
+numpy
+scikit-learn
+scipy
+
+# File handling
+openpyxl
+pyarrow
+
+# Configuration
+python-dotenv
+PyYAML
+
+# Retry utilities
+tenacity
+
+# CLI utilities
+typer
+
+# QR codes (for TOTP MFA)
+qrcode
+
+# Progress bars
+tqdm
+
+# Logging / rich output
+rich
+
+# Testing
+pytest
+pytest-cov
+coverage
+hypothesis
+
+# Dev tools
+ruff

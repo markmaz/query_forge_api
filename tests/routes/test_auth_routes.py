@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 import app.routes.auth_routes as auth_routes
+from app.decorators import security
 from app.exceptions.service_error import ServiceError
 from app.models.user import User
 
@@ -12,6 +13,7 @@ def test_login_success(client, monkeypatch):
         return {"user_id": "u1", "requires_otp": True, "email": "u1@example.com"}
 
     monkeypatch.setattr(auth_routes.AuthService, "authenticate", _auth)
+    monkeypatch.setattr(auth_routes.TotpService, "is_totp_enabled", lambda self, _uid: False)
     monkeypatch.setattr(auth_routes, "issue_otp_challenge", lambda **_kwargs: "ch-123")
 
     resp = client.post("/api/v1/auth/login", json={"username": "u", "password": "p"})
@@ -30,6 +32,92 @@ def test_login_invalid_credentials(client, monkeypatch):
     resp = client.post("/api/v1/auth/login", json={"username": "u", "password": "p"})
     assert resp.status_code == 401
     assert resp.json["message"] == "Invalid username or password"
+
+
+def test_login_totp_enabled_returns_mfa_challenge(client, monkeypatch):
+    monkeypatch.setattr(
+        auth_routes.AuthService,
+        "authenticate",
+        lambda self, username, password: {"user_id": "u1"},
+    )
+    monkeypatch.setattr(auth_routes.TotpService, "is_totp_enabled", lambda self, _uid: True)
+    monkeypatch.setattr(auth_routes.LoginChallengeService, "create_challenge", lambda self, _uid: "totp-ch-1")
+
+    resp = client.post("/api/v1/auth/login", json={"username": "u", "password": "p"})
+    assert resp.status_code == 200
+    assert resp.json["mfa_required"] is True
+    assert resp.json["mfa_type"] == "totp"
+    assert resp.json["challenge_id"] == "totp-ch-1"
+
+
+def test_totp_verify_success(client, monkeypatch):
+    monkeypatch.setattr(auth_routes.RateLimitService, "enforce", lambda self, **_kwargs: None)
+    monkeypatch.setattr(auth_routes.LoginChallengeService, "consume_challenge", lambda self, _cid: "u1")
+    monkeypatch.setattr(auth_routes.TotpService, "verify_totp_code", lambda self, _uid, _code: True)
+    monkeypatch.setattr(
+        auth_routes.AuthService,
+        "issue_tokens",
+        lambda self, _user: {
+            "access_token": "access-1",
+            "refresh_token": "refresh-1",
+            "expires_in": 900,
+        },
+    )
+    monkeypatch.setattr(auth_routes.AuthService, "refresh_ttl_seconds", 1209600, raising=False)
+
+    resp = client.post(
+        "/api/v1/auth/mfa/totp/verify",
+        json={"challenge_id": "ch-1", "code": "123456"},
+    )
+    assert resp.status_code == 200
+    assert resp.json["access_token"] == "access-1"
+    assert resp.json["mfa_type"] == "totp"
+    assert "refresh_token=" in (resp.headers.get("Set-Cookie") or "")
+
+
+def test_totp_verify_invalid_challenge(client, monkeypatch):
+    monkeypatch.setattr(auth_routes.RateLimitService, "enforce", lambda self, **_kwargs: None)
+    monkeypatch.setattr(auth_routes.LoginChallengeService, "consume_challenge", lambda self, _cid: None)
+
+    resp = client.post(
+        "/api/v1/auth/mfa/totp/verify",
+        json={"challenge_id": "ch-1", "code": "123456"},
+    )
+    assert resp.status_code == 401
+    assert resp.json["error"] == "Invalid code or expired challenge"
+
+
+def test_totp_start_confirm_disable_success(client, monkeypatch):
+    monkeypatch.setattr(security.auth_service, "verify_token", lambda _token: {"sub": "u1"})
+    monkeypatch.setattr(auth_routes.RateLimitService, "enforce", lambda self, **_kwargs: None)
+    monkeypatch.setattr(
+        auth_routes.TotpService,
+        "start_totp_enrollment",
+        lambda self, _uid: {"otpauth_uri": "uri", "qr_svg": "<svg />", "manual_secret_masked": "AB****YZ"},
+    )
+    monkeypatch.setattr(auth_routes.TotpService, "confirm_totp_enrollment", lambda self, _uid, _code: {"enabled": True})
+    monkeypatch.setattr(auth_routes.TotpService, "disable_totp", lambda self, _uid, _pw, _code: {"enabled": False})
+    headers = {"Authorization": "Bearer token"}
+
+    start = client.post("/api/v1/auth/mfa/totp/start", headers=headers)
+    assert start.status_code == 200
+    assert start.json["otpauth_uri"] == "uri"
+
+    confirm = client.post(
+        "/api/v1/auth/mfa/totp/confirm",
+        headers=headers,
+        json={"code": "123456"},
+    )
+    assert confirm.status_code == 200
+    assert confirm.json["enabled"] is True
+
+    disable = client.post(
+        "/api/v1/auth/mfa/totp/disable",
+        headers=headers,
+        json={"password": "pw", "code": "123456"},
+    )
+    assert disable.status_code == 200
+    assert disable.json["enabled"] is False
 
 
 def test_reset_validate_missing_token(client):

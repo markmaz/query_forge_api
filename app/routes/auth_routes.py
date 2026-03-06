@@ -1,18 +1,35 @@
+import logging
+import os
 from typing import Any, Dict
 
-from flask import jsonify, make_response, request
+from flask import g, jsonify, make_response, request
 from flask_restx import Namespace, Resource, fields
 
 from app.config import COOKIE_SAMESITE, COOKIE_SECURE, REFRESH_COOKIE_PATH
+from app.decorators.security import token_required
 from app.exceptions.service_error import ServiceError
 from app.models.status_enum import UserStatus
 from app.models.user import User
+from app.services.auth import (
+    LOGIN_CHALLENGE_TTL_S,
+    LoginChallengeService,
+    RateLimitService,
+    TotpService,
+)
 from app.services.auth_service import AuthService, hash_token
 from app.services.otp_service import OTP_CHALLENGE_TTL_S, issue_otp_challenge
 from app.services.user_service import UserService
 from app.utils.token_utils import validate_token
 
 auth_ns = Namespace('auth', description='Authentication operations')
+logger = logging.getLogger(__name__)
+
+MFA_VERIFY_MAX_ATTEMPTS = int(os.getenv("MFA_VERIFY_MAX_ATTEMPTS", "8"))
+MFA_VERIFY_WINDOW_SECONDS = int(os.getenv("MFA_VERIFY_WINDOW_SECONDS", "300"))
+MFA_CONFIRM_MAX_ATTEMPTS = int(os.getenv("MFA_CONFIRM_MAX_ATTEMPTS", "10"))
+MFA_CONFIRM_WINDOW_SECONDS = int(os.getenv("MFA_CONFIRM_WINDOW_SECONDS", "600"))
+MFA_DISABLE_MAX_ATTEMPTS = int(os.getenv("MFA_DISABLE_MAX_ATTEMPTS", "6"))
+MFA_DISABLE_WINDOW_SECONDS = int(os.getenv("MFA_DISABLE_WINDOW_SECONDS", "600"))
 
 login_model = auth_ns.model('Login', {
     'username': fields.String(required=True, description="Username"),
@@ -30,6 +47,29 @@ invite_accept_model = auth_ns.model(
         "tos_accepted": fields.Boolean(required=False),
         "eula_accepted": fields.Boolean(required=False),
         "two_factor_preference": fields.String(required=False),
+    },
+)
+
+totp_confirm_model = auth_ns.model(
+    "TotpConfirmRequest",
+    {
+        "code": fields.String(required=True, description="6-digit authenticator code"),
+    },
+)
+
+totp_verify_model = auth_ns.model(
+    "TotpVerifyRequest",
+    {
+        "challenge_id": fields.String(required=True, description="MFA login challenge id"),
+        "code": fields.String(required=True, description="6-digit authenticator code"),
+    },
+)
+
+totp_disable_model = auth_ns.model(
+    "TotpDisableRequest",
+    {
+        "password": fields.String(required=True, description="Current account password"),
+        "code": fields.String(required=True, description="6-digit authenticator code"),
     },
 )
 
@@ -97,7 +137,7 @@ class Login(Resource):
     )
     def post(self):
         """Step 1: credential authentication and OTP challenge issuance"""
-        data = request.json
+        data = request.get_json(silent=True) or {}
         username = data.get("username")
         password = data.get("password")
 
@@ -106,8 +146,21 @@ class Login(Resource):
         if not user:
             return {"message": "Invalid username or password"}, 401
 
+        user_id = str(user["user_id"])
+        if TotpService().is_totp_enabled(user_id):
+            challenge_id = LoginChallengeService().create_challenge(user_id)
+            logger.info("mfa_event=totp_login_challenge user_id=%s challenge_id=%s", user_id, challenge_id)
+            return jsonify(
+                {
+                    "mfa_required": True,
+                    "mfa_type": "totp",
+                    "challenge_id": challenge_id,
+                    "challenge_expires_in": LOGIN_CHALLENGE_TTL_S,
+                }
+            )
+
         challenge_id = issue_otp_challenge(
-            user_id=str(user["user_id"]),
+            user_id=user_id,
             ip_address=request.remote_addr,
             user_agent=request.headers.get("User-Agent"),
         )
@@ -118,6 +171,119 @@ class Login(Resource):
                 "challenge_expires_in": OTP_CHALLENGE_TTL_S,
             }
         )
+
+
+@auth_ns.route("/mfa/totp/start")
+class StartTotpEnrollment(Resource):
+    @token_required
+    def post(self):
+        user_id = str(getattr(g, "user_id", "") or "").strip()
+        payload = TotpService().start_totp_enrollment(user_id)
+        return payload, 200
+
+
+@auth_ns.route("/mfa/totp/confirm")
+class ConfirmTotpEnrollment(Resource):
+    @auth_ns.expect(totp_confirm_model, validate=False)
+    @token_required
+    def post(self):
+        user_id = str(getattr(g, "user_id", "") or "").strip()
+        data = request.get_json(silent=True) or {}
+        code = str(data.get("code") or "").strip()
+        if not code:
+            return {"error": "code is required"}, 400
+
+        RateLimitService().enforce(
+            scope="mfa:totp:confirm",
+            identifier=user_id,
+            max_attempts=MFA_CONFIRM_MAX_ATTEMPTS,
+            window_s=MFA_CONFIRM_WINDOW_SECONDS,
+        )
+        result = TotpService().confirm_totp_enrollment(user_id, code)
+        return result, 200
+
+
+@auth_ns.route("/mfa/totp/verify")
+class VerifyTotpChallenge(Resource):
+    @auth_ns.expect(totp_verify_model, validate=False)
+    @auth_ns.doc(security=[])
+    def post(self):
+        data = request.get_json(silent=True) or {}
+        challenge_id = str(data.get("challenge_id") or "").strip()
+        code = str(data.get("code") or "").strip()
+        if not challenge_id or not code:
+            return {"error": "challenge_id and code are required"}, 400
+
+        limiter = RateLimitService()
+        limiter.enforce(
+            scope="mfa:totp:verify:challenge",
+            identifier=challenge_id,
+            max_attempts=MFA_VERIFY_MAX_ATTEMPTS,
+            window_s=MFA_VERIFY_WINDOW_SECONDS,
+        )
+        limiter.enforce(
+            scope="mfa:totp:verify:ip",
+            identifier=str(request.remote_addr or "unknown"),
+            max_attempts=MFA_VERIFY_MAX_ATTEMPTS * 4,
+            window_s=MFA_VERIFY_WINDOW_SECONDS,
+        )
+
+        challenge_service = LoginChallengeService()
+        user_id = challenge_service.consume_challenge(challenge_id)
+        if not user_id:
+            logger.info(
+                "mfa_event=totp_verify_fail user_id=unknown challenge_id=%s reason=challenge_invalid",
+                challenge_id,
+            )
+            return {"error": "Invalid code or expired challenge"}, 401
+
+        if not TotpService().verify_totp_code(user_id, code):
+            logger.info("mfa_event=totp_verify_fail user_id=%s reason=invalid_code", user_id)
+            return {"error": "Invalid code or expired challenge"}, 401
+
+        auth = AuthService()
+        tokens = auth.issue_tokens(User(user_id=user_id, user_name=user_id))
+        response = make_response(
+            {
+                "access_token": tokens["access_token"],
+                "token_type": "Bearer",
+                "expires_in": tokens["expires_in"],
+                "mfa_type": "totp",
+            },
+            200,
+        )
+        response.set_cookie(
+            "refresh_token",
+            tokens["refresh_token"],
+            httponly=True,
+            secure=bool(COOKIE_SECURE),
+            samesite=COOKIE_SAMESITE,
+            max_age=auth.refresh_ttl_seconds,
+            path=REFRESH_COOKIE_PATH,
+        )
+        return response
+
+
+@auth_ns.route("/mfa/totp/disable")
+class DisableTotp(Resource):
+    @auth_ns.expect(totp_disable_model, validate=False)
+    @token_required
+    def post(self):
+        user_id = str(getattr(g, "user_id", "") or "").strip()
+        data = request.get_json(silent=True) or {}
+        password = str(data.get("password") or "")
+        code = str(data.get("code") or "")
+        if not password or not code:
+            return {"error": "password and code are required"}, 400
+
+        RateLimitService().enforce(
+            scope="mfa:totp:disable",
+            identifier=user_id,
+            max_attempts=MFA_DISABLE_MAX_ATTEMPTS,
+            window_s=MFA_DISABLE_WINDOW_SECONDS,
+        )
+        result = TotpService().disable_totp(user_id, password, code)
+        return result, 200
 
 
 def _get_refresh_from_request() -> str | None:
