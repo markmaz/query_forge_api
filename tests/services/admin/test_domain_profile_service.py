@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.models.domain_profile import (
     DomainProfileCreateRequest,
     DomainProfileUpdateRequest,
@@ -125,7 +125,7 @@ def test_list_profiles_empty():
 
 def test_list_profiles_requires_workspace():
     svc = DomainProfileService(sql=_FakeSQL())
-    with pytest.raises(ServiceError) as exc_info:
+    with pytest.raises(ForgeError) as exc_info:
         svc.list_profiles("")
     assert exc_info.value.status_code == 400
 
@@ -141,7 +141,7 @@ def test_get_profile_found():
 
 def test_get_profile_not_found():
     svc = DomainProfileService(sql=_FakeSQL(query_rows=[]))
-    with pytest.raises(ServiceError) as exc_info:
+    with pytest.raises(ForgeError) as exc_info:
         svc.get_profile("ws-1", 999)
     assert exc_info.value.status_code == 404
 
@@ -170,7 +170,7 @@ def test_create_profile_conflict():
         domain_id=4,
         summary="duplicate",
     )
-    with pytest.raises(ServiceError) as exc_info:
+    with pytest.raises(ForgeError) as exc_info:
         svc.create_profile(req)
     assert exc_info.value.status_code == 409
 
@@ -203,7 +203,7 @@ def test_update_profile_success():
 def test_update_profile_not_found():
     svc = DomainProfileService(sql=_FakeSQL(query_rows=[]))
     req = DomainProfileUpdateRequest(summary="nope")
-    with pytest.raises(ServiceError) as exc_info:
+    with pytest.raises(ForgeError) as exc_info:
         svc.update_profile("ws-1", 999, req)
     assert exc_info.value.status_code == 404
 
@@ -219,7 +219,7 @@ def test_delete_profile_success():
 
 def test_delete_profile_not_found():
     svc = DomainProfileService(sql=_FakeSQL(query_rows=[]))
-    with pytest.raises(ServiceError) as exc_info:
+    with pytest.raises(ForgeError) as exc_info:
         svc.delete_profile("ws-1", 999)
     assert exc_info.value.status_code == 404
 

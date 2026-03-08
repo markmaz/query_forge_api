@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 
 ALLOWED_SEMANTIC_TYPES = {
     "entity",
@@ -46,8 +46,8 @@ WRITEABLE_FIELDS = {
 
 
 class SemanticRegistryService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def list_entries(
         self,
@@ -163,7 +163,7 @@ class SemanticRegistryService:
             {"id": row_id},
         )
         if not rows:
-            raise ServiceError("semantic_registry entry not found", status_code=404)
+            raise ForgeError("semantic_registry entry not found", status_code=404)
         return self._normalize_row(rows[0])
 
     def create_entry(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -226,7 +226,7 @@ class SemanticRegistryService:
             },
         )
         if not rows:
-            raise ServiceError("Failed to create semantic_registry entry", status_code=500)
+            raise ForgeError("Failed to create semantic_registry entry", status_code=500)
         return self.get_entry(int(rows[0]["id"]))
 
     def update_entry(self, entry_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -252,7 +252,7 @@ class SemanticRegistryService:
             return self.get_entry(row_id)
 
         if int(affected or 0) <= 0:
-            raise ServiceError("semantic_registry entry not found", status_code=404)
+            raise ForgeError("semantic_registry entry not found", status_code=404)
         return self.get_entry(row_id)
 
     def delete_entry(self, entry_id: int) -> None:
@@ -265,26 +265,26 @@ class SemanticRegistryService:
             {"id": row_id},
         )
         if int(affected or 0) <= 0:
-            raise ServiceError("semantic_registry entry not found", status_code=404)
+            raise ForgeError("semantic_registry entry not found", status_code=404)
 
     def _normalize_payload(self, payload: Dict[str, Any], *, partial: bool) -> Dict[str, Any]:
         if not isinstance(payload, dict):
-            raise ServiceError("Invalid JSON body", status_code=400)
+            raise ForgeError("Invalid JSON body", status_code=400)
 
         data = {key: value for key, value in payload.items() if key in WRITEABLE_FIELDS}
 
         if not partial:
             if not str(data.get("concept_key") or "").strip():
-                raise ServiceError("concept_key is required", status_code=400)
+                raise ForgeError("concept_key is required", status_code=400)
             if not str(data.get("semantic_type") or "").strip():
-                raise ServiceError("semantic_type is required", status_code=400)
+                raise ForgeError("semantic_type is required", status_code=400)
 
         if "concept_key" in data:
             data["concept_key"] = str(data["concept_key"] or "").strip()
             if not data["concept_key"]:
-                raise ServiceError("concept_key is required", status_code=400)
+                raise ForgeError("concept_key is required", status_code=400)
             if len(data["concept_key"]) > 150:
-                raise ServiceError("concept_key exceeds 150 characters", status_code=400)
+                raise ForgeError("concept_key exceeds 150 characters", status_code=400)
 
         if "semantic_type" in data:
             st = str(data["semantic_type"] or "").strip().lower()
@@ -296,7 +296,7 @@ class SemanticRegistryService:
                 val = str(data[key]).strip()
                 data[key] = val or None
                 if data[key] is not None and len(data[key]) > max_len:
-                    raise ServiceError(f"{key} exceeds {max_len} characters", status_code=400)
+                    raise ForgeError(f"{key} exceeds {max_len} characters", status_code=400)
 
         if "description" in data and data["description"] is not None:
             data["description"] = str(data["description"])
@@ -341,7 +341,7 @@ class SemanticRegistryService:
     def _validate_semantic_type(value: str) -> None:
         if value not in ALLOWED_SEMANTIC_TYPES:
             allowed = ", ".join(sorted(ALLOWED_SEMANTIC_TYPES))
-            raise ServiceError(f"semantic_type must be one of: {allowed}", status_code=400)
+            raise ForgeError(f"semantic_type must be one of: {allowed}", status_code=400)
 
 
 def _normalize_vertical(value: Optional[str]) -> Optional[str]:
@@ -359,9 +359,9 @@ def _coerce_positive_int(value: Any, *, field: str) -> int:
     try:
         as_int = int(value)
     except Exception as exc:
-        raise ServiceError(f"{field} must be a positive integer", status_code=400) from exc
+        raise ForgeError(f"{field} must be a positive integer", status_code=400) from exc
     if as_int <= 0:
-        raise ServiceError(f"{field} must be a positive integer", status_code=400)
+        raise ForgeError(f"{field} must be a positive integer", status_code=400)
     return as_int
 
 
@@ -376,14 +376,14 @@ def _coerce_bool(value: Any, *, field: str) -> bool:
             return True
         if lowered in {"0", "false", "no", "n", "off"}:
             return False
-    raise ServiceError(f"{field} must be boolean", status_code=400)
+    raise ForgeError(f"{field} must be boolean", status_code=400)
 
 
 def _raise_write_error(exc: Exception) -> None:
     msg = str(exc)
     if "Duplicate entry" in msg:
-        raise ServiceError("Duplicate semantic_registry entry", status_code=409) from exc
-    raise ServiceError("semantic_registry write failed", status_code=500, details={"message": msg}) from exc
+        raise ForgeError("Duplicate semantic_registry entry", status_code=409) from exc
+    raise ForgeError("semantic_registry write failed", status_code=500, details={"message": msg}) from exc
 
 
 def _sql_col(name: str) -> str:

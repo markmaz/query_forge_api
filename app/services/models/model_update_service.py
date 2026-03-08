@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 
 ALLOWED_FIELDS = {"dataType", "description", "isActive"}
 
 class ModelUpdateService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def patch_column(
         self,
@@ -21,7 +21,7 @@ class ModelUpdateService:
     ) -> Dict[str, Any]:
         bad = [k for k in patch.keys() if k not in ALLOWED_FIELDS]
         if bad:
-            raise ServiceError(f"Invalid fields in patch: {', '.join(bad)}", status_code=400)
+            raise ForgeError(f"Invalid fields in patch: {', '.join(bad)}", status_code=400)
 
         sets = []
         params: Dict[str, Any] = {"id": int(column_id)}
@@ -37,7 +37,7 @@ class ModelUpdateService:
             params["is_active"] = 1 if bool(patch.get("isActive")) else 0
 
         if not sets:
-            raise ServiceError("Empty patch", status_code=400)
+            raise ForgeError("Empty patch", status_code=400)
 
         upd_sql = f"""
 UPDATE model_column c
@@ -46,7 +46,7 @@ WHERE c.id = :id
 """
         affected = self._sql.execute_write(upd_sql, params)
         if affected == 0:
-            raise ServiceError("Dictionary column not found", status_code=404)
+            raise ForgeError("Dictionary column not found", status_code=404)
 
         sel_sql = """
 SELECT
@@ -64,7 +64,7 @@ LIMIT 1
 """
         r = self._sql.execute_query(sel_sql, {"id": int(column_id)})
         if not r:
-            raise ServiceError("Dictionary column not found", status_code=404)
+            raise ForgeError("Dictionary column not found", status_code=404)
 
         row = r[0]
         return {
@@ -128,7 +128,7 @@ WHERE mc.id = :id
                 new_id = res.lastrowid
             except Exception as e:
                 # Most likely unique constraint uq_model_col hit
-                raise ServiceError("Column already exists for this table", status_code=409) from e
+                raise ForgeError("Column already exists for this table", status_code=409) from e
 
             created_rows = tx.execute_query_mappings(sql_select_created, {"id": new_id})
             created = created_rows[0] if created_rows else None

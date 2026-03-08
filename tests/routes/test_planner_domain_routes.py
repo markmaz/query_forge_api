@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import app.routes.planner_domain as planner_domain_route
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 
 
 def _headers(monkeypatch):
     from app import factory
     from app.decorators import security
-    from app.routes import _route_utils
+    from app.routes import request_helpers as _route_utils
     from app.services.workspace_inventory import workspace_context
 
     def _verify_token(_token):
@@ -148,7 +148,7 @@ def test_plan_domain_profile_route_not_found(client, monkeypatch):
     class _Svc:
         def get_pipeline_profile(self, *, trace_id, workspace_id, user_id):
             del workspace_id, user_id
-            raise ServiceError("Pipeline profile not found", status_code=404, details={"trace_id": trace_id})
+            raise ForgeError("Pipeline profile not found", status_code=404, details={"trace_id": trace_id})
 
     monkeypatch.setattr(planner_domain_route, "PlannerDomainService", _Svc)
     resp = client.get(

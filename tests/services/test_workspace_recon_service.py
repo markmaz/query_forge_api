@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from app.services.recon.workspace_recon_service import ReconQuery, WorkspaceReconService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_list_recon() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses.append(
         [
             {
@@ -26,7 +26,7 @@ def test_list_recon() -> None:
 
 
 def test_counts_by_status() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses.append([{"status": "MATCHED", "cnt": 3}])
     svc = WorkspaceReconService(sql=fake)
     counts = svc.counts_by_status(workspace_id="ws")

@@ -2,7 +2,8 @@
 Flask
 flask-cors
 flask-restx
-Flask-Mail
+flask-Mail
+boto3
 
 # WSGI server
 gunicorn
@@ -32,6 +33,7 @@ torch
 transformers
 sentence-transformers
 huggingface_hub
+spacy
 
 # Vector database
 qdrant-client
@@ -49,6 +51,9 @@ pyarrow
 # Configuration
 python-dotenv
 PyYAML
+
+# Analytics connectors
+snowflake-connector-python
 
 # Retry utilities
 tenacity

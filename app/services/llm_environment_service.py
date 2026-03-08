@@ -12,7 +12,7 @@ from app.config import (
     LLM_INSTANCE_ID,
     LLM_STATUS_CACHE_SECONDS,
 )
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def _build_ec2_client(
     try:
         import boto3
     except Exception as exc:  # pragma: no cover - runtime dependency guard
-        raise ServiceError("boto3 is required for LLM environment control", status_code=500) from exc
+        raise ForgeError("boto3 is required for LLM environment control", status_code=500) from exc
     return boto3.client(
         "ec2",
         region_name=region,
@@ -105,9 +105,9 @@ class LLMEnvironmentService:
         self._last_logged_raw_state: Optional[str] = None
 
         if not self.instance_id:
-            raise ServiceError("LLM_INSTANCE_ID is required", status_code=500)
+            raise ForgeError("LLM_INSTANCE_ID is required", status_code=500)
         if ec2_client is None and (not self.aws_access_key_id or not self.aws_secret_access_key):
-            raise ServiceError(
+            raise ForgeError(
                 "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required",
                 status_code=500,
             )
@@ -171,7 +171,7 @@ class LLMEnvironmentService:
         instances = reservations[0].get("Instances") if reservations else None
         instance = instances[0] if instances else None
         if not instance:
-            raise ServiceError("LLM instance not found", status_code=404)
+            raise ForgeError("LLM instance not found", status_code=404)
 
         raw_state = str((instance.get("State") or {}).get("Name") or "unknown").lower()
         mapped_state = _STATE_MAP.get(raw_state, "error")
@@ -186,19 +186,19 @@ class LLMEnvironmentService:
         self._cached_status = None
         self._cached_at = 0.0
 
-    def _translate_aws_error(self, message: str, exc: Exception) -> ServiceError:
-        if isinstance(exc, ServiceError):
+    def _translate_aws_error(self, message: str, exc: Exception) -> ForgeError:
+        if isinstance(exc, ForgeError):
             return exc
         if isinstance(exc, ClientError):
             error = getattr(exc, "response", {}).get("Error", {})
             code = str(error.get("Code") or "ClientError")
             details = {"code": code, "message": error.get("Message", str(exc))}
             if code in {"InvalidInstanceID.NotFound"}:
-                return ServiceError(message, status_code=404, details=details)
+                return ForgeError(message, status_code=404, details=details)
             if code in {"UnauthorizedOperation", "AuthFailure"}:
-                return ServiceError(message, status_code=403, details=details)
-            return ServiceError(message, status_code=502, details=details)
+                return ForgeError(message, status_code=403, details=details)
+            return ForgeError(message, status_code=502, details=details)
         if isinstance(exc, BotoCoreError):
-            return ServiceError(message, status_code=502, details={"message": str(exc)})
+            return ForgeError(message, status_code=502, details={"message": str(exc)})
         logger.exception("%s instance_id=%s", message, self.instance_id)
-        return ServiceError(message, status_code=500, details={"message": str(exc)})
+        return ForgeError(message, status_code=500, details={"message": str(exc)})

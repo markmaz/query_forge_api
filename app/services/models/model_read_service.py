@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.ports.sql_executor import ForgeQueryPort
 
 
 @dataclass(frozen=True)
@@ -42,8 +42,8 @@ class DictColumnRow:
 
 
 class ModelReadService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def list_tables(
         self,
@@ -67,7 +67,7 @@ class ModelReadService:
             "offset": int(offset),
         }
 
-        count_sql = """
+        qf_count_sql = """
         SELECT COUNT(*) AS total
         FROM model_table t
         WHERE (:q IS NULL OR t.name LIKE CONCAT('%', :q, '%'))
@@ -101,7 +101,7 @@ class ModelReadService:
         LIMIT :limit OFFSET :offset
         """
 
-        total_rows = self._sql.execute_query(count_sql, params)
+        total_rows = self._sql.execute_query(qf_count_sql, params)
         total = int(total_rows[0][0]) if total_rows else 0
 
         rows = self._sql.execute_query(rows_sql, params)

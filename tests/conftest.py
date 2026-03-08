@@ -14,7 +14,7 @@ from tests._auth import (
 
 _AUTH_CACHE: Dict[str, Any] = {}
 
-class _DummyTokenManager:
+class _DummyForgeTokenPort:
     def start_auto_refresh(self) -> None:
         return None
 
@@ -36,8 +36,8 @@ class _DummyValkeyModule:
 def app(monkeypatch: pytest.MonkeyPatch):
     from app import factory
 
-    monkeypatch.setattr(factory, "DatabricksTokenManager", _DummyTokenManager)
-    monkeypatch.setattr(factory, "SigmaTokenManager", _DummyTokenManager)
+    monkeypatch.setattr(factory, "DatabricksForgeTokenPort", _DummyForgeTokenPort)
+    monkeypatch.setattr(factory, "ForgeTokenManager", _DummyForgeTokenPort)
     monkeypatch.setattr(factory, "valkey", _DummyValkeyModule)
     monkeypatch.setattr(factory, "LLM_INSTANCE_ID", "i-test-llm")
     monkeypatch.setattr(factory, "AWS_REGION", "us-east-1")
@@ -115,7 +115,7 @@ def auth_headers(
 ) -> Dict[str, str]:
     from app import factory
     from app.decorators import security
-    from app.routes import _route_utils
+    from app.routes import request_helpers as _route_utils
     from app.services.workspace_inventory import workspace_context
 
     def _verify_token(token: str) -> Dict[str, Any]:

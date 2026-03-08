@@ -3,7 +3,8 @@ from __future__ import annotations
 import logging
 
 from flask import request
-from flask_restx import Namespace, Resource
+from flask_restx import Namespace
+from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
 from app.services.embedding.embedding_search_service import EmbeddingSearchService
@@ -17,7 +18,7 @@ nlp_ns = Namespace("nlp", description="NLP extraction")
 
 
 @nlp_ns.route("/extract")
-class NlpExtract(Resource):
+class NlpExtract(ForgeResource):
     @token_required
     def post(self):
         body = request.get_json(silent=True) or {}
@@ -28,7 +29,7 @@ class NlpExtract(Resource):
 
 
 @nlp_ns.route("/extract-and-search")
-class NlpExtractAndSearch(Resource):
+class NlpExtractAndSearch(ForgeResource):
     @token_required
     def post(self):
         body = request.get_json(silent=True) or {}

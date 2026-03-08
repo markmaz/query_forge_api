@@ -43,7 +43,7 @@ class _Session:
 
 @pytest.fixture
 def dqs(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(base_token_manager, "get_headers", lambda token_manager=None: {})
+    monkeypatch.setattr(base_token_manager, "forge_auth_headers", lambda token_manager=None: {})
     mod = importlib.import_module("app.services.databricks_query_service")
     importlib.reload(mod)
     return mod
@@ -51,7 +51,7 @@ def dqs(monkeypatch: pytest.MonkeyPatch):
 
 def test_submit_statement_builds_payload(monkeypatch: pytest.MonkeyPatch, dqs) -> None:
     session = _Session()
-    session.queue(_Resp({"statement_id": "s1"}))
+    session.queue(_Resp({"qf_statement_id": "s1"}))
     monkeypatch.setattr(dqs, "s", session)
 
     resp = dqs.submit_statement(
@@ -65,7 +65,7 @@ def test_submit_statement_builds_payload(monkeypatch: pytest.MonkeyPatch, dqs) -
         wait_timeout="5s",
     )
 
-    assert resp["statement_id"] == "s1"
+    assert resp["qf_statement_id"] == "s1"
     payload = json.loads(session.posts[0]["data"])
     assert payload["warehouse_id"] == "wh"
     assert payload["statement"] == "SELECT 1"
@@ -87,14 +87,14 @@ def test_wait_until_done_succeeds(monkeypatch: pytest.MonkeyPatch, dqs) -> None:
 
     monkeypatch.setattr(dqs, "get_statement", _get)
 
-    final = dqs.wait_until_done("s1", poll_interval_s=0.0, timeout_s=1.0)
+    final = dqs.wait_until_done("s1", qf_poll_interval=0.0, qf_timeout_s=1.0)
     assert final["status"]["state"] == "SUCCEEDED"
 
 
 def test_wait_until_done_timeout(monkeypatch: pytest.MonkeyPatch, dqs) -> None:
     monkeypatch.setattr(dqs, "get_statement", lambda stmt_id: {"status": {"state": "RUNNING"}})
     with pytest.raises(TimeoutError):
-        dqs.wait_until_done("s1", poll_interval_s=0.0, timeout_s=0.0)
+        dqs.wait_until_done("s1", qf_poll_interval=0.0, qf_timeout_s=0.0)
 
 
 def test_iter_inline_chunks_follows_next(monkeypatch: pytest.MonkeyPatch, dqs) -> None:
@@ -131,7 +131,7 @@ def test_iter_external_links_handles_inline_fallback(monkeypatch: pytest.MonkeyP
 
 
 def test_run_and_collect_all_inline(monkeypatch: pytest.MonkeyPatch, dqs) -> None:
-    monkeypatch.setattr(dqs, "submit_statement", lambda *a, **k: {"statement_id": "s1"})
+    monkeypatch.setattr(dqs, "submit_statement", lambda *a, **k: {"qf_statement_id": "s1"})
     monkeypatch.setattr(dqs, "wait_until_done", lambda stmt_id: {"status": {"state": "SUCCEEDED"}})
     monkeypatch.setattr(dqs, "iter_inline_chunks", lambda resp: [[{"a": 1}], [{"a": 2}]])
 
@@ -140,7 +140,7 @@ def test_run_and_collect_all_inline(monkeypatch: pytest.MonkeyPatch, dqs) -> Non
 
 
 def test_run_and_collect_all_external_json(monkeypatch: pytest.MonkeyPatch, dqs) -> None:
-    monkeypatch.setattr(dqs, "submit_statement", lambda *a, **k: {"statement_id": "s1"})
+    monkeypatch.setattr(dqs, "submit_statement", lambda *a, **k: {"qf_statement_id": "s1"})
     monkeypatch.setattr(dqs, "wait_until_done", lambda stmt_id: {"status": {"state": "SUCCEEDED"}, "manifest": {}})
     monkeypatch.setattr(dqs, "iter_external_links", lambda stmt_id, manifest: [b"[{\"a\": 1}]"])
 
@@ -149,7 +149,7 @@ def test_run_and_collect_all_external_json(monkeypatch: pytest.MonkeyPatch, dqs)
 
 
 def test_run_and_collect_all_external_raw(monkeypatch: pytest.MonkeyPatch, dqs) -> None:
-    monkeypatch.setattr(dqs, "submit_statement", lambda *a, **k: {"statement_id": "s1"})
+    monkeypatch.setattr(dqs, "submit_statement", lambda *a, **k: {"qf_statement_id": "s1"})
     monkeypatch.setattr(dqs, "wait_until_done", lambda stmt_id: {"status": {"state": "SUCCEEDED"}, "manifest": {}})
     monkeypatch.setattr(dqs, "iter_external_links", lambda stmt_id, manifest: [b"a", b"b"])
 

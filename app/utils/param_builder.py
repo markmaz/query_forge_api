@@ -1,24 +1,25 @@
+from __future__ import annotations
+
 from urllib.parse import quote
 
 
-class ParamBuilder:
-    def __init__(self):
-        self.params = []
+class SigmaEmbedParams:
+    def __init__(self) -> None:
+        self._parts: list[str] = []
 
-    def add_param(self, key: str, value: str, encode: bool = False):
-        """
-        Adds a Sigma embed parameter (:key=value).
-        """
-        if encode:
-            value = quote(value, safe="")  # Encode JWT safely
-
-        self.params.append(f":{key}={value}")
+    def add_param(self, key: str, value: str, encode: bool = False) -> "SigmaEmbedParams":
+        rendered_value = quote(value, safe="") if encode else value
+        self._parts.append(f":{key}={rendered_value}")
         return self
 
-    def __str__(self):
-        if not self.params:
-            return ""
-        return f"?{'&'.join(self.params)}"
+    @property
+    def params(self) -> list[str]:
+        return self._parts
 
-    def get_query_string(self):
+    def __str__(self) -> str:
+        if not self._parts:
+            return ""
+        return f"?{'&'.join(self._parts)}"
+
+    def get_query_string(self) -> str:
         return str(self)

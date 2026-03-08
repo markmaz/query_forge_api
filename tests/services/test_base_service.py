@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services import base_service
 
 
@@ -23,7 +23,7 @@ def test_process_response_ok() -> None:
 
 def test_process_response_error() -> None:
     resp = _Resp(500, {"error": "nope"}, text="boom")
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         base_service.process_response(resp)
 
 

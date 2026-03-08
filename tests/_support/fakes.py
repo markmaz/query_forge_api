@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
-from app.ports.sql_executor import ExecuteResult, SQLExecutor, SQLTransaction
+from app.ports.sql_executor import ForgeExecResult, ForgeQueryPort, ForgeQueryTx
 
 
 @dataclass
@@ -13,8 +13,8 @@ class CapturedCall:
     params: Optional[Mapping[str, Any]] = None
 
 
-class FakeSQLTransaction(SQLTransaction):
-    def __init__(self, parent: "FakeSQLExecutor") -> None:
+class FakeForgeQueryTx(ForgeQueryTx):
+    def __init__(self, parent: "FakeForgeQueryPort") -> None:
         self._parent = parent
 
     def execute_write(self, query: str, params: Optional[Mapping[str, Any]] = None) -> int:
@@ -26,11 +26,11 @@ class FakeSQLTransaction(SQLTransaction):
     def execute_query(self, query: str, params: Optional[Mapping[str, Any]] = None) -> List[Tuple]:
         return self._parent.execute_query(query, params)
 
-    def execute_insert(self, query: str, params: Optional[Mapping[str, Any]] = None) -> ExecuteResult:
+    def execute_insert(self, query: str, params: Optional[Mapping[str, Any]] = None) -> ForgeExecResult:
         return self._parent.execute_insert(query, params)
 
 
-class FakeSQLExecutor(SQLExecutor):
+class FakeForgeQueryPort(ForgeQueryPort):
     def __init__(self) -> None:
         self.write_calls: List[CapturedCall] = []
         self.query_calls: List[CapturedCall] = []
@@ -39,7 +39,7 @@ class FakeSQLExecutor(SQLExecutor):
         self.query_responses: List[List[Tuple]] = []
         self.query_mappings_responses: List[List[Dict[str, Any]]] = []
         self.write_responses: List[int] = []
-        self.insert_responses: List[ExecuteResult] = []
+        self.insert_responses: List[ForgeExecResult] = []
         self.write_exceptions: List[Exception] = []
         self.query_exceptions: List[Exception] = []
         self.query_mappings_exceptions: List[Exception] = []
@@ -52,18 +52,18 @@ class FakeSQLExecutor(SQLExecutor):
         warehouse_id: Optional[str] = None,
         parameters: Optional[Mapping[str, Any]] = None,
         wait: bool = True,
-        timeout_s: int = 120,
-        result_format: Optional[str] = None,
+        qf_timeout_s: int = 120,
+        qf_result_fmt: Optional[str] = None,
     ) -> Dict[str, Any]:
         raise NotImplementedError
 
-    def poll_status(self, statement_id: str) -> Dict[str, Any]:
+    def poll_status(self, qf_statement_id: str) -> Dict[str, Any]:
         raise NotImplementedError
 
-    def fetch_all_json(self, statement_id: str) -> List[Dict[str, Any]]:
+    def fetch_all_json(self, qf_statement_id: str) -> List[Dict[str, Any]]:
         raise NotImplementedError
 
-    def cancel(self, statement_id: str) -> None:
+    def cancel(self, qf_statement_id: str) -> None:
         raise NotImplementedError
 
     def execute_write(self, query: str, params: Optional[Mapping[str, Any]] = None) -> int:
@@ -90,20 +90,20 @@ class FakeSQLExecutor(SQLExecutor):
             return self.query_responses.pop(0)
         return []
 
-    def execute_insert(self, query: str, params: Optional[Mapping[str, Any]] = None) -> ExecuteResult:
+    def execute_insert(self, query: str, params: Optional[Mapping[str, Any]] = None) -> ForgeExecResult:
         self.insert_calls.append(CapturedCall(query=query, params=params))
         if self.insert_exceptions:
             raise self.insert_exceptions.pop(0)
         if self.insert_responses:
             return self.insert_responses.pop(0)
-        return ExecuteResult(rowcount=1, lastrowid=1)
+        return ForgeExecResult(rowcount=1, lastrowid=1)
 
     @contextmanager
-    def transaction(self) -> Iterable[SQLTransaction]:
-        yield FakeSQLTransaction(self)
+    def transaction(self) -> Iterable[ForgeQueryTx]:
+        yield FakeForgeQueryTx(self)
 
 
-class FakeDatabricksSQLExecutor:
+class FakeDatabricksForgeQueryPort:
     def __init__(self) -> None:
         self.submit_calls: List[CapturedCall] = []
         self.submit_responses: List[Dict[str, Any]] = []
@@ -115,10 +115,10 @@ class FakeDatabricksSQLExecutor:
         warehouse_id: Optional[str] = None,
         parameters: Optional[Mapping[str, Any]] = None,
         wait: bool = True,
-        timeout_s: int = 120,
-        result_format: Optional[str] = None,
+        qf_timeout_s: int = 120,
+        qf_result_fmt: Optional[str] = None,
     ) -> Dict[str, Any]:
-        del warehouse_id, parameters, wait, timeout_s, result_format
+        del warehouse_id, parameters, wait, qf_timeout_s, qf_result_fmt
         self.submit_calls.append(CapturedCall(query=sql))
         if self.submit_responses:
             return self.submit_responses.pop(0)

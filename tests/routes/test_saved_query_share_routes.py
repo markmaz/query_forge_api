@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import app.routes.query_tree_routes as query_tree_routes
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 
 
 def test_saved_query_share_to_workspace(client, auth_headers, monkeypatch):
@@ -64,7 +64,7 @@ def test_saved_query_share_non_owner_returns_404(client, auth_headers, monkeypat
             pass
 
         def share_to_workspace(self, query_id: str, can_edit: bool = False):
-            raise ServiceError("Saved query not found", status_code=404)
+            raise ForgeError("Saved query not found", status_code=404)
 
     monkeypatch.setattr(query_tree_routes, "SavedQueryShareService", _Svc)
 

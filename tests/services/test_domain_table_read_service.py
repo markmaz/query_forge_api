@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.domain.domain_table_read_service import DomainTableReadService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_list_domain_tables() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -26,10 +26,10 @@ def test_list_domain_tables() -> None:
                 "schema_name": "asset",
                 "table_name": "tbl",
                 "full_name": "main.asset.tbl",
-                "variant_code": None,
+                "qf_variant_code": None,
                 "is_qe": 0,
-                "exists_in_dbx": 1,
-                "last_seen_at": None,
+                "qf_exists_in_dbx": 1,
+                "qf_last_seen_at": None,
             }
         ]
     ]
@@ -39,13 +39,13 @@ def test_list_domain_tables() -> None:
 
 
 def test_get_domain_validation() -> None:
-    service = DomainTableReadService(sql=FakeSQLExecutor())
-    with pytest.raises(ServiceError):
+    service = DomainTableReadService(sql=FakeForgeQueryPort())
+    with pytest.raises(ForgeError):
         service.get_domain(workspace_id="", domain_name="Name")
 
 
 def test_list_workspace_tables_calls_snapshot(monkeypatch) -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [[]]
     service = DomainTableReadService(sql=sql)
     called = {}

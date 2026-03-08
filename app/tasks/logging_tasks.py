@@ -6,9 +6,9 @@ except Exception:
     celery = None
 
 
-def persist_log():
+def flush_query_log():
     return None
 
 
 if celery is not None:
-    persist_log = celery.task(persist_log)
+    flush_query_log = celery.task(flush_query_log)

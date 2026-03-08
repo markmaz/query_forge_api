@@ -1,9 +1,9 @@
 from flask import current_app
 
-SIGMA_TOKEN = "SIGMA_TOKEN_MANAGER"
-DATABRICKS_TOKEN = "DATABRICKS_TOKEN_MANAGER"
+QF_SIGMA_TOKEN = "SIGMA_TOKEN_MANAGER"
+QF_DATABRICKS_TOKEN = "DATABRICKS_TOKEN_MANAGER"
 
-def get_token(token_manager: str):
+def fetch_forge_token(token_manager: str):
     """
     Generic Token manager - gets or refreshes the token from the given system.
 
@@ -21,7 +21,7 @@ def get_token(token_manager: str):
             return token_manager.token
         raise RuntimeError(f"{token_manager} is not configured in Flask app.")
 
-def get_headers(token_manager: str):
+def forge_auth_headers(token_manager: str):
     """
     Helper method to set the Bearer information for an HTTP request. It gets the correct token for the given system.
 
@@ -32,6 +32,6 @@ def get_headers(token_manager: str):
         dict (Header paramerters)
     """
     return {
-            "Authorization": f"Bearer {get_token(token_manager=token_manager)}",
+            "Authorization": f"Bearer {fetch_forge_token(token_manager=token_manager)}",
             "Content-Type": "application/json",
         }

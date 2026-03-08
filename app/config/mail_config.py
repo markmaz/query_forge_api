@@ -1,7 +1,7 @@
 from app.config import DEFAULT_MAIL_SENDER, SMTP_PASSWORD, SMTP_PORT, SMTP_SERVER, SMTP_USERNAME
 
 
-class MailConfig:
+class ForgeMailConfig:
     MAIL_SERVER = SMTP_SERVER
     MAIL_PORT = int(SMTP_PORT or 587)
     MAIL_USE_TLS = True

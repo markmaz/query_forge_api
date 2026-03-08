@@ -4,10 +4,10 @@ from datetime import datetime
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import ExecuteResult
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeExecResult
 from app.services.forge_insights_threads_service import ForgeInsightsThreadsService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def _project_row(*, project_id: int, archived: int = 0) -> dict:
@@ -41,8 +41,8 @@ def _thread_row(*, thread_id: int, conversation_id: str = "fi_x") -> dict:
 
 
 def test_create_project_success() -> None:
-    sql = FakeSQLExecutor()
-    sql.insert_responses = [ExecuteResult(rowcount=1, lastrowid=12)]
+    sql = FakeForgeQueryPort()
+    sql.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=12)]
     sql.query_mappings_responses = [[_project_row(project_id=12)]]
 
     svc = ForgeInsightsThreadsService(sql=sql)
@@ -54,12 +54,12 @@ def test_create_project_success() -> None:
 
 
 def test_create_thread_generates_conversation_id_when_missing() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [{"id": 7}],  # assert project exists
         [_thread_row(thread_id=21, conversation_id="fi_generated")],  # fetch created thread
     ]
-    sql.insert_responses = [ExecuteResult(rowcount=1, lastrowid=21)]
+    sql.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=21)]
     svc = ForgeInsightsThreadsService(sql=sql)
 
     out = svc.create_thread(
@@ -77,7 +77,7 @@ def test_create_thread_generates_conversation_id_when_missing() -> None:
 
 
 def test_list_threads_filters_and_normalizes() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [[_thread_row(thread_id=1, conversation_id="fi_1")]]
     svc = ForgeInsightsThreadsService(sql=sql)
 
@@ -90,7 +90,7 @@ def test_list_threads_filters_and_normalizes() -> None:
 
 
 def test_list_threads_falls_back_to_legacy_query_when_conversation_table_missing() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_exceptions = [Exception("no such table: forge_insights_conversation")]
     sql.query_mappings_responses = [[_thread_row(thread_id=2, conversation_id="fi_2")]]
     svc = ForgeInsightsThreadsService(sql=sql)
@@ -111,11 +111,11 @@ def test_list_threads_falls_back_to_legacy_query_when_conversation_table_missing
 
 
 def test_update_thread_missing_raises_404() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [[]]  # assert thread exists -> missing
     svc = ForgeInsightsThreadsService(sql=sql)
 
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         svc.update_thread(
             workspace_id="ws-1",
             user_id="user-1",
@@ -126,10 +126,10 @@ def test_update_thread_missing_raises_404() -> None:
 
 
 def test_delete_project_missing_raises_404() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [[]]  # assert exists
     svc = ForgeInsightsThreadsService(sql=sql)
 
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         svc.delete_project(workspace_id="ws-1", user_id="user-1", project_id=99)
     assert exc.value.status_code == 404

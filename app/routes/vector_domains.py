@@ -4,11 +4,12 @@ import logging
 from typing import Any, Dict
 
 from flask import request
-from flask_restx import Namespace, Resource, fields
+from flask_restx import Namespace, fields
+from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
-from app.routes._route_utils import get_workspace_id_from_header
+from app.exceptions.forge_error import ForgeError
+from app.routes.request_helpers import extract_workspace_id
 from app.services.vector import DomainVectorIndexService
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ def _parse_int(value: Any, *, default: int, minimum: int = 1) -> int:
     try:
         parsed = int(value)
     except Exception:
-        raise ServiceError("limit must be an integer", status_code=400)
+        raise ForgeError("limit must be an integer", status_code=400)
     return max(minimum, parsed)
 
 
@@ -56,24 +57,24 @@ def _parse_float(value: Any, *, default: float) -> float:
     try:
         return float(value)
     except Exception:
-        raise ServiceError("score_threshold must be numeric", status_code=400)
+        raise ForgeError("score_threshold must be numeric", status_code=400)
 
 
 @vector_ns.route("/domains/search")
-class DomainVectorSearch(Resource):
+class DomainVectorSearch(ForgeResource):
     @token_required
     @vector_ns.expect(_domain_search_request_model, validate=False)
     def post(self):
         try:
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            header_workspace_id = get_workspace_id_from_header()
+            header_workspace_id = extract_workspace_id()
             payload_workspace_id = str(body.get("workspace_id") or "").strip()
             if payload_workspace_id and payload_workspace_id != header_workspace_id:
-                raise ServiceError("workspace_id must match X-Workspace-Id header", status_code=400)
+                raise ForgeError("workspace_id must match X-Workspace-Id header", status_code=400)
 
             query = str(body.get("query") or "").strip()
             if not query:
-                raise ServiceError("query is required", status_code=400)
+                raise ForgeError("query is required", status_code=400)
 
             vertical_norm = str(body.get("vertical_norm") or "generic").strip().lower() or "generic"
             limit = _parse_int(body.get("limit"), default=5)
@@ -90,7 +91,7 @@ class DomainVectorSearch(Resource):
                 include_payload=include_payload,
             )
             return result, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("domain vector search failed")

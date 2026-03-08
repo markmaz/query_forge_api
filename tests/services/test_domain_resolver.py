@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.domain_resolver import (
     DomainPlan,
     DomainPlanJoin,
@@ -11,18 +11,18 @@ from app.services.domain_resolver import (
     ResolvedDomainFrom,
     _safe_fqn,
 )
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_safe_fqn_rejects_invalid() -> None:
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         _safe_fqn("bad name")
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         _safe_fqn("too.many.parts.name")
 
 
 def test_resolve_plan_builds_aliases() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -68,7 +68,7 @@ def test_resolve_plan_builds_aliases() -> None:
 
 
 def test_resolve_plan_requires_alias_for_show_all() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -95,12 +95,12 @@ def test_resolve_plan_requires_alias_for_show_all() -> None:
         [],
     ]
     resolver = DomainResolver(workspace_id="ws1", sql=sql)
-    with pytest.raises(ServiceError, match="table_alias is required"):
+    with pytest.raises(ForgeError, match="table_alias is required"):
         resolver.resolve_plan(1)
 
 
 def test_resolve_plan_rejects_invalid_filter_mode() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -117,7 +117,7 @@ def test_resolve_plan_rejects_invalid_filter_mode() -> None:
         [],
     ]
     resolver = DomainResolver(workspace_id="ws1", sql=sql)
-    with pytest.raises(ServiceError, match="Invalid filter_mode"):
+    with pytest.raises(ForgeError, match="Invalid filter_mode"):
         resolver.resolve_plan(1)
 
 
@@ -156,16 +156,16 @@ def test_get_join_path_finds_route() -> None:
         column_name_policy="DEDUP_PRIMARY_FIRST",
     )
 
-    resolver = DomainResolver(workspace_id="ws1", sql=FakeSQLExecutor())
+    resolver = DomainResolver(workspace_id="ws1", sql=FakeForgeQueryPort())
     path = resolver.get_join_path(plan, 3)
     assert [p.join_id for p in path] == ["1", "2"]
 
-    with pytest.raises(ServiceError, match="Join path not found"):
+    with pytest.raises(ForgeError, match="Join path not found"):
         resolver.get_join_path(plan, 99)
 
 
 def test_resolve_ambiguous_raises() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {"workspace_table_id": 1, "full_name": "main.asset.patients"},
@@ -173,12 +173,12 @@ def test_resolve_ambiguous_raises() -> None:
         ]
     ]
     resolver = DomainResolver(workspace_id="ws1", sql=sql)
-    with pytest.raises(ServiceError, match="maps to multiple workspace tables"):
+    with pytest.raises(ForgeError, match="maps to multiple workspace tables"):
         resolver.resolve(1)
 
 
 def test_resolve_fallback() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [],
         [{"workspace_table_id": 9, "full_name": "main.asset.fallback"}],

@@ -2,20 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.ports.sql_executor import ForgeQueryPort
 from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
 from app.services.workspace_inventory.workspace_inventory_pipeline_service import WorkspacePipelineService
 
 
 class WorkspaceSnapshotEnsureService:
-    """
-    Ensures workspace_table/workspace_column cache exists for a workspace (+schema).
-    Throttled so we don't snapshot on every request.
-    """
+    """Ensure workspace snapshot data exists and is fresh enough for reads."""
 
-    def __init__(self, *, sql: SQLExecutor | None = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: ForgeQueryPort | None = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def ensure(
         self,
@@ -24,10 +21,24 @@ class WorkspaceSnapshotEnsureService:
         schema_name: str = "asset",
         min_fresh_age_minutes: int = 15,
     ) -> None:
-        schema_name = (schema_name or "asset").strip()
-        min_fresh_age_minutes = int(min_fresh_age_minutes)
+        schema = (schema_name or "asset").strip()
+        freshness_minutes = int(min_fresh_age_minutes)
 
-        any_rows = self._sql.execute_query_mappings(
+        if not self._has_any_rows(workspace_id=workspace_id, schema_name=schema):
+            self._run_snapshot(workspace_id=workspace_id, schema_name=schema)
+            return
+
+        last_seen_at = self._fetch_last_seen(workspace_id=workspace_id, schema_name=schema)
+        if not last_seen_at:
+            self._run_snapshot(workspace_id=workspace_id, schema_name=schema)
+            return
+
+        threshold = timedelta(minutes=freshness_minutes)
+        if datetime.now() - last_seen_at > threshold:
+            self._run_snapshot(workspace_id=workspace_id, schema_name=schema)
+
+    def _has_any_rows(self, *, workspace_id: str, schema_name: str) -> bool:
+        rows = self._sql.execute_query_mappings(
             """
             SELECT 1
             FROM workspace_table
@@ -37,13 +48,10 @@ class WorkspaceSnapshotEnsureService:
             """,
             {"ws": workspace_id, "schema": schema_name},
         )
-        any_row = any_rows[0] if any_rows else None
+        return bool(rows)
 
-        if not any_row:
-            self._run_snapshot(workspace_id=workspace_id, schema_name=schema_name)
-            return
-
-        last_seen_rows = self._sql.execute_query_mappings(
+    def _fetch_last_seen(self, *, workspace_id: str, schema_name: str):
+        rows = self._sql.execute_query_mappings(
             """
             SELECT MAX(last_seen_at) AS max_seen
             FROM workspace_table
@@ -52,20 +60,13 @@ class WorkspaceSnapshotEnsureService:
             """,
             {"ws": workspace_id, "schema": schema_name},
         )
-        last_seen = last_seen_rows[0] if last_seen_rows else None
-
-        max_seen = last_seen.get("max_seen") if last_seen else None
-        if not max_seen:
-            self._run_snapshot(workspace_id=workspace_id, schema_name=schema_name)
-            return
-
-        age = datetime.now() - max_seen  # compare naive-to-naive
-        if age > timedelta(minutes=min_fresh_age_minutes):
-            self._run_snapshot(workspace_id=workspace_id, schema_name=schema_name)
+        if not rows:
+            return None
+        return rows[0].get("max_seen")
 
     def _run_snapshot(self, *, workspace_id: str, schema_name: str) -> None:
-        ctx = WorkspaceContextBuilder().build(workspace_id)
-        WorkspacePipelineService(sql=ctx.sql_exec).sync_snapshot(
+        context = WorkspaceContextBuilder().build(workspace_id)
+        WorkspacePipelineService(sql=context.sql_exec).sync_snapshot(
             workspace_id=workspace_id,
             schema_name=schema_name,
         )

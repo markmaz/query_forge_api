@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
 
-class BaseTokenManager:
+class BaseForgeTokenManager:
     def __init__(self, name: str, token_url: str, client_id: str, client_secret: str, scope: str = "all-apis"):
         load_dotenv()
         self._token_manager_name = name
@@ -96,10 +96,10 @@ class BaseTokenManager:
         
         self._client_secret = value
 
-    def get_token(self):
+    def fetch_forge_token(self):
         return self.token
 
-    def get_headers(self) -> dict:
+    def forge_auth_headers(self) -> dict:
         return {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",

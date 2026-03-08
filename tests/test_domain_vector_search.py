@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from app.services.vector import DomainVectorIndexService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 @dataclass
@@ -106,7 +106,7 @@ def _dot(a: List[float], b: List[float]) -> float:
 
 def _service() -> DomainVectorIndexService:
     return DomainVectorIndexService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         qdrant=_FakeQdrant(),
         model=_FakeEmbeddingModel(),
         collection_name="domain_catalog_v1",

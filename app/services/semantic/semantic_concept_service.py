@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Dict, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 from app.services.semantic.concept_seed import ConceptSeedService
 from app.services.semantic.semantic_llm_schema import normalize_concept_key
 
@@ -15,8 +15,8 @@ _ALLOWED_RELATIONSHIP_KIND = {"primary", "alternate", "derived", "rollup", "comp
 
 
 class SemanticConceptService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
         self._seed = ConceptSeedService(sql=self._sql)
 
     def list_concepts(
@@ -122,7 +122,7 @@ class SemanticConceptService:
             _raise_write_error(exc, "concept")
 
         if not result.lastrowid:
-            raise ServiceError("failed to create concept", status_code=500)
+            raise ForgeError("failed to create concept", status_code=500)
         return self.get_concept(int(result.lastrowid))
 
     def patch_concept(self, concept_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -145,7 +145,7 @@ class SemanticConceptService:
             _raise_write_error(exc, "concept")
             affected = 0
         if int(affected or 0) <= 0:
-            raise ServiceError("concept not found", status_code=404)
+            raise ForgeError("concept not found", status_code=404)
         return self.get_concept(concept_id)
 
     def get_concept(self, concept_id: int) -> Dict[str, Any]:
@@ -164,7 +164,7 @@ class SemanticConceptService:
             {"id": concept_id},
         )
         if not rows:
-            raise ServiceError("concept not found", status_code=404)
+            raise ForgeError("concept not found", status_code=404)
         return _norm_concept_row(rows[0])
 
     def delete_concept(self, concept_id: int) -> None:
@@ -181,7 +181,7 @@ class SemanticConceptService:
             _raise_write_error(exc, "concept")
             affected = 0
         if int(affected or 0) <= 0:
-            raise ServiceError("concept not found", status_code=404)
+            raise ForgeError("concept not found", status_code=404)
 
     def list_aliases(
         self,
@@ -236,7 +236,7 @@ class SemanticConceptService:
             _raise_write_error(exc, "alias")
 
         if not result.lastrowid:
-            raise ServiceError("failed to create alias", status_code=500)
+            raise ForgeError("failed to create alias", status_code=500)
 
         rows = self._sql.execute_query_mappings(
             """
@@ -261,7 +261,7 @@ class SemanticConceptService:
             {"id": alias_id},
         )
         if not rows:
-            raise ServiceError("alias not found", status_code=404)
+            raise ForgeError("alias not found", status_code=404)
         return _norm_alias_row(rows[0])
 
     def patch_alias(self, alias_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -289,7 +289,7 @@ class SemanticConceptService:
             _raise_write_error(exc, "alias")
             affected = 0
         if int(affected or 0) <= 0:
-            raise ServiceError("alias not found", status_code=404)
+            raise ForgeError("alias not found", status_code=404)
         return self.get_alias(alias_id)
 
     def delete_alias(self, alias_id: int) -> None:
@@ -306,7 +306,7 @@ class SemanticConceptService:
             _raise_write_error(exc, "alias")
             affected = 0
         if int(affected or 0) <= 0:
-            raise ServiceError("alias not found", status_code=404)
+            raise ForgeError("alias not found", status_code=404)
 
     def list_value_aliases(
         self,
@@ -389,7 +389,7 @@ class SemanticConceptService:
         except Exception as exc:
             _raise_write_error(exc, "value_alias")
         if not result.lastrowid:
-            raise ServiceError("failed to create value_alias", status_code=500)
+            raise ForgeError("failed to create value_alias", status_code=500)
         return self.get_value_alias(int(result.lastrowid))
 
     def get_value_alias(self, value_alias_id: int) -> Dict[str, Any]:
@@ -415,7 +415,7 @@ class SemanticConceptService:
             {"id": value_alias_id},
         )
         if not rows:
-            raise ServiceError("value_alias not found", status_code=404)
+            raise ForgeError("value_alias not found", status_code=404)
         return _norm_value_alias_row(rows[0])
 
     def patch_value_alias(self, value_alias_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -440,7 +440,7 @@ class SemanticConceptService:
             _raise_write_error(exc, "value_alias")
             affected = 0
         if int(affected or 0) <= 0:
-            raise ServiceError("value_alias not found", status_code=404)
+            raise ForgeError("value_alias not found", status_code=404)
         return self.get_value_alias(value_alias_id)
 
     def delete_value_alias(self, value_alias_id: int) -> None:
@@ -457,7 +457,7 @@ class SemanticConceptService:
             _raise_write_error(exc, "value_alias")
             affected = 0
         if int(affected or 0) <= 0:
-            raise ServiceError("value_alias not found", status_code=404)
+            raise ForgeError("value_alias not found", status_code=404)
 
     def list_concept_column_maps(
         self,
@@ -491,7 +491,7 @@ class SemanticConceptService:
         if relationship_kind is not None and str(relationship_kind).strip():
             rel = str(relationship_kind).strip().lower()
             if rel not in _ALLOWED_RELATIONSHIP_KIND:
-                raise ServiceError("invalid relationship_kind", status_code=400)
+                raise ForgeError("invalid relationship_kind", status_code=400)
             where.append("m.relationship_kind = :relationship_kind")
             params["relationship_kind"] = rel
         if concept_key is not None and str(concept_key).strip():
@@ -573,7 +573,7 @@ class SemanticConceptService:
         except Exception as exc:
             _raise_write_error(exc, "concept_column_map")
         if not result.lastrowid:
-            raise ServiceError("failed to create concept_column_map", status_code=500)
+            raise ForgeError("failed to create concept_column_map", status_code=500)
         return self.get_concept_column_map(int(result.lastrowid))
 
     def get_concept_column_map(self, map_id: int) -> Dict[str, Any]:
@@ -602,7 +602,7 @@ class SemanticConceptService:
             {"id": map_id},
         )
         if not rows:
-            raise ServiceError("concept_column_map not found", status_code=404)
+            raise ForgeError("concept_column_map not found", status_code=404)
         return _norm_concept_column_map_row(rows[0])
 
     def patch_concept_column_map(self, map_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -629,7 +629,7 @@ class SemanticConceptService:
             _raise_write_error(exc, "concept_column_map")
             affected = 0
         if int(affected or 0) <= 0:
-            raise ServiceError("concept_column_map not found", status_code=404)
+            raise ForgeError("concept_column_map not found", status_code=404)
         return self.get_concept_column_map(map_id)
 
     def delete_concept_column_map(self, map_id: int) -> None:
@@ -646,7 +646,7 @@ class SemanticConceptService:
             _raise_write_error(exc, "concept_column_map")
             affected = 0
         if int(affected or 0) <= 0:
-            raise ServiceError("concept_column_map not found", status_code=404)
+            raise ForgeError("concept_column_map not found", status_code=404)
 
     def backfill_primary_semantic_keys(
         self,
@@ -785,7 +785,7 @@ class SemanticConceptService:
             {"vertical_norm": vertical_norm, "concept_key": concept_key},
         )
         if not rows:
-            raise ServiceError("concept_key not found for vertical", status_code=400)
+            raise ForgeError("concept_key not found for vertical", status_code=400)
 
     def _ensure_concept_id_exists(self, concept_id: int) -> None:
         rows = self._sql.execute_query_mappings(
@@ -798,7 +798,7 @@ class SemanticConceptService:
             {"id": _as_pos_int(concept_id, "semantic_concept_id")},
         )
         if not rows:
-            raise ServiceError("semantic_concept_id not found", status_code=400)
+            raise ForgeError("semantic_concept_id not found", status_code=400)
 
     def _ensure_model_column_exists(self, model_column_id: int) -> None:
         rows = self._sql.execute_query_mappings(
@@ -811,7 +811,7 @@ class SemanticConceptService:
             {"id": _as_pos_int(model_column_id, "model_column_id")},
         )
         if not rows:
-            raise ServiceError("model_column_id not found", status_code=400)
+            raise ForgeError("model_column_id not found", status_code=400)
 
 
 def _normalize_vertical(value: Optional[str]) -> Optional[str]:
@@ -836,9 +836,9 @@ def _as_pos_int(value: Any, field: str) -> int:
     try:
         out = int(value)
     except Exception as exc:
-        raise ServiceError(f"{field} must be a positive integer", status_code=400) from exc
+        raise ForgeError(f"{field} must be a positive integer", status_code=400) from exc
     if out <= 0:
-        raise ServiceError(f"{field} must be a positive integer", status_code=400)
+        raise ForgeError(f"{field} must be a positive integer", status_code=400)
     return out
 
 
@@ -853,12 +853,12 @@ def _to_bool(value: Any, field: str) -> int:
             return 1
         if low in {"0", "false", "no", "off", "n"}:
             return 0
-    raise ServiceError(f"{field} must be boolean", status_code=400)
+    raise ForgeError(f"{field} must be boolean", status_code=400)
 
 
 def _normalize_concept_payload(payload: Dict[str, Any], *, partial: bool) -> Dict[str, Any]:
     if not isinstance(payload, dict):
-        raise ServiceError("invalid json body", status_code=400)
+        raise ForgeError("invalid json body", status_code=400)
 
     allowed = {
         "vertical_norm",
@@ -883,7 +883,7 @@ def _normalize_concept_payload(payload: Dict[str, Any], *, partial: bool) -> Dic
     if not partial:
         for req in ("vertical_norm", "concept_key", "name", "semantic_type"):
             if not str(out.get(req) or "").strip():
-                raise ServiceError(f"{req} is required", status_code=400)
+                raise ForgeError(f"{req} is required", status_code=400)
 
     if "vertical_norm" in out:
         out["vertical_norm"] = str(out["vertical_norm"] or "").strip().lower()
@@ -935,20 +935,20 @@ def _normalize_concept_payload(payload: Dict[str, Any], *, partial: bool) -> Dic
 
 def _normalize_alias_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(payload, dict):
-        raise ServiceError("invalid json body", status_code=400)
+        raise ForgeError("invalid json body", status_code=400)
 
     for req in ("vertical_norm", "alias_key", "concept_key"):
         if not str(payload.get(req) or "").strip():
-            raise ServiceError(f"{req} is required", status_code=400)
+            raise ForgeError(f"{req} is required", status_code=400)
 
     match_kind = str(payload.get("match_kind") or "exact").strip().lower()
     if match_kind not in _ALLOWED_MATCH_KIND:
-        raise ServiceError("match_kind must be exact|normalized|prefix|suffix|contains|regex", status_code=400)
+        raise ForgeError("match_kind must be exact|normalized|prefix|suffix|contains|regex", status_code=400)
 
     try:
         weight = float(payload.get("weight", 1.0))
     except Exception as exc:
-        raise ServiceError("weight must be numeric", status_code=400) from exc
+        raise ForgeError("weight must be numeric", status_code=400) from exc
 
     return {
         "vertical_norm": str(payload.get("vertical_norm") or "").strip().lower(),
@@ -961,7 +961,7 @@ def _normalize_alias_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def _normalize_alias_patch_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(payload, dict):
-        raise ServiceError("invalid json body", status_code=400)
+        raise ForgeError("invalid json body", status_code=400)
     allowed = {"vertical_norm", "alias_key", "concept_key", "match_kind", "weight"}
     out = {k: v for k, v in payload.items() if k in allowed}
     if "vertical_norm" in out:
@@ -973,25 +973,25 @@ def _normalize_alias_patch_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if "match_kind" in out:
         match_kind = str(out["match_kind"] or "").strip().lower()
         if match_kind not in _ALLOWED_MATCH_KIND:
-            raise ServiceError("match_kind must be exact|normalized|prefix|suffix|contains|regex", status_code=400)
+            raise ForgeError("match_kind must be exact|normalized|prefix|suffix|contains|regex", status_code=400)
         out["match_kind"] = match_kind
     if "weight" in out:
         try:
             out["weight"] = float(out["weight"])
         except Exception as exc:
-            raise ServiceError("weight must be numeric", status_code=400) from exc
+            raise ForgeError("weight must be numeric", status_code=400) from exc
     return out
 
 
 def _normalize_value_alias_payload(payload: Dict[str, Any], *, partial: bool) -> Dict[str, Any]:
     if not isinstance(payload, dict):
-        raise ServiceError("invalid json body", status_code=400)
+        raise ForgeError("invalid json body", status_code=400)
     allowed = {"vertical_norm", "semantic_concept_id", "canonical_value", "alias_value", "match_kind", "weight"}
     out = {k: v for k, v in payload.items() if k in allowed}
     if not partial:
         for req in ("vertical_norm", "semantic_concept_id", "canonical_value", "alias_value"):
             if not str(out.get(req) or "").strip():
-                raise ServiceError(f"{req} is required", status_code=400)
+                raise ForgeError(f"{req} is required", status_code=400)
     if "vertical_norm" in out:
         out["vertical_norm"] = str(out["vertical_norm"] or "").strip().lower()
     if "semantic_concept_id" in out:
@@ -1003,13 +1003,13 @@ def _normalize_value_alias_payload(payload: Dict[str, Any], *, partial: bool) ->
     if "match_kind" in out:
         mk = str(out["match_kind"] or "").strip().lower()
         if mk not in _ALLOWED_VALUE_MATCH_KIND:
-            raise ServiceError("match_kind must be exact|contains|prefix|regex", status_code=400)
+            raise ForgeError("match_kind must be exact|contains|prefix|regex", status_code=400)
         out["match_kind"] = mk
     if "weight" in out:
         try:
             out["weight"] = float(out["weight"])
         except Exception as exc:
-            raise ServiceError("weight must be numeric", status_code=400) from exc
+            raise ForgeError("weight must be numeric", status_code=400) from exc
     if not partial:
         out.setdefault("match_kind", "contains")
         out.setdefault("weight", 1.0)
@@ -1018,13 +1018,13 @@ def _normalize_value_alias_payload(payload: Dict[str, Any], *, partial: bool) ->
 
 def _normalize_concept_column_map_payload(payload: Dict[str, Any], *, partial: bool) -> Dict[str, Any]:
     if not isinstance(payload, dict):
-        raise ServiceError("invalid json body", status_code=400)
+        raise ForgeError("invalid json body", status_code=400)
     allowed = {"vertical_norm", "semantic_concept_id", "model_column_id", "relationship_kind", "weight"}
     out = {k: v for k, v in payload.items() if k in allowed}
     if not partial:
         for req in ("vertical_norm", "semantic_concept_id", "model_column_id"):
             if not str(out.get(req) or "").strip():
-                raise ServiceError(f"{req} is required", status_code=400)
+                raise ForgeError(f"{req} is required", status_code=400)
     if "vertical_norm" in out:
         out["vertical_norm"] = str(out["vertical_norm"] or "").strip().lower()
     if "semantic_concept_id" in out:
@@ -1034,13 +1034,13 @@ def _normalize_concept_column_map_payload(payload: Dict[str, Any], *, partial: b
     if "relationship_kind" in out:
         rel = str(out["relationship_kind"] or "").strip().lower()
         if rel not in _ALLOWED_RELATIONSHIP_KIND:
-            raise ServiceError("relationship_kind must be primary|alternate|derived|rollup|component", status_code=400)
+            raise ForgeError("relationship_kind must be primary|alternate|derived|rollup|component", status_code=400)
         out["relationship_kind"] = rel
     if "weight" in out:
         try:
             out["weight"] = float(out["weight"])
         except Exception as exc:
-            raise ServiceError("weight must be numeric", status_code=400) from exc
+            raise ForgeError("weight must be numeric", status_code=400) from exc
     if not partial:
         out.setdefault("relationship_kind", "primary")
         out.setdefault("weight", 1.0)
@@ -1100,8 +1100,8 @@ def _normalize_temporal_fields(row: Dict[str, Any]) -> None:
 def _raise_write_error(exc: Exception, kind: str) -> None:
     msg = str(exc)
     if "Duplicate entry" in msg:
-        raise ServiceError(f"duplicate {kind}", status_code=409) from exc
-    raise ServiceError(f"{kind} write failed", status_code=500, details={"message": msg}) from exc
+        raise ForgeError(f"duplicate {kind}", status_code=409) from exc
+    raise ForgeError(f"{kind} write failed", status_code=500, details={"message": msg}) from exc
 
 
 def _sql_col(name: str) -> str:

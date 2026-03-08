@@ -10,8 +10,8 @@ from spacy.language import Language
 from spacy.pipeline import EntityRuler
 from spacy.tokens import Doc
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.ports.sql_executor import ForgeQueryPort
 
 LABEL_CONCEPT = "ED_CONCEPT"
 
@@ -174,12 +174,12 @@ def resolve_column_keys_to_workspace_columns(
     domain_id: int,
     column_keys: Sequence[str],
     *,
-    sql: Optional[SQLExecutor] = None,
+    sql: Optional[ForgeQueryPort] = None,
 ) -> Dict[str, List[int]]:
     if not column_keys:
         return {}
 
-    executor = sql or MySQLSQLExecutor()
+    executor = sql or ForgeMetaSQL()
     placeholders = ", ".join([f":col_{idx}" for idx in range(len(column_keys))])
     params: Dict[str, Any] = {"workspace_id": workspace_id, "domain_id": int(domain_id)}
     for idx, col in enumerate(column_keys):
@@ -347,7 +347,7 @@ def _load_domain_columns(workspace_id: str, domain_id: int) -> Tuple[ColumnInfo,
       AND (mc.is_active = 1 OR mc.is_active IS NULL)
     ORDER BY mc.column_name
     """
-    rows = MySQLSQLExecutor().execute_query_mappings(
+    rows = ForgeMetaSQL().execute_query_mappings(
         sql,
         {"workspace_id": workspace_id, "domain_id": int(domain_id)},
     )

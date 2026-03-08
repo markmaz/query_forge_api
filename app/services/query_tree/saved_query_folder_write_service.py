@@ -2,136 +2,91 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy.exc import IntegrityError
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 
 
-class SavedQueryFolderWriteService:
-    """
-    Folder operations for MINE scope with trash/restore/purge support.
-
-    Supported operations:
-      - create_folder / rename_folder / move_folder / delete_folder (empty-only)
-      - trash_folder: soft-deletes folder subtree (folders + queries)
-      - restore_folder: restores folder subtree AND restores ancestor chain if needed
-      - purge_folder: permanently deletes folder subtree (queries first, then folders)
-    """
-
-    def __init__(self, *, workspace_id: str, user_id: str, sql: Optional[SQLExecutor] = None):
-        if not workspace_id:
-            raise ServiceError("workspace_id is required", status_code=400)
-        if not user_id:
-            raise ServiceError("user_id is required", status_code=400)
-        self._ws = workspace_id
-        self._uid = user_id
-        self._sql = sql or MySQLSQLExecutor()
-
-    # -------------------------
-    # Create / rename / move / delete (empty-only)
-    # -------------------------
-    def create_folder(self, *, name: str, parent_folder_id: Optional[str] = None, sort_index: int = 0) -> Dict[str, Any]:
-        name = (name or "").strip()
-        if not name:
-            raise ServiceError("Folder name is required", status_code=400)
-        if len(name) > 255:
-            raise ServiceError("Folder name is too long", status_code=400)
-
-        parent_id = (str(parent_folder_id).strip() or None) if parent_folder_id is not None else None
-        parent_id = self._normalize_parent_id(parent_id)
-        if parent_id:
-            self._assert_folder_exists(parent_id)
-
-        folder_id = str(uuid.uuid4())
-        try:
-            with self._sql.transaction() as tx:
-                tx.execute_write(
-                    """
-                    INSERT INTO saved_query_folder (
-                      id, scope, workspace_id, owner_user_id,
-                      parent_id, name, sort_index,
-                      is_deleted, created_at, updated_at
-                    )
-                    VALUES (
-                      :id, 'MINE', :ws, :uid,
-                      :parent_id, :name, :sort_index,
-                      0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-                    )
-                    """,
-                    {
-                        "id": folder_id,
-                        "ws": self._ws,
-                        "uid": self._uid,
-                        "parent_id": parent_id,
-                        "name": name,
-                        "sort_index": int(sort_index or 0),
-                    },
-                )
-        except Exception as exc:  # noqa: BLE001
-            # Likely sibling name conflict (uq_sqf_sibling_name); surface as 400
-            msg = str(exc).lower()
-            if "duplicate" in msg or "unique" in msg:
-                raise ServiceError("Folder already exists", status_code=400) from exc
-            raise
-
-        return {
-            "folderId": folder_id,
-            "name": name,
-            "parentId": parent_id,
-            "sortIndex": int(sort_index or 0),
-        }
+@dataclass(frozen=True)
+class _FolderContext:
+    workspace_id: str
+    user_id: str
 
 
-    def rename_folder(self, *, folder_id: str, name: str) -> Dict[str, Any]:
-        fid = _req(folder_id, "folder_id")
-        name = (name or "").strip()
-        if not name:
-            raise ServiceError("Folder name is required", status_code=400)
-        if len(name) > 255:
-            raise ServiceError("Folder name is too long", status_code=400)
+class _FolderRepository:
+    def __init__(self, *, ctx: _FolderContext, sql: ForgeQueryPort):
+        self._ctx = ctx
+        self._sql = sql
 
-        self._assert_folder_exists(fid)
+    def folder_exists(self, *, folder_id: str, allow_deleted: bool) -> bool:
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT id
+            FROM saved_query_folder
+            WHERE id = :fid
+              AND workspace_id = :ws
+              AND scope = 'MINE'
+              AND owner_user_id = :uid
+              AND (:allow_deleted = 1 OR is_deleted = 0)
+            LIMIT 1
+            """,
+            {
+                "fid": folder_id,
+                "ws": self._ctx.workspace_id,
+                "uid": self._ctx.user_id,
+                "allow_deleted": 1 if allow_deleted else 0,
+            },
+        )
+        return bool(rows)
 
-        try:
-            with self._sql.transaction() as tx:
-                res = tx.execute_write(
-                    """
-                    UPDATE saved_query_folder
-                    SET name = :name, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = :fid
-                    AND workspace_id = :ws
-                    AND scope = 'MINE'
-                    AND owner_user_id = :uid
-                    AND is_deleted = 0
-                    """,
-                    {"fid": fid, "ws": self._ws, "uid": self._uid, "name": name},
-                )
-        except IntegrityError as exc:
-            raise ServiceError("Folder already exists", status_code=400) from exc
-
-        if (res or 0) == 0:
-            raise ServiceError("Folder not found", status_code=404)
-
-        return {"folderId": fid, "name": name}
-
-    def move_folder(self, *, folder_id: str, new_parent_folder_id: Optional[str], new_sort_index: Optional[int] = None) -> Dict[str, Any]:
-        fid = _req(folder_id, "folder_id")
-        parent_id = _req(new_parent_folder_id, "new_parent_folder_id") if new_parent_folder_id else None
-        parent_id = self._normalize_parent_id(parent_id)
-
-        self._assert_folder_exists(fid)
-        if parent_id:
-            self._assert_folder_exists(parent_id)
-
-        if parent_id and self._is_descendant(descendant_id=parent_id, ancestor_id=fid):
-            raise ServiceError("Invalid move (cannot move folder into itself)", status_code=400)
-
+    def insert_folder(self, *, folder_id: str, name: str, parent_id: Optional[str], sort_index: int) -> None:
         with self._sql.transaction() as tx:
-            res = tx.execute_write(
+            tx.execute_write(
+                """
+                INSERT INTO saved_query_folder (
+                  id, scope, workspace_id, owner_user_id,
+                  parent_id, name, sort_index,
+                  is_deleted, created_at, updated_at
+                )
+                VALUES (
+                  :id, 'MINE', :ws, :uid,
+                  :parent_id, :name, :sort_index,
+                  0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                )
+                """,
+                {
+                    "id": folder_id,
+                    "ws": self._ctx.workspace_id,
+                    "uid": self._ctx.user_id,
+                    "parent_id": parent_id,
+                    "name": name,
+                    "sort_index": sort_index,
+                },
+            )
+
+    def rename_folder(self, *, folder_id: str, name: str) -> int:
+        with self._sql.transaction() as tx:
+            return tx.execute_write(
+                """
+                UPDATE saved_query_folder
+                SET name = :name, updated_at = CURRENT_TIMESTAMP
+                WHERE id = :fid
+                  AND workspace_id = :ws
+                  AND scope = 'MINE'
+                  AND owner_user_id = :uid
+                  AND is_deleted = 0
+                """,
+                {"fid": folder_id, "ws": self._ctx.workspace_id, "uid": self._ctx.user_id, "name": name},
+            )
+
+    def move_folder(self, *, folder_id: str, parent_id: Optional[str], sort_index: Optional[int]) -> int:
+        with self._sql.transaction() as tx:
+            return tx.execute_write(
                 """
                 UPDATE saved_query_folder
                 SET parent_id = :parent_id,
@@ -144,31 +99,17 @@ class SavedQueryFolderWriteService:
                   AND is_deleted = 0
                 """,
                 {
-                    "fid": fid,
-                    "ws": self._ws,
-                    "uid": self._uid,
+                    "fid": folder_id,
+                    "ws": self._ctx.workspace_id,
+                    "uid": self._ctx.user_id,
                     "parent_id": parent_id,
-                    "sort_index": (int(new_sort_index) if new_sort_index is not None else None),
+                    "sort_index": sort_index,
                 },
             )
-            if (res or 0) == 0:
-                raise ServiceError("Folder not found", status_code=404)
 
-        return {"folderId": fid, "parentId": parent_id, "sortIndex": new_sort_index}
-
-    def delete_folder(self, *, folder_id: str) -> Dict[str, Any]:
-        """
-        Soft delete a folder only if it has no active child folders or queries.
-        Use trash_folder for recursive delete.
-        """
-        fid = _req(folder_id, "folder_id")
-        self._assert_folder_exists(fid)
-
-        if self._count_child_folders(folder_id=fid) > 0 or self._count_child_queries(folder_id=fid) > 0:
-            raise ServiceError("Folder is not empty", status_code=400)
-
+    def soft_delete_folder(self, *, folder_id: str) -> int:
         with self._sql.transaction() as tx:
-            res = tx.execute_write(
+            return tx.execute_write(
                 """
                 UPDATE saved_query_folder
                 SET is_deleted = 1,
@@ -181,26 +122,146 @@ class SavedQueryFolderWriteService:
                   AND owner_user_id = :uid
                   AND is_deleted = 0
                 """,
-                {"fid": fid, "ws": self._ws, "uid": self._uid},
+                {"fid": folder_id, "ws": self._ctx.workspace_id, "uid": self._ctx.user_id},
             )
-            if (res or 0) == 0:
-                raise ServiceError("Folder not found", status_code=404)
 
-        return {"folderId": fid, "deleted": True}
+    def child_folder_count(self, *, folder_id: str) -> int:
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT COUNT(1) AS n
+            FROM saved_query_folder
+            WHERE parent_id = :fid
+              AND workspace_id = :ws
+              AND scope = 'MINE'
+              AND owner_user_id = :uid
+              AND is_deleted = 0
+            """,
+            {"fid": folder_id, "ws": self._ctx.workspace_id, "uid": self._ctx.user_id},
+        )
+        row = rows[0] if rows else None
+        return int((row or {}).get("n") or 0)
 
-    # -------------------------
-    # TRASH (soft delete)
-    # -------------------------
-    def trash_folder(self, *, folder_id: str) -> Dict[str, Any]:
-        fid = _req(folder_id, "folder_id")
-        self._assert_folder_exists(fid)
+    def child_query_count(self, *, folder_id: str) -> int:
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT COUNT(1) AS n
+            FROM saved_query
+            WHERE folder_id = :fid
+              AND workspace_id = :ws
+              AND scope = 'MINE'
+              AND owner_user_id = :uid
+              AND is_deleted = 0
+            """,
+            {"fid": folder_id, "ws": self._ctx.workspace_id, "uid": self._ctx.user_id},
+        )
+        row = rows[0] if rows else None
+        return int((row or {}).get("n") or 0)
 
-        folder_ids, query_ids = self._collect_subtree(folder_id=fid, include_deleted=False)
+    def parent_id_for_folder(self, *, folder_id: str) -> Optional[str]:
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT parent_id
+            FROM saved_query_folder
+            WHERE id = :fid
+              AND workspace_id = :ws
+              AND scope = 'MINE'
+              AND owner_user_id = :uid
+            LIMIT 1
+            """,
+            {"fid": folder_id, "ws": self._ctx.workspace_id, "uid": self._ctx.user_id},
+        )
+        row = rows[0] if rows else None
+        return str(row["parent_id"]) if row and row.get("parent_id") else None
 
+    def fetch_all_folders(self, *, qf_include_deleted: bool) -> List[Dict[str, Any]]:
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT id, parent_id, is_deleted
+            FROM saved_query_folder
+            WHERE workspace_id = :ws
+              AND scope = 'MINE'
+              AND owner_user_id = :uid
+              AND (:qf_include_deleted = 1 OR is_deleted = 0)
+            """,
+            {
+                "ws": self._ctx.workspace_id,
+                "uid": self._ctx.user_id,
+                "qf_include_deleted": 1 if qf_include_deleted else 0,
+            },
+        )
+        return [dict(row) for row in rows]
+
+    def fetch_queries_in_folders(self, *, folder_ids: List[str], qf_include_deleted: bool) -> List[str]:
         if not folder_ids:
-            # Should not happen because folder exists, but guard against data races/bugs
-            raise ServiceError("Folder not found", status_code=404)
+            return []
+        rows = self._sql.execute_query_mappings(
+            f"""
+            SELECT id
+            FROM saved_query
+            WHERE workspace_id = :ws
+              AND scope = 'MINE'
+              AND owner_user_id = :uid
+              AND (:qf_include_deleted = 1 OR is_deleted = 0)
+              AND folder_id IN ({_qf_in_params('f', len(folder_ids))})
+            """,
+            {
+                "ws": self._ctx.workspace_id,
+                "uid": self._ctx.user_id,
+                "qf_include_deleted": 1 if qf_include_deleted else 0,
+                **_bind_in("f", folder_ids),
+            },
+        )
+        return [str(row["id"]) for row in rows]
 
+    def restore_folder_ids(self, *, folder_ids: List[str]) -> None:
+        if not folder_ids:
+            return
+        with self._sql.transaction() as tx:
+            tx.execute_write(
+                f"""
+                UPDATE saved_query_folder
+                SET is_deleted = 0,
+                    deleted_at = NULL,
+                    deleted_by_user_id = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE workspace_id = :ws
+                  AND scope = 'MINE'
+                  AND owner_user_id = :uid
+                  AND is_deleted = 1
+                  AND id IN ({_qf_in_params('f', len(folder_ids))})
+                """,
+                {
+                    "ws": self._ctx.workspace_id,
+                    "uid": self._ctx.user_id,
+                    **_bind_in("f", folder_ids),
+                },
+            )
+
+    def restore_query_ids(self, *, query_ids: List[str]) -> None:
+        if not query_ids:
+            return
+        with self._sql.transaction() as tx:
+            tx.execute_write(
+                f"""
+                UPDATE saved_query
+                SET is_deleted = 0,
+                    deleted_at = NULL,
+                    deleted_by_user_id = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE workspace_id = :ws
+                  AND scope = 'MINE'
+                  AND owner_user_id = :uid
+                  AND is_deleted = 1
+                  AND id IN ({_qf_in_params('q', len(query_ids))})
+                """,
+                {
+                    "ws": self._ctx.workspace_id,
+                    "uid": self._ctx.user_id,
+                    **_bind_in("q", query_ids),
+                },
+            )
+
+    def trash_subtree(self, *, folder_ids: List[str], query_ids: List[str]) -> None:
         with self._sql.transaction() as tx:
             if query_ids:
                 tx.execute_write(
@@ -214,9 +275,9 @@ class SavedQueryFolderWriteService:
                       AND scope = 'MINE'
                       AND owner_user_id = :uid
                       AND is_deleted = 0
-                      AND id IN ({_in_params('q', len(query_ids))})
+                      AND id IN ({_qf_in_params('q', len(query_ids))})
                     """,
-                    {"ws": self._ws, "uid": self._uid, **_bind_in("q", query_ids)},
+                    {"ws": self._ctx.workspace_id, "uid": self._ctx.user_id, **_bind_in("q", query_ids)},
                 )
 
             tx.execute_write(
@@ -230,82 +291,12 @@ class SavedQueryFolderWriteService:
                   AND scope = 'MINE'
                   AND owner_user_id = :uid
                   AND is_deleted = 0
-                  AND id IN ({_in_params('f', len(folder_ids))})
+                  AND id IN ({_qf_in_params('f', len(folder_ids))})
                 """,
-                {"ws": self._ws, "uid": self._uid, **_bind_in("f", folder_ids)},
+                {"ws": self._ctx.workspace_id, "uid": self._ctx.user_id, **_bind_in("f", folder_ids)},
             )
 
-        return {"folderId": fid, "deleted": True, "foldersTrashed": len(folder_ids), "queriesTrashed": len(query_ids)}
-
-    # -------------------------
-    # RESTORE
-    # -------------------------
-    def restore_folder(self, *, folder_id: str) -> Dict[str, Any]:
-        fid = _req(folder_id, "folder_id")
-        # must exist (even if deleted)
-        self._assert_folder_exists(fid, allow_deleted=True)
-
-        # 1) restore ancestor chain (so folder has a visible path)
-        ancestor_ids = self._collect_ancestor_chain(folder_id=fid)
-
-        # 2) restore subtree (including deleted nodes)
-        folder_ids, query_ids = self._collect_subtree(folder_id=fid, include_deleted=True)
-
-        # union ancestors + subtree folders
-        all_folder_ids = list(dict.fromkeys(ancestor_ids + folder_ids))  # stable unique
-
-        with self._sql.transaction() as tx:
-            if all_folder_ids:
-                tx.execute_write(
-                    f"""
-                    UPDATE saved_query_folder
-                    SET is_deleted = 0,
-                        deleted_at = NULL,
-                        deleted_by_user_id = NULL,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE workspace_id = :ws
-                      AND scope = 'MINE'
-                      AND owner_user_id = :uid
-                      AND is_deleted = 1
-                      AND id IN ({_in_params('f', len(all_folder_ids))})
-                    """,
-                    {"ws": self._ws, "uid": self._uid, **_bind_in("f", all_folder_ids)},
-                )
-
-            if query_ids:
-                tx.execute_write(
-                    f"""
-                    UPDATE saved_query
-                    SET is_deleted = 0,
-                        deleted_at = NULL,
-                        deleted_by_user_id = NULL,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE workspace_id = :ws
-                      AND scope = 'MINE'
-                      AND owner_user_id = :uid
-                      AND is_deleted = 1
-                      AND id IN ({_in_params('q', len(query_ids))})
-                    """,
-                    {"ws": self._ws, "uid": self._uid, **_bind_in("q", query_ids)},
-                )
-
-        return {
-            "folderId": fid,
-            "restored": True,
-            "foldersRestored": len(all_folder_ids),
-            "queriesRestored": len(query_ids),
-        }
-
-    # -------------------------
-    # PURGE (hard delete)
-    # -------------------------
-    def purge_folder(self, *, folder_id: str) -> Dict[str, Any]:
-        fid = _req(folder_id, "folder_id")
-        self._assert_folder_exists(fid, allow_deleted=True)
-
-        folder_ids, query_ids = self._collect_subtree(folder_id=fid, include_deleted=True)
-
-        # Purge order matters: queries -> folders (due to FK folder parent self-reference + query FK)
+    def purge_subtree(self, *, folder_ids_sorted: List[str], query_ids: List[str]) -> None:
         with self._sql.transaction() as tx:
             if query_ids:
                 tx.execute_write(
@@ -314,14 +305,10 @@ class SavedQueryFolderWriteService:
                     WHERE workspace_id = :ws
                       AND scope = 'MINE'
                       AND owner_user_id = :uid
-                      AND id IN ({_in_params('q', len(query_ids))})
+                      AND id IN ({_qf_in_params('q', len(query_ids))})
                     """,
-                    {"ws": self._ws, "uid": self._uid, **_bind_in("q", query_ids)},
+                    {"ws": self._ctx.workspace_id, "uid": self._ctx.user_id, **_bind_in("q", query_ids)},
                 )
-
-            # Delete folders deepest-first to satisfy parent FK RESTRICT
-            folder_depths = self._depths_for_ids(folder_ids)
-            folder_ids_sorted = sorted(folder_ids, key=lambda x: folder_depths.get(x, 0), reverse=True)
 
             if folder_ids_sorted:
                 tx.execute_write(
@@ -330,159 +317,222 @@ class SavedQueryFolderWriteService:
                     WHERE workspace_id = :ws
                       AND scope = 'MINE'
                       AND owner_user_id = :uid
-                      AND id IN ({_in_params('f', len(folder_ids_sorted))})
+                      AND id IN ({_qf_in_params('f', len(folder_ids_sorted))})
                     """,
-                    {"ws": self._ws, "uid": self._uid, **_bind_in("f", folder_ids_sorted)},
+                    {"ws": self._ctx.workspace_id, "uid": self._ctx.user_id, **_bind_in("f", folder_ids_sorted)},
                 )
 
-        return {"folderId": fid, "purged": True, "foldersPurged": len(folder_ids), "queriesPurged": len(query_ids)}
 
-    # -------------------------
-    # INTERNAL: graph helpers
-    # -------------------------
+class SavedQueryFolderWriteService:
+    """Folder operations for scope='MINE' with delete/trash/restore/purge behavior."""
+
+    def __init__(self, *, workspace_id: str, user_id: str, sql: Optional[ForgeQueryPort] = None):
+        if not workspace_id:
+            raise ForgeError("workspace_id is required", status_code=400)
+        if not user_id:
+            raise ForgeError("user_id is required", status_code=400)
+
+        self._ctx = _FolderContext(workspace_id=workspace_id, user_id=user_id)
+        self._sql = sql or ForgeMetaSQL()
+        self._repo = _FolderRepository(ctx=self._ctx, sql=self._sql)
+        self._ws = workspace_id
+        self._uid = user_id
+
+    def create_folder(self, *, name: str, parent_folder_id: Optional[str] = None, sort_index: int = 0) -> Dict[str, Any]:
+        clean_name = (name or "").strip()
+        if not clean_name:
+            raise ForgeError("Folder name is required", status_code=400)
+        if len(clean_name) > 255:
+            raise ForgeError("Folder name is too long", status_code=400)
+
+        normalized_parent = (str(parent_folder_id).strip() or None) if parent_folder_id is not None else None
+        normalized_parent = self._normalize_parent_id(normalized_parent)
+        if normalized_parent:
+            self._assert_folder_exists(normalized_parent)
+
+        folder_id = str(uuid.uuid4())
+        try:
+            self._repo.insert_folder(
+                folder_id=folder_id,
+                name=clean_name,
+                parent_id=normalized_parent,
+                sort_index=int(sort_index or 0),
+            )
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc).lower()
+            if "duplicate" in msg or "unique" in msg:
+                raise ForgeError("Folder already exists", status_code=400) from exc
+            raise
+
+        return {
+            "folderId": folder_id,
+            "name": clean_name,
+            "parentId": normalized_parent,
+            "sortIndex": int(sort_index or 0),
+        }
+
+    def rename_folder(self, *, folder_id: str, name: str) -> Dict[str, Any]:
+        folder_id = _req(folder_id, "folder_id")
+        clean_name = (name or "").strip()
+        if not clean_name:
+            raise ForgeError("Folder name is required", status_code=400)
+        if len(clean_name) > 255:
+            raise ForgeError("Folder name is too long", status_code=400)
+
+        self._assert_folder_exists(folder_id)
+
+        try:
+            updated = self._repo.rename_folder(folder_id=folder_id, name=clean_name)
+        except IntegrityError as exc:
+            raise ForgeError("Folder already exists", status_code=400) from exc
+
+        if (updated or 0) == 0:
+            raise ForgeError("Folder not found", status_code=404)
+
+        return {"folderId": folder_id, "name": clean_name}
+
+    def move_folder(self, *, folder_id: str, qf_new_parent_folder_id: Optional[str], new_sort_index: Optional[int] = None) -> Dict[str, Any]:
+        folder_id = _req(folder_id, "folder_id")
+        parent_id = _req(qf_new_parent_folder_id, "qf_new_parent_folder_id") if qf_new_parent_folder_id else None
+        parent_id = self._normalize_parent_id(parent_id)
+
+        self._assert_folder_exists(folder_id)
+        if parent_id:
+            self._assert_folder_exists(parent_id)
+
+        if parent_id and self._is_descendant(descendant_id=parent_id, ancestor_id=folder_id):
+            raise ForgeError("Invalid move (cannot move folder into itself)", status_code=400)
+
+        updated = self._repo.move_folder(
+            folder_id=folder_id,
+            parent_id=parent_id,
+            sort_index=(int(new_sort_index) if new_sort_index is not None else None),
+        )
+        if (updated or 0) == 0:
+            raise ForgeError("Folder not found", status_code=404)
+
+        return {"folderId": folder_id, "parentId": parent_id, "sortIndex": new_sort_index}
+
+    def delete_folder(self, *, folder_id: str) -> Dict[str, Any]:
+        folder_id = _req(folder_id, "folder_id")
+        self._assert_folder_exists(folder_id)
+
+        if self._count_child_folders(folder_id=folder_id) > 0 or self._count_child_queries(folder_id=folder_id) > 0:
+            raise ForgeError("Folder is not empty", status_code=400)
+
+        updated = self._repo.soft_delete_folder(folder_id=folder_id)
+        if (updated or 0) == 0:
+            raise ForgeError("Folder not found", status_code=404)
+
+        return {"folderId": folder_id, "deleted": True}
+
+    def trash_folder(self, *, folder_id: str) -> Dict[str, Any]:
+        folder_id = _req(folder_id, "folder_id")
+        self._assert_folder_exists(folder_id)
+
+        folder_ids, query_ids = self._collect_subtree(folder_id=folder_id, qf_include_deleted=False)
+        if not folder_ids:
+            raise ForgeError("Folder not found", status_code=404)
+
+        self._repo.trash_subtree(folder_ids=folder_ids, query_ids=query_ids)
+
+        return {
+            "folderId": folder_id,
+            "deleted": True,
+            "foldersTrashed": len(folder_ids),
+            "queriesTrashed": len(query_ids),
+        }
+
+    def restore_folder(self, *, folder_id: str) -> Dict[str, Any]:
+        folder_id = _req(folder_id, "folder_id")
+        self._assert_folder_exists(folder_id, allow_deleted=True)
+
+        ancestor_ids = self._collect_ancestor_chain(folder_id=folder_id)
+        subtree_folder_ids, subtree_query_ids = self._collect_subtree(folder_id=folder_id, qf_include_deleted=True)
+        all_folder_ids = list(dict.fromkeys(ancestor_ids + subtree_folder_ids))
+
+        self._repo.restore_folder_ids(folder_ids=all_folder_ids)
+        self._repo.restore_query_ids(query_ids=subtree_query_ids)
+
+        return {
+            "folderId": folder_id,
+            "restored": True,
+            "foldersRestored": len(all_folder_ids),
+            "queriesRestored": len(subtree_query_ids),
+        }
+
+    def purge_folder(self, *, folder_id: str) -> Dict[str, Any]:
+        folder_id = _req(folder_id, "folder_id")
+        self._assert_folder_exists(folder_id, allow_deleted=True)
+
+        folder_ids, query_ids = self._collect_subtree(folder_id=folder_id, qf_include_deleted=True)
+        depths = self._depths_for_ids(folder_ids)
+        sorted_folders = sorted(folder_ids, key=lambda item: depths.get(item, 0), reverse=True)
+
+        self._repo.purge_subtree(folder_ids_sorted=sorted_folders, query_ids=query_ids)
+        return {
+            "folderId": folder_id,
+            "purged": True,
+            "foldersPurged": len(folder_ids),
+            "queriesPurged": len(query_ids),
+        }
+
     def _normalize_parent_id(self, parent_id: Optional[str]) -> Optional[str]:
         if parent_id and parent_id == f"user:{self._uid}":
             return None
         return parent_id
 
     def _assert_folder_exists(self, folder_id: str, allow_deleted: bool = False) -> None:
-        rows = self._sql.execute_query_mappings(
-            """
-            SELECT id
-            FROM saved_query_folder
-            WHERE id = :fid
-              AND workspace_id = :ws
-              AND scope = 'MINE'
-              AND owner_user_id = :uid
-              AND (:allow_deleted = 1 OR is_deleted = 0)
-            LIMIT 1
-            """,
-            {"fid": folder_id, "ws": self._ws, "uid": self._uid, "allow_deleted": 1 if allow_deleted else 0},
-        )
-        row = rows[0] if rows else None
-        if not row:
-            raise ServiceError("Folder not found", status_code=404)
+        if not self._repo.folder_exists(folder_id=folder_id, allow_deleted=allow_deleted):
+            raise ForgeError("Folder not found", status_code=404)
 
     def _count_child_folders(self, *, folder_id: str) -> int:
-        rows = self._sql.execute_query_mappings(
-            """
-            SELECT COUNT(1) AS n
-            FROM saved_query_folder
-            WHERE parent_id = :fid
-              AND workspace_id = :ws
-              AND scope = 'MINE'
-              AND owner_user_id = :uid
-              AND is_deleted = 0
-            """,
-            {"fid": folder_id, "ws": self._ws, "uid": self._uid},
-        )
-        row = rows[0] if rows else None
-        return int(row["n"] or 0)
+        return self._repo.child_folder_count(folder_id=folder_id)
 
     def _count_child_queries(self, *, folder_id: str) -> int:
-        rows = self._sql.execute_query_mappings(
-            """
-            SELECT COUNT(1) AS n
-            FROM saved_query
-            WHERE folder_id = :fid
-              AND workspace_id = :ws
-              AND scope = 'MINE'
-              AND owner_user_id = :uid
-              AND is_deleted = 0
-            """,
-            {"fid": folder_id, "ws": self._ws, "uid": self._uid},
-        )
-        row = rows[0] if rows else None
-        return int(row["n"] or 0)
+        return self._repo.child_query_count(folder_id=folder_id)
 
     def _is_descendant(self, *, descendant_id: str, ancestor_id: str) -> bool:
-        """
-        Walk parent pointers to see if descendant_id is under ancestor_id.
-        """
         current = descendant_id
         for _ in range(128):
             if not current:
                 return False
             if current == ancestor_id:
                 return True
-            rows = self._sql.execute_query_mappings(
-                """
-                SELECT parent_id
-                FROM saved_query_folder
-                WHERE id = :fid
-                  AND workspace_id = :ws
-                  AND scope = 'MINE'
-                  AND owner_user_id = :uid
-                LIMIT 1
-                """,
-                {"fid": current, "ws": self._ws, "uid": self._uid},
-            )
-            row = rows[0] if rows else None
-            if not row:
+            current = self._repo.parent_id_for_folder(folder_id=current)
+            if current is None:
                 return False
-            current = row["parent_id"]
-        raise ServiceError("Folder hierarchy too deep", status_code=400)
+        raise ForgeError("Folder hierarchy too deep", status_code=400)
 
-    def _fetch_all_folders(self, *, include_deleted: bool) -> List[Dict[str, Any]]:
-        rows = self._sql.execute_query_mappings(
-            """
-            SELECT id, parent_id, is_deleted
-            FROM saved_query_folder
-            WHERE workspace_id = :ws
-              AND scope = 'MINE'
-              AND owner_user_id = :uid
-              AND (:include_deleted = 1 OR is_deleted = 0)
-            """,
-            {"ws": self._ws, "uid": self._uid, "include_deleted": 1 if include_deleted else 0},
-        )
-        return [dict(r) for r in rows]
+    def _fetch_all_folders(self, *, qf_include_deleted: bool) -> List[Dict[str, Any]]:
+        return self._repo.fetch_all_folders(qf_include_deleted=qf_include_deleted)
 
-    def _fetch_queries_in_folders(self, *, folder_ids: List[str], include_deleted: bool) -> List[str]:
-        if not folder_ids:
-            return []
-        rows = self._sql.execute_query_mappings(
-            f"""
-            SELECT id
-            FROM saved_query
-            WHERE workspace_id = :ws
-              AND scope = 'MINE'
-              AND owner_user_id = :uid
-              AND (:include_deleted = 1 OR is_deleted = 0)
-              AND folder_id IN ({_in_params('f', len(folder_ids))})
-            """,
-            {"ws": self._ws, "uid": self._uid, "include_deleted": 1 if include_deleted else 0, **_bind_in("f", folder_ids)},
-        )
-        return [str(r["id"]) for r in rows]
+    def _fetch_queries_in_folders(self, *, folder_ids: List[str], qf_include_deleted: bool) -> List[str]:
+        return self._repo.fetch_queries_in_folders(folder_ids=folder_ids, qf_include_deleted=qf_include_deleted)
 
-    def _collect_subtree(self, *, folder_id: str, include_deleted: bool) -> Tuple[List[str], List[str]]:
-        folders = self._fetch_all_folders(include_deleted=include_deleted)
+    def _collect_subtree(self, *, folder_id: str, qf_include_deleted: bool) -> Tuple[List[str], List[str]]:
+        all_folders = self._fetch_all_folders(qf_include_deleted=qf_include_deleted)
+        children_map: Dict[Optional[str], List[str]] = defaultdict(list)
+        for row in all_folders:
+            parent_id = str(row["parent_id"]) if row.get("parent_id") else None
+            children_map[parent_id].append(str(row["id"]))
 
-        children: Dict[Optional[str], List[str]] = defaultdict(list)
-        for r in folders:
-            pid = str(r["parent_id"]) if r["parent_id"] else None
-            children[pid].append(str(r["id"]))
-
-        # BFS/DFS collect folder subtree
-        out_folders: List[str] = []
         stack = [folder_id]
-        seen: Set[str] = set()
-        while stack:
-            cur = stack.pop()
-            if cur in seen:
-                continue
-            seen.add(cur)
-            out_folders.append(cur)
-            for ch in children.get(cur, []):
-                stack.append(ch)
+        visited: Set[str] = set()
+        subtree_folder_ids: List[str] = []
 
-        query_ids = self._fetch_queries_in_folders(folder_ids=out_folders, include_deleted=include_deleted)
-        return out_folders, query_ids
+        while stack:
+            current = stack.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            subtree_folder_ids.append(current)
+            stack.extend(children_map.get(current, []))
+
+        subtree_query_ids = self._fetch_queries_in_folders(folder_ids=subtree_folder_ids, qf_include_deleted=qf_include_deleted)
+        return subtree_folder_ids, subtree_query_ids
 
     def _collect_ancestor_chain(self, *, folder_id: str) -> List[str]:
-        """
-        Returns [root ... parent ... folder_id] for this folder (including itself),
-        restricted to this user's MINE namespace, including deleted.
-        """
         rows = self._sql.execute_query_mappings(
             """
             SELECT id, parent_id
@@ -494,24 +544,21 @@ class SavedQueryFolderWriteService:
             {"ws": self._ws, "uid": self._uid},
         )
 
-        parent_of: Dict[str, Optional[str]] = {}
-        for r in rows:
-            parent_of[str(r["id"])] = (str(r["parent_id"]) if r["parent_id"] else None)
+        parent_map: Dict[str, Optional[str]] = {}
+        for row in rows:
+            parent_map[str(row["id"])] = str(row["parent_id"]) if row.get("parent_id") else None
 
         chain: List[str] = []
-        cur: Optional[str] = folder_id
+        current: Optional[str] = folder_id
         for _ in range(256):
-            if not cur:
+            if not current:
                 break
-            chain.append(cur)
-            cur = parent_of.get(cur)
+            chain.append(current)
+            current = parent_map.get(current)
         chain.reverse()
         return chain
 
     def _depths_for_ids(self, folder_ids: List[str]) -> Dict[str, int]:
-        """
-        Compute depths for sorting purge order (deepest-first).
-        """
         rows = self._sql.execute_query_mappings(
             """
             SELECT id, parent_id
@@ -523,36 +570,35 @@ class SavedQueryFolderWriteService:
             {"ws": self._ws, "uid": self._uid},
         )
 
-        parent_of: Dict[str, Optional[str]] = {}
-        for r in rows:
-            parent_of[str(r["id"])] = (str(r["parent_id"]) if r["parent_id"] else None)
+        parent_map: Dict[str, Optional[str]] = {}
+        for row in rows:
+            parent_map[str(row["id"])] = str(row["parent_id"]) if row.get("parent_id") else None
 
         depths: Dict[str, int] = {}
-        for fid in folder_ids:
-            d = 0
-            cur = fid
-            seen = set()
-            while cur and cur not in seen and d < 256:
-                seen.add(cur)
-                cur = parent_of.get(cur)
-                d += 1
-            depths[fid] = d
+        for folder_id in folder_ids:
+            depth = 0
+            current = folder_id
+            seen: Set[str] = set()
+            while current and current not in seen and depth < 256:
+                seen.add(current)
+                current = parent_map.get(current)
+                depth += 1
+            depths[folder_id] = depth
         return depths
 
 
 def _req(v: Any, field: str) -> str:
-    s = str(v or "").strip()
-    if not s:
-        raise ServiceError(f"{field} is required", status_code=400)
-    return s
+    value = str(v or "").strip()
+    if not value:
+        raise ForgeError(f"{field} is required", status_code=400)
+    return value
 
 
-def _in_params(prefix: str, n: int) -> str:
+def _qf_in_params(prefix: str, n: int) -> str:
     if n <= 0:
-        # should never be used with 0, but guard
         return "NULL"
-    return ",".join([f":{prefix}{i}" for i in range(n)])
+    return ",".join(f":{prefix}{idx}" for idx in range(n))
 
 
 def _bind_in(prefix: str, values: List[str]) -> Dict[str, Any]:
-    return {f"{prefix}{i}": values[i] for i in range(len(values))}
+    return {f"{prefix}{idx}": values[idx] for idx in range(len(values))}

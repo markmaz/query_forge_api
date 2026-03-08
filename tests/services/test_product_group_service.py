@@ -3,15 +3,15 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import exc
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.models.product import Product
 from app.models.product_group import ProductGroup
 from app.services.product_groups_service import ProductGroupService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_product_group_get_counts() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[{"status": "Active", "count": 2}]]
     svc = ProductGroupService(sql=fake)
     counts = svc.get_counts()
@@ -20,15 +20,15 @@ def test_product_group_get_counts() -> None:
 
 
 def test_product_group_get_counts_db_error() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_exceptions = [exc.SQLAlchemyError("boom")]
     svc = ProductGroupService(sql=fake)
-    with pytest.raises(ServiceError, match="Database error"):
+    with pytest.raises(ForgeError, match="Database error"):
         svc.get_counts()
 
 
 def test_get_product_groups_attaches_products(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[{"product_group_id": "pg1", "product_group_name": "Group", "status": "Active"}]]
     svc = ProductGroupService(sql=fake)
 
@@ -42,22 +42,22 @@ def test_get_product_groups_attaches_products(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_get_product_groups_db_error() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_exceptions = [exc.SQLAlchemyError("boom")]
     svc = ProductGroupService(sql=fake)
-    with pytest.raises(ServiceError, match="Database error"):
+    with pytest.raises(ForgeError, match="Database error"):
         svc.get_product_groups()
 
 
 def test_create_product_group_duplicate(monkeypatch: pytest.MonkeyPatch) -> None:
-    svc = ProductGroupService(sql=FakeSQLExecutor())
+    svc = ProductGroupService(sql=FakeForgeQueryPort())
     monkeypatch.setattr(svc, "_check_product_group", lambda name: True)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.create_product_group("Group")
 
 
 def test_create_product_group_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [1]
     svc = ProductGroupService(sql=fake)
     monkeypatch.setattr(svc, "_check_product_group", lambda name: False)
@@ -71,24 +71,24 @@ def test_create_product_group_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_create_product_group_db_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_exceptions = [exc.SQLAlchemyError("boom")]
     svc = ProductGroupService(sql=fake)
     monkeypatch.setattr(svc, "_check_product_group", lambda name: False)
-    with pytest.raises(ServiceError, match="Database error"):
+    with pytest.raises(ForgeError, match="Database error"):
         svc.create_product_group("Group")
 
 
 def test_get_product_group_not_found() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[]]
     svc = ProductGroupService(sql=fake)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.get_product_group("pg1")
 
 
 def test_get_product_group_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[{"product_group_id": "pg1", "product_group_name": "Group", "status": "Active"}]]
     svc = ProductGroupService(sql=fake)
     monkeypatch.setattr(
@@ -100,23 +100,23 @@ def test_get_product_group_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_get_product_group_db_error() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_exceptions = [exc.SQLAlchemyError("boom")]
     svc = ProductGroupService(sql=fake)
-    with pytest.raises(ServiceError, match="Database error"):
+    with pytest.raises(ForgeError, match="Database error"):
         svc.get_product_group("pg1")
 
 
 def test_delete_product_group_not_found() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_responses = [[]]
     svc = ProductGroupService(sql=fake)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.delete_product_group("pg1")
 
 
 def test_delete_product_group_success() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_responses = [[("x",)]]
     fake.write_responses = [2, 1]
     svc = ProductGroupService(sql=fake)
@@ -125,40 +125,40 @@ def test_delete_product_group_success() -> None:
 
 
 def test_delete_product_group_missing_after_delete() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_responses = [[("x",)]]
     fake.write_responses = [1, 0]
     svc = ProductGroupService(sql=fake)
-    with pytest.raises(ServiceError, match="not found after delete"):
+    with pytest.raises(ForgeError, match="not found after delete"):
         svc.delete_product_group("pg1")
 
 
 def test_delete_product_group_db_error() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_responses = [[("x",)]]
     fake.write_exceptions = [exc.SQLAlchemyError("boom")]
     svc = ProductGroupService(sql=fake)
-    with pytest.raises(ServiceError, match="Failed to delete product group"):
+    with pytest.raises(ForgeError, match="Failed to delete product group"):
         svc.delete_product_group("pg1")
 
 
 def test_check_product_group_db_error() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_exceptions = [exc.SQLAlchemyError("boom")]
     svc = ProductGroupService(sql=fake)
-    with pytest.raises(ServiceError, match="Failed to check product name"):
+    with pytest.raises(ForgeError, match="Failed to check product name"):
         svc._check_product_group("Group")
 
 
 def test_check_product_group_success() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_responses = [[("x",)]]
     svc = ProductGroupService(sql=fake)
     assert svc._check_product_group("Group") is True
 
 
 def test_add_product_to_group_inserts(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [1]
     svc = ProductGroupService(sql=fake)
 
@@ -181,7 +181,7 @@ def test_add_product_to_group_inserts(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_add_product_to_group_existing(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     svc = ProductGroupService(sql=fake)
     group = ProductGroup.model_construct(
         product_group_id="pg1",
@@ -196,7 +196,7 @@ def test_add_product_to_group_existing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_add_product_to_group_db_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_exceptions = [exc.SQLAlchemyError("boom")]
     svc = ProductGroupService(sql=fake)
     group = ProductGroup.model_construct(
@@ -206,19 +206,19 @@ def test_add_product_to_group_db_error(monkeypatch: pytest.MonkeyPatch) -> None:
         products=[],
     )
     monkeypatch.setattr(svc, "get_product_group", lambda group_id: group)
-    with pytest.raises(ServiceError, match="Failed to add product"):
+    with pytest.raises(ForgeError, match="Failed to add product"):
         svc.add_product_to_group("p1", "pg1")
 
 
 def test_add_product_to_group_missing_group(monkeypatch: pytest.MonkeyPatch) -> None:
-    svc = ProductGroupService(sql=FakeSQLExecutor())
+    svc = ProductGroupService(sql=FakeForgeQueryPort())
     monkeypatch.setattr(svc, "get_product_group", lambda group_id: None)
-    with pytest.raises(ServiceError, match="does not exist"):
+    with pytest.raises(ForgeError, match="does not exist"):
         svc.add_product_to_group("p1", "pg1")
 
 
 def test_remove_product_from_group(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [1]
     svc = ProductGroupService(sql=fake)
     group = ProductGroup.model_construct(
@@ -234,7 +234,7 @@ def test_remove_product_from_group(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_remove_product_from_group_db_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_exceptions = [exc.SQLAlchemyError("boom")]
     svc = ProductGroupService(sql=fake)
     group = ProductGroup.model_construct(
@@ -244,12 +244,12 @@ def test_remove_product_from_group_db_error(monkeypatch: pytest.MonkeyPatch) -> 
         products=[],
     )
     monkeypatch.setattr(svc, "get_product_group", lambda group_id: group)
-    with pytest.raises(ServiceError, match="Failed to remove product"):
+    with pytest.raises(ForgeError, match="Failed to remove product"):
         svc.remove_product_from_group("p1", "pg1")
 
 
 def test_remove_product_from_group_missing_group(monkeypatch: pytest.MonkeyPatch) -> None:
-    svc = ProductGroupService(sql=FakeSQLExecutor())
+    svc = ProductGroupService(sql=FakeForgeQueryPort())
     monkeypatch.setattr(svc, "get_product_group", lambda group_id: None)
-    with pytest.raises(ServiceError, match="does not exist"):
+    with pytest.raises(ForgeError, match="does not exist"):
         svc.remove_product_from_group("p1", "pg1")

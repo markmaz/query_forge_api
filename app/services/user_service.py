@@ -7,9 +7,9 @@ from typing import Any, Dict, List, Optional, Set
 from sqlalchemy import exc
 from werkzeug.security import generate_password_hash
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.decorators.validate import validate_params
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.models.product import Product
 from app.models.product_role import ProductRole
 from app.models.role import Role
@@ -17,14 +17,14 @@ from app.models.status_enum import UserStatus
 from app.models.user import User
 from app.models.user_invitation import UserInvitation
 from app.models.user_workspace import Workspace
-from app.ports.sql_executor import SQLExecutor, SQLTransaction
+from app.ports.sql_executor import ForgeQueryPort, ForgeQueryTx
 from app.services.password_service import generate_otp_secret, validate_password_policy
 
 logger = logging.getLogger(__name__)
 
 class UserService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def update_status(self, user_id:str, status: str):
         sql = """
@@ -38,7 +38,7 @@ class UserService:
             return {"message": "Status updated."}
         except exc.SQLAlchemyError as e:
             logger.error(f"{sql} - {str(e)}")
-            raise ServiceError(f"Database error: {str(e)}", 500)
+            raise ForgeError(f"Database error: {str(e)}", 500)
     def get_counts(self):
         sql = """
             SELECT status, COUNT(*) as count
@@ -57,7 +57,7 @@ class UserService:
             return counts
         except exc.SQLAlchemyError as e:
             logger.error(f"{sql} - {str(e)}")
-            raise ServiceError(f"Database error: {str(e)}", 500)
+            raise ForgeError(f"Database error: {str(e)}", 500)
     
     validate_params("email")
     def resend_invite(self, user_id:str, email: str):
@@ -126,13 +126,13 @@ class UserService:
 
         except exc.SQLAlchemyError as e:
             logger.error(f"create_invite_bulk failed: {e}")
-            raise ServiceError(f"Database error: {str(e)}", 500)
+            raise ForgeError(f"Database error: {str(e)}", 500)
 
     validate_params("email")
     def create_invite(self, invitation: UserInvitation) -> Dict[str, str]:
         if self.check_for_existing_user(invitation.email):
             logger.error(f"User with this username or email already exists: {invitation.email}")
-            raise ServiceError("User with this email already exists", 409)
+            raise ForgeError("User with this email already exists", 409)
 
         sql = """
             INSERT INTO users (email, user_id, status, username, password, otp_secret, last_log_in)
@@ -166,10 +166,10 @@ class UserService:
                 return {"email": invitation.email, "user_id": user_id}
         except exc.IntegrityError:
             logger.error(f"User with this username or email already exists: {invitation.email}")
-            raise ServiceError("User with this username or email already exists", 409)
+            raise ForgeError("User with this username or email already exists", 409)
         except exc.SQLAlchemyError as e:
             logger.error(f"{sql} - {str(e)}")
-            raise ServiceError(f"Database error: {str(e)}", 500)
+            raise ForgeError(f"Database error: {str(e)}", 500)
                     
     validate_params("username", "password", "email")
     def create_user(self, username: str, password: str, email: str, first_name: str, last_name: str) -> Dict[str, str]:
@@ -186,11 +186,11 @@ class UserService:
         Returns:
             dict[str, str]: Success message
         Raises:
-            ServiceError 409 (duplicate user), 500 (database error)
+            ForgeError 409 (duplicate user), 500 (database error)
         """
         if self.check_for_existing_user(username):
             logger.error(f"User with this username or email already exists: {username}")
-            raise ServiceError("User with this username already exists", 409)
+            raise ForgeError("User with this username already exists", 409)
 
         validate_password_policy(password)
         
@@ -216,10 +216,10 @@ class UserService:
             return {"username": username, "email": email, "user_id": user_id}
         except exc.IntegrityError:
             logger.error(f"User with this username or email already exists: {username}, {email}")
-            raise ServiceError("User with this username or email already exists", 409)
+            raise ForgeError("User with this username or email already exists", 409)
         except exc.SQLAlchemyError as e:
             logger.error(f"{sql} - {str(e)}")
-            raise ServiceError(f"Database error: {str(e)}", 500)
+            raise ForgeError(f"Database error: {str(e)}", 500)
 
     validate_params("user_id")
 
@@ -233,7 +233,7 @@ class UserService:
             # 1) Load current user (and fail fast if missing)
             current_user = self.get_user(user_id)
             if not current_user:
-                raise ServiceError(f"User with ID {user_id} not found", 404)
+                raise ForgeError(f"User with ID {user_id} not found", 404)
 
             # 2) Prepare scalar field updates on the users table, excluding nested relations
             update_fields = update_data.model_dump(exclude_unset=True)
@@ -262,7 +262,7 @@ class UserService:
                     if new_value is None:
                         continue
                     if not isinstance(new_value, str) or not new_value.strip():
-                        raise ServiceError("Password violates policy rules.", 422)
+                        raise ForgeError("Password violates policy rules.", 422)
                     validate_password_policy(new_value)
                     new_value = generate_password_hash(new_value)
                     updates.append(f"{field} = :{field}")
@@ -296,10 +296,10 @@ class UserService:
 
             except exc.SQLAlchemyError as e:
                 logger.error(f"update_user failed for {user_id}: {e}")
-                raise ServiceError(f"Failed to update user: {str(e)}", 500)
+                raise ForgeError(f"Failed to update user: {str(e)}", 500)
 
 
-    def _sync_user_workspaces(self, tx: SQLTransaction, user_id: str, new_ws: List[Dict[str, Any]]) -> None:
+    def _sync_user_workspaces(self, tx: ForgeQueryTx, user_id: str, new_ws: List[Dict[str, Any]]) -> None:
         """
         new_ws: [{"workspace_id": "...", "is_default": bool}, ...]
         """
@@ -360,7 +360,7 @@ class UserService:
                     {"uid": user_id, "keep": keep},
                 )
 
-    def _sync_user_product_roles(self, tx: SQLTransaction, user_id: str, new_products: List[Dict[str, Any]]) -> None:
+    def _sync_user_product_roles(self, tx: ForgeQueryTx, user_id: str, new_products: List[Dict[str, Any]]) -> None:
         """
         new_products: [{"product_id": "...", "roles": [{"product_role_id": "..."}]}...]
         We only need the set of product_role_id assignments for the user.
@@ -398,7 +398,7 @@ class UserService:
                 [{"uid": user_id, "product_role_id": prid} for prid in to_insert],
             )
 
-    def _sync_user_direct_roles(self, tx: SQLTransaction, user_id: str, new_role_ids: List[str]) -> None:
+    def _sync_user_direct_roles(self, tx: ForgeQueryTx, user_id: str, new_role_ids: List[str]) -> None:
         desired_role_ids: Set[str] = set()
         for role_id in new_role_ids or []:
             rid = str(role_id or "").strip()
@@ -441,7 +441,7 @@ class UserService:
         Returns:
             dict[str, str]: Success message
         Raises:
-            ServiceError 404 (User not found), 500 (database error)
+            ForgeError 404 (User not found), 500 (database error)
         """
         delete_user = "DELETE FROM users WHERE user_id = :user_id"
         delete_user_workspace = "DELETE FROM user_workspace_map WHERE user_id = :user_id"
@@ -459,11 +459,11 @@ class UserService:
                 result = tx.execute_write(delete_user, {"user_id": user_id})
                 if (result or 0) == 0:
                     logger.error(f"User not found: {user_id}")
-                    raise ServiceError("User not found", 404)
+                    raise ForgeError("User not found", 404)
             return {"message": "User deleted successfully"}
         except exc.SQLAlchemyError as e:
             logger.error(f"{str(e)}")
-            raise ServiceError(f"Failed to delete user: {str(e)}", 500)
+            raise ForgeError(f"Failed to delete user: {str(e)}", 500)
 
     @validate_params("username")
     def find_user_by_username(self, username: str) -> Optional[User]:
@@ -476,7 +476,7 @@ class UserService:
         Returns:
             User | None
         Raises:
-            ServiceError 500 (database error)
+            ForgeError 500 (database error)
         """
         sql = """
             SELECT u.user_id, u.username, u.password, u.email, u.first_name, u.last_name, u.tos_accepted, u.eula_accepted, u.status as user_status,
@@ -501,7 +501,7 @@ class UserService:
             return user
         except exc.SQLAlchemyError as e:
             logger.error(f"{sql} - {str(e)}")
-            raise ServiceError(f"Failed to retrieve user: {str(e)}", 500)
+            raise ForgeError(f"Failed to retrieve user: {str(e)}", 500)
 
     @validate_params("username")
     def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
@@ -514,12 +514,12 @@ class UserService:
         Returns:
             dict[str, any]: User
         Raises:
-            ServiceError 404 (User not found), 500 (database error)
+            ForgeError 404 (User not found), 500 (database error)
         """
         user = self.find_user_by_username(username)
         if not user:
             logger.error(f"User not found {username}")
-            raise ServiceError("User not found", 404)
+            raise ForgeError("User not found", 404)
         return user
 
     @validate_params("user_id")
@@ -533,7 +533,7 @@ class UserService:
         Returns:
             dict[str, any]: User
         Raises:
-            ServiceError 404 (User not found), 500 (database error)
+            ForgeError 404 (User not found), 500 (database error)
         """
         sql = """
             SELECT u.user_id, u.username, u.password, u.email, u.first_name, u.last_name, u.tos_accepted, u.eula_accepted, u.status as user_status,
@@ -551,7 +551,7 @@ class UserService:
             result = self._sql.execute_query_mappings(sql, {"user_id": user_id})
             if not result:
                 logger.error(f"User not found {user_id}")
-                raise ServiceError("User not found", 404)
+                raise ForgeError("User not found", 404)
             user = self.map_user_with_products(result)
             direct_roles = self._to_role_models(self.get_user_direct_roles(str(user.user_id)))
             user.rbac_roles = direct_roles
@@ -559,7 +559,7 @@ class UserService:
             return user
         except exc.SQLAlchemyError as e:
             logger.error(f"{sql} - {str(e)}")
-            raise ServiceError(f"Failed to retrieve user: {str(e)}", 500)
+            raise ForgeError(f"Failed to retrieve user: {str(e)}", 500)
     
 
     def get_users(self, status: str = 'All', cursor: Optional[str] = None, limit: int = 10, direction: str = 'forward', username: Optional[str] = None) -> tuple:
@@ -705,7 +705,7 @@ class UserService:
         user_id: str,
         workspace_id: str,
         is_default: bool,
-        tx: Optional[SQLTransaction] = None,
+        tx: Optional[ForgeQueryTx] = None,
     ) -> Dict[str, Any]:
         """
         Maps a user to a workspace (organization).
@@ -723,13 +723,13 @@ class UserService:
             dict: Mapping info
 
         Raises:
-            ServiceError: On duplicate or SQL failure.
+            ForgeError: On duplicate or SQL failure.
         """
         mapping = self.get_user_workspaces(user_id)
 
         if any(w['workspace_id'] == workspace_id for w in mapping):
             logger.error(f"User: {user_id} already mapped to workspace {workspace_id}")
-            raise ServiceError("Mapping already exists for user", 409)
+            raise ForgeError("Mapping already exists for user", 409)
 
         try:
             if tx is None:
@@ -771,10 +771,10 @@ class UserService:
             }
         except exc.SQLAlchemyError as e:
             logger.error(f"SQL error during user mapping: {str(e)}")
-            raise ServiceError(f"Failed to map user to workspace: {str(e)}", 500)
+            raise ForgeError(f"Failed to map user to workspace: {str(e)}", 500)
     
     @validate_params("user_id", "product")
-    def map_user_product(self, user_id: str, product: str, tx: Optional[SQLTransaction] = None):
+    def map_user_product(self, user_id: str, product: str, tx: Optional[ForgeQueryTx] = None):
         mapping = self.get_user_products(user_id)
 
         if any(p['product_id'] == product for p in mapping):
@@ -799,10 +799,10 @@ class UserService:
 
         except exc.SQLAlchemyError as e:
             logger.error(f"SQL error during user mapping: {str(e)}")
-            raise ServiceError(f"Failed to map user to product: {str(e)}", 500)
+            raise ForgeError(f"Failed to map user to product: {str(e)}", 500)
 
     @validate_params("user_id", "product_role_id")
-    def map_user_product_role(self, user_id: str, product_role_id: str, tx: Optional[SQLTransaction] = None):
+    def map_user_product_role(self, user_id: str, product_role_id: str, tx: Optional[ForgeQueryTx] = None):
         mapping = self.get_user_product_roles(user_id)
 
         if any(p['product_role_id'] == product_role_id for p in mapping):
@@ -827,7 +827,7 @@ class UserService:
 
         except exc.SQLAlchemyError as e:
             logger.error(f"SQL error during user mapping: {str(e)}")
-            raise ServiceError(f"Failed to map user to product: {str(e)}", 500)
+            raise ForgeError(f"Failed to map user to product: {str(e)}", 500)
 
     @validate_params("user_id")
     def get_user_product_roles(self, user_id: str):
@@ -845,7 +845,7 @@ class UserService:
             return [dict(row) for row in results]
         except exc.SQLAlchemyError as e:
             logger.error(f"Error fetching roles for user_id={user_id}: {str(e)}")
-            raise ServiceError(f"Failed to retrieve user roles: {str(e)}", 500)
+            raise ForgeError(f"Failed to retrieve user roles: {str(e)}", 500)
 
     @validate_params("user_id")
     def get_user_direct_roles(self, user_id: str) -> List[Dict[str, Any]]:
@@ -860,10 +860,10 @@ class UserService:
             return [dict(row) for row in self._sql.execute_query_mappings(sql, {"user_id": user_id})]
         except exc.SQLAlchemyError as e:
             logger.error(f"Error fetching direct roles for user_id={user_id}: {str(e)}")
-            raise ServiceError(f"Failed to retrieve user direct roles: {str(e)}", 500)
+            raise ForgeError(f"Failed to retrieve user direct roles: {str(e)}", 500)
 
     @validate_params("user_id", "role_id")
-    def add_user_direct_role(self, user_id: str, role_id: str, tx: Optional[SQLTransaction] = None) -> Dict[str, Any]:
+    def add_user_direct_role(self, user_id: str, role_id: str, tx: Optional[ForgeQueryTx] = None) -> Dict[str, Any]:
         uid = str(user_id or "").strip()
         rid = str(role_id or "").strip()
         self._assert_user_exists(uid)
@@ -937,14 +937,14 @@ class UserService:
                 "role_name": role.get("role_name"),
                 "created": True,
             }
-        except ServiceError:
+        except ForgeError:
             raise
         except exc.SQLAlchemyError as e:
             logger.error(f"Error adding direct role for user_id={uid}: {str(e)}")
-            raise ServiceError(f"Failed to add user direct role: {str(e)}", 500)
+            raise ForgeError(f"Failed to add user direct role: {str(e)}", 500)
 
     @validate_params("user_id", "role_id")
-    def remove_user_direct_role(self, user_id: str, role_id: str, tx: Optional[SQLTransaction] = None) -> Dict[str, Any]:
+    def remove_user_direct_role(self, user_id: str, role_id: str, tx: Optional[ForgeQueryTx] = None) -> Dict[str, Any]:
         uid = str(user_id or "").strip()
         rid = str(role_id or "").strip()
         self._assert_user_exists(uid)
@@ -960,7 +960,7 @@ class UserService:
                         {"user_id": uid, "role_id": rid},
                     )
                     if int(deleted or 0) == 0:
-                        raise ServiceError("User direct role mapping not found", 404)
+                        raise ForgeError("User direct role mapping not found", 404)
                     return {
                         "user_id": uid,
                         "role_id": rid,
@@ -975,18 +975,18 @@ class UserService:
                 {"user_id": uid, "role_id": rid},
             )
             if int(deleted or 0) == 0:
-                raise ServiceError("User direct role mapping not found", 404)
+                raise ForgeError("User direct role mapping not found", 404)
 
             return {
                 "user_id": uid,
                 "role_id": rid,
                 "deleted": True,
             }
-        except ServiceError:
+        except ForgeError:
             raise
         except exc.SQLAlchemyError as e:
             logger.error(f"Error removing direct role for user_id={uid}: {str(e)}")
-            raise ServiceError(f"Failed to remove user direct role: {str(e)}", 500)
+            raise ForgeError(f"Failed to remove user direct role: {str(e)}", 500)
 
     @validate_params("user_id")
     def replace_user_direct_roles(self, user_id: str, role_ids: List[str]) -> Dict[str, Any]:
@@ -1016,11 +1016,11 @@ class UserService:
                 "roles": roles,
                 "count": len(roles),
             }
-        except ServiceError:
+        except ForgeError:
             raise
         except exc.SQLAlchemyError as e:
             logger.error(f"Error replacing direct roles for user_id={uid}: {str(e)}")
-            raise ServiceError(f"Failed to replace user direct roles: {str(e)}", 500)
+            raise ForgeError(f"Failed to replace user direct roles: {str(e)}", 500)
 
     @validate_params("user_id", "old_role_id", "new_role_id")
     def update_user_direct_role(self, user_id: str, old_role_id: str, new_role_id: str) -> Dict[str, Any]:
@@ -1040,11 +1040,11 @@ class UserService:
                 "new_role_id": new_rid,
                 "created": bool(created.get("created")),
             }
-        except ServiceError:
+        except ForgeError:
             raise
         except exc.SQLAlchemyError as e:
             logger.error(f"Error updating direct role for user_id={uid}: {str(e)}")
-            raise ServiceError(f"Failed to update user direct role: {str(e)}", 500)
+            raise ForgeError(f"Failed to update user direct role: {str(e)}", 500)
 
     def get_direct_roles_for_users(self, user_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
         ids = [str(uid or "").strip() for uid in user_ids if str(uid or "").strip()]
@@ -1063,7 +1063,7 @@ class UserService:
             rows = self._sql.execute_query_mappings(sql, params)
         except exc.SQLAlchemyError as e:
             logger.error(f"Error fetching direct roles for users: {str(e)}")
-            raise ServiceError(f"Failed to retrieve user direct roles: {str(e)}", 500)
+            raise ForgeError(f"Failed to retrieve user direct roles: {str(e)}", 500)
 
         out: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for row in rows:
@@ -1098,7 +1098,7 @@ class UserService:
             {"role_id": str(role_id)},
         )
         if not rows:
-            raise ServiceError("Role not found", 404)
+            raise ForgeError("Role not found", 404)
         return dict(rows[0])
 
     def _assert_user_exists(self, user_id: str) -> None:
@@ -1112,7 +1112,7 @@ class UserService:
             {"user_id": str(user_id)},
         )
         if not rows:
-            raise ServiceError("User not found", 404)
+            raise ForgeError("User not found", 404)
 
     def _assert_role_exists(self, role_id: str) -> None:
         rows = self._sql.execute_query_mappings(
@@ -1125,7 +1125,7 @@ class UserService:
             {"role_id": str(role_id)},
         )
         if not rows:
-            raise ServiceError("Role not found", 404)
+            raise ForgeError("Role not found", 404)
 
     @validate_params("user_id")
     def get_user_effective_role_names(self, user_id: str) -> List[str]:
@@ -1157,7 +1157,7 @@ class UserService:
             return [dict(row) for row in results]
         except exc.SQLAlchemyError as e:
             logger.error(f"Error fetching products for user_id={user_id}: {str(e)}")
-            raise ServiceError(f"Failed to retrieve user products: {str(e)}", 500)
+            raise ForgeError(f"Failed to retrieve user products: {str(e)}", 500)
 
     
 
@@ -1181,10 +1181,10 @@ class UserService:
         current_mapping = next((w for w in mapping if w['workspace_id'] == workspace_id), None)
 
         if not current_mapping:
-            raise ServiceError("Workspace mapping not found for user", 404)
+            raise ForgeError("Workspace mapping not found for user", 404)
 
         if current_mapping['is_default'] and not is_default:
-            raise ServiceError("User must always have a default workspace", 409)
+            raise ForgeError("User must always have a default workspace", 409)
 
         sql = """
             UPDATE user_workspace_map 
@@ -1219,7 +1219,7 @@ class UserService:
 
         except exc.SQLAlchemyError as e:
             logger.error(f"SQL error during workspace update: {str(e)}")
-            raise ServiceError(f"Failed to update workspace mapping: {str(e)}", 500)
+            raise ForgeError(f"Failed to update workspace mapping: {str(e)}", 500)
 
     @validate_params("user_id")
     def get_user_workspaces(self, user_id: str) -> List[Dict[str, Any]]:
@@ -1232,7 +1232,7 @@ class UserService:
         Returns:
             Dict[str, any]: Success Message
         Raises:
-            ServiceError 500 (database error)
+            ForgeError 500 (database error)
 
         """
         sql = """
@@ -1245,7 +1245,7 @@ class UserService:
             return [dict(row) for row in result]
         except exc.SQLAlchemyError as e:
             logger.error(f"{sql} - {str(e)}")
-            raise ServiceError(f"Failed to retrieve user workspaces: {str(e)}", 500)
+            raise ForgeError(f"Failed to retrieve user workspaces: {str(e)}", 500)
     
     validate_params("user_id", "workspace_id")
     def delete_user_workspace(self, user_id: str, workspace_id: str) -> Dict[str, str]:
@@ -1260,7 +1260,7 @@ class UserService:
         Returns:
             Dict[str, str]: Success Message
         Raises:
-            ServiceError 500 (database error)
+            ForgeError 500 (database error)
         """
 
         sql = "DELETE FROM user_workspace_map WHERE user_id = :user_id AND workspace_id = :workspace_id"
@@ -1270,7 +1270,7 @@ class UserService:
             return {"message": "Mapping deleted successfully"}
         except exc.SQLAlchemyError as e:
             logger.error(f"{sql} - {str(e)}")
-            raise ServiceError(f"Failed to map user to workspace: {str(e)}", 500)
+            raise ForgeError(f"Failed to map user to workspace: {str(e)}", 500)
 
     validate_params("username")
     def check_for_existing_user(self, username: str) -> bool:
@@ -1283,7 +1283,7 @@ class UserService:
         Returns:
             bool: True if the user exists
         Raises:
-            ServiceError 500 (database error)
+            ForgeError 500 (database error)
 
         """
         sql = "SELECT * FROM users WHERE username = :username"
@@ -1300,7 +1300,7 @@ class UserService:
                 
         except exc.SQLAlchemyError as e:
             logger.error(f"{sql} - {str(e)}")
-            raise ServiceError(f"Failed to retrieve user workspaces: {str(e)}", 500)
+            raise ForgeError(f"Failed to retrieve user workspaces: {str(e)}", 500)
 
     def map_user_with_products(self, rows: List[dict]) -> User:
         if not rows:

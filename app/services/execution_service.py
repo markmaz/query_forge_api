@@ -9,9 +9,9 @@ from typing import Any, Dict, Optional
 import valkey
 
 from app.config import VALKEY_ADDRESS, VALKEY_PORT
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.domain_resolver import DomainResolver
-from app.services.no_code_query_service import NoCodeQueryService
+from app.services.query_forge_service import QueryForgeService
 from app.services.sql_guard_service import assert_no_disallowed_client_sql_fields, assert_read_only_sql_statement
 from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
 
@@ -36,19 +36,19 @@ def _get_valkey_client() -> valkey.StrictValkey:
     return _valkey_client
 
 
-def _job_key(job_id: str) -> str:
-    return f"exec:job:{job_id}"
+def _qf_job_key(job_id: str) -> str:
+    return f"qf:exec:{job_id}"
 
 
 def _put_job(job_id: str, payload: Dict[str, Any]) -> None:
     payload = dict(payload)
     payload.setdefault("created_at", _utc_now_iso())
     data = json.dumps(payload, default=str)
-    _get_valkey_client().setex(_job_key(job_id), _JOB_TTL_S, data)
+    _get_valkey_client().setex(_qf_job_key(job_id), _JOB_TTL_S, data)
 
 
 def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
-    data = _get_valkey_client().get(_job_key(job_id))
+    data = _get_valkey_client().get(_qf_job_key(job_id))
     if not data:
         return None
     try:
@@ -89,42 +89,42 @@ def _columns_from_rows(rows: list[Any]) -> list[Dict[str, Any]]:
     return []
 
 
-def _rows_to_dicts(rows_any: list[Any], columns: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
-    if not rows_any:
+def _qf_exec_rows_to_dicts(qf_rows_any: list[Any], columns: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    if not qf_rows_any:
         return []
-    if rows_any and isinstance(rows_any[0], dict):
-        return rows_any
+    if qf_rows_any and isinstance(qf_rows_any[0], dict):
+        return qf_rows_any
     if not columns:
         return []
     keys = [c.get("key") for c in columns]
     out: list[Dict[str, Any]] = []
-    for row in rows_any:
+    for row in qf_rows_any:
         if not isinstance(row, (list, tuple)):
             continue
         out.append({keys[i]: (row[i] if i < len(row) else None) for i in range(len(keys))})
     return out
 
 
-def _int_from_payload(value: Any, name: str) -> Optional[int]:
+def _qf_int_from_payload(value: Any, name: str) -> Optional[int]:
     if value is None:
         return None
     try:
         return int(value)
     except (TypeError, ValueError):
-        raise ServiceError(f"Invalid integer for '{name}'", status_code=400)
+        raise ForgeError(f"Invalid integer for '{name}'", status_code=400)
 
 
-def _int_from_args(args: Dict[str, Any], name: str, default: int) -> int:
+def _qf_int_from_args(args: Dict[str, Any], name: str, default: int) -> int:
     raw = (args.get(name) or "").strip()
     if not raw:
         return default
     try:
         return int(raw)
     except ValueError:
-        raise ServiceError(f"Invalid integer for '{name}'", status_code=400)
+        raise ForgeError(f"Invalid integer for '{name}'", status_code=400)
 
 
-def _extract_total(count_rows: list[Any]) -> int:
+def _qf_exec_extract_total(count_rows: list[Any]) -> int:
     if not count_rows:
         return 0
     first = count_rows[0]
@@ -203,46 +203,41 @@ class ExecutionService:
     def start(self, workspace_id: str, payload: Dict[str, Any], query_args: Dict[str, Any]) -> tuple[Dict[str, Any], int]:
         assert_no_disallowed_client_sql_fields(payload)
 
-        sql_json = payload.get("sqlJson") or payload.get("sql_json")
-        if sql_json is None:
-            raise ServiceError("sqlJson is required", status_code=400)
-        if sql_json is not None and not isinstance(sql_json, dict):
-            raise ServiceError("sqlJson must be an object", status_code=400)
+        qf_sql_json = payload.get("sqlJson") or payload.get("sql_json")
+        if qf_sql_json is None:
+            raise ForgeError("sqlJson is required", status_code=400)
+        if qf_sql_json is not None and not isinstance(qf_sql_json, dict):
+            raise ForgeError("sqlJson must be an object", status_code=400)
 
         sql = ""
         params: Dict[str, Any] = {}
 
         kind = (payload.get("kind") or "").strip()
-        if not kind and isinstance(sql_json, dict):
-            meta = sql_json.get("meta") if isinstance(sql_json.get("meta"), dict) else {}
-            tool = (meta.get("tool") or "").strip().lower()
-            if tool == "cohort_builder":
-                kind = "cohort_builder"
-            else:
-                kind = "query_builder"
-        if kind not in ("query_builder", "cohort_builder"):
-            raise ServiceError("kind must be query_builder or cohort_builder", status_code=400)
+        if not kind and isinstance(qf_sql_json, dict):
+            kind = "query_builder"
+        if kind != "query_builder":
+            raise ForgeError("kind must be query_builder", status_code=400)
 
         ctx = self._builder.build(workspace_id)
-        limit_raw = _int_from_payload(payload.get("limit"), "limit")
-        offset_raw = _int_from_payload(payload.get("offset"), "offset")
-        limit = limit_raw if limit_raw is not None else _int_from_args(query_args, "limit", 200)
-        offset = offset_raw if offset_raw is not None else _int_from_args(query_args, "offset", 0)
+        qf_limit_raw = _qf_int_from_payload(payload.get("limit"), "limit")
+        offset_raw = _qf_int_from_payload(payload.get("offset"), "offset")
+        limit = qf_limit_raw if qf_limit_raw is not None else _qf_int_from_args(query_args, "limit", 200)
+        offset = offset_raw if offset_raw is not None else _qf_int_from_args(query_args, "offset", 0)
 
-        sql_rendered = None
-        count_sql = None
+        qf_rendered_sql = None
+        qf_count_sql = None
         domain_resolver = DomainResolver(workspace_id=workspace_id)
-        svc = NoCodeQueryService(executor=ctx.sql_exec, domain_resolver=domain_resolver)
+        svc = QueryForgeService(executor=ctx.sql_exec, domain_resolver=domain_resolver)
         mode = (query_args.get("mode") or "preview").strip().lower()
-        prepared = svc.prepare(raw_query=sql_json, mode=mode, limit=limit, offset=offset)
+        prepared = svc.prepare(raw_query=qf_sql_json, mode=mode, limit=limit, offset=offset)
         sql = prepared.sql
         params = prepared.params
-        sql_rendered = prepared.sql_rendered
-        count_sql = prepared.count_sql
+        qf_rendered_sql = prepared.qf_rendered_sql
+        qf_count_sql = prepared.qf_count_sql
 
         assert_read_only_sql_statement(sql, context="Compiled SQL statement")
-        if count_sql:
-            assert_read_only_sql_statement(count_sql, context="Compiled count SQL statement")
+        if qf_count_sql:
+            assert_read_only_sql_statement(qf_count_sql, context="Compiled count SQL statement")
 
         resp = ctx.sql_exec.submit_statement_async(
             sql,
@@ -251,7 +246,7 @@ class ExecutionService:
 
         statement_id = resp.get("statement_id")
         if not statement_id:
-            raise ServiceError("Databricks did not return statement_id", status_code=500)
+            raise ForgeError("Databricks did not return statement_id", status_code=500)
 
         job_id = uuid.uuid4().hex
         _put_job(
@@ -262,11 +257,11 @@ class ExecutionService:
                 "kind": kind,
                 "sql": sql,
                 "params": params,
-                "sqlRendered": sql_rendered,
+                "sqlRendered": qf_rendered_sql,
                 "limit": limit,
                 "offset": offset,
-                "countSql": count_sql,
-                "sqlJson": sql_json,
+                "countSql": qf_count_sql,
+                "sqlJson": qf_sql_json,
             },
         )
 
@@ -275,7 +270,7 @@ class ExecutionService:
     def status(self, workspace_id: str, job_id: str) -> tuple[Dict[str, Any], int]:
         job = _get_job(job_id)
         if not job or job.get("workspace_id") != workspace_id:
-            raise ServiceError("Execution job not found", status_code=404)
+            raise ForgeError("Execution job not found", status_code=404)
 
         ctx = self._builder.build(workspace_id)
         status = ctx.sql_exec.get_statement_status(job["statement_id"])
@@ -291,7 +286,7 @@ class ExecutionService:
     def cancel(self, workspace_id: str, job_id: str) -> tuple[Dict[str, Any], int]:
         job = _get_job(job_id)
         if not job or job.get("workspace_id") != workspace_id:
-            raise ServiceError("Execution job not found", status_code=404)
+            raise ForgeError("Execution job not found", status_code=404)
 
         ctx = self._builder.build(workspace_id)
         ctx.sql_exec.cancel_statement(job["statement_id"])
@@ -301,7 +296,7 @@ class ExecutionService:
     def results(self, workspace_id: str, job_id: str) -> tuple[Dict[str, Any], int]:
         job = _get_job(job_id)
         if not job or job.get("workspace_id") != workspace_id:
-            raise ServiceError("Execution job not found", status_code=404)
+            raise ForgeError("Execution job not found", status_code=404)
 
         ctx = self._builder.build(workspace_id)
         status = ctx.sql_exec.get_statement_status(job["statement_id"])
@@ -323,16 +318,16 @@ class ExecutionService:
                 "statementId": job["statement_id"],
             }, 500
 
-        rows_any = ctx.sql_exec.fetch_all_json(job["statement_id"])
-        columns = _columns_from_manifest(status.get("manifest")) or _columns_from_rows(rows_any)
-        rows = _rows_to_dicts(rows_any, columns)
+        qf_rows_any = ctx.sql_exec.fetch_all_json(job["statement_id"])
+        columns = _columns_from_manifest(status.get("manifest")) or _columns_from_rows(qf_rows_any)
+        rows = _qf_exec_rows_to_dicts(qf_rows_any, columns)
 
         total = None
-        count_sql = job.get("countSql") or job.get("count_sql")
-        if count_sql:
-            assert_read_only_sql_statement(str(count_sql), context="Stored count SQL statement")
-            count_resp = ctx.sql_exec.submit_statement(count_sql, parameters=job.get("params") or {})
-            total = _extract_total((count_resp or {}).get("rows") or [])
+        qf_count_sql = job.get("countSql") or job.get("qf_count_sql")
+        if qf_count_sql:
+            assert_read_only_sql_statement(str(qf_count_sql), context="Stored count SQL statement")
+            count_resp = ctx.sql_exec.submit_statement(qf_count_sql, parameters=job.get("params") or {})
+            total = _qf_exec_extract_total((count_resp or {}).get("rows") or [])
         if total is None:
             result = status.get("result") or {}
             total = result.get("row_count") or result.get("rowcount") or status.get("rowcount")

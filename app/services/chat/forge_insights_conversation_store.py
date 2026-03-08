@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 
 _ALLOWED_ROLES = {"user", "assistant", "system"}
 _MAX_CONTENT_LEN = 8000
@@ -16,8 +16,8 @@ _MAX_SUMMARY_LEN = 5000
 class ForgeInsightsConversationStore:
     """Persistent conversation storage for ForgeInsights (MySQL source of truth)."""
 
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def get_messages(
         self,
@@ -42,9 +42,9 @@ class ForgeInsightsConversationStore:
         user_id: str,
         conversation_id: str,
         messages: Sequence[Mapping[str, Any]],
-        ttl_seconds: int,
+        qf_ttl_seconds: int,
     ) -> None:
-        del ttl_seconds
+        del qf_ttl_seconds
         existing = self.get_conversation(
             workspace_id=workspace_id,
             user_id=user_id,
@@ -60,7 +60,7 @@ class ForgeInsightsConversationStore:
                 "title": existing.get("title"),
                 "summary": existing.get("summary"),
             },
-            ttl_seconds=0,
+            qf_ttl_seconds=0,
         )
 
     def get_conversation(
@@ -127,9 +127,9 @@ class ForgeInsightsConversationStore:
         user_id: str,
         conversation_id: str,
         conversation: Mapping[str, Any],
-        ttl_seconds: int,
+        qf_ttl_seconds: int,
     ) -> None:
-        del ttl_seconds
+        del qf_ttl_seconds
         ws = _required_text(workspace_id, "workspace_id", max_len=64)
         uid = _required_text(user_id, "user_id", max_len=255)
         cid = _required_text(conversation_id, "conversation_id", max_len=128)
@@ -192,7 +192,7 @@ class ForgeInsightsConversationStore:
                     {"workspace_id": ws, "user_id": uid, "conversation_id": cid},
                 )
                 if not id_rows:
-                    raise ServiceError("failed to resolve conversation row", status_code=500)
+                    raise ForgeError("failed to resolve conversation row", status_code=500)
                 conversation_pk = int(id_rows[0]["id"])
 
             tx.execute_write(
@@ -315,9 +315,9 @@ class ForgeInsightsConversationStore:
 def _required_text(value: Any, field_name: str, *, max_len: int) -> str:
     text = str(value or "").strip()
     if text == "":
-        raise ServiceError(f"{field_name} is required", status_code=400)
+        raise ForgeError(f"{field_name} is required", status_code=400)
     if len(text) > max_len:
-        raise ServiceError(f"{field_name} must be {max_len} characters or fewer", status_code=400)
+        raise ForgeError(f"{field_name} must be {max_len} characters or fewer", status_code=400)
     return text
 
 

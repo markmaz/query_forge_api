@@ -6,7 +6,7 @@ from app.services.semantic.semantic_llm_labeler import SemanticLLMLabeler
 from app.services.semantic.semantic_postprocess import apply_deterministic_overrides, normalize_concept_key
 from app.services.semantic.semantic_suggestion_service import SemanticSuggestionService
 from app.services.semantic.semantic_validation import validate_semantic_suggestion
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 class _StubCardService:
@@ -191,7 +191,7 @@ def test_time_year_from_samples() -> None:
 
 
 def test_execute_run_stores_normalized_concept_key_and_rewritten_reasons() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [_run_row(status="created")],
         [],

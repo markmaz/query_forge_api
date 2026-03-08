@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 
 from app.services.chat.education_fewshot_service import EducationFewshotService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_fewshot_uses_only_upvoted_education_feedback() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -37,7 +37,7 @@ def test_fewshot_uses_only_upvoted_education_feedback() -> None:
 
 
 def test_fewshot_dedupes_and_caches() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {

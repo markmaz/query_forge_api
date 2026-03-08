@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.workspace_access_service import WorkspaceAccessService
 
 
@@ -23,7 +23,7 @@ def test_assert_workspace_access_allows_when_membership_exists():
 
 def test_assert_workspace_access_denies_when_membership_missing():
     svc = WorkspaceAccessService(sql=_StubSQL(rows=[]))
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         svc.assert_workspace_access(user_id="user-1", workspace_id="ws-1")
     assert exc.value.status_code == 403
 

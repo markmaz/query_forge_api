@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.value_overrides import value_override_meta_writer
 from app.services.value_overrides.value_override_meta_writer import ValueOverrideMetaWriter
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_upsert_meta_inserts_uuid_and_params(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     writer = ValueOverrideMetaWriter(fake)
 
     monkeypatch.setattr(value_override_meta_writer, "uuid4", lambda: "uuid-1")
@@ -34,7 +34,7 @@ def test_upsert_meta_inserts_uuid_and_params(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_set_shared_updates_existing_row() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [1, 1]
     writer = ValueOverrideMetaWriter(fake)
 
@@ -49,16 +49,16 @@ def test_set_shared_updates_existing_row() -> None:
 
 
 def test_set_shared_raises_if_list_missing() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [0]
     writer = ValueOverrideMetaWriter(fake)
 
-    with pytest.raises(ServiceError, match="List not found"):
+    with pytest.raises(ForgeError, match="List not found"):
         writer.set_shared(workspace_id="ws1", list_type="regions", list_id="missing", is_shared=True)
 
 
 def test_delete_meta_executes_delete() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     writer = ValueOverrideMetaWriter(fake)
 
     writer.delete_meta(workspace_id="ws1", list_type="regions", list_id="list-1")
@@ -75,11 +75,11 @@ def test_delete_meta_executes_delete() -> None:
 
 
 def test_missing_table_raises_service_error() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_exceptions.append(RuntimeError("missing"))
     writer = ValueOverrideMetaWriter(fake)
 
-    with pytest.raises(ServiceError, match="crosswalk_list_meta missing"):
+    with pytest.raises(ForgeError, match="crosswalk_list_meta missing"):
         writer.upsert_meta(
             workspace_id="ws1",
             list_type="regions",

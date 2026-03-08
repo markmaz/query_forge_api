@@ -6,7 +6,7 @@ from typing import Any
 import redis
 
 from app.config import VALKEY_CONFIG
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ class RateLimitService:
             return
 
         if count > max_attempts:
-            raise ServiceError(message, status_code=429, details={"retry_after_seconds": ttl})
+            raise ForgeError(message, status_code=429, details={"retry_after_seconds": ttl})
 
     @staticmethod
     def _rate_key(*, scope: str, identifier: str) -> str:

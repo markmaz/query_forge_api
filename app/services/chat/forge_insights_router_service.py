@@ -13,7 +13,7 @@ from app.config import (
     QF_FORGE_INSIGHTS_ROUTE_DOMAIN_VECTOR_SCORE_THRESHOLD,
     QF_FORGE_INSIGHTS_ROUTE_LLM_MAX_TOKENS,
 )
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.chat.education_fewshot_service import EducationFewshotService
 from app.services.chat.minimal_chat_service import ForgeInsightsChatService, MinimalChatRequest
 from app.services.execution_service import ExecutionService
@@ -93,7 +93,7 @@ class ForgeInsightsRouterService:
         try:
             req = MinimalChatRequest.model_validate(payload)
         except ValidationError as exc:
-            raise ServiceError(
+            raise ForgeError(
                 "Invalid chat request",
                 status_code=400,
                 details={"errors": _safe_validation_errors(exc)},
@@ -101,7 +101,7 @@ class ForgeInsightsRouterService:
 
         user_prompt = _latest_user_message(payload)
         if user_prompt is None:
-            raise ServiceError("messages must include at least one user message", status_code=400)
+            raise ForgeError("messages must include at least one user message", status_code=400)
 
         decision = self._route_decision(prompt=user_prompt, workspace_id=workspace_id, user_id=user_id)
         if inbound_messages_truncated:
@@ -122,7 +122,7 @@ class ForgeInsightsRouterService:
             plan_result = self._planner.plan(plan_payload, user_id=user_id)
             sql_json = plan_result.get("sql_json")
             if not isinstance(sql_json, dict) or not sql_json:
-                raise ServiceError(
+                raise ForgeError(
                     "planner did not produce executable sql_json",
                     status_code=422,
                     details={"validation": plan_result.get("validation")},

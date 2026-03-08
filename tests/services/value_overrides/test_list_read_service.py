@@ -5,9 +5,9 @@ from datetime import date
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
-from app.services.value_overrides.list_read_service import ListReadService
-from tests._support.fakes import FakeSQLExecutor
+from app.exceptions.forge_error import ForgeError
+from app.services.value_overrides.list_read_service import ForgeListReadService
+from tests._support.fakes import FakeForgeQueryPort
 
 
 @dataclass
@@ -23,13 +23,13 @@ class _FakeDBX:
         self._responses = list(responses)
         self.calls = []
 
-    def submit_statement(self, sql, parameters=None, result_format=None, **_kwargs):
-        self.calls.append((sql, parameters, result_format))
+    def submit_statement(self, sql, parameters=None, qf_result_fmt=None, **_kwargs):
+        self.calls.append((sql, parameters, qf_result_fmt))
         return self._responses.pop(0)
 
 
 def test_get_preview_and_index() -> None:
-    mysql = FakeSQLExecutor()
+    mysql = FakeForgeQueryPort()
     mysql.query_mappings_responses = [
         [{"list_name": "ListA", "owner": "user1"}],
         [
@@ -52,18 +52,18 @@ def test_get_preview_and_index() -> None:
             {"rows": [{"total_rows": 1}]},
         ]
     )
-    service = ListReadService(mysql=mysql, dbx=dbx, workspace_id="ws1")
+    service = ForgeListReadService(mysql=mysql, dbx=dbx, workspace_id="ws1")
 
     preview = service.get_preview_by_id(list_type="regions", list_id="list-1", limit=1, offset=0)
     assert preview.rows[0]["region"] == "NE"
 
-    index = service.get_index(include_expired=True)
+    index = service.get_index(qf_include_expired=True)
     assert index.regions[0].list_name == "ListA"
     assert index.regions[0].is_shared is True
 
 
 def test_delete_list_success() -> None:
-    mysql = FakeSQLExecutor()
+    mysql = FakeForgeQueryPort()
     dbx = _FakeDBX(
         [
             {
@@ -71,16 +71,16 @@ def test_delete_list_success() -> None:
             }
         ]
     )
-    service = ListReadService(mysql=mysql, dbx=dbx, workspace_id="ws1")
+    service = ForgeListReadService(mysql=mysql, dbx=dbx, workspace_id="ws1")
     service.delete_list(list_type="regions", list_id="list-1")
     assert mysql.write_calls
 
 
 def test_get_index_filters_by_user_visibility() -> None:
-    mysql = FakeSQLExecutor()
+    mysql = FakeForgeQueryPort()
     mysql.query_mappings_responses = [[], [], []]
     dbx = _FakeDBX([])
-    service = ListReadService(mysql=mysql, dbx=dbx, workspace_id="ws1", user_id="user-1")
+    service = ForgeListReadService(mysql=mysql, dbx=dbx, workspace_id="ws1", user_id="user-1")
 
     service.get_index()
 
@@ -92,20 +92,20 @@ def test_get_index_filters_by_user_visibility() -> None:
 
 
 def test_get_preview_by_id_forbidden_when_not_visible() -> None:
-    mysql = FakeSQLExecutor()
+    mysql = FakeForgeQueryPort()
     mysql.query_mappings_responses = [[]]
     dbx = _FakeDBX([])
-    service = ListReadService(mysql=mysql, dbx=dbx, workspace_id="ws1", user_id="user-1")
+    service = ForgeListReadService(mysql=mysql, dbx=dbx, workspace_id="ws1", user_id="user-1")
 
-    with pytest.raises(ServiceError, match="List not found"):
+    with pytest.raises(ForgeError, match="List not found"):
         service.get_preview_by_id(list_type="regions", list_id="hidden", limit=10, offset=0)
 
 
 def test_delete_list_requires_owner_when_user_context_present() -> None:
-    mysql = FakeSQLExecutor()
+    mysql = FakeForgeQueryPort()
     mysql.query_mappings_responses = [[]]
     dbx = _FakeDBX([])
-    service = ListReadService(mysql=mysql, dbx=dbx, workspace_id="ws1", user_id="user-1")
+    service = ForgeListReadService(mysql=mysql, dbx=dbx, workspace_id="ws1", user_id="user-1")
 
-    with pytest.raises(ServiceError, match="permission"):
+    with pytest.raises(ForgeError, match="permission"):
         service.delete_list(list_type="regions", list_id="list-1")

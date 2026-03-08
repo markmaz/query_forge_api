@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Tuple
 
 from flask import g, make_response, request
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.auth_service import AuthService
 from app.services.workspace_access_service import WorkspaceAccessService
 from app.utils.jwt_claims import claim_is_admin, get_roles_from_claim
@@ -58,14 +58,14 @@ def token_required(f):
             if len(parts) > 1:
                 token = parts[1]  # Extract the bearer token
             else:
-                raise ServiceError("Token is not formatted correctly", status_code=403)
+                raise ForgeError("Token is not formatted correctly", status_code=403)
 
         if not token:
-            raise ServiceError("Token is missing", 403)
+            raise ForgeError("Token is missing", 403)
 
         payload = auth_service.verify_token(token)
         if not payload:
-            raise ServiceError("Invalid or expired token!", 401)
+            raise ForgeError("Invalid or expired token!", 401)
 
         # Store full payload for backward compatibility
         g.user_data = payload
@@ -73,7 +73,7 @@ def token_required(f):
         # Store normalized user context for services
         user_id, display_name, is_admin, roles = _extract_user_context(payload)
         if not user_id:
-            raise ServiceError("Invalid token payload: missing user identity", status_code=401)
+            raise ForgeError("Invalid token payload: missing user identity", status_code=401)
 
         g.user_id = user_id
         g.user_display_name = display_name

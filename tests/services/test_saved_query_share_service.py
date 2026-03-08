@@ -5,7 +5,7 @@ import uuid
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.query_tree.saved_query_share_service import SavedQueryShareService, _req
 
 
@@ -37,9 +37,9 @@ class FakeSQL:
 
 
 def test_init_requires_workspace_and_user():
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         SavedQueryShareService(workspace_id="", user_id="user")
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         SavedQueryShareService(workspace_id="ws", user_id="")
 
 
@@ -73,7 +73,7 @@ def test_unshare_invalid_kind_raises():
     sql = FakeSQL(mappings_queue=[[{"id": "q1"}]])
     svc = SavedQueryShareService(workspace_id="ws", user_id="user", sql=sql)
 
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.unshare(query_id="q1", share_kind="bad")
 
 
@@ -81,7 +81,7 @@ def test_unshare_user_requires_shared_with_user_id():
     sql = FakeSQL(mappings_queue=[[{"id": "q1"}]])
     svc = SavedQueryShareService(workspace_id="ws", user_id="user", sql=sql)
 
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.unshare(query_id="q1", share_kind="USER", shared_with_user_id=None)
 
 
@@ -130,7 +130,7 @@ def test_assert_query_owner_not_found():
     sql = FakeSQL(mappings_queue=[[]])
     svc = SavedQueryShareService(workspace_id="ws", user_id="user", sql=sql)
 
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.list_shares(query_id="q1")
 
 
@@ -142,6 +142,6 @@ def test_find_acl_returns_none():
 
 
 def test_req_validates_values():
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         _req("", "field")
     assert _req(" value ", "field") == "value"

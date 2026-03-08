@@ -4,10 +4,11 @@ import logging
 from typing import Optional, Tuple
 
 from flask import current_app
-from flask_restx import Namespace, Resource
+from flask_restx import Namespace
+from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.llm_environment_service import LLMEnvironmentService
 
 logger = logging.getLogger(__name__)
@@ -49,37 +50,37 @@ def _get_service() -> LLMEnvironmentService:
     return _service_cache
 
 
-def _handle_service_error(e: ServiceError):
+def _handle_service_error(e: ForgeError):
     return {"error": str(e), "details": e.details}, e.status_code
 
 
 @data_environment_ns.route("/llm/start")
-class LLMStart(Resource):
+class LLMStart(ForgeResource):
     @token_required
     def post(self):
         logger.info("API request: start LLM environment")
         try:
             return _get_service().start_instance(), 200
-        except ServiceError as e:
+        except ForgeError as e:
             return _handle_service_error(e)
 
 
 @data_environment_ns.route("/llm/stop")
-class LLMStop(Resource):
+class LLMStop(ForgeResource):
     @token_required
     def post(self):
         logger.info("API request: stop LLM environment")
         try:
             return _get_service().stop_instance(), 200
-        except ServiceError as e:
+        except ForgeError as e:
             return _handle_service_error(e)
 
 
 @data_environment_ns.route("/llm/status")
-class LLMStatus(Resource):
+class LLMStatus(ForgeResource):
     @token_required
     def get(self):
         try:
             return _get_service().get_instance_status(), 200
-        except ServiceError as e:
+        except ForgeError as e:
             return _handle_service_error(e)

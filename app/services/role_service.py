@@ -1,180 +1,116 @@
+from __future__ import annotations
+
 import logging
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import exc
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.decorators.validate import validate_params
-from app.exceptions.service_error import ServiceError
-from app.models.product_role import ProductRole
-from app.ports.sql_executor import SQLExecutor
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
 
+
 class RoleService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: ForgeQueryPort | None = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
-    def get_roles(self) -> List[Dict[str, Any]]:
-        """
-        Retrieves all roles from the database.
-        
-        Returns:
-            list[dict[str, any]]: Role listing
-        Raises:
-            ServiceError 404 (Role not found), 500 (database error)
-        """
-        sql = "SELECT role_id, role_name FROM roles"
+    def get_roles(self) -> list[dict[str, Any]]:
+        query = "SELECT role_id, role_name FROM roles"
         try:
-            result = self._sql.execute_query_mappings(sql)
-            return [dict(row) for row in result] 
-        except exc.SQLAlchemyError as e:
-            logger.error(f"{sql} - {str(e)}")
-            raise ServiceError(f"Failed to retrieve users: {str(e)}", 500)
-    
-    validate_params("role_name")
-    def add_role(self, role_name: str) -> Dict[str, Any]:
-        """
-        Creates a new role
-        
-        Returns:
-            dict[str, any]: Role listing
-        Raises:
-            ServiceError 409 (Duplicate), 500 (database error)
-        """
+            rows = self._sql.execute_query_mappings(query)
+            return [dict(row) for row in rows]
+        except exc.SQLAlchemyError as err:
+            logger.error("%s - %s", query, err)
+            raise ForgeError(f"Failed to retrieve users: {err}", status_code=500) from err
 
-        existing_roles = self.get_roles()
+    @validate_params("role_name")
+    def add_role(self, role_name: str) -> dict[str, Any] | ForgeError:
+        if any((row.get("role_name") == role_name) for row in self.get_roles()):
+            return ForgeError("Role name already exists", 409, {"role_name": role_name})
 
-        if  any(role['role_name'] == role_name for role in existing_roles):
-            return ServiceError("Role name already exists", 409, {"role_name": role_name})
-
-        sql = "INSERT INTO roles (role_id, role_name) values (:role_id, :role_name)"
+        query = "INSERT INTO roles (role_id, role_name) values (:role_id, :role_name)"
         role_id = str(uuid.uuid4())
+        params = {"role_id": role_id, "role_name": role_name}
 
         try:
             with self._sql.transaction() as tx:
-                tx.execute_write(
-                    sql,
-                    {"role_id": role_id, "role_name": role_name},
-                )
-            logger.info(f"Role {role_name} created successfully")
-            return {"role_name": role_name,  "role_id": role_id}
-        except exc.SQLAlchemyError as e:
-            logger.error("Delete role failed: %s", str(e))
-            raise ServiceError(f"Database error: {str(e)}", 500)
+                tx.execute_write(query, params)
+            logger.info("Role created role_id=%s role_name=%s", role_id, role_name)
+            return {"role_name": role_name, "role_id": role_id}
+        except exc.SQLAlchemyError as err:
+            logger.error("add_role failed: %s", err)
+            raise ForgeError(f"Database error: {err}", status_code=500) from err
 
-    validate_params("role_id")
-    def delete_role(self, role_id: str) -> Dict[str, Any]:
-        """
-        Deletes a given role
-
-        :param role_id: The identifier for the role.
-        :type role_id: str
-        
-        Returns:
-            
-        Raises:
-            ServiceError 500 (database error)
-        """
-
-        delete_maps = "DELETE FROM user_role_map WHERE role_id = :role_id"
-        delete_role = "DELETE FROM roles WHERE role_id = :role_id"
+    @validate_params("role_id")
+    def delete_role(self, role_id: str) -> tuple[dict[str, Any], int]:
+        delete_user_role_map = "DELETE FROM user_role_map WHERE role_id = :role_id"
+        delete_role_row = "DELETE FROM roles WHERE role_id = :role_id"
+        params = {"role_id": role_id}
 
         try:
             with self._sql.transaction() as tx:
-                tx.execute_write(delete_maps, {"role_id": role_id})
-                logger.info(f"Deleted role: {role_id} from user_role_map")
-
-                tx.execute_write(delete_role, {"role_id": role_id})
-                logger.info(f"Delete role: {role_id} from roles")
-
+                tx.execute_write(delete_user_role_map, params)
+                tx.execute_write(delete_role_row, params)
             return {"message": "Role deleted successfully"}, 200
-        except exc.SQLAlchemyError as e:
-            logger.error("Delete role failed: %s", str(e))
-            raise ServiceError(f"Database error: {str(e)}", 500)
-    
+        except exc.SQLAlchemyError as err:
+            logger.error("delete_role failed role_id=%s error=%s", role_id, err)
+            raise ForgeError(f"Database error: {err}", status_code=500) from err
 
-    validate_params("role_id")
-    def get_role(self, role_id: str) -> Dict[str, Any]:
-        """
-        Retrieves a given role
+    @validate_params("role_id")
+    def get_role(self, role_id: str) -> dict[str, Any]:
+        query = "SELECT role_id, role_name FROM roles WHERE role_id = :role_id"
+        try:
+            rows = self._sql.execute_query_mappings(query, {"role_id": role_id})
+            if not rows:
+                raise ForgeError("Role not found", status_code=404)
+            return dict(rows[0])
+        except ForgeError:
+            raise
+        except exc.SQLAlchemyError as err:
+            logger.error("%s - %s", query, err)
+            raise ForgeError(f"Database error: {err}", status_code=500) from err
 
-        :param role_id: The identifier for the role.
-        :type role_id: str
-        
-        Returns:
-            Dict[str, Any]
-        Raises:
-            ServiceError 404 (Not found), 500 (database error)
-        """
+    @validate_params("product_id", "role_id")
+    def map_product_to_role(self, product_id: str, role_id: str) -> dict[str, Any]:
+        if self.has_role(product_id, role_id):
+            raise ForgeError("That role has already been mapped to that product.", status_code=409)
 
-        sql = "SELECT role_id, role_name FROM roles WHERE role_id = :role_id"
+        insert_query = (
+            "INSERT INTO product_roles (product_role_id, product_id, role_id) "
+            "VALUES(:product_role_id, :product_id, :role_id)"
+        )
+        product_role_id = str(uuid.uuid4())
+        params = {"product_role_id": product_role_id, "product_id": product_id, "role_id": role_id}
 
         try:
-            rows = self._sql.execute_query_mappings(sql, {"role_id": role_id})
-            result = rows[0] if rows else None
-                
-            if not result:
-                logger.error(f"Role not found: {role_id}")
-                raise ServiceError("Role not found", 404)
-                
-            return dict(result)
-        except exc.SQLAlchemyError as e:
-            logger.error(f"{sql} - {str(e)}")
-            raise ServiceError(f"Database error: {str(e)}", 500)
-        
-    validate_params("product_id", "role_id")
-    def map_product_to_role(self, product_id: str, role_id: str):
+            with self._sql.transaction() as tx:
+                tx.execute_write(insert_query, params)
+            return params
+        except exc.SQLAlchemyError as err:
+            logger.error("%s - %s", insert_query, err)
+            raise ForgeError(f"Database error: {err}", status_code=500) from err
 
-        if not self.has_role(product_id, role_id):
-            sql = "INSERT INTO product_roles (product_role_id, product_id, role_id) VALUES(:product_role_id, :product_id, :role_id)"
-
-            try:
-                with self._sql.transaction() as tx:
-                    product_role_id =  str(uuid.uuid4())
-                    tx.execute_write(
-                        sql,
-                        {"product_role_id": product_role_id, "product_id": product_id, "role_id": role_id},
-                    )
-                return {"product_role_id": product_role_id, "product_id": product_id, "role_id": role_id}
-            except exc.SQLAlchemyError as e:
-                logger.error(f"{sql} - {str(e)}")
-                raise ServiceError(f"Database error: {str(e)}", 500)
-        else:
-            raise ServiceError("That role has already been mapped to that product.", 409)
-
-    validate_params("product_id", "role_id")
-
-    def remove_role_from_product(self, product_id: str, role_id: str) -> dict:
-        """
-        Remove the (product_id, role_id) mapping from product_roles.
-        - 404 if the mapping doesn't exist
-        - 409 if the mapping is assigned to any users
-        - 200 + payload on success
-        """
-        # 1) Resolve product_role_id from (product_id, role_id)
-        select_pr = """
+    @validate_params("product_id", "role_id")
+    def remove_role_from_product(self, product_id: str, role_id: str) -> dict[str, Any]:
+        select_mapping = """
             SELECT product_role_id
             FROM product_roles
             WHERE product_id = :pid AND role_id = :rid
             LIMIT 1
         """
-
-        # 2) Check usage in user_roles
         check_usage = """
             SELECT COUNT(*) AS cnt
             FROM user_roles
             WHERE product_role_id = :prid
         """
-
-        # 3) Delete mapping
-        delete_pr = """
+        delete_mapping = """
             DELETE FROM product_roles
             WHERE product_role_id = :prid
         """
-
-        # 4) Touch product last_update
         touch_product = """
             UPDATE products
             SET last_update = CURRENT_TIMESTAMP
@@ -183,59 +119,36 @@ class RoleService:
 
         try:
             with self._sql.transaction() as tx:
-                rows = tx.execute_query_mappings(select_pr, {"pid": product_id, "rid": role_id})
-                row = rows[0] if rows else None
+                row = (tx.execute_query_mappings(select_mapping, {"pid": product_id, "rid": role_id}) or [None])[0]
                 if not row:
-                    logger.info("No product_role mapping for product_id=%s role_id=%s", product_id, role_id)
-                    raise ServiceError("Role mapping not found for this product.", 404)
+                    raise ForgeError("Role mapping not found for this product.", status_code=404)
 
                 product_role_id = row["product_role_id"]
-                params = {"prid": product_role_id}
-
-                usage_rows = tx.execute_query_mappings(check_usage, params)
-                in_use = int((usage_rows[0].get("cnt") if usage_rows else 0) or 0)
+                usage_row = (tx.execute_query_mappings(check_usage, {"prid": product_role_id}) or [{}])[0]
+                in_use = int((usage_row.get("cnt") or 0))
                 if in_use > 0:
-                    logger.error("Role mapping %s is in use by %d users", product_role_id, in_use)
-                    raise ServiceError(
+                    raise ForgeError(
                         f"That role is in use by {in_use} users. Cannot delete this role from the product.",
-                        409
+                        status_code=409,
                     )
 
-                res = tx.execute_write(delete_pr, params)
-                if (res or 0) == 0:
-                    logger.error("Role wasn't found during the delete. Someone else must have deleted it first?")
-                    raise ServiceError("Role mapping not found (concurrent update).", 404)
+                deleted = tx.execute_write(delete_mapping, {"prid": product_role_id})
+                if not deleted:
+                    raise ForgeError("Role mapping not found (concurrent update).", status_code=404)
 
                 tx.execute_write(touch_product, {"pid": product_id})
-
-                logger.info("Deleted product_role_id=%s from product_id=%s", product_role_id, product_id)
                 return {"ok": True, "deleted_product_role_id": product_role_id}
-
-        except exc.SQLAlchemyError as e:
-            logger.error("remove_role_from_product failed: %s", str(e))
-            raise ServiceError(f"Database error: {str(e)}", 500)
-
+        except ForgeError:
+            raise
+        except exc.SQLAlchemyError as err:
+            logger.error("remove_role_from_product failed: %s", err)
+            raise ForgeError(f"Database error: {err}", status_code=500) from err
 
     @validate_params("product_id", "role_id")
     def has_role(self, product_id: str, role_id: str) -> bool:
-        """"
-        Returns:
-            bool
-        Raises:
-            ServiceError 409 (Duplicate), 500 (database error)
-        """
-
-        sql = "SELECT * from product_roles WHERE product_id = :product_id AND role_id = :role_id"
+        query = "SELECT * from product_roles WHERE product_id = :product_id AND role_id = :role_id"
         try:
-            result = self._sql.execute_query(sql, {"role_id": role_id, "product_id": product_id})
-            if not result:
-                return False
-            return True
-        except exc.SQLAlchemyError as e:
-            logger.error(f"{sql} - {str(e)}")
-            raise ServiceError(f"Database error: {str(e)}", 500)
-        
-        @validate_params("product_id")
-        def get_roles_for_product(self, product_id: str) -> List[ProductRole]:
-            #sql = text("SELECT role_name, p.role_id, p.product_role_id")
-            pass
+            return bool(self._sql.execute_query(query, {"role_id": role_id, "product_id": product_id}))
+        except exc.SQLAlchemyError as err:
+            logger.error("%s - %s", query, err)
+            raise ForgeError(f"Database error: {err}", status_code=500) from err

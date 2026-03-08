@@ -2,26 +2,26 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.domain.domain_table_write_service import DomainTableWriteService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_normalize_ids_validates() -> None:
     assert DomainTableWriteService._normalize_ids([1, 2, 2], "add") == [1, 2]
 
-    with pytest.raises(ServiceError, match="must be a list"):
+    with pytest.raises(ForgeError, match="must be a list"):
         DomainTableWriteService._normalize_ids("bad", "add")
 
-    with pytest.raises(ServiceError, match="must contain integers"):
+    with pytest.raises(ForgeError, match="must contain integers"):
         DomainTableWriteService._normalize_ids([1, "x"], "add")
 
-    with pytest.raises(ServiceError, match="must contain positive"):
+    with pytest.raises(ForgeError, match="must contain positive"):
         DomainTableWriteService._normalize_ids([0], "add")
 
 
 def test_add_or_update_table_sets_primary_and_returns_row() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_responses = [[("ok",)], []]
     sql.query_mappings_responses = [
         [{"ok_domain": 1, "ok_table": 1}],
@@ -39,10 +39,10 @@ def test_add_or_update_table_sets_primary_and_returns_row() -> None:
                 "schema_name": "asset",
                 "table_name": "patients",
                 "full_name": "main.asset.patients",
-                "variant_code": None,
+                "qf_variant_code": None,
                 "is_qe": 0,
-                "exists_in_dbx": 1,
-                "last_seen_at": None,
+                "qf_exists_in_dbx": 1,
+                "qf_last_seen_at": None,
             }
         ],
     ]
@@ -72,7 +72,7 @@ def test_add_or_update_table_sets_primary_and_returns_row() -> None:
 
 
 def test_apply_changes_add_remove() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_responses = [[("ok",)], [("ok",)]]
     sql.query_mappings_responses = [[{"id": 1}, {"id": 2}, {"id": 3}]]
     sql.write_responses = [1, 0, 0]
@@ -89,10 +89,10 @@ def test_apply_changes_add_remove() -> None:
 
 
 def test_apply_changes_missing_domain() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_responses = [[("ok",)], []]
     service = DomainTableWriteService(sql=sql)
-    with pytest.raises(ServiceError, match="Domain not found"):
+    with pytest.raises(ForgeError, match="Domain not found"):
         service.apply_changes(
             workspace_id="ws1",
             user_id="user1",

@@ -2,10 +2,10 @@ import os
 
 from dotenv import load_dotenv
 
-from app.adapters.base_token_manager import BaseTokenManager
+from app.adapters.base_token_manager import BaseForgeTokenManager
 
 
-class SigmaTokenManager(BaseTokenManager):
+class ForgeTokenManager(BaseForgeTokenManager):
     def __init__(self):
         load_dotenv()
 

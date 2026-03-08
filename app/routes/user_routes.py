@@ -1,28 +1,29 @@
 import logging
 
 from flask import jsonify, request
-from flask_restx import Namespace, Resource, fields, reqparse
+from flask_restx import Namespace, fields, reqparse
+from app.routes.forge_resource import ForgeResource
 from pydantic import ValidationError
 
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.models.user import User
 from app.models.user_invitation import UserInvitation
 from app.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
 
-user_ns = Namespace("users", description="User management operations")
+qf_user_ns = Namespace("users", description="User management operations")
 SENSITIVE_USER_FIELDS = {"password", "otp_secret"}
 # Define parser globally
-user_parser = reqparse.RequestParser()
-user_parser.add_argument('status', type=str, default='All', help='Filter by status', action='store', location='args')  # Single value
-user_parser.add_argument('cursor', type=str, help='Cursor for pagination (user_id)', location='args')
-user_parser.add_argument('limit', type=int, default=10, help='Number of records per page', location='args')
-user_parser.add_argument('direction', type=str, default='forward', choices=['forward', 'backward'], help='Pagination direction', location='args')
-user_parser.add_argument('q', type=str, location='args')
+qf_user_parser = reqparse.RequestParser()
+qf_user_parser.add_argument('status', type=str, default='All', help='Filter by status', action='store', location='args')  # Single value
+qf_user_parser.add_argument('cursor', type=str, help='Cursor for pagination (user_id)', location='args')
+qf_user_parser.add_argument('limit', type=int, default=10, help='Number of records per page', location='args')
+qf_user_parser.add_argument('direction', type=str, default='forward', choices=['forward', 'backward'], help='Pagination direction', location='args')
+qf_user_parser.add_argument('q', type=str, location='args')
 
-user_model = user_ns.model('User', {
+user_model = qf_user_ns.model('User', {
     'user_id': fields.String(required=True, description='User ID'),
     'username': fields.String(required=True, description='Username'),
     'password': fields.String(required=True, description='Password'),
@@ -37,33 +38,33 @@ user_model = user_ns.model('User', {
     'otp_secret': fields.String(description='OTP secret', default=None),
 })
 
-mapping_model = user_ns.model('UserWorkspaceMapping', {
+mapping_model = qf_user_ns.model('UserWorkspaceMapping', {
     'user_id': fields.String(required=True, description='The ID of the user'),
     'workspace_id': fields.String(required=True, description='The ID of the workspace'),
 })
 
-user_role_add_model = user_ns.model(
+user_role_add_model = qf_user_ns.model(
     "UserRoleAdd",
     {
         "role_id": fields.String(required=True, description="Role ID to assign directly to the user"),
     },
 )
 
-user_role_replace_model = user_ns.model(
+user_role_replace_model = qf_user_ns.model(
     "UserRoleReplace",
     {
         "role_ids": fields.List(fields.String, required=True, description="Complete direct role id list"),
     },
 )
 
-user_role_update_model = user_ns.model(
+user_role_update_model = qf_user_ns.model(
     "UserRoleUpdate",
     {
         "role_id": fields.String(required=True, description="Replacement role id"),
     },
 )
 
-pagination_response = user_ns.model('PaginationResponse', {
+pagination_response = qf_user_ns.model('PaginationResponse', {
     'users': fields.List(fields.Nested(user_model)),
     'next_cursor': fields.String(description='Cursor for next page', default=None),
     'prev_cursor': fields.String(description='Cursor for previous page', default=None),
@@ -75,10 +76,10 @@ def _public_user_payload(user: User) -> dict:
     return user.model_dump(mode="json", exclude=SENSITIVE_USER_FIELDS)
 
 
-@user_ns.route("/")
-class UserList(Resource):
-    @user_ns.response(201, "User invite created")
-    @user_ns.doc(security='BearerAuth')
+@qf_user_ns.route("/")
+class UserList(ForgeResource):
+    @qf_user_ns.response(201, "User invite created")
+    @qf_user_ns.doc(security='BearerAuth')
     @token_required
     def post(self):
         """
@@ -94,10 +95,10 @@ class UserList(Resource):
         return result, 201
     
     @token_required
-    # @user_ns.marshal_with(pagination_response)
+    # @qf_user_ns.marshal_with(pagination_response)
     def get(self):
         """List users with cursor-based pagination"""
-        args = user_parser.parse_args()
+        args = qf_user_parser.parse_args()
         logger.info(f"Parsed args: {args}")  # Debug query parameters
         logger.info(args['status'])
         try:
@@ -116,14 +117,14 @@ class UserList(Resource):
                 'total_count': total_count
             }, 200
         except Exception as e:
-            user_ns.abort(500, f"Error fetching users: {str(e)}")
+            qf_user_ns.abort(500, f"Error fetching users: {str(e)}")
 
 
-@user_ns.route("/<string:user_id>")
-@user_ns.param("user_id", "The user identifier")
-class UserUpdates(Resource):
-    @user_ns.response(200, "User updated")
-    @user_ns.doc(security='BearerAuth')
+@qf_user_ns.route("/<string:user_id>")
+@qf_user_ns.param("user_id", "The user identifier")
+class UserUpdates(ForgeResource):
+    @qf_user_ns.response(200, "User updated")
+    @qf_user_ns.doc(security='BearerAuth')
     @token_required
     def put(self, user_id):
         """
@@ -131,7 +132,7 @@ class UserUpdates(Resource):
         """
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict):
-            raise ServiceError("Invalid JSON body", status_code=400)
+            raise ForgeError("Invalid JSON body", status_code=400)
 
         user = User(**body)
         userService = UserService()
@@ -139,8 +140,8 @@ class UserUpdates(Resource):
         
         return jsonify(_public_user_payload(result))
 
-    @user_ns.response(200, "User deleted")
-    @user_ns.doc(security='BearerAuth')
+    @qf_user_ns.response(200, "User deleted")
+    @qf_user_ns.doc(security='BearerAuth')
     @token_required
     def delete(self, user_id):
         """
@@ -150,8 +151,8 @@ class UserUpdates(Resource):
         result = userService.delete_user(user_id)
         return result
     
-    # @user_ns.response(200, "Success", user_model)
-    # @user_ns.marshal_with(user_model)
+    # @qf_user_ns.response(200, "Success", user_model)
+    # @qf_user_ns.marshal_with(user_model)
     @token_required
     def get(self, user_id):
         """
@@ -164,8 +165,8 @@ class UserUpdates(Resource):
     def options(self, user_id):
         return {}, 200
 
-@user_ns.route("/<string:user_id>/workspaces")
-class UserWorkspaces(Resource):
+@qf_user_ns.route("/<string:user_id>/workspaces")
+class UserWorkspaces(ForgeResource):
     @token_required
     def get(self, user_id):
         """
@@ -176,8 +177,8 @@ class UserWorkspaces(Resource):
         return results
 
 
-@user_ns.route("/<string:user_id>/roles")
-class UserDirectRoles(Resource):
+@qf_user_ns.route("/<string:user_id>/roles")
+class UserDirectRoles(ForgeResource):
     @token_required
     def get(self, user_id):
         user_service = UserService()
@@ -190,7 +191,7 @@ class UserDirectRoles(Resource):
         }, 200
 
     @token_required
-    @user_ns.expect(user_role_add_model, validate=False)
+    @qf_user_ns.expect(user_role_add_model, validate=False)
     def post(self, user_id):
         data = request.get_json(silent=True) or {}
         role_id = str(data.get("role_id") or "").strip()
@@ -201,7 +202,7 @@ class UserDirectRoles(Resource):
         return {"mapping": mapping}, 200
 
     @token_required
-    @user_ns.expect(user_role_replace_model, validate=False)
+    @qf_user_ns.expect(user_role_replace_model, validate=False)
     def put(self, user_id):
         data = request.get_json(silent=True) or {}
         role_ids = data.get("role_ids")
@@ -212,10 +213,10 @@ class UserDirectRoles(Resource):
         return result, 200
 
 
-@user_ns.route("/<string:user_id>/roles/<string:role_id>")
-class UserDirectRoleById(Resource):
+@qf_user_ns.route("/<string:user_id>/roles/<string:role_id>")
+class UserDirectRoleById(ForgeResource):
     @token_required
-    @user_ns.expect(user_role_update_model, validate=False)
+    @qf_user_ns.expect(user_role_update_model, validate=False)
     def patch(self, user_id, role_id):
         data = request.get_json(silent=True) or {}
         new_role_id = str(data.get("role_id") or "").strip()
@@ -231,10 +232,10 @@ class UserDirectRoleById(Resource):
         result = user_service.remove_user_direct_role(user_id, role_id)
         return result, 200
 
-@user_ns.route("/<string:user_id>/workspaces/<string:workspace_id>/dashboards/<string:dashboard_id>/embed")
-class UserWorkspaceDashboard(Resource):
+@qf_user_ns.route("/<string:user_id>/workspaces/<string:workspace_id>/dashboards/<string:dashboard_id>/embed")
+class UserWorkspaceDashboard(ForgeResource):
     @token_required
-    @user_ns.doc(
+    @qf_user_ns.doc(
         description=(
             "## User Organization Sigma Embed URL\n"
             "This endpoint allows clients to retrieve the embed URL for a given user's organization. The embed will switch the connection to the correct organization based on the given workspace id\n\n"
@@ -256,8 +257,8 @@ class UserWorkspaceDashboard(Resource):
     def options(self, user_id, workspace_id, dashboard_id):
         return {}, 200
 
-@user_ns.route("/counts")
-class UserCounts(Resource):
+@qf_user_ns.route("/counts")
+class UserCounts(ForgeResource):
     @token_required
     def get(self):
         user_service = UserService()
@@ -265,8 +266,8 @@ class UserCounts(Resource):
 
         return results, 200
 
-@user_ns.route("/resend-invite")
-class ResentInvite(Resource):
+@qf_user_ns.route("/resend-invite")
+class ResentInvite(ForgeResource):
     @token_required
     def post(self):
         try:
@@ -277,8 +278,8 @@ class ResentInvite(Resource):
         user_service = UserService()
         user_service.resend_invite(payload.user_id, payload.email)
 
-@user_ns.route("/bulk-invite")
-class BulkInviteUsers(Resource):
+@qf_user_ns.route("/bulk-invite")
+class BulkInviteUsers(ForgeResource):
     @token_required
     def post(self):
         data = request.json

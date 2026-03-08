@@ -9,16 +9,16 @@ from app.services.workspace_inventory.workspace_snapshot_service import (
     _build_uc_metadata_sql,
     _discover_default_catalog_schema,
     _is_qe_from_variant,
-    _safe_ident,
+    _qf_safe_ident,
     _split_base_and_variant,
 )
-from tests._support.fakes import FakeDatabricksSQLExecutor, FakeSQLExecutor
+from tests._support.fakes import FakeDatabricksForgeQueryPort, FakeForgeQueryPort
 
 
 def test_safe_ident() -> None:
-    assert _safe_ident("abc_123") == "abc_123"
+    assert _qf_safe_ident("abc_123") == "abc_123"
     with pytest.raises(ValueError):
-        _safe_ident("bad-name")
+        _qf_safe_ident("bad-name")
 
 
 def test_split_base_and_variant() -> None:
@@ -44,28 +44,28 @@ def test_is_qe_from_variant() -> None:
 
 
 def test_discover_default_catalog_schema_empty_rows() -> None:
-    sql = FakeDatabricksSQLExecutor()
+    sql = FakeDatabricksForgeQueryPort()
     sql.submit_responses.append({"table": pa.table({"catalog": [], "schema": []})})
     with pytest.raises(RuntimeError):
         _discover_default_catalog_schema(sql)
 
 
 def test_discover_default_catalog_schema() -> None:
-    sql = FakeDatabricksSQLExecutor()
+    sql = FakeDatabricksForgeQueryPort()
     table = pa.table({"catalog": ["main"], "schema": ["asset"]})
     sql.submit_responses.append({"table": table})
     assert _discover_default_catalog_schema(sql) == ("main", "asset")
 
 
 def test_sync_snapshot_empty_table() -> None:
-    sql = FakeDatabricksSQLExecutor()
+    sql = FakeDatabricksForgeQueryPort()
     sql.submit_responses.append(
-        {"table": pa.table({"catalog_name": [], "schema_name": [], "table_name": [], "column_name": [], "ordinal_position": [], "data_type": [], "is_nullable": []})}
+        {"table": pa.table({"qf_catalog_name": [], "qf_schema_name": [], "qf_table_name": [], "column_name": [], "qf_ordinal_position": [], "data_type": [], "is_nullable": []})}
     )
-    mysql = FakeSQLExecutor()
+    mysql = FakeForgeQueryPort()
     svc = WorkspaceSnapshotService(sql=sql, mysql=mysql)
 
-    result = svc.sync_snapshot(workspace_id="ws-1", catalog_name="main", schema_name="asset")
+    result = svc.sync_snapshot(workspace_id="ws-1", qf_catalog_name="main", qf_schema_name="asset")
 
     assert isinstance(result, SnapshotResult)
     assert result.tables_seen == 0
@@ -74,33 +74,33 @@ def test_sync_snapshot_empty_table() -> None:
 
 
 def test_sync_snapshot_with_rows() -> None:
-    sql = FakeDatabricksSQLExecutor()
+    sql = FakeDatabricksForgeQueryPort()
     table = pa.Table.from_pylist(
         [
             {
-                "catalog_name": "main",
-                "schema_name": "asset",
-                "table_name": "patient",
+                "qf_catalog_name": "main",
+                "qf_schema_name": "asset",
+                "qf_table_name": "patient",
                 "column_name": "patient_id",
-                "ordinal_position": 1,
+                "qf_ordinal_position": 1,
                 "data_type": "STRING",
                 "is_nullable": "NO",
             },
             {
-                "catalog_name": "main",
-                "schema_name": "asset",
-                "table_name": "patient",
+                "qf_catalog_name": "main",
+                "qf_schema_name": "asset",
+                "qf_table_name": "patient",
                 "column_name": "gender",
-                "ordinal_position": 2,
+                "qf_ordinal_position": 2,
                 "data_type": "STRING",
                 "is_nullable": "YES",
             },
             {
-                "catalog_name": "main",
-                "schema_name": "asset",
-                "table_name": "diagnosis_150",
+                "qf_catalog_name": "main",
+                "qf_schema_name": "asset",
+                "qf_table_name": "diagnosis_150",
                 "column_name": "code",
-                "ordinal_position": 1,
+                "qf_ordinal_position": 1,
                 "data_type": "STRING",
                 "is_nullable": "YES",
             },
@@ -108,7 +108,7 @@ def test_sync_snapshot_with_rows() -> None:
     )
     sql.submit_responses.append({"table": table})
 
-    mysql = FakeSQLExecutor()
+    mysql = FakeForgeQueryPort()
     mysql.query_responses.append([("patient",), ("diagnosis",)])
     mysql.query_mappings_responses.append(
         [
@@ -124,7 +124,7 @@ def test_sync_snapshot_with_rows() -> None:
     )
 
     svc = WorkspaceSnapshotService(sql=sql, mysql=mysql)
-    result = svc.sync_snapshot(workspace_id="ws-1", catalog_name="main", schema_name="asset")
+    result = svc.sync_snapshot(workspace_id="ws-1", qf_catalog_name="main", qf_schema_name="asset")
 
     assert result.tables_seen == 2
     assert result.columns_seen == 3

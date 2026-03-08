@@ -3,11 +3,11 @@ from __future__ import annotations
 import pytest
 from flask import g
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
 
 
-class _DummyTokenManager:
+class _DummyForgeTokenPort:
     def __init__(self, *args, **kwargs) -> None:
         self.args = args
         self.kwargs = kwargs
@@ -29,15 +29,15 @@ def test_build_context(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda *_args, **_kwargs: {"warehouse_id": "wh-1"},
     )
     monkeypatch.setattr(
-        "app.services.workspace_inventory.workspace_context.get_current_username",
+        "app.services.workspace_inventory.workspace_context.resolve_request_username",
         lambda: "user-1",
     )
     monkeypatch.setattr(
-        "app.services.workspace_inventory.workspace_context.DatabricksWorkspaceTokenManager",
-        _DummyTokenManager,
+        "app.services.workspace_inventory.workspace_context.DatabricksWorkspaceForgeTokenPort",
+        _DummyForgeTokenPort,
     )
     monkeypatch.setattr(
-        "app.services.workspace_inventory.workspace_context.DatabricksSQLExecutor",
+        "app.services.workspace_inventory.workspace_context.DatabricksForgeQueryPort",
         _DummyExecutor,
     )
 
@@ -53,7 +53,7 @@ def test_resolve_workspace_url_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda *_args, **_kwargs: {"workspace_id": "ws-1"},
     )
     builder = WorkspaceContextBuilder()
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         builder._resolve_workspace_url("ws-1")
 
 
@@ -76,13 +76,13 @@ def test_resolve_default_warehouse_missing(monkeypatch: pytest.MonkeyPatch) -> N
         lambda *_args, **_kwargs: {},
     )
     builder = WorkspaceContextBuilder()
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         builder._resolve_default_warehouse_id("ws-1")
 
 
 def test_build_context_forbidden_workspace_in_request_context(app, monkeypatch: pytest.MonkeyPatch) -> None:
     def _deny_workspace_access(self, *, user_id: str, workspace_id: str) -> str:
-        raise ServiceError("You do not have access to this workspace", status_code=403)
+        raise ForgeError("You do not have access to this workspace", status_code=403)
 
     monkeypatch.setattr(
         "app.services.workspace_inventory.workspace_context.WorkspaceAccessService.assert_workspace_access",
@@ -90,6 +90,6 @@ def test_build_context_forbidden_workspace_in_request_context(app, monkeypatch: 
     )
     with app.test_request_context("/"):
         g.user_id = "user-1"
-        with pytest.raises(ServiceError) as exc:
+        with pytest.raises(ForgeError) as exc:
             WorkspaceContextBuilder().build("ws-1")
     assert exc.value.status_code == 403

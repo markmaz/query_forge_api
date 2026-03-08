@@ -6,15 +6,15 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
 
 
 class PlannerLLMCache:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None, ttl_days: int = 7) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None, ttl_days: int = 7) -> None:
+        self._sql = sql or ForgeMetaSQL()
         self._ttl_days = max(1, int(ttl_days))
 
     @staticmethod

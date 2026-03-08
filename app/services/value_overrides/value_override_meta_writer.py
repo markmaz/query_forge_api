@@ -3,12 +3,12 @@ from __future__ import annotations
 from typing import Optional
 from uuid import uuid4
 
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 
 
 class ValueOverrideMetaWriter:
-    def __init__(self, mysql: SQLExecutor) -> None:
+    def __init__(self, mysql: ForgeQueryPort) -> None:
         self._sql = mysql
         self._checked = False
 
@@ -81,7 +81,7 @@ class ValueOverrideMetaWriter:
             },
         )
         if not updated:
-            raise ServiceError("List not found", status_code=404)
+            raise ForgeError("List not found", status_code=404)
 
     def delete_meta(self, *, workspace_id: str, list_type: str, list_id: str) -> None:
         self._assert_table_exists_once()
@@ -105,5 +105,5 @@ class ValueOverrideMetaWriter:
         try:
             self._sql.execute_query_mappings("SELECT 1 FROM crosswalk_list_meta LIMIT 1")
         except Exception as exc:  # narrow mysql errors without importing driver
-            raise ServiceError("crosswalk_list_meta missing; run migrations", status_code=500) from exc
+            raise ForgeError("crosswalk_list_meta missing; run migrations", status_code=500) from exc
         self._checked = True

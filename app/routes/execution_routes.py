@@ -1,102 +1,84 @@
 from __future__ import annotations
 
 import logging
+from typing import Any, Callable, Dict
 
 from flask import request
-from flask_restx import Namespace, Resource
+from flask_restx import Namespace
+from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
-from app.routes._route_utils import get_workspace_id_from_header
+from app.exceptions.forge_error import ForgeError
+from app.routes.request_helpers import extract_workspace_id
 from app.services.execution_service import ExecutionService
 
 logger = logging.getLogger(__name__)
 executions_ns = Namespace("executions", description="Databricks SQL executions")
 
 
-def _handle_service_error(e: ServiceError):
-    return {"error": str(e)}, getattr(e, "status_code", 400) or 400
-
-
-
 def _service() -> ExecutionService:
     return ExecutionService()
 
 
-@executions_ns.route("/start")
-class ExecutionStart(Resource):
-    """
-    Example:
-      curl -X POST /api/v1/executions/start \\
-        -H "Authorization: Bearer <token>" \\
-        -H "X-Workspace-Id: <workspace_id>" \\
-        -H "Content-Type: application/json" \\
-        -d '{"sqlJson":{"domainId":"<domain-id>","select":[{"field":"*"}]},"kind":"query_builder"}'
-    """
+def _service_error(error: ForgeError):
+    return {"error": str(error)}, getattr(error, "status_code", 400) or 400
 
+
+def _run(handler: Callable[[], Any], *, log_message: str, client_error: str):
+    try:
+        return handler()
+    except ForgeError as error:
+        return _service_error(error)
+    except Exception:
+        logger.exception(log_message)
+        return {"error": client_error}, 500
+
+
+def _json_payload() -> Dict[str, Any]:
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        raise ForgeError("Invalid JSON body", status_code=400)
+    return payload
+
+
+@executions_ns.route("/start")
+class ExecutionStart(ForgeResource):
     @token_required
     def post(self):
-        try:
-            workspace_id = get_workspace_id_from_header()
-            payload = request.get_json(silent=True) or {}
-            if not isinstance(payload, dict):
-                raise ServiceError("Invalid JSON body", status_code=400)
-            return _service().start(workspace_id, payload, dict(request.args))
+        def handler():
+            workspace_id = extract_workspace_id()
+            payload = _json_payload()
+            query_params = dict(request.args)
+            return _service().start(workspace_id, payload, query_params)
 
-        except ServiceError as e:
-            return _handle_service_error(e)
-        except Exception:
-            logger.exception("Execution start failed")
-            return {"error": "Execution start failed"}, 500
+        return _run(handler, log_message="Execution start failed", client_error="Execution start failed")
 
 
 @executions_ns.route("/<string:job_id>/status")
-class ExecutionStatus(Resource):
+class ExecutionStatus(ForgeResource):
     @token_required
     def get(self, job_id: str):
-        try:
-            workspace_id = get_workspace_id_from_header()
-            return _service().status(workspace_id, job_id)
+        def handler():
+            return _service().status(extract_workspace_id(), job_id)
 
-        except ServiceError as e:
-            return _handle_service_error(e)
-        except Exception:
-            logger.exception("Execution status failed")
-            return {"error": "Execution status failed"}, 500
+        return _run(handler, log_message="Execution status failed", client_error="Execution status failed")
 
 
 @executions_ns.route("/<string:job_id>/cancel")
-class ExecutionCancel(Resource):
-    """
-    Example:
-      curl -X POST /api/v1/executions/<job_id>/cancel \\
-        -H "Authorization: Bearer <token>" \\
-        -H "X-Workspace-Id: <workspace_id>"
-    """
-
+class ExecutionCancel(ForgeResource):
     @token_required
     def post(self, job_id: str):
-        try:
-            workspace_id = get_workspace_id_from_header()
-            return _service().cancel(workspace_id, job_id)
+        def handler():
+            return _service().cancel(extract_workspace_id(), job_id)
 
-        except ServiceError as e:
-            return _handle_service_error(e)
-        except Exception:
-            logger.exception("Execution cancel failed")
-            return {"error": "Execution cancel failed"}, 500
+        return _run(handler, log_message="Execution cancel failed", client_error="Execution cancel failed")
 
 
 @executions_ns.route("/<string:job_id>/results")
-class ExecutionResults(Resource):
+class ExecutionResults(ForgeResource):
     @token_required
     def get(self, job_id: str):
-        try:
-            workspace_id = get_workspace_id_from_header()
-            return _service().results(workspace_id, job_id)
+        def handler():
+            return _service().results(extract_workspace_id(), job_id)
 
-        except ServiceError as e:
-            return _handle_service_error(e)
-        except Exception:
-            logger.exception("Execution results failed")
-            return {"error": "Execution results failed"}, 500
+        return _run(handler, log_message="Execution results failed", client_error="Execution results failed")

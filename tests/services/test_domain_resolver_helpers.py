@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.domain_resolver import _safe_fqn
 
 
@@ -12,8 +12,8 @@ def test_safe_fqn_accepts_two_or_three_parts():
 
 
 def test_safe_fqn_rejects_invalid():
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         _safe_fqn("bad name")
 
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         _safe_fqn("a.b.c.d")

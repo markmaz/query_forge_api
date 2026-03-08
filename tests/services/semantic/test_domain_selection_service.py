@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from app.services.semantic.domain_selection_service import DomainSelectionService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_choose_domain_id_prefers_domain_with_required_concept_coverage() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {"domain_id": 1, "table_name": "dim_student"},

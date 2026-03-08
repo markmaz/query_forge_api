@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from qdrant_client.http import models as qdrant_models
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import (
     EMBEDDING_MODEL_NAME,
     PLANNER_UNIFIED_LLM,
@@ -48,7 +48,7 @@ from app.config import (
     SEMANTIC_PLAN_LLM_TIMEOUT_SECONDS,
     VLLM_BASE_URL,
 )
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.infra.embedding_model import EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
 from app.services.domains.capabilities_service import DomainCapabilitiesService
@@ -381,7 +381,7 @@ class PlannerDomainService:
         try:
             req = PlanDomainRequest.model_validate(payload or {})
         except ValidationError as exc:
-            raise ServiceError("Invalid plan_domain request", status_code=400, details={"errors": exc.errors()}) from exc
+            raise ForgeError("Invalid plan_domain request", status_code=400, details={"errors": exc.errors()}) from exc
 
         profile_enabled = bool(QF_PLAN_DOMAIN_TIMING_PROFILE_ENABLED or req.profile_pipeline)
         pipeline_profile_steps: List[Dict[str, Any]] = []
@@ -414,7 +414,7 @@ class PlannerDomainService:
             elif req.allow_unknown_conversation:
                 prior_state = None
             else:
-                raise ServiceError("Conversation not found", status_code=404, details={"conversation_id": conversation_id})
+                raise ForgeError("Conversation not found", status_code=404, details={"conversation_id": conversation_id})
         context = _plan_conversation_context_from_state(
             conversation_id=conversation_id,
             prompt=req.prompt,
@@ -960,7 +960,7 @@ class PlannerDomainService:
                 user_id=str(user_id),
                 conversation_id=conversation_id,
                 state=state,
-                ttl_seconds=self._conversation_ttl_seconds,
+                qf_ttl_seconds=self._conversation_ttl_seconds,
             )
         except Exception as exc:
             logger.warning("planner_domain conversation save failed conversation_id=%s err=%s", conversation_id, exc)
@@ -994,7 +994,7 @@ class PlannerDomainService:
     ) -> Dict[str, Any]:
         token = str(trace_id or "").strip()
         if token == "":
-            raise ServiceError("trace_id is required", status_code=400)
+            raise ForgeError("trace_id is required", status_code=400)
         return _read_pipeline_profile_from_log(
             trace_id=token,
             workspace_id=str(workspace_id or "").strip(),
@@ -1013,18 +1013,18 @@ class PlannerDomainService:
         try:
             req = PlanDomainNextActionsRequest.model_validate(payload or {})
         except ValidationError as exc:
-            raise ServiceError("Invalid next actions request", status_code=400, details={"errors": exc.errors()}) from exc
+            raise ForgeError("Invalid next actions request", status_code=400, details={"errors": exc.errors()}) from exc
 
         plan_json = dict(req.plan_json_v2 or {}) if isinstance(req.plan_json_v2, Mapping) else {}
         if not plan_json:
-            raise ServiceError("plan_json_v2 is required", status_code=400)
+            raise ForgeError("plan_json_v2 is required", status_code=400)
 
         normalized_prompt = normalize_plan_prompt(req.prompt)
         domain_id = _to_int(req.base_domain_id)
         if domain_id is None:
             domain_id = _to_int(plan_json.get("base_domain_id"))
         if domain_id is None or domain_id <= 0:
-            raise ServiceError("base_domain_id is required", status_code=400)
+            raise ForgeError("base_domain_id is required", status_code=400)
 
         t0 = perf_counter()
         capabilities = self._capabilities.get_domain_capabilities(
@@ -1114,7 +1114,7 @@ class PlannerDomainService:
         out.sort(key=lambda item: (-float(item.get("score") or 0.0), int(item.get("domain_id") or 0)))
         out = out[:6]
         if not out:
-            raise ServiceError("No candidate domain found for prompt", status_code=404)
+            raise ForgeError("No candidate domain found for prompt", status_code=404)
         return out
 
     def _select_domain_and_shortlist_columns(
@@ -1128,7 +1128,7 @@ class PlannerDomainService:
     ) -> Tuple[int, Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]:
         ranking: List[Dict[str, Any]] = []
         best_row: Optional[Dict[str, Any]] = None
-        first_error: Optional[ServiceError] = None
+        first_error: Optional[ForgeError] = None
 
         for candidate in list(domain_candidates or [])[:3]:
             domain_id = _to_int(candidate.get("domain_id"))
@@ -1141,7 +1141,7 @@ class PlannerDomainService:
                     domain_id=domain_id,
                     vertical_norm=vertical_norm,
                 )
-            except ServiceError as exc:
+            except ForgeError as exc:
                 if first_error is None:
                     first_error = exc
                 ranking.append({"domain_id": domain_id, "status": "error", "error": str(exc), "score": 0.0})
@@ -1175,7 +1175,7 @@ class PlannerDomainService:
         if best_row is None:
             if first_error is not None:
                 raise first_error
-            raise ServiceError("No accessible domain candidates found", status_code=404)
+            raise ForgeError("No accessible domain candidates found", status_code=404)
 
         return (
             int(best_row["domain_id"]),
@@ -1843,7 +1843,7 @@ class PlannerDomainService:
             raw_content = str(repair_trace.get("content") or repair_trace.get("raw_text") or "")
             if parsed is not None and _looks_like_plan_v2(parsed):
                 return LLMPlanResult(plan_json=parsed, raw_content=raw_content, attempts=attempts + 1, repaired=True)
-            raise ServiceError("plan_domain invalid model JSON", status_code=502, details={"raw": raw_content[:4000]})
+            raise ForgeError("plan_domain invalid model JSON", status_code=502, details={"raw": raw_content[:4000]})
 
         repair_prompt = build_json_repair_prompt(schema=schema, broken_json=last_raw)
         repair_trace = self._llm.chat_json_with_trace(
@@ -1856,7 +1856,7 @@ class PlannerDomainService:
         raw_content = str(repair_trace.get("content") or repair_trace.get("raw_text") or "")
         if parsed is not None and _looks_like_plan_v2(parsed):
             return LLMPlanResult(plan_json=parsed, raw_content=raw_content, attempts=3, repaired=True)
-        raise ServiceError("plan_domain invalid model JSON", status_code=502, details={"raw": raw_content[:4000]})
+        raise ForgeError("plan_domain invalid model JSON", status_code=502, details={"raw": raw_content[:4000]})
 
     def _embedding_model(self) -> EmbeddingModel:
         if self._embedding is None:
@@ -1946,7 +1946,7 @@ class PlannerDomainService:
               scm.id DESC
         """
         try:
-            rows = MySQLSQLExecutor().execute_query_mappings(sql, params)
+            rows = ForgeMetaSQL().execute_query_mappings(sql, params)
         except Exception as exc:
             logger.warning("planner_domain semantic semester indicator lookup failed err=%s", exc)
             return {}
@@ -2547,7 +2547,7 @@ def _read_pipeline_profile_from_log(
 ) -> Dict[str, Any]:
     log_path = str(QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE or "").strip() or "logs/plan_domain_pipeline_timing.log"
     if not os.path.exists(log_path):
-        raise ServiceError(
+        raise ForgeError(
             "Pipeline profile log not found",
             status_code=404,
             details={"trace_id": trace_id, "log_file": log_path},
@@ -2556,7 +2556,7 @@ def _read_pipeline_profile_from_log(
         with open(log_path, encoding="utf-8") as handle:
             lines = handle.read().splitlines()
     except Exception as exc:
-        raise ServiceError(
+        raise ForgeError(
             "Failed to read pipeline profile log",
             status_code=500,
             details={"trace_id": trace_id, "log_file": log_path, "error": str(exc)},
@@ -2591,7 +2591,7 @@ def _read_pipeline_profile_from_log(
         parsed["profiling_enabled"] = bool(QF_PLAN_DOMAIN_TIMING_PROFILE_ENABLED)
         return parsed
 
-    raise ServiceError(
+    raise ForgeError(
         "Pipeline profile not found",
         status_code=404,
         details={"trace_id": trace_id, "workspace_id": workspace_id, "user_id": user_id, "log_file": log_path},

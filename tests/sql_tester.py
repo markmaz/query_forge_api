@@ -1,4 +1,4 @@
-from app.services.no_code_query_service import NoCodeQueryService
+from app.services.query_forge_service import QueryForgeService
 
 
 class FakeDomainResolver:
@@ -13,7 +13,7 @@ class FakeExecutor:
 
 
 def test_compile_with_aliases_where_sorting():
-    svc = NoCodeQueryService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver())
+    svc = QueryForgeService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver())
 
     q = {
             "version": 1,

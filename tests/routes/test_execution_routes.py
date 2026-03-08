@@ -24,15 +24,15 @@ def _install_valkey(monkeypatch):
     return client
 
 
-def _install_nocode_prepare(monkeypatch, *, sql="SELECT 1", params=None, sql_rendered=None, count_sql=None):
+def _install_nocode_prepare(monkeypatch, *, sql="SELECT 1", params=None, qf_rendered_sql=None, qf_count_sql=None):
     class _Prepared:
         pass
 
     prepared = _Prepared()
     prepared.sql = sql
     prepared.params = params or {}
-    prepared.sql_rendered = sql if sql_rendered is None else sql_rendered
-    prepared.count_sql = count_sql
+    prepared.qf_rendered_sql = sql if qf_rendered_sql is None else qf_rendered_sql
+    prepared.qf_count_sql = qf_count_sql
 
     class _NoCodeService:
         def __init__(self, executor, domain_resolver):
@@ -42,7 +42,7 @@ def _install_nocode_prepare(monkeypatch, *, sql="SELECT 1", params=None, sql_ren
         def prepare(self, raw_query, mode="preview", limit=200, offset=0):
             return prepared
 
-    monkeypatch.setattr(execution_service, "NoCodeQueryService", _NoCodeService)
+    monkeypatch.setattr(execution_service, "QueryForgeService", _NoCodeService)
     monkeypatch.setattr(execution_service, "DomainResolver", lambda workspace_id: object())
 
 
@@ -57,13 +57,13 @@ def test_execution_start_status_cancel(client, auth_headers, monkeypatch):
         def submit_statement_async(self, sql, parameters, **_kwargs):
             assert sql == "SELECT 1"
             assert parameters == {}
-            return {"statement_id": "stmt-1"}
+            return {"qf_statement_id": "stmt-1"}
 
-        def get_statement_status(self, statement_id):
-            return {"status": {"state": "SUCCEEDED"}, "statement_id": statement_id}
+        def get_statement_status(self, qf_statement_id):
+            return {"status": {"state": "SUCCEEDED"}, "qf_statement_id": qf_statement_id}
 
-        def cancel_statement(self, statement_id):
-            self.canceled.append(statement_id)
+        def cancel_statement(self, qf_statement_id):
+            self.canceled.append(qf_statement_id)
 
     class _Ctx:
         sql_exec = _SqlExec()
@@ -125,24 +125,24 @@ def test_execution_status_not_found(client, auth_headers, monkeypatch):
 
 def test_execution_results_success(client, auth_headers, monkeypatch):
     _install_valkey(monkeypatch)
-    _install_nocode_prepare(monkeypatch, sql="SELECT 1", params={"a": 1}, sql_rendered="SELECT 1")
+    _install_nocode_prepare(monkeypatch, sql="SELECT 1", params={"a": 1}, qf_rendered_sql="SELECT 1")
 
     class _SqlExec:
         def submit_statement_async(self, sql, parameters, **_kwargs):
             assert sql == "SELECT 1"
             assert parameters == {"a": 1}
-            return {"statement_id": "stmt-2"}
+            return {"qf_statement_id": "stmt-2"}
 
-        def get_statement_status(self, statement_id):
-            assert statement_id == "stmt-2"
+        def get_statement_status(self, qf_statement_id):
+            assert qf_statement_id == "stmt-2"
             return {
                 "status": {"state": "SUCCEEDED"},
                 "manifest": {"schema": {"columns": [{"name": "a", "type": "INT", "nullable": True}]}},
                 "result": {"row_count": 2},
             }
 
-        def fetch_all_json(self, statement_id):
-            assert statement_id == "stmt-2"
+        def fetch_all_json(self, qf_statement_id):
+            assert qf_statement_id == "stmt-2"
             return [[1], [2]]
 
     class _Ctx:
@@ -192,10 +192,10 @@ def test_execution_results_running(client, auth_headers, monkeypatch):
 
     class _SqlExec:
         def submit_statement_async(self, sql, parameters, **_kwargs):
-            return {"statement_id": "stmt-3"}
+            return {"qf_statement_id": "stmt-3"}
 
-        def get_statement_status(self, statement_id):
-            assert statement_id == "stmt-3"
+        def get_statement_status(self, qf_statement_id):
+            assert qf_statement_id == "stmt-3"
             return {"status": {"state": "RUNNING"}}
 
     class _Ctx:
@@ -226,10 +226,10 @@ def test_execution_results_failed(client, auth_headers, monkeypatch):
 
     class _SqlExec:
         def submit_statement_async(self, sql, parameters, **_kwargs):
-            return {"statement_id": "stmt-4"}
+            return {"qf_statement_id": "stmt-4"}
 
-        def get_statement_status(self, statement_id):
-            assert statement_id == "stmt-4"
+        def get_statement_status(self, qf_statement_id):
+            assert qf_statement_id == "stmt-4"
             return {"status": {"state": "FAILED"}}
 
     class _Ctx:
@@ -260,8 +260,8 @@ def test_execution_start_sql_json(client, auth_headers, monkeypatch):
     class _Prepared:
         sql = "SELECT 2"
         params = {"x": 1}
-        sql_rendered = "SELECT 2"
-        count_sql = "SELECT COUNT(*) AS total FROM t"
+        qf_rendered_sql = "SELECT 2"
+        qf_count_sql = "SELECT COUNT(*) AS total FROM t"
 
     class _NoCodeService:
         def __init__(self, executor, domain_resolver):
@@ -279,7 +279,7 @@ def test_execution_start_sql_json(client, auth_headers, monkeypatch):
         def submit_statement_async(self, sql, parameters, **_kwargs):
             assert sql == "SELECT 2"
             assert parameters == {"x": 1}
-            return {"statement_id": "stmt-5"}
+            return {"qf_statement_id": "stmt-5"}
 
     class _Ctx:
         sql_exec = _SqlExec()
@@ -289,7 +289,7 @@ def test_execution_start_sql_json(client, auth_headers, monkeypatch):
             return _Ctx()
 
     monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
-    monkeypatch.setattr(execution_service, "NoCodeQueryService", _NoCodeService)
+    monkeypatch.setattr(execution_service, "QueryForgeService", _NoCodeService)
     monkeypatch.setattr(execution_service, "DomainResolver", lambda workspace_id: object())
 
     resp = client.post(

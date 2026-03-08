@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from app.services.models.model_write_service import ModelWriteService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_upsert_dictionary_empty_rows_returns_zero() -> None:
-    svc = ModelWriteService(sql=FakeSQLExecutor())
+    svc = ModelWriteService(sql=FakeForgeQueryPort())
     result = svc.upsert_dictionary(user_name="user", rows=[])
     assert result == {
         "inserted_tables": 0,
@@ -16,7 +16,7 @@ def test_upsert_dictionary_empty_rows_returns_zero() -> None:
 
 
 def test_upsert_dictionary_dedupes_and_counts() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses.append([{"id": 1, "name": "patients"}])
     sql.query_mappings_responses.append([{"model_table_id": 1, "column_name": "id"}])
 
@@ -35,7 +35,7 @@ def test_upsert_dictionary_dedupes_and_counts() -> None:
 
 
 def test_upsert_dictionary_full_replace_deactivates() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses.append([{"id": 2, "name": "visits"}])
     sql.query_mappings_responses.append([])
     sql.write_responses = [0, 0, 2]

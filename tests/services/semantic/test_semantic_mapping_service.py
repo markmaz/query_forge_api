@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import ExecuteResult
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeExecResult
 from app.services.semantic.semantic_mapping_service import SemanticMappingService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_mapping_create_with_model_column_id() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [{"id": 99}],
         [
@@ -32,7 +32,7 @@ def test_mapping_create_with_model_column_id() -> None:
             }
         ],
     ]
-    sql.insert_responses = [ExecuteResult(rowcount=1, lastrowid=10)]
+    sql.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=10)]
 
     svc = SemanticMappingService(sql=sql)
     row = svc.create_mapping(
@@ -51,7 +51,7 @@ def test_mapping_create_with_model_column_id() -> None:
 
 
 def test_mapping_create_with_table_and_column() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [{"id": 42}],
         [
@@ -74,7 +74,7 @@ def test_mapping_create_with_table_and_column() -> None:
             }
         ],
     ]
-    sql.insert_responses = [ExecuteResult(rowcount=1, lastrowid=11)]
+    sql.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=11)]
 
     svc = SemanticMappingService(sql=sql)
     row = svc.create_mapping(
@@ -92,14 +92,14 @@ def test_mapping_create_with_table_and_column() -> None:
 
 
 def test_mapping_rejects_missing_identifiers() -> None:
-    svc = SemanticMappingService(sql=FakeSQLExecutor())
+    svc = SemanticMappingService(sql=FakeForgeQueryPort())
 
-    with pytest.raises(ServiceError, match=r"mapping requires model_column_id or table_name\+column_name"):
+    with pytest.raises(ForgeError, match=r"mapping requires model_column_id or table_name\+column_name"):
         svc.create_mapping({"semantic_registry_id": 1})
 
 
 def test_resolve_best_column_for_concept_prefers_priority_then_confidence() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -147,7 +147,7 @@ def test_resolve_best_column_for_concept_prefers_priority_then_confidence() -> N
 
 
 def test_find_concepts_for_column_requires_identifier() -> None:
-    svc = SemanticMappingService(sql=FakeSQLExecutor())
+    svc = SemanticMappingService(sql=FakeForgeQueryPort())
 
-    with pytest.raises(ServiceError, match=r"model_column_id or table_name\+column_name is required"):
+    with pytest.raises(ForgeError, match=r"model_column_id or table_name\+column_name is required"):
         svc.find_concepts_for_column(workspace_id="ws1")

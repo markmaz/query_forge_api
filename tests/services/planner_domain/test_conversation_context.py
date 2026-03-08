@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.planner_domain.service import PlannerDomainService
 
 
@@ -13,8 +13,8 @@ class _MemoryConversationStore:
     def get_state(self, *, workspace_id: str, user_id: str, conversation_id: str):
         return self.rows.get((workspace_id, user_id, conversation_id))
 
-    def save_state(self, *, workspace_id: str, user_id: str, conversation_id: str, state, ttl_seconds: int):
-        del ttl_seconds
+    def save_state(self, *, workspace_id: str, user_id: str, conversation_id: str, state, qf_ttl_seconds: int):
+        del qf_ttl_seconds
         self.rows[(workspace_id, user_id, conversation_id)] = dict(state)
 
 
@@ -188,7 +188,7 @@ def test_plan_domain_unknown_conversation_id_returns_404() -> None:
         conversation_store=_MemoryConversationStore(),
     )
 
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         svc.plan(
             {
                 "workspace_id": "ws-1",

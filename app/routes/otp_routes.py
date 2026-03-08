@@ -1,5 +1,6 @@
 from flask import make_response, request
-from flask_restx import Namespace, Resource
+from flask_restx import Namespace
+from app.routes.forge_resource import ForgeResource
 
 from app.config import COOKIE_SAMESITE, COOKIE_SECURE, REFRESH_COOKIE_PATH
 from app.services.auth_service import AuthService
@@ -8,7 +9,7 @@ from app.services.otp_service import verify_otp_challenge
 otp_ns = Namespace("otp", description="A product available in Workboard")
 
 @otp_ns.route("/verify")
-class VerifyOTP(Resource):
+class VerifyOTP(ForgeResource):
     def post(self):
         data = request.get_json(silent=True) or {}
         challenge_id = (data.get("challenge_id") or "").strip()
@@ -30,11 +31,16 @@ class VerifyOTP(Resource):
 
         auth = AuthService()
         tokens = auth.issue_tokens(user)
+        workspaces = getattr(user, "workspaces", None) or []
+        default_ws = next((w for w in workspaces if getattr(w, "is_default", False)), None)
+        workspace_id = getattr(default_ws, "workspace_id", None)
         response = make_response(
             {
                 "access_token": tokens["access_token"],
                 "token_type": "Bearer",
                 "expires_in": tokens["expires_in"],
+                "workspace_id": workspace_id,
+                "workspaceId": workspace_id,
             },
             200,
         )
@@ -44,7 +50,7 @@ class VerifyOTP(Resource):
             httponly=True,
             secure=bool(COOKIE_SECURE),
             samesite=COOKIE_SAMESITE,
-            max_age=auth.refresh_ttl_seconds,
+            max_age=auth.qf_refresh_ttl,
             path=REFRESH_COOKIE_PATH,
         )
         return response

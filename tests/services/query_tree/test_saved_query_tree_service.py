@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.services.query_tree.saved_query_tree_service import FolderRow, QueryRow, SavedQueryTreeService
-from tests._support.fakes import FakeSQLExecutor
+from app.services.query_tree.saved_query_tree_service import ForgeFolderRow, ForgeQueryRow, SavedQueryTreeService
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_get_tree_my(monkeypatch) -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     service = SavedQueryTreeService(workspace_id="ws1", user_id="u1", user_display_name="User", sql=sql)
-    monkeypatch.setattr(service, "_fetch_folders_my", lambda: [FolderRow("f1", None, "Folder", 0)])
+    monkeypatch.setattr(service, "_fetch_folders_my", lambda: [ForgeFolderRow("f1", None, "Folder", 0)])
     monkeypatch.setattr(
         service,
         "_fetch_queries_my",
-        lambda: [QueryRow("q1", "f1", "Query", "u1", "MINE", datetime(2024, 1, 1))],
+        lambda: [ForgeQueryRow("q1", "f1", "Query", "u1", "MINE", datetime(2024, 1, 1))],
     )
 
     tree = service.get_tree(view="my")
@@ -23,7 +23,7 @@ def test_get_tree_my(monkeypatch) -> None:
 
 
 def test_get_tree_library(monkeypatch) -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     service = SavedQueryTreeService(workspace_id="ws1", user_id="u1", user_display_name="User", sql=sql)
     monkeypatch.setattr(service, "_fetch_folders_library", lambda: [])
     monkeypatch.setattr(service, "_fetch_queries_library", lambda: [])
@@ -32,7 +32,7 @@ def test_get_tree_library(monkeypatch) -> None:
 
 
 def test_get_tree_shared() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -52,7 +52,7 @@ def test_get_tree_shared() -> None:
 
 
 def test_get_tree_trash(monkeypatch) -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     service = SavedQueryTreeService(workspace_id="ws1", user_id="u1", user_display_name="User", sql=sql)
     monkeypatch.setattr(service, "_fetch_folders_trash", lambda: [])
     monkeypatch.setattr(service, "_fetch_queries_trash", lambda: [])
@@ -61,10 +61,10 @@ def test_get_tree_trash(monkeypatch) -> None:
 
 
 def test_build_trash_tree() -> None:
-    service = SavedQueryTreeService(workspace_id="ws1", user_id="u1", user_display_name="User", sql=FakeSQLExecutor())
-    folders = [FolderRow("f1", None, "TrashFolder", 0, deleted_at=datetime(2024, 1, 1))]
+    service = SavedQueryTreeService(workspace_id="ws1", user_id="u1", user_display_name="User", sql=FakeForgeQueryPort())
+    folders = [ForgeFolderRow("f1", None, "TrashFolder", 0, deleted_at=datetime(2024, 1, 1))]
     queries = [
-        QueryRow("q1", "f1", "DeletedQuery", "u1", "MINE", datetime(2024, 1, 2), deleted_at=datetime(2024, 1, 3))
+        ForgeQueryRow("q1", "f1", "DeletedQuery", "u1", "MINE", datetime(2024, 1, 2), deleted_at=datetime(2024, 1, 3))
     ]
     nodes = service._build_trash_tree(folders, queries)
     assert nodes[0]["nodeType"] == "folder"

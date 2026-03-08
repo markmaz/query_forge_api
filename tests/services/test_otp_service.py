@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services import otp_service
 
 
@@ -102,7 +102,7 @@ def test_issue_otp_challenge_rate_limited(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(otp_service, "OTP_ISSUE_MAX_PER_USER", 1)
 
     otp_service.issue_otp_challenge(user_id="u1")
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         otp_service.issue_otp_challenge(user_id="u1")
 
 

@@ -7,10 +7,10 @@ from flask import Flask
 from flask_restx import Api
 
 from app.decorators import security
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 import app.routes.ai as ai_routes
 from app.routes.ai import ai_ns
-from app.routes import _route_utils
+from app.routes import request_helpers as _route_utils
 from app.services import ai_suggest_service
 
 
@@ -618,12 +618,12 @@ def test_infer_domain_from_columns_single_result() -> None:
             _ = (query, params)
             return [{"domain_id": 6}]
 
-    inferred = ai_suggest_service.infer_domain_from_columns(
+    qf_inferred = ai_suggest_service.infer_domain_from_columns(
         workspace_id="ws-1",
         edits=[{"op": "addFilter", "col": {"workspaceTableId": 24}}],
         sql_executor=_SQL(),
     )
-    assert inferred == 6
+    assert qf_inferred == 6
 
 
 def test_infer_domain_from_columns_ambiguous_returns_none() -> None:
@@ -632,12 +632,12 @@ def test_infer_domain_from_columns_ambiguous_returns_none() -> None:
             _ = (query, params)
             return [{"domain_id": 6}, {"domain_id": 7}]
 
-    inferred = ai_suggest_service.infer_domain_from_columns(
+    qf_inferred = ai_suggest_service.infer_domain_from_columns(
         workspace_id="ws-1",
         edits=[{"op": "addSelect", "col": {"workspaceTableId": 24}}],
         sql_executor=_SQL(),
     )
-    assert inferred is None
+    assert qf_inferred is None
 
 
 def test_suggest_retries_when_literals_present_but_filters_missing(client, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1409,7 +1409,7 @@ def test_health_unavailable_returns_503(client, monkeypatch: pytest.MonkeyPatch)
 
 
 def test_suggest_requires_workspace_header(client) -> None:
-    with pytest.raises(ServiceError, match="Missing X-Workspace-Id header"):
+    with pytest.raises(ForgeError, match="Missing X-Workspace-Id header"):
         client.post(
             "/api/ai/suggest",
             json=_request_body(),

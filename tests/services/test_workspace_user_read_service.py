@@ -2,25 +2,25 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.workspace_user_read_service import WorkspaceUserReadService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_list_workspace_users_validates_inputs() -> None:
-    svc = WorkspaceUserReadService(sql=FakeSQLExecutor())
-    with pytest.raises(ServiceError):
+    svc = WorkspaceUserReadService(sql=FakeForgeQueryPort())
+    with pytest.raises(ForgeError):
         svc.list_workspace_users(workspace_id="")
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.list_workspace_users(workspace_id="ws", limit="bad")
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.list_workspace_users(workspace_id="ws", limit=0)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.list_workspace_users(workspace_id="ws", offset=-1)
 
 
 def test_list_workspace_users_success() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses.append(
         [
             {

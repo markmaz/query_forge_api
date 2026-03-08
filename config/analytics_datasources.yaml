@@ -1,0 +1,33 @@
+# analytics_datasources.yaml
+#
+# SECURITY: All values that are credentials or internal identifiers MUST be
+# referenced as ${ENV_VAR} placeholders only.  Literal secret values (passwords,
+# tokens, API keys, hostnames, account IDs) must NEVER be committed to this file.
+# This is enforced by the detect-secrets pre-commit hook.
+
+analytics_datasources:
+  primary:
+    type: databricks
+    host: ${DATABRICKS_HOST}
+    token: ${DATABRICKS_TOKEN}
+    http_path: ${DATABRICKS_HTTP_PATH}
+
+  analytics:
+    type: snowflake
+    account: ${SNOWFLAKE_ACCOUNT}
+    user: ${SNOWFLAKE_USER}
+    password: ${SNOWFLAKE_PASSWORD}
+    database: ${SNOWFLAKE_DATABASE}
+    warehouse: ${SNOWFLAKE_WAREHOUSE}
+    role: ${SNOWFLAKE_ROLE}
+
+  legacy:
+    type: mysql
+    host: ${MYSQL_ANALYTICS_HOST}
+    port: 3306
+    database: ${MYSQL_ANALYTICS_DB}
+    user: ${MYSQL_ANALYTICS_USER}
+    password: ${MYSQL_ANALYTICS_PASSWORD}
+    # FIND-022: ssl_ca is required — path to PEM CA certificate for server
+    # certificate verification.  Set to the path inside the deployment container.
+    ssl_ca: ${MYSQL_ANALYTICS_SSL_CA}

@@ -30,7 +30,7 @@ class PlannerDomainConversationStore(Protocol):
         user_id: str,
         conversation_id: str,
         state: Mapping[str, Any],
-        ttl_seconds: int,
+        qf_ttl_seconds: int,
     ) -> None:
         ...
 
@@ -57,11 +57,11 @@ class HybridPlannerDomainConversationStore:
         user_id: str,
         conversation_id: str,
         state: Mapping[str, Any],
-        ttl_seconds: int,
+        qf_ttl_seconds: int,
     ) -> None:
         key = _conversation_store_key(workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id)
         payload = json.dumps(dict(state), ensure_ascii=True, separators=(",", ":"))
-        self._write(key, payload, ttl_seconds)
+        self._write(key, payload, qf_ttl_seconds)
 
     def _read(self, key: str) -> Optional[str]:
         client = _get_valkey_client()
@@ -76,11 +76,11 @@ class HybridPlannerDomainConversationStore:
                 logger.debug("planner_domain valkey read failed", exc_info=True)
         return _IN_MEMORY_CONV_STORE.get(key)
 
-    def _write(self, key: str, value: str, ttl_seconds: int) -> None:
+    def _write(self, key: str, value: str, qf_ttl_seconds: int) -> None:
         client = _get_valkey_client()
         if client is not None:
             try:
-                client.setex(key, int(ttl_seconds), value)
+                client.setex(key, int(qf_ttl_seconds), value)
                 return
             except Exception:
                 logger.debug("planner_domain valkey write failed", exc_info=True)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import app.routes.domain_routes as domain_routes
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 
 
 def test_domains_get_success(client, auth_headers, monkeypatch):
@@ -33,7 +33,7 @@ def test_domains_get_forbidden_workspace(client, monkeypatch):
     )
 
     def _deny_workspace_access(*, user_id: str, workspace_id: str) -> str:
-        raise ServiceError("You do not have access to this workspace", status_code=403)
+        raise ForgeError("You do not have access to this workspace", status_code=403)
 
     monkeypatch.setattr(
         "app.decorators.security.workspace_access_service.assert_workspace_access",
@@ -51,7 +51,7 @@ def test_domains_get_forbidden_workspace(client, monkeypatch):
 def test_domains_get_service_error(client, auth_headers, monkeypatch):
     class _Svc:
         def list_user_domains(self, *, workspace_id: str, user_id: str):
-            raise ServiceError("nope", status_code=418)
+            raise ForgeError("nope", status_code=418)
 
     monkeypatch.setattr(domain_routes, "UserDomainReadService", _Svc)
 

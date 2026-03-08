@@ -3,10 +3,11 @@ from __future__ import annotations
 import logging
 
 from flask import request
-from flask_restx import Namespace, Resource
+from flask_restx import Namespace
+from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.embedding.domain_embedding_service import DomainEmbeddingService
 from app.services.embedding.embedding_index_service import EmbeddingIndexService
 from app.services.embedding.embedding_search_service import EmbeddingSearchService
@@ -52,7 +53,7 @@ def _parse_min_score(value):
     try:
         return float(value)
     except Exception:
-        raise ServiceError("minScore must be a number", status_code=400)
+        raise ForgeError("minScore must be a number", status_code=400)
 
 
 def _parse_model_table_id(value):
@@ -61,11 +62,11 @@ def _parse_model_table_id(value):
     try:
         return int(value)
     except Exception:
-        raise ServiceError("modelTableId must be an integer", status_code=400)
+        raise ForgeError("modelTableId must be an integer", status_code=400)
 
 
 @embeddings_ns.route("/rebuild")
-class EmbeddingsRebuild(Resource):
+class EmbeddingsRebuild(ForgeResource):
     @token_required
     def post(self):
         body = request.get_json(silent=True) or {}
@@ -81,7 +82,7 @@ class EmbeddingsRebuild(Resource):
                 workspace_id=workspace_id,
             )
             return result, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("Embedding rebuild failed")
@@ -89,7 +90,7 @@ class EmbeddingsRebuild(Resource):
 
 
 @embeddings_ns.route("/search")
-class EmbeddingsSearch(Resource):
+class EmbeddingsSearch(ForgeResource):
     @token_required
     def post(self):
         body = request.get_json(silent=True) or {}
@@ -121,7 +122,7 @@ class EmbeddingsSearch(Resource):
                 min_score=min_score,
             )
             return result, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("Embedding search failed")
@@ -129,7 +130,7 @@ class EmbeddingsSearch(Resource):
 
 
 @embeddings_ns.route("/domains/upsert")
-class EmbeddingsDomainUpsert(Resource):
+class EmbeddingsDomainUpsert(ForgeResource):
     @token_required
     def post(self):
         body = request.get_json(silent=True) or {}
@@ -142,7 +143,7 @@ class EmbeddingsDomainUpsert(Resource):
             service = DomainEmbeddingService()
             result = service.upsert_domain_profiles(workspace_id=workspace_id, force=force)
             return result, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("Domain embedding upsert failed")
@@ -150,7 +151,7 @@ class EmbeddingsDomainUpsert(Resource):
 
 
 @embeddings_ns.route("/columns/upsert")
-class EmbeddingsColumnUpsert(Resource):
+class EmbeddingsColumnUpsert(ForgeResource):
     @token_required
     def post(self):
         body = request.get_json(silent=True) or {}
@@ -163,7 +164,7 @@ class EmbeddingsColumnUpsert(Resource):
             service = EmbeddingIndexService()
             result = service.upsert_workspace_columns(workspace_id=workspace_id, limit=limit)
             return result, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("Column embedding upsert failed")

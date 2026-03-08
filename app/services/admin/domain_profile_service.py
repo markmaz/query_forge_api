@@ -4,8 +4,8 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
 from app.models.domain_profile import (
     DomainProfileCreateRequest,
     DomainProfileResponse,
@@ -13,7 +13,7 @@ from app.models.domain_profile import (
     compute_content_hash,
     _build_embedding_text,
 )
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
 
@@ -102,25 +102,25 @@ WHERE workspace_id = :workspace_id AND domain_id = :domain_id
 
 
 class DomainProfileService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def list_profiles(self, workspace_id: str) -> List[Dict[str, Any]]:
         workspace = (workspace_id or "").strip()
         if not workspace:
-            raise ServiceError("workspace_id is required", status_code=400)
+            raise ForgeError("workspace_id is required", status_code=400)
         rows = self._sql.execute_query_mappings(_LIST_QUERY, {"workspace_id": workspace})
         return [_row_to_response(r).model_dump(mode="json") for r in rows]
 
     def get_profile(self, workspace_id: str, domain_id: int) -> Dict[str, Any]:
         workspace = (workspace_id or "").strip()
         if not workspace:
-            raise ServiceError("workspace_id is required", status_code=400)
+            raise ForgeError("workspace_id is required", status_code=400)
         rows = self._sql.execute_query_mappings(
             _GET_QUERY, {"workspace_id": workspace, "domain_id": domain_id}
         )
         if not rows:
-            raise ServiceError(
+            raise ForgeError(
                 "Domain profile not found",
                 status_code=404,
                 details={"workspace_id": workspace, "domain_id": domain_id},
@@ -133,7 +133,7 @@ class DomainProfileService:
             {"workspace_id": req.workspace_id, "domain_id": req.domain_id},
         )
         if existing:
-            raise ServiceError(
+            raise ForgeError(
                 "Domain profile already exists",
                 status_code=409,
                 details={"workspace_id": req.workspace_id, "domain_id": req.domain_id},
@@ -150,13 +150,13 @@ class DomainProfileService:
     ) -> Dict[str, Any]:
         workspace = (workspace_id or "").strip()
         if not workspace:
-            raise ServiceError("workspace_id is required", status_code=400)
+            raise ForgeError("workspace_id is required", status_code=400)
 
         existing = self._sql.execute_query_mappings(
             _GET_QUERY, {"workspace_id": workspace, "domain_id": domain_id}
         )
         if not existing:
-            raise ServiceError(
+            raise ForgeError(
                 "Domain profile not found",
                 status_code=404,
                 details={"workspace_id": workspace, "domain_id": domain_id},
@@ -186,13 +186,13 @@ class DomainProfileService:
     def delete_profile(self, workspace_id: str, domain_id: int) -> Dict[str, Any]:
         workspace = (workspace_id or "").strip()
         if not workspace:
-            raise ServiceError("workspace_id is required", status_code=400)
+            raise ForgeError("workspace_id is required", status_code=400)
 
         existing = self._sql.execute_query_mappings(
             _GET_QUERY, {"workspace_id": workspace, "domain_id": domain_id}
         )
         if not existing:
-            raise ServiceError(
+            raise ForgeError(
                 "Domain profile not found",
                 status_code=404,
                 details={"workspace_id": workspace, "domain_id": domain_id},

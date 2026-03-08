@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import app.services.planner_domain.service as planner_domain_service_module
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.planner_domain.service import _read_pipeline_profile_from_log
 
 
@@ -58,8 +58,8 @@ def test_read_pipeline_profile_from_log_respects_workspace_and_user(monkeypatch,
             workspace_id="ws-1",
             user_id="user-1",
         )
-    except ServiceError as exc:
+    except ForgeError as exc:
         assert exc.status_code == 404
         assert "trace-xyz" in str(exc.details or {})
     else:
-        raise AssertionError("Expected ServiceError for workspace/user mismatch")
+        raise AssertionError("Expected ForgeError for workspace/user mismatch")

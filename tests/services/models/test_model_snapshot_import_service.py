@@ -5,20 +5,20 @@ import json
 import pytest
 
 from app.services.models.model_snapshot_import_service import ModelSnapshotImportService
-from tests._support.fakes import FakeDatabricksSQLExecutor, FakeSQLExecutor
+from tests._support.fakes import FakeDatabricksForgeQueryPort, FakeForgeQueryPort
 
 
 def test_latest_snapshot_id_missing() -> None:
-    sql = FakeDatabricksSQLExecutor()
+    sql = FakeDatabricksForgeQueryPort()
     sql.submit_responses.append({"rows": []})
-    svc = ModelSnapshotImportService(sql=sql, mysql=FakeSQLExecutor())
+    svc = ModelSnapshotImportService(sql=sql, mysql=FakeForgeQueryPort())
 
     with pytest.raises(ValueError):
         svc._latest_snapshot_id()
 
 
 def test_import_snapshot_upserts_and_deactivates() -> None:
-    sql = FakeDatabricksSQLExecutor()
+    sql = FakeDatabricksForgeQueryPort()
     sql.submit_responses.append(
         {
             "rows": [
@@ -52,7 +52,7 @@ def test_import_snapshot_upserts_and_deactivates() -> None:
         }
     )
 
-    mysql = FakeSQLExecutor()
+    mysql = FakeForgeQueryPort()
     mysql.query_mappings_responses.append([{"id": 10, "name": "patients"}, {"id": 20, "name": "visits"}])
     mysql.write_responses = [0, 0, 3]
 

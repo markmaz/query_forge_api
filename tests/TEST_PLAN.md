@@ -19,7 +19,7 @@
 - models (`app/routes/model_routes.py`)
 - workspace-inventory (`app/routes/workspace_inventory_routes.py`)
 - domains (`app/routes/domain_routes.py`)
-- query (`app/routes/no_code_query_routes.py`)
+- query (`app/routes/query_forge_routes.py`)
 - query-tree (`app/routes/query_tree_routes.py`)
 - saved-queries (`app/routes/query_tree_routes.py`)
 - catalog (`app/routes/catalog_routes.py`)
@@ -34,7 +34,7 @@
 - Auth: `AuthService`, `OtpService`, `PasswordService`
 - Products: `ProductService`, `ProductGroupService`, `RoleService`
 - ValueOverrides: `ListReadService`, `ListUploadService`, `ListTemplateService`, `ListWriter`/`DualListWriter`
-- No-code: `NoCodeQueryService`
+- Query Forge: `QueryForgeService`
 - Misc: `ConnectionService`, `DashboardService`, `WorkspaceService`, `WarehouseService`, `UdfService`
 - Recon: `WorkspaceReconService`
 

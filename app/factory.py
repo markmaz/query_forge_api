@@ -10,9 +10,9 @@ from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 from flask_restx import Api
 
-from app.adapters.databricks_token_manager import DatabricksTokenManager
-from app.adapters.sigma_token_manager import SigmaTokenManager
-from app.celery_app import celery, init_celery
+from app.adapters.databricks_token_manager import DatabricksForgeTokenPort
+from app.adapters.sigma_token_manager import ForgeTokenManager
+from app.celery_app import celery, configure_forge_celery
 from app.config import (
     AWS_ACCESS_KEY_ID,
     AWS_REGION,
@@ -33,19 +33,19 @@ from app.config import (
     VLLM_TIMEOUT,
 )
 from app.config.logging_config import configure_logging
-from app.config.mail_config import MailConfig
-from app.exceptions.service_error import ServiceError
+from app.config.mail_config import ForgeMailConfig
+from app.exceptions.forge_error import ForgeError
 from app.extensions import mail
 from app.routes import planner_domain as _planner_domain  # noqa: F401
 from app.routes import planner_llm as _planner_llm  # noqa: F401
 from app.routes.admin_routes import admin_ns
 from app.routes.ai import ai_ns
-from app.routes.auth_routes import auth_ns
+from app.routes.auth_routes import qf_auth_ns
 from app.routes.chat_minimal import chat_ns
 from app.routes.connection_routes import connection_ns
-from app.routes.dashboard_routes import dashboard_ns
 from app.routes.data_environment import data_environment_ns
-from app.routes.domain_routes import domains_ns
+from app.routes.datasource_routes import datasource_ns
+from app.routes.domain_routes import qf_domains_ns
 from app.routes.embeddings import embeddings_ns
 from app.routes.execution_routes import executions_ns
 from app.routes.export_routes import exports_ns
@@ -54,14 +54,15 @@ from app.routes.model_routes import model_ns
 from app.routes.nlp_review import nlp_review_ns
 from app.routes.nlp_routes import nlp_ns
 from app.routes.nlp_tier2 import nlp_tier2_ns
-from app.routes.no_code_query_routes import nocode_ns
 from app.routes.otp_routes import otp_ns
 from app.routes.planner_extract import planner_ns
 from app.routes.product_groups_routes import product_group_ns
 from app.routes.product_routes import product_ns
 from app.routes.prompt_feedback import prompt_feedback_ns
 from app.routes.public_sales_inquiry import public_ns
-from app.routes.query_tree_routes import saved_query_ns, tree_ns
+from app.routes.query_forge_routes import query_forge_ns
+from app.routes.query_studio_routes import query_studio_ns
+from app.routes.query_tree_routes import qf_saved_query_ns, qf_tree_ns
 from app.routes.role_routes import role_ns
 from app.routes.semantic_concepts import (
     semantic_concept_aliases_ns,
@@ -74,13 +75,16 @@ from app.routes.semantic_registry import semantic_registry_ns
 from app.routes.semantic_relationships import semantic_relationships_ns
 from app.routes.semantic_routes import semantic_ns
 from app.routes.semantic_suggestions import semantic_suggestions_ns
-from app.routes.user_routes import user_ns
+from app.routes.user_routes import qf_user_ns
 from app.routes.user_workspace_routes import user_workspace_ns
 from app.routes.value_override_routes import value_override_ns
 from app.routes.vector_domains import vector_ns
 from app.routes.workspace_inventory_routes import wsinv_ns
 from app.routes.workspace_routes import workspace_ns
 from app.routes.workspace_table_routes import workspace_tables_ns
+from app.services.analytics.config_loader import load_analytics_config
+from app.services.analytics.executor_factory import ExecutorFactory
+from app.services.analytics.registry import AnalyticsDatasourceRegistry
 from app.services.auth_service import AuthService
 from app.services.base_service import build_url
 from app.services.semantic.concept_seed import ConceptSeedService
@@ -89,6 +93,32 @@ NAME = "api"
 VERSION = "v1"
 
 auth_service = AuthService()
+
+
+def _register_analytics_registry(app: Flask) -> None:  # noqa: F821
+    """Load analytics datasource config and register the registry in ``app.extensions``.
+
+    Failures are logged but never crash app startup — the registry will simply be
+    absent or empty so that unrelated features are unaffected.
+    """
+    _logger = logging.getLogger(__name__)
+    try:
+        config = load_analytics_config()
+        executors = {
+            name: ExecutorFactory.create(cfg["type"], cfg)
+            for name, cfg in config.items()
+        }
+        registry = AnalyticsDatasourceRegistry(executors)
+        app.extensions["analytics_registry"] = registry
+        _logger.info(
+            "Analytics datasource registry initialised with %d datasource(s): %s",
+            len(executors),
+            ", ".join(
+                f"{name}({executor.get_dialect()})" for name, executor in executors.items()
+            ),
+        )
+    except Exception:
+        _logger.exception("Failed to initialise analytics datasource registry")
 
 def try_get_json_body(req):
     try:
@@ -136,20 +166,20 @@ def create_app():
         )
     authorizations = {"BearerAuth": {"type": "apiKey", "in": "header", "name": "Authorization"}}
 
-    app.config.from_object(MailConfig)
+    app.config.from_object(ForgeMailConfig)
     mail.init_app(app=app)
 
     app.config["CELERY_BROKER_URL"] = VALKEY_CONFIG
     app.config["CELERY_RESULT_BACKEND"] = VALKEY_CONFIG
 
-    init_celery(app)
+    configure_forge_celery(app)
     app.config["CELERY"] = celery
 
     api = Api(
         app,
         version="1.0",
-        title="Wayfinder API",
-        description="The Wayfinder API",
+        title="Query Forge API",
+        description="The Query Forge REST API",
         doc="/swagger-ui",
         mask_swagger=False,
         security="BearerAuth",
@@ -163,11 +193,10 @@ def create_app():
         expose_headers=["Content-Disposition"],
     )
 
-    api.add_namespace(auth_ns, path=build_url("/", NAME, VERSION, "auth"))
-    api.add_namespace(user_ns, path=build_url("/", NAME, VERSION, "users"))
+    api.add_namespace(qf_auth_ns, path=build_url("/", NAME, VERSION, "auth"))
+    api.add_namespace(qf_user_ns, path=build_url("/", NAME, VERSION, "users"))
     api.add_namespace(workspace_ns, path=build_url("/", NAME, VERSION, "workspaces"))
     api.add_namespace(workspace_tables_ns, path=build_url("/", NAME, VERSION, "workspace-tables"))
-    api.add_namespace(dashboard_ns, path=build_url("/", NAME, VERSION, "dashboards"))
     api.add_namespace(connection_ns, path=build_url("/", NAME, VERSION, "connections"))
     api.add_namespace(user_workspace_ns, path=build_url("/", NAME, VERSION, "user-workspaces"))
     api.add_namespace(role_ns, path=build_url("/", NAME, VERSION, "roles"))
@@ -178,7 +207,7 @@ def create_app():
     api.add_namespace(product_group_ns, path=build_url("/", NAME, VERSION, "product-groups"))
     api.add_namespace(value_override_ns, path=build_url("/", NAME, VERSION, "value_overrides"))
     api.add_namespace(public_ns, path=build_url("/", NAME, VERSION, "public"))
-    api.add_namespace(domains_ns, path=build_url("/", NAME, VERSION, "domains"))
+    api.add_namespace(qf_domains_ns, path=build_url("/", NAME, VERSION, "domains"))
     api.add_namespace(embeddings_ns, path=build_url("/", NAME, VERSION, "embeddings"))
     api.add_namespace(executions_ns, path=build_url("/", NAME, VERSION, "executions"))
     api.add_namespace(exports_ns, path=build_url("/", NAME, VERSION, "exports"))
@@ -187,9 +216,10 @@ def create_app():
     api.add_namespace(nlp_ns, path=build_url("/", NAME, VERSION, "nlp"))
     api.add_namespace(nlp_tier2_ns, path=build_url("/", NAME, VERSION, "nlp"))
     api.add_namespace(nlp_review_ns, path=build_url("/", NAME, VERSION, "nlp"))
-    api.add_namespace(nocode_ns, path=build_url("/", NAME, VERSION, "query"))
-    api.add_namespace(tree_ns, path=build_url("/", NAME, VERSION, "query-tree"))
-    api.add_namespace(saved_query_ns, path=build_url("/", NAME, VERSION, "saved-queries"))
+    api.add_namespace(query_forge_ns, path=build_url("/", NAME, VERSION, "query"))
+    api.add_namespace(query_studio_ns, path=build_url("/", NAME, VERSION, "query-studio"))
+    api.add_namespace(qf_tree_ns, path=build_url("/", NAME, VERSION, "query-tree"))
+    api.add_namespace(qf_saved_query_ns, path=build_url("/", NAME, VERSION, "saved-queries"))
     api.add_namespace(ai_ns, path=build_url("/", NAME, VERSION, "ai"))
     api.add_namespace(prompt_feedback_ns, path=build_url("/", NAME, VERSION, "prompt-feedback"))
     api.add_namespace(forge_insights_ns, path=build_url("/", NAME, VERSION, "forge-insights"))
@@ -205,6 +235,7 @@ def create_app():
     api.add_namespace(semantic_ns, path=build_url("/", NAME, VERSION, "semantic"))
     api.add_namespace(vector_ns, path=build_url("/", NAME, VERSION, "vector"))
     api.add_namespace(data_environment_ns, path=f"/{NAME}/{VERSION}/data-environment")
+    api.add_namespace(datasource_ns, path=build_url("/", NAME, VERSION, "datasources"))
 
     configure_logging()
     logger = logging.getLogger(__name__)
@@ -217,8 +248,8 @@ def create_app():
         except Exception:
             logger.exception("Semantic concept startup seed failed")
 
-    databricks_token_manager = DatabricksTokenManager()
-    sigma_token_manager = SigmaTokenManager()
+    databricks_token_manager = DatabricksForgeTokenPort()
+    sigma_token_manager = ForgeTokenManager()
     databricks_token_manager.start_auto_refresh()
     sigma_token_manager.start_auto_refresh()
 
@@ -256,10 +287,12 @@ def create_app():
         response.headers["X-Correlation-ID"] = g.correlation_id
         return response
 
-    @app.errorhandler(ServiceError)
+    @app.errorhandler(ForgeError)
     def handle_service_error(error):
         response = jsonify(error.to_dict())
         response.status_code = error.status_code
         return response
+
+    _register_analytics_registry(app)
 
     return app

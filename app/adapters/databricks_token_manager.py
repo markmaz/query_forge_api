@@ -1,12 +1,12 @@
 import logging
 
-from app.adapters.base_token_manager import BaseTokenManager
+from app.adapters.base_token_manager import BaseForgeTokenManager
 from app.config import DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET, DATABRICKS_TOKEN_URL
 
 logger = logging.getLogger(__name__)
 
 
-class DatabricksTokenManager(BaseTokenManager):
+class DatabricksForgeTokenPort(BaseForgeTokenManager):
     def __init__(self):
         logger.info(f"TOKEN URL: {DATABRICKS_TOKEN_URL}")
         token_url = DATABRICKS_TOKEN_URL

@@ -3,15 +3,15 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.ports.sql_executor import ForgeQueryPort
 
 
 class ConceptToColumnService:
     PER_CONCEPT_LIMIT = 3
 
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def map_concepts_to_columns(
         self,

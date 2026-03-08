@@ -6,11 +6,11 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from qdrant_client.http import models as qdrant_models
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import QDRANT_COLUMN_COLLECTION, QDRANT_COLUMN_COLLECTION_V2, QDRANT_TABLE_COLLECTION
 from app.infra.embedding_model import DEFAULT_VECTOR_SIZE, EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +23,12 @@ class EmbeddingIndexService:
     def __init__(
         self,
         *,
-        sql: Optional[SQLExecutor] = None,
+        sql: Optional[ForgeQueryPort] = None,
         table_qdrant: Optional[QdrantClientWrapper] = None,
         column_qdrant: Optional[QdrantClientWrapper] = None,
         model: Optional[EmbeddingModel] = None,
     ) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+        self._sql = sql or ForgeMetaSQL()
         self._table_qdrant = table_qdrant or QdrantClientWrapper(collection_name=TABLE_COLLECTION_NAME)
         self._column_qdrant = column_qdrant or QdrantClientWrapper(collection_name=COLUMN_COLLECTION_NAME)
         self._model = model or EmbeddingModel()

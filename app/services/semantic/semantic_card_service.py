@@ -5,9 +5,9 @@ import re
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import SEMANTIC_SAMPLE_VALUES_LIMIT, SEMANTIC_STATS_ENABLED
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 
 _YEAR_RE = re.compile(r"^\d{4}$")
 _NUMERIC_RE = re.compile(r"^-?\d+(\.\d+)?$")
@@ -17,11 +17,11 @@ class SemanticCardService:
     def __init__(
         self,
         *,
-        sql: Optional[SQLExecutor] = None,
+        sql: Optional[ForgeQueryPort] = None,
         sample_values_limit: Optional[int] = None,
         stats_enabled: Optional[bool] = None,
     ) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+        self._sql = sql or ForgeMetaSQL()
         self._sample_values_limit = max(1, int(sample_values_limit or SEMANTIC_SAMPLE_VALUES_LIMIT))
         self._stats_enabled = SEMANTIC_STATS_ENABLED if stats_enabled is None else bool(stats_enabled)
 

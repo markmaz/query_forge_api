@@ -4,9 +4,9 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.semantic.semantic_suggestion_service import SemanticSuggestionService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 class _StubCardService:
@@ -76,7 +76,7 @@ def _run_row(status: str = "created") -> Dict[str, Any]:
 
 
 def test_execution_flow_with_mocked_llm() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [_run_row(status="created")],
         [],
@@ -147,7 +147,7 @@ def test_execution_flow_with_mocked_llm() -> None:
 
 
 def test_cannot_approve_invalid_item() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -189,12 +189,12 @@ def test_cannot_approve_invalid_item() -> None:
     ]
 
     svc = SemanticSuggestionService(sql=sql)
-    with pytest.raises(ServiceError, match="Cannot approve invalid item"):
+    with pytest.raises(ForgeError, match="Cannot approve invalid item"):
         svc.update_item(7, {"decision_status": "approved"})
 
 
 def test_apply_idempotency() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [_run_row(status="completed")],
         [
@@ -272,7 +272,7 @@ def test_apply_idempotency() -> None:
 
 
 def test_llm_raw_json_saved_on_schema_failure() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [_run_row(status="created")],
         [],

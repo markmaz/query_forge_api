@@ -5,21 +5,21 @@ from typing import Any, ContextManager, Dict, List, Mapping, Optional, Protocol,
 
 
 @dataclass(frozen=True)
-class ExecuteResult:
+class ForgeExecResult:
     rowcount: int
     lastrowid: Optional[int] = None
 
 
 @runtime_checkable
-class SQLTransaction(Protocol):
+class ForgeQueryTx(Protocol):
     def execute_write(self, query: str, params: Optional[Mapping[str, Any]] = None) -> int: ...
     def execute_query_mappings(self, query: str, params: Optional[Mapping[str, Any]] = None) -> List[Dict[str, Any]]: ...
     def execute_query(self, query: str, params: Optional[Mapping[str, Any]] = None) -> List[Tuple]: ...
-    def execute_insert(self, query: str, params: Optional[Mapping[str, Any]] = None) -> ExecuteResult: ...
+    def execute_insert(self, query: str, params: Optional[Mapping[str, Any]] = None) -> ForgeExecResult: ...
 
 
 @runtime_checkable
-class SQLExecutor(Protocol):
+class ForgeQueryPort(Protocol):
     """Abstract SQL executor used by agents (injectable)."""
 
     def submit_statement(
@@ -29,18 +29,18 @@ class SQLExecutor(Protocol):
         warehouse_id: Optional[str] = None,
         parameters: Optional[Mapping[str, Any]] = None,
         wait: bool = True,
-        timeout_s: int = 120,
-        result_format: Optional[str] = None,
+        qf_timeout_s: int = 120,
+        qf_result_fmt: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Submit a SQL statement. If wait=True, blocks until DONE/FAILED/CANCELED, else returns handle immediately."""
 
-    def poll_status(self, statement_id: str) -> Dict[str, Any]:
+    def poll_status(self, qf_statement_id: str) -> Dict[str, Any]:
         """Polls the statement status payload (RAW response dict)."""
 
-    def fetch_all_json(self, statement_id: str) -> List[Dict[str, Any]]:
+    def fetch_all_json(self, qf_statement_id: str) -> List[Dict[str, Any]]:
         """Fetches all results as a list[dict] (handles pagination/external links)."""
 
-    def cancel(self, statement_id: str) -> None:
+    def cancel(self, qf_statement_id: str) -> None:
         """Attempts to cancel the running statement (best effort)."""
 
     def execute_write(self, query: str, params: Optional[Mapping[str, Any]] = None) -> int:
@@ -52,8 +52,8 @@ class SQLExecutor(Protocol):
     def execute_query(self, query: str, params: Optional[Mapping[str, Any]] = None) -> List[Tuple]:
         """Executes a query and returns list of tuple rows."""
 
-    def execute_insert(self, query: str, params: Optional[Mapping[str, Any]] = None) -> ExecuteResult:
+    def execute_insert(self, query: str, params: Optional[Mapping[str, Any]] = None) -> ForgeExecResult:
         """Executes INSERT and returns rowcount + lastrowid."""
 
-    def transaction(self) -> ContextManager[SQLTransaction]:
+    def transaction(self) -> ContextManager[ForgeQueryTx]:
         """Starts a transaction context."""

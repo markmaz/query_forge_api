@@ -5,7 +5,7 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.domain_resolver import DomainPlan
 
 _WT_COLUMN_KEY_RE = re.compile(r"^wt(?P<wt>\d+)\.(?P<col>[A-Za-z_][A-Za-z0-9_]*)$")
@@ -45,7 +45,7 @@ def validate_and_normalize_derived_sqljson(
     Normalize planner-style derived metric payloads into the legacy sqlJson shape.
 
     Returns: (normalized_query, issues, meta)
-      - issues is a stable-coded list suitable for ServiceError.details.
+      - issues is a stable-coded list suitable for ForgeError.details.
       - meta contains derived_registry keyed by metric name.
     """
 
@@ -159,7 +159,7 @@ def validate_and_normalize_derived_sqljson(
     issue_dicts = [issue.to_dict() for issue in issues]
     if strict and issue_dicts:
         first = issue_dicts[0]
-        raise ServiceError(
+        raise ForgeError(
             f"derived_validation_failed: {first['code']} at {first['path']}",
             status_code=400,
             details={"issues": issue_dicts},

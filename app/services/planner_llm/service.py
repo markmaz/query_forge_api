@@ -11,13 +11,13 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from qdrant_client.http import models as qdrant_models
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import VLLM_BASE_URL, VLLM_MODEL
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.infra.embedding_model import EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
 from app.models.ai_suggest import AddAggregateEdit, AddFilterEdit, AddGroupByEdit, AddSelectEdit, SetDomainEdit, SqlColumnKey
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 from app.services.llm.llm_client import LLMClient
 from app.services.planner_llm.cache import PlannerLLMCache
 from app.services.planner_llm.prompts import (
@@ -68,13 +68,13 @@ class PlannerLLMCandidateRetriever:
     def __init__(
         self,
         *,
-        sql: Optional[SQLExecutor] = None,
+        sql: Optional[ForgeQueryPort] = None,
         model: Optional[EmbeddingModel] = None,
         concept_qdrant: Optional[QdrantClientWrapper] = None,
         column_qdrant: Optional[QdrantClientWrapper] = None,
         domain_qdrant: Optional[QdrantClientWrapper] = None,
     ) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+        self._sql = sql or ForgeMetaSQL()
         self._model = model or EmbeddingModel()
         self._concept_qdrant = concept_qdrant or QdrantClientWrapper(collection_name=SEMANTIC_COLLECTION)
         self._column_qdrant = column_qdrant or QdrantClientWrapper(collection_name=COLUMN_COLLECTION)
@@ -376,12 +376,12 @@ class PlannerLLMService:
     def __init__(
         self,
         *,
-        sql: Optional[SQLExecutor] = None,
+        sql: Optional[ForgeQueryPort] = None,
         llm_client: Optional[LLMClient] = None,
         cache: Optional[PlannerLLMCache] = None,
         retriever: Optional[PlannerLLMCandidateRetriever] = None,
     ) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+        self._sql = sql or ForgeMetaSQL()
         self._llm = llm_client or LLMClient(endpoint=VLLM_BASE_URL, model=VLLM_MODEL, timeout_seconds=60)
         self._cache = cache or PlannerLLMCache(sql=self._sql)
         self._retriever = retriever or PlannerLLMCandidateRetriever(sql=self._sql)
@@ -390,7 +390,7 @@ class PlannerLLMService:
         try:
             req = PlannerLLMRequest.model_validate(payload or {})
         except ValidationError as exc:
-            raise ServiceError("Invalid planner_llm request", status_code=400, details={"errors": exc.errors()}) from exc
+            raise ForgeError("Invalid planner_llm request", status_code=400, details={"errors": exc.errors()}) from exc
 
         trace_id = str(uuid.uuid4())
         timings: Dict[str, int] = {}
@@ -571,7 +571,7 @@ class PlannerLLMService:
         raw_content = str(repair_trace.get("content") or repair_trace.get("raw_text") or "")
         if parsed is not None and _looks_like_plan_json(parsed):
             return LLMCallResult(parsed=parsed, raw_content=raw_content, attempts=3, repaired=True)
-        raise ServiceError("planner_llm invalid model JSON", status_code=502, details={"raw": raw_content[:2000]})
+        raise ForgeError("planner_llm invalid model JSON", status_code=502, details={"raw": raw_content[:2000]})
 
     def _compile_plan_to_sql_json(
         self,

@@ -4,15 +4,15 @@ import json
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from app.adapters.databricks_sql_executor import DatabricksSQLExecutor
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.databricks_sql_executor import DatabricksForgeQueryPort
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import (
     DBX_MODEL_COLUMNS_SNAPSHOT_TABLE,
     DBX_MODEL_SNAPSHOT_CATALOG,
     DBX_MODEL_SNAPSHOT_SCHEMA,
     DBX_MODEL_TABLES_SNAPSHOT_TABLE,
 )
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 
 COLUMNS_PATH = f"{DBX_MODEL_SNAPSHOT_CATALOG}.{DBX_MODEL_SNAPSHOT_SCHEMA}.{DBX_MODEL_COLUMNS_SNAPSHOT_TABLE}"
 TABLE_PATH = f"{DBX_MODEL_SNAPSHOT_CATALOG}.{DBX_MODEL_SNAPSHOT_SCHEMA}.{DBX_MODEL_TABLES_SNAPSHOT_TABLE}"
@@ -41,11 +41,11 @@ class ModelSnapshotImportService:
     def __init__(
         self,
         *,
-        sql: DatabricksSQLExecutor,
-        mysql: Optional[SQLExecutor] = None,
+        sql: DatabricksForgeQueryPort,
+        mysql: Optional[ForgeQueryPort] = None,
     ):
         self._sql = sql
-        self._mysql = mysql or MySQLSQLExecutor()
+        self._mysql = mysql or ForgeMetaSQL()
 
     # ----------------------------
     # DBX reads
@@ -58,7 +58,7 @@ FROM {TABLE_PATH}
 ORDER BY snapshot_utc DESC
 LIMIT 1
 """
-        resp = self._sql.submit_statement(sql_text, result_format="ARROW_STREAM")
+        resp = self._sql.submit_statement(sql_text, qf_result_fmt="ARROW_STREAM")
         rows = resp.get("rows") or []
         if not rows:
             raise ValueError("No snapshots found in model_tables_snapshot")
@@ -79,7 +79,7 @@ SELECT
 FROM {TABLE_PATH}
 WHERE snapshot_id = '{snapshot_id}'
 """
-        resp = self._sql.submit_statement(sql_text, result_format="ARROW_STREAM")
+        resp = self._sql.submit_statement(sql_text, qf_result_fmt="ARROW_STREAM")
         return resp.get("rows") or []
 
     def _fetch_columns(self, snapshot_id: str) -> List[Dict[str, Any]]:
@@ -104,7 +104,7 @@ SELECT
 FROM {COLUMNS_PATH}
 WHERE snapshot_id = '{snapshot_id}'
 """
-        resp = self._sql.submit_statement(sql_text, result_format="ARROW_STREAM")
+        resp = self._sql.submit_statement(sql_text, qf_result_fmt="ARROW_STREAM")
         return resp.get("rows") or []
 
     # ----------------------------

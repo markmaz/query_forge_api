@@ -3,14 +3,14 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.ports.sql_executor import ForgeQueryPort
 from app.services.semantic.semantic_llm_schema import normalize_concept_key
 
 
 class SemanticConceptMatcher:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def load_known_concepts(self, vertical_norm: str) -> List[Dict[str, Any]]:
         vertical = _norm_vertical(vertical_norm)
@@ -151,9 +151,6 @@ class SemanticConceptMatcher:
         deterministic, det_notes = self._deterministic_identifier_candidate(card=card)
         if deterministic is not None:
             return deterministic, det_notes
-
-        known = known_concepts if known_concepts is not None else self.load_known_concepts(vertical_norm)
-        known_map = {normalize_concept_key(c.get("concept_key") or ""): c for c in known}
 
         alias_candidate, alias_notes = self.match_by_alias(
             card=card,

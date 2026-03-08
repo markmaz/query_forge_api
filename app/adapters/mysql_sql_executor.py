@@ -8,7 +8,7 @@ from sqlalchemy.engine.result import Result
 from sqlalchemy.pool import QueuePool
 
 from app.config import DB_URI, MAX_OVERFLOW, POOL_RECYCLE, POOL_SIZE, POOL_TIMEOUT
-from app.ports.sql_executor import ExecuteResult, SQLExecutor, SQLTransaction
+from app.ports.sql_executor import ForgeExecResult, ForgeQueryPort, ForgeQueryTx
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ engine = create_engine(
 )
 
 
-def get_db_connection() -> Connection:
+def open_forge_connection() -> Connection:
     """
     Connects to the database and returns a connection.
 
@@ -44,7 +44,7 @@ def execute_query(query: str, params: dict[str, Any] = None) -> List[Tuple]:
     Returns:
         List[Tuple]: The results of the database query.
     """
-    with get_db_connection() as conn:
+    with open_forge_connection() as conn:
         result: Result = conn.execute(text(query), params or {})
         return result.fetchall()
 
@@ -54,7 +54,7 @@ def show_status():
 
 
 def execute_query_mappings(query: str, params: dict[str, Any] = None) -> List[dict[str, Any]]:
-    with get_db_connection() as conn:
+    with open_forge_connection() as conn:
         result: Result = conn.execute(text(query), params or {})
         return [dict(r) for r in result.mappings().all()]
 
@@ -63,7 +63,7 @@ def execute_write(query: str, params: Optional[Dict[str, Any]] = None) -> int:
     """
     Executes INSERT/UPDATE/DELETE. Returns affected rowcount.
     """
-    with get_db_connection() as conn:
+    with open_forge_connection() as conn:
         tx = conn.begin()
         try:
             result = conn.execute(text(query), params or {})
@@ -74,13 +74,13 @@ def execute_write(query: str, params: Optional[Dict[str, Any]] = None) -> int:
             raise
 
 
-class MySQLSQLExecutor(SQLExecutor):
+class ForgeMetaSQL(ForgeQueryPort):
     @contextmanager
-    def transaction(self) -> Iterator[SQLTransaction]:
-        conn = get_db_connection()
+    def transaction(self) -> Iterator[ForgeQueryTx]:
+        conn = open_forge_connection()
         tx = conn.begin()
         try:
-            yield _MySQLTransaction(conn)
+            yield _ForgeMetaTransaction(conn)
             tx.commit()
         except Exception:
             tx.rollback()
@@ -95,10 +95,10 @@ class MySQLSQLExecutor(SQLExecutor):
         warehouse_id: Optional[str] = None,
         parameters: Optional[Dict[str, Any]] = None,
         wait: bool = True,
-        timeout_s: int = 120,
-        result_format: Optional[str] = None,
+        qf_timeout_s: int = 120,
+        qf_result_fmt: Optional[str] = None,
     ) -> Dict[str, Any]:
-        del warehouse_id, wait, timeout_s, result_format
+        del warehouse_id, wait, qf_timeout_s, qf_result_fmt
         sql_str = (sql or "").strip()
         if sql_str.lower().startswith("select"):
             rows = execute_query_mappings(sql_str, parameters or {})
@@ -107,16 +107,16 @@ class MySQLSQLExecutor(SQLExecutor):
         affected = execute_write(sql_str, parameters or {})
         return {"status": {"state": "SUCCEEDED"}, "rowcount": affected, "rows": []}
 
-    def poll_status(self, statement_id: str) -> Dict[str, Any]:
-        del statement_id
+    def poll_status(self, qf_statement_id: str) -> Dict[str, Any]:
+        del qf_statement_id
         return {"status": {"state": "SUCCEEDED"}}
 
-    def fetch_all_json(self, statement_id: str) -> List[Dict[str, Any]]:
-        del statement_id
+    def fetch_all_json(self, qf_statement_id: str) -> List[Dict[str, Any]]:
+        del qf_statement_id
         return []
 
-    def cancel(self, statement_id: str) -> None:
-        del statement_id
+    def cancel(self, qf_statement_id: str) -> None:
+        del qf_statement_id
         return None
 
     def execute_write(self, query: str, params: Optional[Dict[str, Any]] = None) -> int:
@@ -128,19 +128,19 @@ class MySQLSQLExecutor(SQLExecutor):
     def execute_query(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Tuple]:
         return execute_query(query, params)
 
-    def execute_insert(self, query: str, params: Optional[Dict[str, Any]] = None) -> ExecuteResult:
-        with get_db_connection() as conn:
+    def execute_insert(self, query: str, params: Optional[Dict[str, Any]] = None) -> ForgeExecResult:
+        with open_forge_connection() as conn:
             tx = conn.begin()
             try:
                 result = conn.execute(text(query), params or {})
                 tx.commit()
-                return ExecuteResult(rowcount=int(result.rowcount or 0), lastrowid=result.lastrowid)
+                return ForgeExecResult(rowcount=int(result.rowcount or 0), lastrowid=result.lastrowid)
             except Exception:
                 tx.rollback()
                 raise
 
 
-class _MySQLTransaction(SQLTransaction):
+class _ForgeMetaTransaction(ForgeQueryTx):
     def __init__(self, conn: Connection):
         self._conn = conn
 
@@ -156,9 +156,9 @@ class _MySQLTransaction(SQLTransaction):
         result: Result = self._conn.execute(text(query), params or {})
         return result.fetchall()
 
-    def execute_insert(self, query: str, params: Optional[Dict[str, Any]] = None) -> ExecuteResult:
+    def execute_insert(self, query: str, params: Optional[Dict[str, Any]] = None) -> ForgeExecResult:
         result = self._conn.execute(text(query), params or {})
-        return ExecuteResult(rowcount=int(result.rowcount or 0), lastrowid=result.lastrowid)
+        return ForgeExecResult(rowcount=int(result.rowcount or 0), lastrowid=result.lastrowid)
 
 
 def ensure_workspace(conn: Connection, workspace_id: str, display_name: Optional[str] = None) -> None:

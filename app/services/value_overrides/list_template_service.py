@@ -46,30 +46,30 @@ NOTES: Dict[str, List[str]] = {
 
 
 @dataclass(frozen=True)
-class TemplateFile:
+class ForgeTemplateFile:
     filename: str
     content_type: str
     bytes: bytes
 
 
-class ListTemplateService:
+class ForgeListTemplateService:
     CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-    def generate_template(self, template_type: TemplateType, *, include_time: bool = False) -> TemplateFile:
+    def generate_forge_template(self, template_type: TemplateType, *, qf_include_time: bool = False) -> ForgeTemplateFile:
         if template_type not in TEMPLATES:
             raise ValueError(f"Unknown template_type '{template_type}'")
 
-        wb = self._build_workbook(template_type)
-        data = self._workbook_to_bytes(wb)
+        wb = self._forge_build_workbook(template_type)
+        data = self._forge_workbook_bytes(wb)
 
         now = datetime.now(timezone.utc)
-        suffix = now.strftime("%Y-%m-%d_%H%M") if include_time else now.strftime("%Y-%m-%d")
+        suffix = now.strftime("%Y-%m-%d_%H%M") if qf_include_time else now.strftime("%Y-%m-%d")
         base = TEMPLATES[template_type]["base_filename"]
         filename = f"{base}_{suffix}.xlsx"
 
-        return TemplateFile(filename=filename, content_type=self.CONTENT_TYPE, bytes=data)
+        return ForgeTemplateFile(filename=filename, content_type=self.CONTENT_TYPE, bytes=data)
 
-    def _build_workbook(self, template_type: TemplateType) -> Workbook:
+    def _forge_build_workbook(self, template_type: TemplateType) -> Workbook:
         cfg = TEMPLATES[template_type]
         cols = cfg["columns"]
 
@@ -90,7 +90,7 @@ class ListTemplateService:
         # Column widths
         for i, col_name in enumerate(cols, start=1):
             width = max(14, min(38, len(col_name) + 4))
-            ws.column_dimensions[self._col_letter(i)].width = width
+            ws.column_dimensions[self._forge_col_letter(i)].width = width
 
         # Instructions sheet
         inst = wb.create_sheet("Instructions")
@@ -118,19 +118,19 @@ class ListTemplateService:
             dv.promptTitle = "npi_type_code"
 
             npi_type_idx = cols.index("npi_type_code") + 1
-            col_letter = self._col_letter(npi_type_idx)
+            col_letter = self._forge_col_letter(npi_type_idx)
             dv.ranges.add(f"{col_letter}2:{col_letter}5000")
             ws.add_data_validation(dv)
 
         return wb
 
-    def _workbook_to_bytes(self, wb: Workbook) -> bytes:
+    def _forge_workbook_bytes(self, wb: Workbook) -> bytes:
         bio = io.BytesIO()
         wb.save(bio)
         bio.seek(0)
         return bio.getvalue()
 
-    def _col_letter(self, n: int) -> str:
+    def _forge_col_letter(self, n: int) -> str:
         s = ""
         while n:
             n, r = divmod(n - 1, 26)

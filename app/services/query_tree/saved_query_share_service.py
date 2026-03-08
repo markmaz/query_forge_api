@@ -1,143 +1,26 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 
 
-class SavedQueryShareService:
-    """
-    Option B (ACL-based) sharing.
+@dataclass(frozen=True)
+class _ShareContext:
+    workspace_id: str
+    user_id: str
 
-    Writes rows to saved_query_acl:
-      - principal_type: USER | WORKSPACE (ROLE optional later)
-      - principal_id:  USER => user UUID (string), WORKSPACE => workspace_id (string)
-      - permission: READ | WRITE
 
-    Policy:
-      - Only owner of a MINE query in this workspace can manage shares.
-      - Sharing does not change saved_query.scope (stays MINE).
-    """
+class _SavedQueryShareRepository:
+    def __init__(self, *, ctx: _ShareContext, sql: ForgeQueryPort):
+        self._ctx = ctx
+        self._sql = sql
 
-    def __init__(self, *, workspace_id: str, user_id: str, sql: Optional[SQLExecutor] = None):
-        if not workspace_id:
-            raise ServiceError("workspace_id is required", status_code=400)
-        if not user_id:
-            raise ServiceError("user_id is required", status_code=400)
-        self._ws = workspace_id
-        self._uid = user_id
-        self._sql = sql or MySQLSQLExecutor()
-
-    # -------------------------
-    # Share helpers (public)
-    # -------------------------
-    def share_to_workspace(self, *, query_id: str, can_edit: bool = False) -> Dict[str, Any]:
-        qid = _req(query_id, "query_id")
-        self._assert_query_owner(qid)
-
-        principal_type = "WORKSPACE"
-        principal_id = self._ws
-        permission = "WRITE" if can_edit else "READ"
-
-        acl = self._upsert_acl(saved_query_id=qid, principal_type=principal_type, principal_id=principal_id, permission=permission)
-        return {
-            "aclId": acl["id"],
-            "queryId": qid,
-            "principalType": principal_type,
-            "principalId": principal_id,
-            "permission": permission,
-            "canEdit": (permission == "WRITE"),
-        }
-
-    def share_to_user(self, *, query_id: str, shared_with_user_id: str, can_edit: bool = False) -> Dict[str, Any]:
-        qid = _req(query_id, "query_id")
-        target = _req(shared_with_user_id, "shared_with_user_id")
-        self._assert_query_owner(qid)
-
-        principal_type = "USER"
-        principal_id = target
-        permission = "WRITE" if can_edit else "READ"
-
-        acl = self._upsert_acl(saved_query_id=qid, principal_type=principal_type, principal_id=principal_id, permission=permission)
-        return {
-            "aclId": acl["id"],
-            "queryId": qid,
-            "principalType": principal_type,
-            "principalId": principal_id,
-            "permission": permission,
-            "canEdit": (permission == "WRITE"),
-        }
-
-    def unshare(self, *, query_id: str, share_kind: str, shared_with_user_id: Optional[str] = None) -> Dict[str, Any]:
-        """
-        share_kind: WORKSPACE | USER
-        For USER, shared_with_user_id is required.
-        """
-        qid = _req(query_id, "query_id")
-        kind = (share_kind or "").strip().upper()
-        if kind not in ("WORKSPACE", "USER"):
-            raise ServiceError("Invalid share_kind", status_code=400)
-
-        self._assert_query_owner(qid)
-
-        if kind == "WORKSPACE":
-            principal_type = "WORKSPACE"
-            principal_id = self._ws
-        else:
-            principal_type = "USER"
-            principal_id = _req(shared_with_user_id, "shared_with_user_id")
-
-        with self._sql.transaction() as tx:
-            res = tx.execute_write(
-                """
-                DELETE FROM saved_query_acl
-                WHERE saved_query_id = :qid
-                  AND workspace_id = :ws
-                  AND principal_type = :ptype
-                  AND principal_id = :pid
-                """,
-                {"qid": qid, "ws": self._ws, "ptype": principal_type, "pid": principal_id},
-            )
-
-        return {"queryId": qid, "shareKind": kind, "removed": (res or 0) > 0}
-
-    def list_shares(self, *, query_id: str) -> Dict[str, Any]:
-        qid = _req(query_id, "query_id")
-        self._assert_query_owner(qid)
-
-        rows = self._sql.execute_query_mappings(
-            """
-            SELECT id, principal_type, principal_id, permission, created_at
-            FROM saved_query_acl
-            WHERE saved_query_id = :qid
-              AND workspace_id = :ws
-            ORDER BY created_at ASC
-            """,
-            {"qid": qid, "ws": self._ws},
-        )
-
-        return {
-            "queryId": qid,
-            "shares": [
-                {
-                    "aclId": r["id"],
-                    "principalType": r["principal_type"],
-                    "principalId": r["principal_id"],
-                    "permission": r["permission"],
-                    "canEdit": (r["permission"] == "WRITE"),
-                    "createdAt": r["created_at"].isoformat() if r["created_at"] else None,
-                }
-                for r in rows
-            ],
-        }
-
-    # -------------------------
-    # Internal helpers
-    # -------------------------
-    def _assert_query_owner(self, query_id: str) -> None:
+    def owned_query_exists(self, *, query_id: str) -> bool:
         rows = self._sql.execute_query_mappings(
             """
             SELECT id
@@ -149,28 +32,50 @@ class SavedQueryShareService:
               AND is_deleted = 0
             LIMIT 1
             """,
-            {"qid": query_id, "ws": self._ws, "uid": self._uid},
+            {"qid": query_id, "ws": self._ctx.workspace_id, "uid": self._ctx.user_id},
         )
-        if not rows:
-            raise ServiceError("Saved query not found", status_code=404)
+        return bool(rows)
 
-    def _upsert_acl(self, *, saved_query_id: str, principal_type: str, principal_id: str, permission: str) -> Dict[str, Any]:
-        # Your DDL has uq_sqa_unique on (saved_query_id, principal_type, principal_id)
-        existing = self._find_acl(saved_query_id=saved_query_id, principal_type=principal_type, principal_id=principal_id)
-        if existing:
-            with self._sql.transaction() as tx:
-                tx.execute_write(
-                    """
-                    UPDATE saved_query_acl
-                    SET permission = :perm
-                    WHERE id = :id
-                    """,
-                    {"id": existing["id"], "perm": permission},
-                )
-            existing["permission"] = permission
-            return existing
+    def fetch_acl(self, *, saved_query_id: str, principal_type: str, principal_id: str) -> Optional[Dict[str, Any]]:
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT id, permission
+            FROM saved_query_acl
+            WHERE saved_query_id = :qid
+              AND workspace_id = :ws
+              AND principal_type = :ptype
+              AND principal_id = :pid
+            LIMIT 1
+            """,
+            {
+                "qid": saved_query_id,
+                "ws": self._ctx.workspace_id,
+                "ptype": principal_type,
+                "pid": principal_id,
+            },
+        )
+        return dict(rows[0]) if rows else None
 
-        acl_id = str(uuid.uuid4())
+    def update_acl_permission(self, *, acl_id: str, permission: str) -> None:
+        with self._sql.transaction() as tx:
+            tx.execute_write(
+                """
+                UPDATE saved_query_acl
+                SET permission = :perm
+                WHERE id = :id
+                """,
+                {"id": acl_id, "perm": permission},
+            )
+
+    def insert_acl(
+        self,
+        *,
+        acl_id: str,
+        saved_query_id: str,
+        principal_type: str,
+        principal_id: str,
+        permission: str,
+    ) -> None:
         with self._sql.transaction() as tx:
             tx.execute_write(
                 """
@@ -188,34 +93,168 @@ class SavedQueryShareService:
                 {
                     "id": acl_id,
                     "qid": saved_query_id,
-                    "ws": self._ws,
+                    "ws": self._ctx.workspace_id,
                     "ptype": principal_type,
                     "pid": principal_id,
                     "perm": permission,
                 },
             )
 
-        return {"id": acl_id, "permission": permission}
+    def remove_acl(self, *, query_id: str, principal_type: str, principal_id: str) -> int:
+        with self._sql.transaction() as tx:
+            return tx.execute_write(
+                """
+                DELETE FROM saved_query_acl
+                WHERE saved_query_id = :qid
+                  AND workspace_id = :ws
+                  AND principal_type = :ptype
+                  AND principal_id = :pid
+                """,
+                {
+                    "qid": query_id,
+                    "ws": self._ctx.workspace_id,
+                    "ptype": principal_type,
+                    "pid": principal_id,
+                },
+            )
 
-    def _find_acl(self, *, saved_query_id: str, principal_type: str, principal_id: str) -> Optional[Dict[str, Any]]:
-        rows = self._sql.execute_query_mappings(
+    def list_query_shares(self, *, query_id: str) -> list[Dict[str, Any]]:
+        return self._sql.execute_query_mappings(
             """
-            SELECT id, permission
+            SELECT id, principal_type, principal_id, permission, created_at
             FROM saved_query_acl
             WHERE saved_query_id = :qid
               AND workspace_id = :ws
-              AND principal_type = :ptype
-              AND principal_id = :pid
-            LIMIT 1
+            ORDER BY created_at ASC
             """,
-            {"qid": saved_query_id, "ws": self._ws, "ptype": principal_type, "pid": principal_id},
+            {"qid": query_id, "ws": self._ctx.workspace_id},
         )
-        row = rows[0] if rows else None
-        return dict(row) if row else None
+
+
+class SavedQueryShareService:
+    """Share/unshare/list ACL records for saved queries."""
+
+    def __init__(self, *, workspace_id: str, user_id: str, sql: Optional[ForgeQueryPort] = None):
+        if not workspace_id:
+            raise ForgeError("workspace_id is required", status_code=400)
+        if not user_id:
+            raise ForgeError("user_id is required", status_code=400)
+
+        self._ctx = _ShareContext(workspace_id=workspace_id, user_id=user_id)
+        self._sql = sql or ForgeMetaSQL()
+        self._repo = _SavedQueryShareRepository(ctx=self._ctx, sql=self._sql)
+        self._ws = workspace_id
+
+    def share_to_workspace(self, *, query_id: str, can_edit: bool = False) -> Dict[str, Any]:
+        query_id = _req(query_id, "query_id")
+        self._assert_query_owner(query_id)
+
+        permission = "WRITE" if can_edit else "READ"
+        acl = self._upsert_acl(
+            saved_query_id=query_id,
+            principal_type="WORKSPACE",
+            principal_id=self._ctx.workspace_id,
+            permission=permission,
+        )
+        return {
+            "aclId": acl["id"],
+            "queryId": query_id,
+            "principalType": "WORKSPACE",
+            "principalId": self._ctx.workspace_id,
+            "permission": permission,
+            "canEdit": permission == "WRITE",
+        }
+
+    def share_to_user(self, *, query_id: str, shared_with_user_id: str, can_edit: bool = False) -> Dict[str, Any]:
+        query_id = _req(query_id, "query_id")
+        shared_with_user_id = _req(shared_with_user_id, "shared_with_user_id")
+        self._assert_query_owner(query_id)
+
+        permission = "WRITE" if can_edit else "READ"
+        acl = self._upsert_acl(
+            saved_query_id=query_id,
+            principal_type="USER",
+            principal_id=shared_with_user_id,
+            permission=permission,
+        )
+        return {
+            "aclId": acl["id"],
+            "queryId": query_id,
+            "principalType": "USER",
+            "principalId": shared_with_user_id,
+            "permission": permission,
+            "canEdit": permission == "WRITE",
+        }
+
+    def unshare(self, *, query_id: str, share_kind: str, shared_with_user_id: Optional[str] = None) -> Dict[str, Any]:
+        query_id = _req(query_id, "query_id")
+        share_kind = (share_kind or "").strip().upper()
+        if share_kind not in ("WORKSPACE", "USER"):
+            raise ForgeError("Invalid share_kind", status_code=400)
+
+        self._assert_query_owner(query_id)
+
+        if share_kind == "WORKSPACE":
+            principal_type = "WORKSPACE"
+            principal_id = self._ctx.workspace_id
+        else:
+            principal_type = "USER"
+            principal_id = _req(shared_with_user_id, "shared_with_user_id")
+
+        removed = self._repo.remove_acl(query_id=query_id, principal_type=principal_type, principal_id=principal_id)
+        return {"queryId": query_id, "shareKind": share_kind, "removed": (removed or 0) > 0}
+
+    def list_shares(self, *, query_id: str) -> Dict[str, Any]:
+        query_id = _req(query_id, "query_id")
+        self._assert_query_owner(query_id)
+
+        rows = self._repo.list_query_shares(query_id=query_id)
+        return {
+            "queryId": query_id,
+            "shares": [
+                {
+                    "aclId": row["id"],
+                    "principalType": row["principal_type"],
+                    "principalId": row["principal_id"],
+                    "permission": row["permission"],
+                    "canEdit": row["permission"] == "WRITE",
+                    "createdAt": row["created_at"].isoformat() if row.get("created_at") else None,
+                }
+                for row in rows
+            ],
+        }
+
+    def _assert_query_owner(self, query_id: str) -> None:
+        if not self._repo.owned_query_exists(query_id=query_id):
+            raise ForgeError("Saved query not found", status_code=404)
+
+    def _upsert_acl(self, *, saved_query_id: str, principal_type: str, principal_id: str, permission: str) -> Dict[str, Any]:
+        existing = self._find_acl(saved_query_id=saved_query_id, principal_type=principal_type, principal_id=principal_id)
+        if existing:
+            self._repo.update_acl_permission(acl_id=existing["id"], permission=permission)
+            existing["permission"] = permission
+            return existing
+
+        acl_id = str(uuid.uuid4())
+        self._repo.insert_acl(
+            acl_id=acl_id,
+            saved_query_id=saved_query_id,
+            principal_type=principal_type,
+            principal_id=principal_id,
+            permission=permission,
+        )
+        return {"id": acl_id, "permission": permission}
+
+    def _find_acl(self, *, saved_query_id: str, principal_type: str, principal_id: str) -> Optional[Dict[str, Any]]:
+        return self._repo.fetch_acl(
+            saved_query_id=saved_query_id,
+            principal_type=principal_type,
+            principal_id=principal_id,
+        )
 
 
 def _req(v: Any, field: str) -> str:
-    s = str(v or "").strip()
-    if not s:
-        raise ServiceError(f"{field} is required", status_code=400)
-    return s
+    value = str(v or "").strip()
+    if not value:
+        raise ForgeError(f"{field} is required", status_code=400)
+    return value

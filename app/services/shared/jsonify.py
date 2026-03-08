@@ -2,47 +2,34 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Dict, Iterable, List
+from typing import Any, Iterable
 from uuid import UUID
 
 
-def jsonify_value(v: Any) -> Any:
-    if v is None:
+def serialize_cell(value: Any) -> Any:
+    if value is None:
         return None
-
-    # datetime/date -> isoformat
-    if isinstance(v, (datetime, date)):
-        return v.isoformat()
-
-    # Decimal -> float (or str if you prefer)
-    if isinstance(v, Decimal):
-        return float(v)
-
-    # UUID -> str
-    if isinstance(v, UUID):
-        return str(v)
-
-    # bytes -> utf-8 (best-effort)
-    if isinstance(v, (bytes, bytearray)):
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, (bytes, bytearray)):
         try:
-            return v.decode("utf-8")
+            return value.decode("utf-8")
         except Exception:
-            return str(v)
-
-    # containers
-    if isinstance(v, dict):
-        return jsonify_dict(v)
-    if isinstance(v, list):
-        return [jsonify_value(x) for x in v]
-    if isinstance(v, tuple):
-        return [jsonify_value(x) for x in v]
-
-    return v
+            return str(value)
+    if isinstance(value, dict):
+        return serialize_record(value)
+    if isinstance(value, (list, tuple)):
+        return [serialize_cell(item) for item in value]
+    return value
 
 
-def jsonify_dict(d: Dict[str, Any]) -> Dict[str, Any]:
-    return {str(k): jsonify_value(v) for k, v in (d or {}).items()}
+def serialize_record(payload: dict[str, Any]) -> dict[str, Any]:
+    return {str(key): serialize_cell(val) for key, val in (payload or {}).items()}
 
 
-def jsonify_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    return [jsonify_dict(r) for r in (rows or [])]
+def serialize_result_rows(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [serialize_record(row) for row in (rows or [])]

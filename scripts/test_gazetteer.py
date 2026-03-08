@@ -11,9 +11,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import spacy
+import spacy  # noqa: E402
 
-from app.nlp.gazetteers import add_school_district_ruler
+from app.nlp.gazetteers import add_school_district_ruler  # noqa: E402
 
 DEFAULT_MODEL = "models/tier2/model-best"
 DEFAULT_PATTERNS = "app/nlp/gazetteers/school_districts_patterns.jsonl"

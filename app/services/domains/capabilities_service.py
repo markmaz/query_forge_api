@@ -5,9 +5,9 @@ import logging
 import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +25,8 @@ _OVERLAY_CATALOG: List[Dict[str, Any]] = [
 
 
 class DomainCapabilitiesService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def get_domain_capabilities(
         self,
@@ -108,7 +108,7 @@ class DomainCapabilitiesService:
             params,
         )
         if not rows:
-            raise ServiceError("Domain not found or access denied", status_code=404)
+            raise ForgeError("Domain not found or access denied", status_code=404)
         return dict(rows[0])
 
     def _load_domain_columns(self, *, workspace_id: str, domain_id: int) -> List[Dict[str, Any]]:

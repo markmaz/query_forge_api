@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.services.semantic.plan_service import LLMFilter, LLMPlanPayload, LLMSelectedColumn, PlanService
 from app.services.semantic.deterministic_matcher import DeterministicMatcher
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_normalize_llm_payload_coerces_common_alternate_shapes() -> None:
@@ -58,7 +58,7 @@ def test_normalize_llm_payload_can_map_filter_column_expression() -> None:
 
 
 def test_apply_value_aliases_to_llm_plan_rewrites_filter_and_sql_json() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -192,7 +192,7 @@ def test_ground_plan_drops_filters_without_mapped_columns() -> None:
 
 
 def test_apply_value_aliases_to_llm_plan_rewrites_sql_json_filter_tree_values() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -332,7 +332,7 @@ def test_plan_flow_keeps_birth_country_mapping_and_filter_column() -> None:
             }
 
     svc = PlanService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         deterministic=_Deterministic(),
         concept_retrieval=_ConceptRetrieval(),
         concept_to_column=_ConceptToColumn(),
@@ -473,7 +473,7 @@ def test_plan_flow_forces_canonical_district_filter_and_drops_locale_alias_filte
             return {"domain_id": None, "source": "auto", "threshold_met": False, "domains": []}
 
     svc = PlanService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         deterministic=_Deterministic(),
         concept_retrieval=_ConceptRetrieval(),
         concept_to_column=_ConceptToColumn(),
@@ -551,7 +551,7 @@ def test_plan_suppresses_identifier_concepts_when_prompt_has_no_identifier_inten
 
     mapper = _ConceptToColumn()
     svc = PlanService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         deterministic=_Deterministic(),
         concept_retrieval=_ConceptRetrieval(),
         concept_to_column=mapper,
@@ -626,7 +626,7 @@ def test_plan_keeps_identifier_concepts_when_prompt_requests_ids() -> None:
 
     mapper = _ConceptToColumn()
     svc = PlanService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         deterministic=_Deterministic(),
         concept_retrieval=_ConceptRetrieval(),
         concept_to_column=mapper,
@@ -696,7 +696,7 @@ def test_plan_black_kids_includes_race_from_lexical_alias_pass() -> None:
             del kwargs
             return {"domain_id": None, "source": "auto", "threshold_met": False, "domains": []}
 
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [],
         [{"concept_key": "RACE", "alias_key": "black", "match_kind": "contains", "weight": 1.0}],
@@ -833,7 +833,7 @@ def test_plan_students_named_holden_prefers_student_name_mapping_and_filter() ->
             return {"domain_id": None, "source": "auto", "threshold_met": False, "domains": []}
 
     svc = PlanService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         deterministic=DeterministicMatcher(),
         concept_retrieval=_ConceptRetrieval(),
         concept_to_column=_ConceptToColumn(),
@@ -922,7 +922,7 @@ def test_plan_staff_named_holden_prefers_staff_name_filter() -> None:
             return {"domain_id": None, "source": "auto", "threshold_met": False, "domains": []}
 
     svc = PlanService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         deterministic=DeterministicMatcher(),
         concept_retrieval=_ConceptRetrieval(),
         concept_to_column=_ConceptToColumn(),
@@ -1007,7 +1007,7 @@ def test_plan_validity_gate_injects_defaults_when_llm_returns_empty() -> None:
             return {"domain_id": None, "source": "auto", "threshold_met": False, "domains": []}
 
     svc = PlanService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         deterministic=DeterministicMatcher(),
         concept_retrieval=_ConceptRetrieval(),
         concept_to_column=_ConceptToColumn(),
@@ -1099,7 +1099,7 @@ def test_plan_el_subgroup_injects_is_el_filter_and_keeps_sql_json() -> None:
             return {"domain_id": None, "source": "auto", "threshold_met": False, "domains": []}
 
     svc = PlanService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         deterministic=DeterministicMatcher(),
         concept_retrieval=_ConceptRetrieval(),
         concept_to_column=_ConceptToColumn(),
@@ -1191,7 +1191,7 @@ def test_plan_injects_student_first_last_and_school_filter_for_school_phrase_pro
             return {"domain_id": None, "source": "auto", "threshold_met": False, "domains": []}
 
     svc = PlanService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         deterministic=DeterministicMatcher(),
         concept_retrieval=_ConceptRetrieval(),
         concept_to_column=_ConceptToColumn(),
@@ -1294,7 +1294,7 @@ def test_plan_injects_school_filter_for_quoted_school_phrase_prompt() -> None:
             return {"domain_id": None, "source": "auto", "threshold_met": False, "domains": []}
 
     svc = PlanService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         deterministic=DeterministicMatcher(),
         concept_retrieval=_ConceptRetrieval(),
         concept_to_column=_ConceptToColumn(),
@@ -1419,7 +1419,7 @@ def test_plan_uses_tier2_school_slot_to_force_filter(monkeypatch) -> None:
             return []
 
     svc = PlanService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         deterministic=_Deterministic(),
         concept_retrieval=_ConceptRetrieval(),
         concept_to_column=_ConceptToColumn(),

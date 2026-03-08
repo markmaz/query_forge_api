@@ -4,11 +4,12 @@ import logging
 from typing import Any, Dict
 
 from flask import request
-from flask_restx import Namespace, Resource, fields
+from flask_restx import Namespace, fields
+from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
-from app.routes._route_utils import int_arg
+from app.exceptions.forge_error import ForgeError
+from app.routes.request_helpers import int_arg
 from app.services.semantic_registry_service import SemanticRegistryService
 
 logger = logging.getLogger(__name__)
@@ -78,12 +79,12 @@ semantic_registry_entry_model = semantic_registry_ns.model(
 )
 
 
-def _handle_service_error(exc: ServiceError):
+def _handle_service_error(exc: ForgeError):
     return {"error": str(exc)}, getattr(exc, "status_code", 400) or 400
 
 
 @semantic_registry_ns.route("")
-class SemanticRegistryCollection(Resource):
+class SemanticRegistryCollection(ForgeResource):
     @token_required
     @semantic_registry_ns.doc(
         params={
@@ -110,7 +111,7 @@ class SemanticRegistryCollection(Resource):
                 q=q,
             )
             return {"rows": rows, "total": total, "limit": max(1, min(limit, 500)), "offset": max(0, offset)}, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return _handle_service_error(exc)
         except Exception:
             logger.exception("Semantic registry list failed")
@@ -123,7 +124,7 @@ class SemanticRegistryCollection(Resource):
             body: Dict[str, Any] = request.get_json(silent=True) or {}
             row = SemanticRegistryService().create_entry(body)
             return {"row": row}, 201
-        except ServiceError as exc:
+        except ForgeError as exc:
             return _handle_service_error(exc)
         except Exception:
             logger.exception("Semantic registry create failed")
@@ -131,13 +132,13 @@ class SemanticRegistryCollection(Resource):
 
 
 @semantic_registry_ns.route("/<string:entry_id>")
-class SemanticRegistryById(Resource):
+class SemanticRegistryById(ForgeResource):
     @token_required
     def get(self, entry_id: str):
         try:
             row = SemanticRegistryService().get_entry(entry_id)
             return {"row": row}, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return _handle_service_error(exc)
         except Exception:
             logger.exception("Semantic registry get failed")
@@ -150,7 +151,7 @@ class SemanticRegistryById(Resource):
             body: Dict[str, Any] = request.get_json(silent=True) or {}
             row = SemanticRegistryService().update_entry(entry_id, body)
             return {"row": row}, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return _handle_service_error(exc)
         except Exception:
             logger.exception("Semantic registry update failed")
@@ -161,7 +162,7 @@ class SemanticRegistryById(Resource):
         try:
             SemanticRegistryService().delete_entry(entry_id)
             return {"deleted": True, "id": entry_id}, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return _handle_service_error(exc)
         except Exception:
             logger.exception("Semantic registry delete failed")

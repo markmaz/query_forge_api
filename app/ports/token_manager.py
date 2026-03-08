@@ -4,7 +4,7 @@ from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
-class TokenManager(Protocol):
+class ForgeTokenPort(Protocol):
     def refresh_token(self):
         """"""
     

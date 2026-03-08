@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 import pyarrow as pa
 import pytest
 
-from app.adapters.databricks_sql_executor import DatabricksSQLExecutor, _rows_from_result_json
+from app.adapters.databricks_sql_executor import DatabricksForgeQueryPort, _rows_from_result_json
 
 
 class _Resp:
@@ -50,12 +50,12 @@ class _TokenProvider:
     def __init__(self, token: str):
         self.token = token
 
-    def get_token(self) -> str:
+    def fetch_forge_token(self) -> str:
         return self.token
 
 
 def test_encode_parameters() -> None:
-    exec = DatabricksSQLExecutor(
+    exec = DatabricksForgeQueryPort(
         base_url="https://dbx",
         token_provider=_TokenProvider("tok"),
         http=_Session(),
@@ -83,7 +83,7 @@ def test_encode_parameters() -> None:
 
 
 def test_headers_use_token() -> None:
-    exec = DatabricksSQLExecutor(
+    exec = DatabricksForgeQueryPort(
         base_url="https://dbx",
         token_provider=_TokenProvider("tok"),
         http=_Session(),
@@ -95,23 +95,23 @@ def test_headers_use_token() -> None:
 
 def test_submit_statement_wait_false() -> None:
     session = _Session()
-    session.set_post(_Resp({"statement_id": "s1"}))
-    exec = DatabricksSQLExecutor(
+    session.set_post(_Resp({"qf_statement_id": "s1"}))
+    exec = DatabricksForgeQueryPort(
         base_url="https://dbx",
         token_provider=_TokenProvider("tok"),
         http=session,
         default_warehouse_id="wh",
     )
 
-    resp = exec.submit_statement("SELECT 1", wait=False, result_format="JSON_ARRAY")
-    assert resp["statement_id"] == "s1"
+    resp = exec.submit_statement("SELECT 1", wait=False, qf_result_fmt="JSON_ARRAY")
+    assert resp["qf_statement_id"] == "s1"
     assert session.posts
 
 
 def test_submit_statement_async_overrides() -> None:
     session = _Session()
-    session.set_post(_Resp({"statement_id": "s2"}))
-    exec = DatabricksSQLExecutor(
+    session.set_post(_Resp({"qf_statement_id": "s2"}))
+    exec = DatabricksForgeQueryPort(
         base_url="https://dbx",
         token_provider=_TokenProvider("tok"),
         http=session,
@@ -128,7 +128,7 @@ def test_submit_statement_async_overrides() -> None:
         schema="sch-override",
     )
 
-    assert resp["statement_id"] == "s2"
+    assert resp["qf_statement_id"] == "s2"
     payload = session.posts[-1]["json"]
     assert payload["warehouse_id"] == "wh-override"
     assert payload["catalog"] == "cat-override"
@@ -140,7 +140,7 @@ def test_submit_statement_async_overrides() -> None:
 def test_get_statement_status() -> None:
     session = _Session()
     session.set_get(_Resp({"status": {"state": "RUNNING"}}))
-    exec = DatabricksSQLExecutor(
+    exec = DatabricksForgeQueryPort(
         base_url="https://dbx",
         token_provider=_TokenProvider("tok"),
         http=session,
@@ -154,7 +154,7 @@ def test_get_statement_status() -> None:
 def test_cancel_statement_allows_202() -> None:
     session = _Session()
     session.set_post(_Resp(status_code=202))
-    exec = DatabricksSQLExecutor(
+    exec = DatabricksForgeQueryPort(
         base_url="https://dbx",
         token_provider=_TokenProvider("tok"),
         http=session,
@@ -165,24 +165,24 @@ def test_cancel_statement_allows_202() -> None:
 
 def test_submit_statement_arrow(monkeypatch: pytest.MonkeyPatch) -> None:
     session = _Session()
-    session.set_post(_Resp({"statement_id": "s1"}))
-    exec = DatabricksSQLExecutor(
+    session.set_post(_Resp({"qf_statement_id": "s1"}))
+    exec = DatabricksForgeQueryPort(
         base_url="https://dbx",
         token_provider=_TokenProvider("tok"),
         http=session,
         default_warehouse_id="wh",
     )
 
-    monkeypatch.setattr(exec, "_wait_for_terminal", lambda stmt_id, timeout_s: {"status": {"state": "SUCCEEDED"}})
+    monkeypatch.setattr(exec, "_wait_for_terminal", lambda stmt_id, qf_timeout_s: {"status": {"state": "SUCCEEDED"}})
     monkeypatch.setattr(exec, "fetch_arrow_table", lambda stmt_id: pa.table({"a": [1]}))
 
-    resp = exec.submit_statement("SELECT 1", result_format="ARROW_STREAM")
+    resp = exec.submit_statement("SELECT 1", qf_result_fmt="ARROW_STREAM")
     assert resp["rows"] == [{"a": 1}]
-    assert resp["result_format"] == "ARROW_STREAM"
+    assert resp["qf_result_fmt"] == "ARROW_STREAM"
 
 
 def test_execute_write_failed() -> None:
-    exec = DatabricksSQLExecutor(
+    exec = DatabricksForgeQueryPort(
         base_url="https://dbx",
         token_provider=_TokenProvider("tok"),
         http=_Session(),
@@ -197,7 +197,7 @@ def test_execute_write_failed() -> None:
 def test_cancel_allows_404() -> None:
     session = _Session()
     session.set_post(_Resp(status_code=404))
-    exec = DatabricksSQLExecutor(
+    exec = DatabricksForgeQueryPort(
         base_url="https://dbx",
         token_provider=_TokenProvider("tok"),
         http=session,
@@ -221,8 +221,8 @@ def test_rows_from_result_json_list() -> None:
 
 def test_submit_statement_logs_redacted_payload(caplog: pytest.LogCaptureFixture) -> None:
     session = _Session()
-    session.set_post(_Resp({"statement_id": "s1"}))
-    exec = DatabricksSQLExecutor(
+    session.set_post(_Resp({"qf_statement_id": "s1"}))
+    exec = DatabricksForgeQueryPort(
         base_url="https://dbx",
         token_provider=_TokenProvider("tok"),
         http=session,
@@ -250,7 +250,7 @@ def test_poll_status_logs_only_state(caplog: pytest.LogCaptureFixture) -> None:
             }
         )
     )
-    exec = DatabricksSQLExecutor(
+    exec = DatabricksForgeQueryPort(
         base_url="https://dbx",
         token_provider=_TokenProvider("tok"),
         http=session,

@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
 
 import requests
 from flask import current_app, request
-from flask_restx import Namespace, Resource
+from flask_restx import Namespace
+from app.routes.forge_resource import ForgeResource
 from pydantic import ValidationError
 
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.models.ai_suggest import SuggestAPIResponse, SuggestRequest
-from app.routes._route_utils import get_workspace_id_from_header
+from app.routes.request_helpers import extract_workspace_id
 from app.services.embedding.embedding_search_service import EmbeddingSearchService
 from app.services.ai_suggest_service import AISuggestService, InvalidModelResponseError
 from app.services.semantic.plan_service import PlanService
@@ -313,10 +313,10 @@ def _legacy_suggest_response(suggest_request: SuggestRequest) -> SuggestAPIRespo
 
 
 @ai_ns.route("/suggest")
-class AISuggest(Resource):
+class AISuggest(ForgeResource):
     @token_required
     def post(self) -> tuple[dict, int]:
-        workspace_id = get_workspace_id_from_header()
+        workspace_id = extract_workspace_id()
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict):
             body = {}
@@ -337,7 +337,7 @@ class AISuggest(Resource):
                 debug=debug,
             )
             return result.model_dump(mode="json"), 200, DEPRECATION_HEADERS
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code, DEPRECATION_HEADERS
         except Exception:
             logger.exception("ai/suggest semantic bridge failed; falling back to legacy ai_suggest_service")
@@ -504,10 +504,10 @@ def _sqljson_to_suggest_edits(sqljson: object) -> list[dict]:
 
 
 @ai_ns.route("/suggest-semantic-adapter")
-class AISuggestSemanticAdapter(Resource):
+class AISuggestSemanticAdapter(ForgeResource):
     @token_required
     def post(self) -> tuple[dict, int]:
-        workspace_id = get_workspace_id_from_header()
+        workspace_id = extract_workspace_id()
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict):
             body = {}
@@ -528,7 +528,7 @@ class AISuggestSemanticAdapter(Resource):
                 debug=debug,
             )
             return payload.model_dump(mode="json"), 200, DEPRECATION_HEADERS
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code, DEPRECATION_HEADERS
         except Exception as exc:
             logger.exception("AI semantic adapter failed unexpectedly")
@@ -536,7 +536,7 @@ class AISuggestSemanticAdapter(Resource):
 
 
 @ai_ns.route("/health")
-class AIHealth(Resource):
+class AIHealth(ForgeResource):
     def get(self) -> tuple[dict, int]:
         service = _build_service()
         try:

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.models.product import Product
 from app.models.product_role import ProductRole
 from app.models.role import Role
@@ -13,7 +13,7 @@ from app.models.user_invitation import UserInvitation
 from app.models.user_workspace import Workspace
 from app.services import user_service as user_service_mod
 from app.services.user_service import UserService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 class _EmailTask:
@@ -25,7 +25,7 @@ class _EmailTask:
 
 
 def test_update_status_updates_login(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [1, 1]
     svc = UserService(sql=fake)
 
@@ -34,15 +34,15 @@ def test_update_status_updates_login(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_update_status_db_error() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_exceptions = [user_service_mod.exc.SQLAlchemyError("err")]
     svc = UserService(sql=fake)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.update_status("u1", "Active")
 
 
 def test_get_counts_includes_all() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[{"status": "Active", "count": 2}]]
     svc = UserService(sql=fake)
     counts = svc.get_counts()
@@ -52,10 +52,10 @@ def test_get_counts_includes_all() -> None:
 
 
 def test_get_counts_db_error() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_exceptions = [user_service_mod.exc.SQLAlchemyError("err")]
     svc = UserService(sql=fake)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.get_counts()
 
 
@@ -63,7 +63,7 @@ def test_resend_invite_sends_email(monkeypatch: pytest.MonkeyPatch) -> None:
     task = _EmailTask()
     import app.tasks.email_tasks as email_tasks
     monkeypatch.setattr(email_tasks, "send_invite_email_task", task)
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [1]
     svc = UserService(sql=fake)
 
@@ -73,7 +73,7 @@ def test_resend_invite_sends_email(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_create_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [1]
     svc = UserService(sql=fake)
     monkeypatch.setattr(svc, "check_for_existing_user", lambda username: False)
@@ -85,36 +85,36 @@ def test_create_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_create_user_duplicate(monkeypatch: pytest.MonkeyPatch) -> None:
-    svc = UserService(sql=FakeSQLExecutor())
+    svc = UserService(sql=FakeForgeQueryPort())
     monkeypatch.setattr(svc, "check_for_existing_user", lambda username: True)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.create_user("alice", "Password1!", "a@example.com", "A", "B")
 
 
 def test_create_user_bad_password(monkeypatch: pytest.MonkeyPatch) -> None:
-    svc = UserService(sql=FakeSQLExecutor())
+    svc = UserService(sql=FakeForgeQueryPort())
     monkeypatch.setattr(svc, "check_for_existing_user", lambda username: False)
     monkeypatch.setattr(
         user_service_mod,
         "validate_password_policy",
-        lambda password: (_ for _ in ()).throw(ServiceError("Password violates policy rules.", 422)),
+        lambda password: (_ for _ in ()).throw(ForgeError("Password violates policy rules.", 422)),
     )
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.create_user("alice", "bad", "a@example.com", "A", "B")
 
 
 def test_create_user_db_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_exceptions = [user_service_mod.exc.SQLAlchemyError("err")]
     svc = UserService(sql=fake)
     monkeypatch.setattr(svc, "check_for_existing_user", lambda username: False)
     monkeypatch.setattr(user_service_mod, "validate_password_policy", lambda password: 200)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.create_user("alice", "Password1!", "a@example.com", "A", "B")
 
 
 def test_create_invite_bulk_skips_existing(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [1, 0]
     svc = UserService(sql=fake)
     task = _EmailTask()
@@ -135,15 +135,15 @@ def test_create_invite_bulk_skips_existing(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_create_invite_duplicate(monkeypatch: pytest.MonkeyPatch) -> None:
-    svc = UserService(sql=FakeSQLExecutor())
+    svc = UserService(sql=FakeForgeQueryPort())
     monkeypatch.setattr(svc, "check_for_existing_user", lambda email: True)
     invite = UserInvitation(email="a@example.com", products=[], workspaces=[])
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.create_invite(invite)
 
 
 def test_create_invite_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [1]
     svc = UserService(sql=fake)
     task = _EmailTask()
@@ -165,7 +165,7 @@ def test_create_invite_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_create_invite_db_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_exceptions = [user_service_mod.exc.SQLAlchemyError("err")]
     svc = UserService(sql=fake)
     task = _EmailTask()
@@ -173,12 +173,12 @@ def test_create_invite_db_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(email_tasks, "send_invite_email_task", task)
     monkeypatch.setattr(svc, "check_for_existing_user", lambda email: False)
     invite = UserInvitation(email="a@example.com", products=[], workspaces=[])
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.create_invite(invite)
 
 
 def test_update_user_updates_fields(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [1]
     svc = UserService(sql=fake)
     existing = User(user_id="u1", first_name="Old", last_name="Name")
@@ -193,31 +193,31 @@ def test_update_user_updates_fields(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_update_user_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
-    svc = UserService(sql=FakeSQLExecutor())
+    svc = UserService(sql=FakeForgeQueryPort())
     monkeypatch.setattr(svc, "get_user", lambda user_id: None)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.update_user("u1", User(first_name="New"))
 
 
 def test_update_user_password_enforces_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     svc = UserService(sql=fake)
     existing = User(user_id="u1", first_name="Old", last_name="Name")
     monkeypatch.setattr(svc, "get_user", lambda user_id: existing)
     monkeypatch.setattr(
         user_service_mod,
         "validate_password_policy",
-        lambda _password: (_ for _ in ()).throw(ServiceError("Password violates policy rules.", 422)),
+        lambda _password: (_ for _ in ()).throw(ForgeError("Password violates policy rules.", 422)),
     )
 
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         svc.update_user("u1", User(password="weak"))
     assert exc.value.status_code == 422
     assert not fake.write_calls
 
 
 def test_update_user_password_hashes_after_policy_validation(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [1]
     svc = UserService(sql=fake)
     existing = User(user_id="u1", first_name="Old", last_name="Name")
@@ -233,7 +233,7 @@ def test_update_user_password_hashes_after_policy_validation(monkeypatch: pytest
 
 
 def test_sync_user_workspaces_inserts_and_updates() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[{"workspace_id": "ws1", "is_default": 0}]]
     svc = UserService(sql=fake)
     with fake.transaction() as tx:
@@ -246,7 +246,7 @@ def test_sync_user_workspaces_inserts_and_updates() -> None:
 
 
 def test_sync_user_product_roles_inserts() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[{"product_role_id": "r1"}]]
     svc = UserService(sql=fake)
     with fake.transaction() as tx:
@@ -259,15 +259,15 @@ def test_sync_user_product_roles_inserts() -> None:
 
 
 def test_delete_user_not_found() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [1, 0]
     svc = UserService(sql=fake)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.delete_user("u1")
 
 
 def test_get_user_by_username() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[{"user_id": "u1", "username": "alice"}]]
     svc = UserService(sql=fake)
     row = svc.get_user_by_username("alice")
@@ -275,15 +275,15 @@ def test_get_user_by_username() -> None:
 
 
 def test_get_user_missing() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[]]
     svc = UserService(sql=fake)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.get_user("u1")
 
 
 def test_get_users_empty() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[]]
     svc = UserService(sql=fake)
     users, next_cursor, prev_cursor, total = svc.get_users()
@@ -294,7 +294,7 @@ def test_get_users_empty() -> None:
 
 
 def test_get_users_with_products_and_workspaces() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [
         [
             {
@@ -343,7 +343,7 @@ def test_get_users_with_products_and_workspaces() -> None:
 
 
 def test_get_users_prev_cursor() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [
         [
             {
@@ -377,7 +377,7 @@ def test_get_users_prev_cursor() -> None:
 
 
 def test_map_user_workspace_first_default() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[]]
     svc = UserService(sql=fake)
     resp = svc.map_user_workspace("u1", "ws1", False)
@@ -385,7 +385,7 @@ def test_map_user_workspace_first_default() -> None:
 
 
 def test_get_user_workspaces_and_delete() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[{"workspace_id": "ws1", "is_default": 1}]]
     fake.write_responses = [1]
     svc = UserService(sql=fake)
@@ -396,15 +396,15 @@ def test_get_user_workspaces_and_delete() -> None:
 
 
 def test_map_user_workspace_duplicate() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[{"workspace_id": "ws1"}]]
     svc = UserService(sql=fake)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.map_user_workspace("u1", "ws1", False)
 
 
 def test_map_user_product_role_maps() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[]]
     fake.write_responses = [1]
     svc = UserService(sql=fake)
@@ -413,14 +413,14 @@ def test_map_user_product_role_maps() -> None:
 
 
 def test_map_user_product_role_existing_returns_none() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[{"product_role_id": "r1"}]]
     svc = UserService(sql=fake)
     assert svc.map_user_product_role("u1", "r1") is None
 
 
 def test_map_user_product_maps() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[]]
     fake.write_responses = [1]
     svc = UserService(sql=fake)
@@ -429,14 +429,14 @@ def test_map_user_product_maps() -> None:
 
 
 def test_map_user_product_existing_returns_none() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[{"product_id": "p1"}]]
     svc = UserService(sql=fake)
     assert svc.map_user_product("u1", "p1") is None
 
 
 def test_get_user_products() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[{"product_id": "p1"}]]
     svc = UserService(sql=fake)
     rows = svc.get_user_products("u1")
@@ -444,7 +444,7 @@ def test_get_user_products() -> None:
 
 
 def test_set_workspace_default_success() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[{"workspace_id": "ws1", "is_default": 0}]]
     fake.write_responses = [1, 1]
     svc = UserService(sql=fake)
@@ -453,46 +453,46 @@ def test_set_workspace_default_success() -> None:
 
 
 def test_set_workspace_default_missing_mapping() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[]]
     svc = UserService(sql=fake)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.set_workspace_default("u1", "ws1", True)
 
 
 def test_set_workspace_default_cannot_unset_only_default() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[{"workspace_id": "ws1", "is_default": 1}]]
     svc = UserService(sql=fake)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.set_workspace_default("u1", "ws1", False)
 
 
 def test_check_for_existing_user_true() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[{"user_id": "u1"}]]
     svc = UserService(sql=fake)
     assert svc.check_for_existing_user("alice") is True
 
 
 def test_get_user_product_roles_error() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_exceptions = [user_service_mod.exc.SQLAlchemyError("err")]
     svc = UserService(sql=fake)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.get_user_product_roles("u1")
 
 
 def test_delete_user_workspace_error() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_exceptions = [user_service_mod.exc.SQLAlchemyError("err")]
     svc = UserService(sql=fake)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.delete_user_workspace("u1", "ws1")
 
 
 def test_map_user_with_products_builds_user() -> None:
-    svc = UserService(sql=FakeSQLExecutor())
+    svc = UserService(sql=FakeForgeQueryPort())
     rows = [
         {
             "user_id": "u1",
@@ -513,13 +513,13 @@ def test_map_user_with_products_builds_user() -> None:
 
 
 def test_map_user_with_products_empty() -> None:
-    svc = UserService(sql=FakeSQLExecutor())
+    svc = UserService(sql=FakeForgeQueryPort())
     with pytest.raises(ValueError):
         svc.map_user_with_products([])
 
 
 def test_update_last_login() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [1]
     svc = UserService(sql=fake)
     svc.update_last_login("u1")

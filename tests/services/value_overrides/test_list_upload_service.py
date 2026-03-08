@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.value_overrides.list_upload_service import ListUploadService
+from app.services.value_overrides.list_upload_service import ForgeListUploadService
 
 
 class _DummyWriter:
@@ -15,7 +15,7 @@ class _DummyWriter:
 
 
 def test_norm_and_infer_type() -> None:
-    svc = ListUploadService(_DummyWriter())
+    svc = ForgeListUploadService(_DummyWriter())
     assert svc._norm_col("Customer Service Line") == "customer_service_line"
     assert svc._infer_type({"zipcode", "subregion", "region"}) == "regions"
     with pytest.raises(ValueError):
@@ -23,13 +23,13 @@ def test_norm_and_infer_type() -> None:
 
 
 def test_validate_row_regions() -> None:
-    svc = ListUploadService(_DummyWriter())
+    svc = ForgeListUploadService(_DummyWriter())
     errs = svc._validate_row("regions", 2, {"zipcode": "abc", "subregion": "", "region": ""})
     assert any(e.code == "INVALID_ZIP" for e in errs)
 
 
 def test_handle_upload_type_mismatch() -> None:
-    svc = ListUploadService(_DummyWriter())
+    svc = ForgeListUploadService(_DummyWriter())
     csv_bytes = b"zipcode,subregion,region\n12345,Sub,Reg\n"
     res = svc.handle_upload(
         file_bytes=csv_bytes,
@@ -46,7 +46,7 @@ def test_handle_upload_type_mismatch() -> None:
 
 def test_handle_upload_success() -> None:
     writer = _DummyWriter()
-    svc = ListUploadService(writer)
+    svc = ForgeListUploadService(writer)
     csv_bytes = b"zipcode,subregion,region\n12345,Sub,Reg\n"
     res = svc.handle_upload(
         file_bytes=csv_bytes,

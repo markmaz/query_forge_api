@@ -4,11 +4,12 @@ import logging
 from typing import Any, Dict, Optional
 
 from flask import g, request
-from flask_restx import Namespace, Resource, fields
+from flask_restx import Namespace, fields
+from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
-from app.routes._route_utils import bool_arg, int_arg
+from app.exceptions.forge_error import ForgeError
+from app.routes.request_helpers import bool_arg, int_arg
 from app.services.semantic.semantic_suggestion_service import SemanticSuggestionService
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ item_patch_model = semantic_suggestions_ns.model(
 
 
 @semantic_suggestions_ns.route("/runs")
-class SuggestionRuns(Resource):
+class SuggestionRuns(ForgeResource):
     @token_required
     @semantic_suggestions_ns.expect(run_model, validate=False)
     def post(self):
@@ -57,7 +58,7 @@ class SuggestionRuns(Resource):
             created_by = str(getattr(g, "user_id", "") or "") or None
             run = SemanticSuggestionService().create_run(body, created_by=created_by)
             return {"run": run}, 201
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("semantic suggestion run create failed")
@@ -65,13 +66,13 @@ class SuggestionRuns(Resource):
 
 
 @semantic_suggestions_ns.route("/runs/<int:run_id>/execute")
-class SuggestionRunExecute(Resource):
+class SuggestionRunExecute(ForgeResource):
     @token_required
     def post(self, run_id: int):
         try:
             run = SemanticSuggestionService().execute_run(run_id)
             return {"run": run}, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("semantic suggestion run execute failed")
@@ -79,13 +80,13 @@ class SuggestionRunExecute(Resource):
 
 
 @semantic_suggestions_ns.route("/runs/<int:run_id>")
-class SuggestionRunById(Resource):
+class SuggestionRunById(ForgeResource):
     @token_required
     def get(self, run_id: int):
         try:
             run = SemanticSuggestionService().get_run(run_id)
             return {"run": run}, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("semantic suggestion run get failed")
@@ -93,7 +94,7 @@ class SuggestionRunById(Resource):
 
 
 @semantic_suggestions_ns.route("/items")
-class SuggestionItems(Resource):
+class SuggestionItems(ForgeResource):
     @token_required
     @semantic_suggestions_ns.doc(
         params={
@@ -120,7 +121,7 @@ class SuggestionItems(Resource):
                 page_size=int_arg("page_size", 50),
             )
             return result, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("semantic suggestion item list failed")
@@ -128,7 +129,7 @@ class SuggestionItems(Resource):
 
 
 @semantic_suggestions_ns.route("/items/<int:item_id>")
-class SuggestionItemById(Resource):
+class SuggestionItemById(ForgeResource):
     @token_required
     @semantic_suggestions_ns.expect(item_patch_model, validate=False)
     def patch(self, item_id: int):
@@ -136,7 +137,7 @@ class SuggestionItemById(Resource):
             body: Dict[str, Any] = request.get_json(silent=True) or {}
             row = SemanticSuggestionService().update_item(item_id, body)
             return {"item": row}, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("semantic suggestion item patch failed")
@@ -144,13 +145,13 @@ class SuggestionItemById(Resource):
 
 
 @semantic_suggestions_ns.route("/runs/<int:run_id>/apply")
-class SuggestionRunApply(Resource):
+class SuggestionRunApply(ForgeResource):
     @token_required
     def post(self, run_id: int):
         try:
             run = SemanticSuggestionService().apply_approved(run_id)
             return {"run": run}, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("semantic suggestion run apply failed")
@@ -163,4 +164,4 @@ def _optional_int(value: Optional[str], field: str) -> Optional[int]:
     try:
         return int(value)
     except Exception as exc:
-        raise ServiceError(f"{field} must be an integer", status_code=400) from exc
+        raise ForgeError(f"{field} must be an integer", status_code=400) from exc

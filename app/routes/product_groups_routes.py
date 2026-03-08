@@ -1,59 +1,94 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
 from flask import request
-from flask_restx import Namespace, Resource, reqparse
+from flask_restx import Namespace
+from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.exceptions.forge_error import ForgeError
 from app.services.product_groups_service import ProductGroupService
 
 product_group_ns = Namespace("product-groups", "A collection of products")
-product_group_parser = reqparse.RequestParser()
-product_group_parser.add_argument('status', type=str, default='All', help='Filter by status', action='store', location='args')  # Single value
-product_group_parser.add_argument('cursor', type=str, help='Cursor for pagination (user_id)', location='args')
-product_group_parser.add_argument('limit', type=int, default=10, help='Number of records per page', location='args')
-product_group_parser.add_argument('direction', type=str, default='forward', choices=['forward', 'backward'], help='Pagination direction', location='args')
+
+
+def _bool_like_direction(value: Optional[str]) -> str:
+    direction = (value or "forward").strip().lower()
+    return direction if direction in {"forward", "backward"} else "forward"
+
+
+def _int_arg(name: str, default: int) -> int:
+    raw = (request.args.get(name) or "").strip()
+    if not raw:
+        return int(default)
+    try:
+        return int(raw)
+    except ValueError:
+        raise ForgeError(f"Invalid integer for '{name}'", status_code=400)
+
+
+def _safe_body_dict() -> Dict[str, Any]:
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        raise ForgeError("Invalid JSON body", status_code=400)
+    return payload
+
+
+def _to_json_rows(items: List[Any]) -> List[Dict[str, Any]]:
+    return [item.model_dump(mode="json") for item in items]
+
 
 @product_group_ns.route("/")
-class ProductGroupList(Resource):
+class ProductGroupList(ForgeResource):
     @token_required
     def get(self):
-        args = product_group_parser.parse_args()
+        status = (request.args.get("status") or "All").strip() or "All"
+        # Keep parser-compatible args available for future service expansion.
+        _ = request.args.get("cursor")
+        _ = _int_arg("limit", 10)
+        _ = _bool_like_direction(request.args.get("direction"))
+
         service = ProductGroupService()
-    
-        product_groups = service.get_product_groups(status=args['status'])
-        return [product_group.model_dump(mode="json") for product_group in product_groups]
-    
+        groups = service.get_product_groups(status=status)
+        return _to_json_rows(groups)
+
     @token_required
     def post(self):
         service = ProductGroupService()
-        data = request.get_json()
-        group_name = data.get("product_group_name")
-        return service.create_product_group(group_name).model_dump(mode="json")
+        payload = _safe_body_dict()
+        group_name = payload.get("product_group_name")
+        if not group_name:
+            raise ForgeError("product_group_name is required", status_code=400)
+
+        created = service.create_product_group(group_name)
+        return created.model_dump(mode="json")
+
 
 @product_group_ns.route("/<string:product_group_id>")
-class ProductGroupStandard(Resource):
+class ProductGroupStandard(ForgeResource):
     @token_required
     def get(self, product_group_id: str):
         service = ProductGroupService()
         product_group = service.get_product_group(product_group_id)
-
         return product_group.model_dump(mode="json")
-    
+
     @token_required
     def delete(self, product_group_id: str):
         service = ProductGroupService()
         return service.delete_product_group(product_group_id)
 
+
 @product_group_ns.route("/<string:product_group_id>/products/<string:product_id>")
-class ProductGroupProductMap(Resource):
+class ProductGroupMembership(ForgeResource):
     @token_required
-    def put(self, product_group_id: str, product_id:str):
+    def put(self, product_group_id: str, product_id: str):
         service = ProductGroupService()
+        mapped = service.add_product_to_group(product_id, product_group_id)
+        return mapped.model_dump(mode="json")
 
-        return service.add_product_to_group(product_id, product_group_id).model_dump(mode="json")
-
-@product_group_ns.route("/<string:product_group_id>/products/<string:product_id>")
-class ProductGroupRemoveProduct(Resource):
     @token_required
     def delete(self, product_group_id: str, product_id: str):
         service = ProductGroupService()
-
-        return service.remove_product_from_group(product_id, product_group_id).model_dump(mode="json")
+        removed = service.remove_product_from_group(product_id, product_group_id)
+        return removed.model_dump(mode="json")

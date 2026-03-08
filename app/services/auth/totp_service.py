@@ -9,10 +9,10 @@ import pyotp
 import redis
 from werkzeug.security import check_password_hash
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import OTP_VALID_WINDOW, VALKEY_CONFIG
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
 
@@ -22,15 +22,15 @@ _PENDING_PREFIX = "totp:pending:"
 
 
 class TotpService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None, redis_client: Any | None = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None, redis_client: Any | None = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
         self._redis = redis_client or redis.Redis.from_url(VALKEY_CONFIG, decode_responses=True)
         self._valid_window = int(OTP_VALID_WINDOW)
 
     def start_totp_enrollment(self, user_id: str) -> Dict[str, Any]:
         user = self._get_user_auth_row(user_id)
         if not user:
-            raise ServiceError("Unable to start TOTP enrollment", status_code=400)
+            raise ForgeError("Unable to start TOTP enrollment", status_code=400)
 
         secret = pyotp.random_base32()
         self._redis.setex(self._pending_key(user_id), TOTP_PENDING_TTL_S, secret)
@@ -49,16 +49,16 @@ class TotpService:
     def confirm_totp_enrollment(self, user_id: str, code: str) -> Dict[str, Any]:
         normalized_code = self._normalize_code(code)
         if not normalized_code:
-            raise ServiceError("code is required", status_code=400)
+            raise ForgeError("code is required", status_code=400)
 
         pending_secret = str(self._redis.get(self._pending_key(user_id)) or "").strip()
         if not pending_secret:
-            raise ServiceError("Enrollment has expired. Start setup again.", status_code=400)
+            raise ForgeError("Enrollment has expired. Start setup again.", status_code=400)
 
         verified = pyotp.TOTP(pending_secret).verify(normalized_code, valid_window=self._valid_window)
         if not verified:
             self._audit("totp_verify_fail", user_id=user_id, extra={"context": "enrollment_confirm"})
-            raise ServiceError("Invalid code", status_code=401)
+            raise ForgeError("Invalid code", status_code=401)
 
         sql = """
             UPDATE users
@@ -103,17 +103,17 @@ class TotpService:
     def disable_totp(self, user_id: str, password: str, code: str) -> Dict[str, Any]:
         user = self._get_user_auth_row(user_id)
         if not user:
-            raise ServiceError("Unable to disable TOTP", status_code=400)
+            raise ForgeError("Unable to disable TOTP", status_code=400)
 
         if not bool(user.get("otp_totp_enabled")):
             return {"enabled": False}
 
         hashed_password = str(user.get("password") or "")
         if not hashed_password or not check_password_hash(hashed_password, password or ""):
-            raise ServiceError("Invalid credentials", status_code=401)
+            raise ForgeError("Invalid credentials", status_code=401)
 
         if not self.verify_totp_code(user_id, code):
-            raise ServiceError("Invalid code", status_code=401)
+            raise ForgeError("Invalid code", status_code=401)
 
         sql = """
             UPDATE users
@@ -173,7 +173,7 @@ class TotpService:
             import qrcode  # type: ignore
             from qrcode.image.svg import SvgPathImage  # type: ignore
         except Exception as exc:
-            raise ServiceError("QR code generation is unavailable", status_code=500) from exc
+            raise ForgeError("QR code generation is unavailable", status_code=500) from exc
 
         image = qrcode.make(content, image_factory=SvgPathImage)
         buff = io.BytesIO()

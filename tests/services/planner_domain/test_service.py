@@ -1786,7 +1786,7 @@ def test_semester_indicator_resolution_uses_explicit_semantic_concept_keys(monke
             ]
 
     monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
-    monkeypatch.setattr(planner_domain_service_module, "MySQLSQLExecutor", lambda: _FakeSql())
+    monkeypatch.setattr(planner_domain_service_module, "ForgeMetaSQL", lambda: _FakeSql())
 
     svc = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),

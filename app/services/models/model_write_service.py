@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Set, Tuple
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.ports.sql_executor import ForgeQueryPort
 
 
 class ModelWriteService:
-    def __init__(self, *, sql: SQLExecutor | None = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: ForgeQueryPort | None = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def upsert_dictionary(
         self,

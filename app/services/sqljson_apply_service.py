@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, Optional
 from uuid import uuid4
 
 from app.models.ai_suggest import EditOperation, SqlColumnKey
