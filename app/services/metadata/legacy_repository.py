@@ -72,6 +72,22 @@ class LegacyMetadataRepository:
         )
         return [_to_table_record(row) for row in rows]
 
+    def resolve_table_ids_by_names(self, *, names: Sequence[str]) -> Dict[str, int]:
+        clean_names = sorted({str(name or "").strip() for name in names if str(name or "").strip()})
+        if not clean_names:
+            return {}
+        out: Dict[str, int] = {}
+        for batch in _chunk(clean_names, 500):
+            placeholders = ", ".join(f":n{i}" for i in range(len(batch)))
+            params = {f"n{i}": name for i, name in enumerate(batch)}
+            rows = self._sql.execute_query_mappings(
+                f"SELECT id, name FROM model_table WHERE name IN ({placeholders})",
+                params,
+            )
+            for row in rows:
+                out[str(row.get("name") or "")] = int(row.get("id") or 0)
+        return out
+
     def upsert_tables(
         self,
         *,

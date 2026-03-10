@@ -6,6 +6,7 @@ import logging
 from typing import Any, Callable
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.services.metadata.gateway import MetadataGateway
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +18,16 @@ class DictionaryEnrichmentService:
     All LLM failures are swallowed and logged — never propagated.
     """
 
-    def __init__(self, *, mysql: ForgeMetaSQL | None = None, llm=None) -> None:
+    def __init__(
+        self,
+        *,
+        mysql: ForgeMetaSQL | None = None,
+        llm=None,
+        metadata_gateway: MetadataGateway | None = None,
+    ) -> None:
         self._mysql = mysql or ForgeMetaSQL()
         self._llm = llm  # any object with .generate(prompt: str) -> str
+        self._metadata_gateway = metadata_gateway or MetadataGateway(sql=self._mysql)
 
     def enrich(
         self,
@@ -209,6 +217,10 @@ WHERE id = :table_id
                                     "table_id": int(state["table_id"]),
                                 },
                             )
+                        self._metadata_gateway.sync_table_patch_from_model(
+                            model_table_id=int(state["table_id"]),
+                            updates={"description": generated_table_description[:2000]},
+                        )
                         tables_enriched += 1
                 except Exception as exc:
                     logger.warning(
@@ -306,6 +318,26 @@ WHERE id = :col_id
 """,
                                 params,
                             )
+                            workspace_updates: dict[str, Any] = {}
+                            if "description" in params:
+                                workspace_updates["description"] = params["description"]
+                            if "semantic_type" in params:
+                                workspace_updates["semantic_type"] = params["semantic_type"]
+                            if "semantic_entity" in params:
+                                workspace_updates["semantic_entity"] = params["semantic_entity"]
+                            if "semantic_sub_type" in params:
+                                workspace_updates["semantic_sub_type"] = params["semantic_sub_type"]
+                            if "semantic_confidence" in params:
+                                workspace_updates["semantic_confidence"] = params["semantic_confidence"]
+                            if "semantic_reasons_json" in params:
+                                workspace_updates["semantic_reasons_json"] = params["semantic_reasons_json"]
+                            if "semantic_source" in params:
+                                workspace_updates["semantic_source"] = params["semantic_source"]
+                            if workspace_updates:
+                                self._metadata_gateway.sync_column_patch_from_model(
+                                    model_column_id=col_id,
+                                    updates=workspace_updates,
+                                )
                             columns_enriched += 1
                     except Exception as exc:
                         logger.warning(

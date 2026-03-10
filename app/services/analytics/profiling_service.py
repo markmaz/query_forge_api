@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.metadata_provider_abc import MetadataProvider
+from app.services.metadata.gateway import MetadataGateway
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +26,9 @@ _DEFAULT_OPTIONS: dict[str, Any] = {
 class ProfilingService:
     """Drives per-table column profiling and persists results to model_column."""
 
-    def __init__(self, *, mysql: ForgeMetaSQL | None = None) -> None:
+    def __init__(self, *, mysql: ForgeMetaSQL | None = None, metadata_gateway: MetadataGateway | None = None) -> None:
         self._mysql = mysql or ForgeMetaSQL()
+        self._metadata_gateway = metadata_gateway or MetadataGateway(sql=self._mysql)
 
     def profile_and_persist(
         self,
@@ -161,6 +163,14 @@ WHERE model_table_id = :table_id
                         "sample_ran_at": now,
                         "sample_error": str(sample_error)[:500] if sample_error else None,
                     },
+                )
+                self._metadata_gateway.sync_column_profile_from_model_table(
+                    model_table_id=table_id,
+                    column_name=cn,
+                    sample_values_json=json.dumps(top_values),
+                    sample_stats_json=json.dumps(sample_stats),
+                    sample_ran_at=now,
+                    sample_error=str(sample_error)[:500] if sample_error else None,
                 )
                 persisted += 1
         return persisted

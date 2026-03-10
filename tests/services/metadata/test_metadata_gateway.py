@@ -39,6 +39,87 @@ class _FakeSQL:
         yield self
 
 
+class _FakeWorkspaceRepo:
+    def __init__(self, *, fail_on: Optional[str] = None) -> None:
+        self.fail_on = fail_on
+        self.calls: List[str] = []
+
+    def _record(self, name: str):
+        self.calls.append(name)
+        if self.fail_on == name:
+            raise RuntimeError(f"boom:{name}")
+
+    def upsert_tables(self, **kwargs):
+        del kwargs
+        self._record("upsert_tables")
+        return {"tables_upserted": 1}
+
+    def upsert_columns(self, **kwargs):
+        del kwargs
+        self._record("upsert_columns")
+        return {"columns_upserted": 1, "cols_by_table_id": {}}
+
+    def mark_tables_missing(self, **kwargs):
+        del kwargs
+        self._record("mark_tables_missing")
+        return 1
+
+    def mark_columns_missing(self, **kwargs):
+        del kwargs
+        self._record("mark_columns_missing")
+        return 1
+
+    def get_table_by_name(self, **kwargs):
+        del kwargs
+        self._record("get_table_by_name")
+        return None
+
+    def get_table_by_id(self, **kwargs):
+        del kwargs
+        self._record("get_table_by_id")
+        return None
+
+    def list_tables(self, **kwargs):
+        del kwargs
+        self._record("list_tables")
+        return []
+
+    def get_column_by_name(self, **kwargs):
+        del kwargs
+        self._record("get_column_by_name")
+        return None
+
+    def patch_table_by_model_table_id(self, **kwargs):
+        del kwargs
+        self._record("patch_table_by_model_table_id")
+        return 1
+
+    def patch_column_by_model_column_id(self, **kwargs):
+        del kwargs
+        self._record("patch_column_by_model_column_id")
+        return 1
+
+    def patch_column_by_model_table_and_name(self, **kwargs):
+        del kwargs
+        self._record("patch_column_by_model_table_and_name")
+        return 1
+
+    def deactivate_columns_not_in(self, **kwargs):
+        del kwargs
+        self._record("deactivate_columns_not_in")
+        return 1
+
+    def clear_model_column_reference(self, **kwargs):
+        del kwargs
+        self._record("clear_model_column_reference")
+        return 1
+
+    def clear_model_table_reference(self, **kwargs):
+        del kwargs
+        self._record("clear_model_table_reference")
+        return 1
+
+
 def test_gateway_defaults_to_legacy_mode(monkeypatch):
     monkeypatch.setattr("app.services.metadata.gateway.METADATA_SOURCE_MODE", "legacy")
     gw = MetadataGateway(legacy_repo=LegacyMetadataRepository(sql=_FakeSQL()))
@@ -46,7 +127,7 @@ def test_gateway_defaults_to_legacy_mode(monkeypatch):
     assert gw.effective_mode == "legacy"
 
 
-def test_gateway_dual_and_workspace_modes_currently_use_legacy_repo():
+def test_gateway_dual_mode_reads_legacy_and_writes_workspace():
     sql = _FakeSQL()
     sql.query_responses.append(
         [
@@ -60,13 +141,20 @@ def test_gateway_dual_and_workspace_modes_currently_use_legacy_repo():
             }
         ]
     )
-    gw = MetadataGateway(mode="dual", legacy_repo=LegacyMetadataRepository(sql=sql))
+    workspace_repo = _FakeWorkspaceRepo()
+    gw = MetadataGateway(
+        mode="dual",
+        legacy_repo=LegacyMetadataRepository(sql=sql),
+        workspace_repo=workspace_repo,  # type: ignore[arg-type]
+    )
 
     row = gw.get_table_by_name(table_name="dim_student")
     assert row is not None
     assert row.table_id == 11
     assert gw.configured_mode == "dual"
-    assert gw.effective_mode == "legacy"
+    assert gw.effective_mode == "dual"
+    gw.upsert_tables(tables=[{"table_name": "dim_student"}], origin="DBX")
+    assert "upsert_tables" in workspace_repo.calls
 
 
 def test_gateway_invalid_mode_raises():
@@ -120,6 +208,41 @@ def test_legacy_repo_upsert_columns_returns_counts_and_seen_sets():
 
 
 def test_gateway_workspace_mode_configured_but_effective_legacy():
-    gw = MetadataGateway(mode="workspace", legacy_repo=LegacyMetadataRepository(sql=_FakeSQL()))
+    workspace_repo = _FakeWorkspaceRepo()
+    gw = MetadataGateway(
+        mode="workspace",
+        legacy_repo=LegacyMetadataRepository(sql=_FakeSQL()),
+        workspace_repo=workspace_repo,  # type: ignore[arg-type]
+    )
     assert gw.configured_mode == "workspace"
-    assert gw.effective_mode == "legacy"
+    assert gw.effective_mode == "workspace"
+    gw.list_tables()
+    assert "list_tables" in workspace_repo.calls
+
+
+def test_gateway_dual_mode_workspace_failure_does_not_break_legacy_write():
+    sql = _FakeSQL()
+    sql.query_responses.append([{"id": 10, "name": "dim_student"}])
+    workspace_repo = _FakeWorkspaceRepo(fail_on="upsert_tables")
+    gw = MetadataGateway(
+        mode="dual",
+        legacy_repo=LegacyMetadataRepository(sql=sql),
+        workspace_repo=workspace_repo,  # type: ignore[arg-type]
+    )
+
+    out = gw.upsert_tables(tables=[{"table_name": "dim_student"}], origin="DBX")
+    assert out["name_to_id"]["dim_student"] == 10
+    assert len(sql.write_calls) == 1
+
+
+def test_gateway_workspace_mode_workspace_failure_raises():
+    workspace_repo = _FakeWorkspaceRepo(fail_on="patch_column_by_model_column_id")
+    gw = MetadataGateway(
+        mode="workspace",
+        legacy_repo=LegacyMetadataRepository(sql=_FakeSQL()),
+        workspace_repo=workspace_repo,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ForgeError) as exc:
+        gw.sync_column_patch_from_model(model_column_id=9, updates={"description": "x"})
+    assert exc.value.status_code == 500

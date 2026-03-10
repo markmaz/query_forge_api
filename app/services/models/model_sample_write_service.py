@@ -11,6 +11,7 @@ import pyarrow as pa
 from app.adapters.databricks_sql_executor import DatabricksForgeQueryPort
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.metadata.gateway import MetadataGateway
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +61,16 @@ class ModelSampleService:
       - model_column.sample_error
     """
 
-    def __init__(self, *, sql: DatabricksForgeQueryPort, mysql: Optional[ForgeQueryPort] = None):
+    def __init__(
+        self,
+        *,
+        sql: DatabricksForgeQueryPort,
+        mysql: Optional[ForgeQueryPort] = None,
+        metadata_gateway: Optional[MetadataGateway] = None,
+    ):
         self._sql = sql
         self._mysql = mysql or ForgeMetaSQL()
+        self._metadata_gateway = metadata_gateway or MetadataGateway(sql=self._mysql)
 
     def _pick_representative_tables(self, *, workspace_id: str, schema_name: str) -> List[Tuple[int, str]]:
         """
@@ -271,6 +279,13 @@ TABLESAMPLE (1 PERCENT)
                                 "ran_at": now,
                             },
                         )
+                        self._metadata_gateway.sync_column_profile_from_model_column(
+                            model_column_id=col_id,
+                            sample_values_json=json.dumps(samples, ensure_ascii=False),
+                            sample_stats_json=json.dumps(stats, ensure_ascii=False, default=str),
+                            sample_ran_at=now,
+                            sample_error=None,
+                        )
                         cols_updated += 1
 
                     except Exception as e:
@@ -293,6 +308,13 @@ TABLESAMPLE (1 PERCENT)
                             WHERE id = :id
                             """,
                             {"id": col_id, "ran_at": now, "err": msg},
+                        )
+                        self._metadata_gateway.sync_column_profile_from_model_column(
+                            model_column_id=col_id,
+                            sample_values_json=json.dumps([]),
+                            sample_stats_json=json.dumps({}),
+                            sample_ran_at=now,
+                            sample_error=msg,
                         )
                         cols_failed += 1
 

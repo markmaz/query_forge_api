@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.metadata.gateway import MetadataGateway
 
 ALLOWED_COLUMN_FIELDS = {
     "dataType",
@@ -27,8 +28,9 @@ ALLOWED_TABLE_FIELDS = {
 
 
 class ModelUpdateService:
-    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None, metadata_gateway: Optional[MetadataGateway] = None) -> None:
         self._sql = sql or ForgeMetaSQL()
+        self._metadata_gateway = metadata_gateway or MetadataGateway(sql=self._sql)
 
     def patch_column(
         self,
@@ -82,6 +84,29 @@ WHERE c.id = :id
         if affected == 0:
             raise ForgeError("Dictionary column not found", status_code=404)
 
+        workspace_updates: Dict[str, Any] = {}
+        if "data_type" in params:
+            workspace_updates["data_type"] = params["data_type"]
+        if "description" in params:
+            workspace_updates["description"] = params["description"]
+        if "is_active" in params:
+            workspace_updates["is_active"] = params["is_active"]
+        if "semantic_type" in params:
+            workspace_updates["semantic_type"] = params["semantic_type"]
+        if "semantic_entity" in params:
+            workspace_updates["semantic_entity"] = params["semantic_entity"]
+        if "semantic_sub_type" in params:
+            workspace_updates["semantic_sub_type"] = params["semantic_sub_type"]
+        if "semantic_source" in params:
+            workspace_updates["semantic_source"] = params["semantic_source"]
+        if "semantic_confidence" in params:
+            workspace_updates["semantic_confidence"] = params["semantic_confidence"]
+        if workspace_updates:
+            self._metadata_gateway.sync_column_patch_from_model(
+                model_column_id=int(column_id),
+                updates=workspace_updates,
+            )
+
         sel_sql = """
 SELECT
   c.id,
@@ -106,19 +131,24 @@ LIMIT 1
             raise ForgeError("Dictionary column not found", status_code=404)
 
         row = r[0]
+        def _safe_idx(idx: int, default: Any = None) -> Any:
+            try:
+                return row[idx]
+            except Exception:
+                return default
         return {
-            "id": int(row[0]),
-            "modelTableId": int(row[1]),
-            "tableName": str(row[2]),
-            "columnName": str(row[3]),
-            "dataType": row[4],
-            "description": row[5],
-            "semanticType": row[6],
-            "semanticEntity": row[7],
-            "semanticSubType": row[8],
-            "semanticSource": row[9],
-            "semanticConfidence": float(row[10]) if row[10] is not None else None,
-            "isActive": bool(row[11]),
+            "id": int(_safe_idx(0, 0) or 0),
+            "modelTableId": int(_safe_idx(1, 0) or 0),
+            "tableName": str(_safe_idx(2, "") or ""),
+            "columnName": str(_safe_idx(3, "") or ""),
+            "dataType": _safe_idx(4),
+            "description": _safe_idx(5),
+            "semanticType": _safe_idx(6),
+            "semanticEntity": _safe_idx(7),
+            "semanticSubType": _safe_idx(8),
+            "semanticSource": _safe_idx(9),
+            "semanticConfidence": float(_safe_idx(10)) if _safe_idx(10) is not None else None,
+            "isActive": bool(_safe_idx(11, 1)),
         }
 
     def create_column(
@@ -200,6 +230,15 @@ WHERE mc.id = :id
             created_rows = tx.execute_query_mappings(sql_select_created, {"id": new_id})
             created = created_rows[0] if created_rows else None
 
+        if created:
+            self._metadata_gateway.sync_column_patch_from_model(
+                model_column_id=int(created.get("id") or 0),
+                updates={
+                    "data_type": created.get("dataType"),
+                    "description": created.get("description"),
+                    "is_active": 1 if bool(created.get("isActive")) else 0,
+                },
+            )
         return dict(created) if created else {}
 
     def delete_column(self, *, column_id: int) -> Dict[str, Any]:
@@ -209,6 +248,7 @@ WHERE mc.id = :id
         )
         if affected == 0:
             raise ForgeError("Dictionary column not found", status_code=404)
+        self._metadata_gateway.clear_workspace_model_column_reference(model_column_id=int(column_id))
         return {"id": int(column_id), "deleted": True}
 
     def create_table(
@@ -256,7 +296,18 @@ LIMIT 1
 
         if not rows:
             raise ForgeError("Table create failed", status_code=500)
-        return _map_table_row(rows[0])
+        mapped = _map_table_row(rows[0])
+        self._metadata_gateway.sync_table_patch_from_model(
+            model_table_id=int(mapped["id"]),
+            updates={
+                "qf_table_name": mapped["name"],
+                "source_table_name": mapped.get("sourceTableName"),
+                "description": mapped.get("description"),
+                "origin": mapped.get("origin"),
+                "is_missing_in_source": 1 if bool(mapped.get("isMissingInSource")) else 0,
+            },
+        )
+        return mapped
 
     def patch_table(
         self,
@@ -308,6 +359,23 @@ WHERE id = :id
         if affected == 0:
             raise ForgeError("Table not found", status_code=404)
 
+        workspace_updates: Dict[str, Any] = {}
+        if "name" in params:
+            workspace_updates["qf_table_name"] = params["name"]
+        if "source_table_name" in params:
+            workspace_updates["source_table_name"] = params["source_table_name"]
+        if "description" in params:
+            workspace_updates["description"] = params["description"]
+        if "origin" in params:
+            workspace_updates["origin"] = params["origin"]
+        if "is_missing_in_source" in params:
+            workspace_updates["is_missing_in_source"] = params["is_missing_in_source"]
+        if workspace_updates:
+            self._metadata_gateway.sync_table_patch_from_model(
+                model_table_id=int(table_id),
+                updates=workspace_updates,
+            )
+
         rows = self._sql.execute_query_mappings(
             """
 SELECT id, name, source_table_name, description, origin, is_missing_in_source
@@ -334,6 +402,7 @@ LIMIT 1
             ) from exc
         if affected == 0:
             raise ForgeError("Table not found", status_code=404)
+        self._metadata_gateway.clear_workspace_model_table_reference(model_table_id=int(table_id))
         return {"id": int(table_id), "deleted": True}
 
 
