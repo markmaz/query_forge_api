@@ -146,6 +146,10 @@ QF_VERTICAL_DEFAULT = (
     os.getenv("QF_VERTICAL_DEFAULT", os.getenv("SEMANTIC_VERTICAL_DEFAULT", "generic")).strip().lower()
     or "generic"
 )
+METADATA_SOURCE_MODE = (
+    os.getenv("METADATA_SOURCE_MODE", "legacy").strip().lower()
+    or "legacy"
+)
 
 # Semantic suggestion backfill
 SEMANTIC_LLM_ENDPOINT = os.getenv("SEMANTIC_LLM_ENDPOINT", "http://localhost:8000/v1/chat/completions")
