@@ -36,13 +36,13 @@ def test_list_domain_tables() -> None:
             }
         ]
     ]
-    service = DomainTableReadService(sql=sql)
+    service = DomainTableReadService(sql=sql, metadata_mode="legacy")
     rows = service.list_domain_tables(workspace_id="ws1", domain_id=1)
     assert rows[0]["workspace_table_id"] == 1
 
 
 def test_get_domain_validation() -> None:
-    service = DomainTableReadService(sql=FakeForgeQueryPort())
+    service = DomainTableReadService(sql=FakeForgeQueryPort(), metadata_mode="legacy")
     with pytest.raises(ForgeError):
         service.get_domain(workspace_id="", domain_name="Name")
 
@@ -50,7 +50,7 @@ def test_get_domain_validation() -> None:
 def test_list_workspace_tables_calls_registry_sync_when_schema_present(monkeypatch) -> None:
     sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [[]]
-    service = DomainTableReadService(sql=sql)
+    service = DomainTableReadService(sql=sql, metadata_mode="legacy")
     called = {}
 
     def fake_sync(*_args, **_kwargs):
@@ -68,7 +68,7 @@ def test_list_workspace_tables_calls_registry_sync_when_schema_present(monkeypat
 def test_list_workspace_tables_skips_registry_sync_when_schema_missing(monkeypatch) -> None:
     sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [[]]
-    service = DomainTableReadService(sql=sql)
+    service = DomainTableReadService(sql=sql, metadata_mode="legacy")
     called = {"count": 0}
 
     def fake_sync(*_args, **_kwargs):
@@ -90,7 +90,7 @@ def test_sync_workspace_inventory_uses_factory_registry(monkeypatch) -> None:
         [],
         [{"id": 11, "table_name": "orders"}],
     ]
-    service = DomainTableReadService(sql=sql)
+    service = DomainTableReadService(sql=sql, metadata_mode="legacy")
 
     executor = MagicMock()
     executor.get_dialect.return_value = "snowflake"

@@ -896,15 +896,10 @@ class QueryForgeService:
             SELECT
               wc.workspace_table_id,
               wc.column_name,
-              LOWER(COALESCE(mc.data_type, wc.data_type, '')) AS data_type
+              LOWER(COALESCE(wc.data_type, '')) AS data_type
             FROM workspace_column wc
             JOIN workspace_table wt
               ON wt.id = wc.workspace_table_id
-            LEFT JOIN model_column mc
-              ON mc.model_table_id = wt.model_table_id
-             AND mc.column_name = wc.column_name
-             AND mc.is_active = 1
-             AND mc.is_missing_in_source = 0
             WHERE wt.workspace_id = :ws
               AND wc.workspace_table_id IN ({in_clause})
         """

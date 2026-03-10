@@ -4,8 +4,10 @@ from datetime import date, datetime
 from typing import Any, Dict, Optional
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.config import METADATA_SOURCE_MODE
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.metadata.gateway import MetadataGateway
 from app.services.semantic.concept_seed import ConceptSeedService
 from app.services.semantic.semantic_llm_schema import normalize_concept_key
 
@@ -15,9 +17,17 @@ _ALLOWED_RELATIONSHIP_KIND = {"primary", "alternate", "derived", "rollup", "comp
 
 
 class SemanticConceptService:
-    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+    def __init__(
+        self,
+        *,
+        sql: Optional[ForgeQueryPort] = None,
+        metadata_gateway: Optional[MetadataGateway] = None,
+        metadata_mode: Optional[str] = None,
+    ) -> None:
         self._sql = sql or ForgeMetaSQL()
         self._seed = ConceptSeedService(sql=self._sql)
+        self._metadata_gateway = metadata_gateway or MetadataGateway(sql=self._sql)
+        self._metadata_mode = str(metadata_mode or METADATA_SOURCE_MODE or "legacy").strip().lower() or "legacy"
 
     def list_concepts(
         self,
@@ -465,6 +475,7 @@ class SemanticConceptService:
         vertical: Optional[str] = None,
         semantic_concept_id: Optional[int] = None,
         model_column_id: Optional[int] = None,
+        workspace_column_id: Optional[int] = None,
         relationship_kind: Optional[str] = None,
         concept_key: Optional[str] = None,
         column_name: Optional[str] = None,
@@ -485,6 +496,12 @@ class SemanticConceptService:
         if semantic_concept_id is not None:
             where.append("m.semantic_concept_id = :semantic_concept_id")
             params["semantic_concept_id"] = _as_pos_int(semantic_concept_id, "semantic_concept_id")
+        if workspace_column_id is not None:
+            resolved_model_column_id = self._resolve_workspace_column_id(
+                _as_pos_int(workspace_column_id, "workspace_column_id")
+            )
+            where.append("m.model_column_id = :model_column_id")
+            params["model_column_id"] = resolved_model_column_id
         if model_column_id is not None:
             where.append("m.model_column_id = :model_column_id")
             params["model_column_id"] = _as_pos_int(model_column_id, "model_column_id")
@@ -497,21 +514,30 @@ class SemanticConceptService:
         if concept_key is not None and str(concept_key).strip():
             where.append("LOWER(sc.concept_key) LIKE :concept_key")
             params["concept_key"] = f"%{str(concept_key).strip().lower()}%"
+        column_ref = "wc.column_name" if self._metadata_mode == "workspace" else "mc.column_name"
+        table_ref = (
+            "COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)"
+            if self._metadata_mode == "workspace"
+            else "COALESCE(mt.name, '')"
+        )
         if column_name is not None and str(column_name).strip():
-            where.append("LOWER(mc.column_name) LIKE :column_name")
+            where.append(f"LOWER({column_ref}) LIKE :column_name")
             params["column_name"] = f"%{str(column_name).strip().lower()}%"
         if q is not None and str(q).strip():
             where.append(
                 "("
                 "LOWER(sc.concept_key) LIKE :q OR "
                 "LOWER(sc.name) LIKE :q OR "
-                "LOWER(mc.column_name) LIKE :q OR "
-                "LOWER(COALESCE(mt.name, '')) LIKE :q"
+                f"LOWER({column_ref}) LIKE :q OR "
+                f"LOWER({table_ref}) LIKE :q"
                 ")"
             )
             params["q"] = f"%{str(q).strip().lower()}%"
 
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        column_joins = self._concept_column_map_joins()
+        table_select = self._concept_column_table_select_expr()
+        workspace_column_select = self._concept_column_workspace_select_expr()
         rows = self._sql.execute_query_mappings(
             f"""
             SELECT
@@ -521,15 +547,15 @@ class SemanticConceptService:
               sc.concept_key,
               sc.name AS concept_name,
               m.model_column_id,
-              mc.column_name,
-              mt.name AS model_table_name,
+              {workspace_column_select} AS workspace_column_id,
+              {column_ref} AS column_name,
+              {table_select} AS model_table_name,
               m.relationship_kind,
               m.weight,
               m.created_at
             FROM model_column_semantic_concept_map m
             JOIN semantic_concept sc ON sc.id = m.semantic_concept_id
-            JOIN model_column mc ON mc.id = m.model_column_id
-            LEFT JOIN model_table mt ON mt.id = mc.model_table_id
+            {column_joins}
             {where_sql}
             ORDER BY m.weight DESC, m.id ASC
             LIMIT :limit OFFSET :offset
@@ -541,8 +567,7 @@ class SemanticConceptService:
             SELECT COUNT(*) AS total
             FROM model_column_semantic_concept_map m
             JOIN semantic_concept sc ON sc.id = m.semantic_concept_id
-            JOIN model_column mc ON mc.id = m.model_column_id
-            LEFT JOIN model_table mt ON mt.id = mc.model_table_id
+            {column_joins}
             {where_sql}
             """,
             {k: v for k, v in params.items() if k not in {"limit", "offset"}},
@@ -557,6 +582,8 @@ class SemanticConceptService:
 
     def create_concept_column_map(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         data = _normalize_concept_column_map_payload(payload, partial=False)
+        if "workspace_column_id" in data:
+            data["model_column_id"] = self._resolve_workspace_column_id(data.pop("workspace_column_id"))
         self._ensure_concept_id_exists(data["semantic_concept_id"])
         self._ensure_model_column_exists(data["model_column_id"])
         try:
@@ -578,8 +605,12 @@ class SemanticConceptService:
 
     def get_concept_column_map(self, map_id: int) -> Dict[str, Any]:
         map_id = _as_pos_int(map_id, "map_id")
+        column_joins = self._concept_column_map_joins()
+        table_select = self._concept_column_table_select_expr()
+        workspace_column_select = self._concept_column_workspace_select_expr()
+        column_ref = "wc.column_name" if self._metadata_mode == "workspace" else "mc.column_name"
         rows = self._sql.execute_query_mappings(
-            """
+            f"""
             SELECT
               m.id,
               m.vertical_norm,
@@ -587,15 +618,15 @@ class SemanticConceptService:
               sc.concept_key,
               sc.name AS concept_name,
               m.model_column_id,
-              mc.column_name,
-              mt.name AS model_table_name,
+              {workspace_column_select} AS workspace_column_id,
+              {column_ref} AS column_name,
+              {table_select} AS model_table_name,
               m.relationship_kind,
               m.weight,
               m.created_at
             FROM model_column_semantic_concept_map m
             JOIN semantic_concept sc ON sc.id = m.semantic_concept_id
-            JOIN model_column mc ON mc.id = m.model_column_id
-            LEFT JOIN model_table mt ON mt.id = mc.model_table_id
+            {column_joins}
             WHERE m.id = :id
             LIMIT 1
             """,
@@ -610,6 +641,8 @@ class SemanticConceptService:
         data = _normalize_concept_column_map_payload(payload, partial=True)
         if not data:
             return self.get_concept_column_map(map_id)
+        if "workspace_column_id" in data:
+            data["model_column_id"] = self._resolve_workspace_column_id(data.pop("workspace_column_id"))
         if "semantic_concept_id" in data:
             self._ensure_concept_id_exists(data["semantic_concept_id"])
         if "model_column_id" in data:
@@ -762,6 +795,8 @@ class SemanticConceptService:
             """,
             params,
         )
+        if int(updated or 0) > 0:
+            self._metadata_gateway.mirror_primary_semantic_keys_from_model(workspace_id=workspace)
         return {
             "workspace_id": workspace,
             "vertical_norm": vertical,
@@ -801,6 +836,20 @@ class SemanticConceptService:
             raise ForgeError("semantic_concept_id not found", status_code=400)
 
     def _ensure_model_column_exists(self, model_column_id: int) -> None:
+        model_column_id_val = _as_pos_int(model_column_id, "model_column_id")
+        if self._metadata_mode == "workspace":
+            rows = self._sql.execute_query_mappings(
+                """
+                SELECT id
+                FROM workspace_column
+                WHERE COALESCE(model_column_id, id) = :id
+                LIMIT 1
+                """,
+                {"id": model_column_id_val},
+            )
+            if not rows:
+                raise ForgeError("model_column_id not found", status_code=400)
+            return
         rows = self._sql.execute_query_mappings(
             """
             SELECT id
@@ -808,10 +857,58 @@ class SemanticConceptService:
             WHERE id = :id
             LIMIT 1
             """,
-            {"id": _as_pos_int(model_column_id, "model_column_id")},
+            {"id": model_column_id_val},
         )
         if not rows:
             raise ForgeError("model_column_id not found", status_code=400)
+
+    def _resolve_workspace_column_id(self, workspace_column_id: int) -> int:
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT COALESCE(model_column_id, id) AS model_column_id
+            FROM workspace_column
+            WHERE id = :id
+            LIMIT 1
+            """,
+            {"id": _as_pos_int(workspace_column_id, "workspace_column_id")},
+        )
+        if not rows:
+            raise ForgeError("workspace_column_id not found", status_code=404)
+        out = rows[0].get("model_column_id")
+        if out is None:
+            raise ForgeError("workspace_column_id could not resolve model_column_id", status_code=400)
+        return int(out)
+
+    def _concept_column_map_joins(self) -> str:
+        if self._metadata_mode == "workspace":
+            return (
+                """
+                JOIN workspace_column wc
+                  ON wc.id = (
+                    SELECT MIN(wc2.id)
+                    FROM workspace_column wc2
+                    WHERE wc2.model_column_id = m.model_column_id
+                  )
+                JOIN workspace_table wt
+                  ON wt.id = wc.workspace_table_id
+                """
+            )
+        return (
+            """
+            JOIN model_column mc ON mc.id = m.model_column_id
+            LEFT JOIN model_table mt ON mt.id = mc.model_table_id
+            """
+        )
+
+    def _concept_column_table_select_expr(self) -> str:
+        if self._metadata_mode == "workspace":
+            return "COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)"
+        return "mt.name"
+
+    def _concept_column_workspace_select_expr(self) -> str:
+        if self._metadata_mode == "workspace":
+            return "wc.id"
+        return "NULL"
 
 
 def _normalize_vertical(value: Optional[str]) -> Optional[str]:
@@ -1019,18 +1116,22 @@ def _normalize_value_alias_payload(payload: Dict[str, Any], *, partial: bool) ->
 def _normalize_concept_column_map_payload(payload: Dict[str, Any], *, partial: bool) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise ForgeError("invalid json body", status_code=400)
-    allowed = {"vertical_norm", "semantic_concept_id", "model_column_id", "relationship_kind", "weight"}
+    allowed = {"vertical_norm", "semantic_concept_id", "model_column_id", "workspace_column_id", "relationship_kind", "weight"}
     out = {k: v for k, v in payload.items() if k in allowed}
     if not partial:
-        for req in ("vertical_norm", "semantic_concept_id", "model_column_id"):
+        for req in ("vertical_norm", "semantic_concept_id"):
             if not str(out.get(req) or "").strip():
                 raise ForgeError(f"{req} is required", status_code=400)
+        if not str(out.get("model_column_id") or "").strip() and not str(out.get("workspace_column_id") or "").strip():
+            raise ForgeError("model_column_id or workspace_column_id is required", status_code=400)
     if "vertical_norm" in out:
         out["vertical_norm"] = str(out["vertical_norm"] or "").strip().lower()
     if "semantic_concept_id" in out:
         out["semantic_concept_id"] = _as_pos_int(out["semantic_concept_id"], "semantic_concept_id")
     if "model_column_id" in out:
         out["model_column_id"] = _as_pos_int(out["model_column_id"], "model_column_id")
+    if "workspace_column_id" in out:
+        out["workspace_column_id"] = _as_pos_int(out["workspace_column_id"], "workspace_column_id")
     if "relationship_kind" in out:
         rel = str(out["relationship_kind"] or "").strip().lower()
         if rel not in _ALLOWED_RELATIONSHIP_KIND:
@@ -1082,7 +1183,7 @@ def _norm_value_alias_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def _norm_concept_column_map_row(row: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(row)
-    for key in ("id", "semantic_concept_id", "model_column_id"):
+    for key in ("id", "semantic_concept_id", "model_column_id", "workspace_column_id"):
         if out.get(key) is not None:
             out[key] = int(out[key])
     if out.get("weight") is not None:

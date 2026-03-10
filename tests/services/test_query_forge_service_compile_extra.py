@@ -226,9 +226,9 @@ def test_load_domain_column_catalog_filters_workspace_via_workspace_table() -> N
     assert "JOIN workspace_table wt" in query
     assert "WHERE wt.workspace_id = :ws" in query
     assert "wc.workspace_id" not in query
-    assert "mc.id = wc.model_column_id" not in query
-    assert "mc.model_table_id = wt.model_table_id" in query
-    assert "mc.column_name = wc.column_name" in query
+    assert "JOIN model_column mc" not in query
+    assert "mc.model_table_id = wt.model_table_id" not in query
+    assert "mc.column_name = wc.column_name" not in query
     assert params == {"ws": "ws-1"}
 
 

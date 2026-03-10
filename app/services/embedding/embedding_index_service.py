@@ -76,13 +76,15 @@ class EmbeddingIndexService:
     def _load_tables(self, limit: int) -> List[Dict[str, Any]]:
         sql = """
         SELECT
-          id,
-          source_table_name,
-          description,
-          origin
-        FROM model_table
-        WHERE is_missing_in_source = 0
-        ORDER BY id
+          MIN(wt.id) AS id,
+          COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS table_name,
+          MIN(wt.source_table_name) AS source_table_name,
+          MIN(wt.description) AS description,
+          MIN(wt.origin) AS origin
+        FROM workspace_table wt
+        WHERE wt.exists_in_dbx = 1
+        GROUP BY COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)
+        ORDER BY table_name
         """
         params: Dict[str, Any] = {}
         if limit > 0:
@@ -103,33 +105,28 @@ class EmbeddingIndexService:
           wt.id AS workspace_table_id,
           wc.id AS workspace_column_id,
           wt.model_table_id,
-          mt.name AS model_table_name,
-          mt.source_table_name,
-          mt.origin AS model_origin,
+          COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS model_table_name,
+          wt.full_name AS source_table_name,
+          wt.origin AS model_origin,
           wt.table_name,
           wt.full_name,
           wc.column_name,
           wc.data_type AS workspace_data_type,
-          mc.id AS model_column_id,
-          mc.data_type AS model_data_type,
-          mc.description AS column_description,
-          mc.semantic_type AS semantic_type,
-          mc.semantic_entity AS semantic_entity,
-          mc.semantic_sub_type AS semantic_sub_type,
-          mc.semantic_confidence AS semantic_confidence,
-          mc.semantic_reasons_json AS semantic_reasons_json,
-          mc.is_active AS model_is_active
+          COALESCE(wc.model_column_id, wc.id) AS model_column_id,
+          wc.data_type AS model_data_type,
+          wc.description AS column_description,
+          wc.semantic_type AS semantic_type,
+          wc.semantic_entity AS semantic_entity,
+          wc.semantic_sub_type AS semantic_sub_type,
+          wc.semantic_confidence AS semantic_confidence,
+          wc.semantic_reasons_json AS semantic_reasons_json,
+          wc.is_active AS model_is_active
         FROM workspace_table wt
         JOIN workspace_column wc ON wc.workspace_table_id = wt.id
-        LEFT JOIN model_table mt ON mt.id = wt.model_table_id
-        LEFT JOIN model_column mc
-          ON mc.model_table_id = wt.model_table_id
-         AND mc.column_name = wc.column_name
         WHERE wt.exists_in_dbx = 1
           AND wc.exists_in_dbx = 1
-          AND (mt.is_missing_in_source = 0 OR mt.id IS NULL)
-          AND (mc.is_missing_in_source = 0 OR mc.id IS NULL)
-          AND (mc.is_active = 1 OR mc.id IS NULL)
+          AND (wc.is_missing_in_source = 0 OR wc.is_missing_in_source IS NULL)
+          AND (wc.is_active = 1 OR wc.is_active IS NULL)
         """
         params: Dict[str, Any] = {}
         if workspace_id:

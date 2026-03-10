@@ -92,6 +92,8 @@ from app.services.analytics.registry import AnalyticsDatasourceRegistry
 from app.services.auth_service import AuthService
 from app.services.base_service import build_url
 from app.services.semantic.concept_seed import ConceptSeedService
+from app.services.tenancy.datasource_catalog_service import DatasourceCatalogService
+from app.services.tenancy.secret_resolver import SecretResolver
 
 NAME = "api"
 VERSION = "v1"
@@ -149,11 +151,28 @@ def _register_analytics_registry(
     _logger = logging.getLogger(__name__)
     try:
         config = config if config is not None else load_analytics_config()
+        config = dict(config or {})
+        db_configs = DatasourceCatalogService().load_all_executor_configs()
+        if db_configs:
+            # DB-backed datasource definitions are the new source of truth.
+            config.update(db_configs)
         executors = {}
         skipped: list[str] = []
+        secret_resolver = SecretResolver()
         for name, cfg in config.items():
             try:
                 effective_cfg = dict(cfg)
+                ds_type = str(effective_cfg.get("type") or "").strip().lower()
+
+                secret_ref = str(effective_cfg.get("_secret_ref") or "").strip()
+                if secret_ref:
+                    resolved_secret = secret_resolver.resolve(secret_ref)
+                    if resolved_secret:
+                        if ds_type == "databricks" and not effective_cfg.get("token"):
+                            effective_cfg["token"] = resolved_secret
+                        elif ds_type in {"snowflake", "mysql"} and not effective_cfg.get("password"):
+                            effective_cfg["password"] = resolved_secret
+
                 if str(effective_cfg.get("type") or "").strip().lower() == "databricks":
                     token_raw = str(effective_cfg.get("token") or "").strip()
                     if (not token_raw) or "${" in token_raw or "}" in token_raw:

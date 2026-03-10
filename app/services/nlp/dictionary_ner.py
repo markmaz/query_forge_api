@@ -27,7 +27,8 @@ class ColumnInfo:
     column_name: str
     description: str | None
     model_table_name: str | None
-    source_table_name: str | None
+    table_name: str | None = None
+    source_table_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -187,20 +188,17 @@ def resolve_column_keys_to_workspace_columns(
 
     sql_text = f"""
     SELECT
-      mc.column_name AS column_key,
+      wc.column_name AS column_key,
       wc.id AS workspace_column_id
     FROM domain_workspace_table dwt
     JOIN workspace_table wt
       ON wt.id = dwt.workspace_table_id
     JOIN workspace_column wc
       ON wc.workspace_table_id = wt.id
-    JOIN model_column mc
-      ON mc.model_table_id = wt.model_table_id
-     AND mc.column_name = wc.column_name
     WHERE wt.workspace_id = :workspace_id
       AND dwt.domain_id = :domain_id
-      AND mc.column_name IN ({placeholders})
-    ORDER BY mc.column_name, wc.id
+      AND wc.column_name IN ({placeholders})
+    ORDER BY wc.column_name, wc.id
     """
 
     rows = executor.execute_query_mappings(sql_text, params)
@@ -330,22 +328,22 @@ def _is_negated(doc: Doc, start_token: int, window: int = 3) -> bool:
 def _load_domain_columns(workspace_id: str, domain_id: int) -> Tuple[ColumnInfo, ...]:
     sql = """
     SELECT DISTINCT
-      mc.column_name,
-      mc.description,
-      mt.name AS model_table_name,
-      mt.source_table_name
+      wc.column_name,
+      wc.description,
+      COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS table_name,
+      wt.full_name AS source_table_name
     FROM domain_workspace_table dwt
     JOIN workspace_table wt
       ON wt.id = dwt.workspace_table_id
-    JOIN model_table mt
-      ON mt.id = wt.model_table_id
-    JOIN model_column mc
-      ON mc.model_table_id = mt.id
+    JOIN workspace_column wc
+      ON wc.workspace_table_id = wt.id
     WHERE wt.workspace_id = :workspace_id
       AND dwt.domain_id = :domain_id
-      AND (mc.is_missing_in_source = 0 OR mc.is_missing_in_source IS NULL)
-      AND (mc.is_active = 1 OR mc.is_active IS NULL)
-    ORDER BY mc.column_name
+      AND wt.exists_in_dbx = 1
+      AND wc.exists_in_dbx = 1
+      AND (wc.is_missing_in_source = 0 OR wc.is_missing_in_source IS NULL)
+      AND (wc.is_active = 1 OR wc.is_active IS NULL)
+    ORDER BY wc.column_name
     """
     rows = ForgeMetaSQL().execute_query_mappings(
         sql,
@@ -355,7 +353,8 @@ def _load_domain_columns(workspace_id: str, domain_id: int) -> Tuple[ColumnInfo,
         ColumnInfo(
             column_name=row.get("column_name") or "",
             description=row.get("description"),
-            model_table_name=row.get("model_table_name"),
+            model_table_name=row.get("table_name"),
+            table_name=row.get("table_name"),
             source_table_name=row.get("source_table_name"),
         )
         for row in rows

@@ -147,8 +147,8 @@ QF_VERTICAL_DEFAULT = (
     or "generic"
 )
 METADATA_SOURCE_MODE = (
-    os.getenv("METADATA_SOURCE_MODE", "legacy").strip().lower()
-    or "legacy"
+    os.getenv("METADATA_SOURCE_MODE", "workspace").strip().lower()
+    or "workspace"
 )
 
 # Semantic suggestion backfill

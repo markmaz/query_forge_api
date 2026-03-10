@@ -224,10 +224,10 @@ class QueryStudioDomainExplorerService:
             """
             SELECT
               wc.id AS workspace_column_id,
-              mc.id AS model_column_id,
+              COALESCE(wc.model_column_id, wc.id) AS model_column_id,
               wc.column_name,
               wc.data_type,
-              mc.description,
+              wc.description,
               wt.table_name,
               dwt.table_alias,
               wc.ordinal_position
@@ -238,11 +238,6 @@ class QueryStudioDomainExplorerService:
              AND wt.exists_in_dbx = 1
             JOIN workspace_column wc
               ON wc.workspace_table_id = wt.id
-            LEFT JOIN model_column mc
-              ON mc.model_table_id = wt.model_table_id
-             AND mc.column_name = wc.column_name
-             AND mc.is_active = 1
-             AND mc.is_missing_in_source = 0
             WHERE dwt.domain_id = :domain_id
             ORDER BY
               CASE WHEN dwt.is_primary = 1 THEN 0 ELSE 1 END,

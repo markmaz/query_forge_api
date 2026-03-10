@@ -10,9 +10,12 @@ class _StubSQL:
     def __init__(self, rows):
         self.rows = rows
         self.calls = 0
+        self.raise_once = False
 
     def execute_query(self, _query: str, _params):
         self.calls += 1
+        if self.raise_once and self.calls == 1:
+            raise RuntimeError("table does not exist")
         return self.rows
 
 
@@ -35,3 +38,11 @@ def test_assert_workspace_access_caches_within_request(app):
         assert svc.assert_workspace_access(user_id="user-1", workspace_id="ws-1") == "ws-1"
         assert svc.assert_workspace_access(user_id="user-1", workspace_id="ws-1") == "ws-1"
     assert sql.calls == 1
+
+
+def test_workspace_access_falls_back_to_legacy_query_on_schema_error():
+    sql = _StubSQL(rows=[{"ok": 1}])
+    sql.raise_once = True
+    svc = WorkspaceAccessService(sql=sql)
+    assert svc.assert_workspace_access(user_id="user-1", workspace_id="ws-1") == "ws-1"
+    assert sql.calls == 2

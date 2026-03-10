@@ -1,9 +1,20 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Optional
 
 from app.services.semantic.semantic_concept_service import SemanticConceptService
+from app.ports.sql_executor import ForgeExecResult
 from tests._support.fakes import FakeForgeQueryPort
+
+
+class _GatewayStub:
+    def __init__(self) -> None:
+        self.calls: list[Optional[str]] = []
+
+    def mirror_primary_semantic_keys_from_model(self, *, workspace_id: Optional[str] = None) -> int:
+        self.calls.append(workspace_id)
+        return 1
 
 
 def test_list_aliases_serializes_created_at_datetime() -> None:
@@ -182,11 +193,11 @@ def test_list_concept_column_maps_supports_typeahead_filters() -> None:
     list_params = sql.query_mappings_calls[0].params
     count_params = sql.query_mappings_calls[1].params
     assert "LOWER(sc.concept_key) LIKE :concept_key" in list_query
-    assert "LOWER(mc.column_name) LIKE :column_name" in list_query
+    assert "LOWER(wc.column_name) LIKE :column_name" in list_query
     assert "LOWER(sc.name) LIKE :q" in list_query
     assert "JOIN semantic_concept sc ON sc.id = m.semantic_concept_id" in count_query
-    assert "JOIN model_column mc ON mc.id = m.model_column_id" in count_query
-    assert "LEFT JOIN model_table mt ON mt.id = mc.model_table_id" in count_query
+    assert "JOIN workspace_column wc" in count_query
+    assert "JOIN workspace_table wt" in count_query
     assert list_params["vertical_norm"] == "education"
     assert list_params["concept_key"] == "%district%"
     assert list_params["column_name"] == "%name%"
@@ -236,8 +247,63 @@ def test_backfill_primary_semantic_keys_execute() -> None:
     assert result["dry_run"] is False
     assert result["candidates"] == 2
     assert result["updated"] == 2
-    assert len(sql.write_calls) == 1
-    update_query = sql.write_calls[0].query
+    assert len(sql.write_calls) >= 1
+    update_query = next(call.query for call in sql.write_calls if "UPDATE model_column mc" in call.query)
     assert "UPDATE model_column mc" in update_query
     assert "SET mc.semantic_concept_id = r.semantic_concept_id" in update_query
     assert "mc.semantic_concept_key = r.concept_key" in update_query
+
+
+def test_backfill_primary_semantic_keys_execute_mirrors_to_workspace() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[{"total": 1}]]
+    sql.write_responses = [1]
+    gateway = _GatewayStub()
+    svc = SemanticConceptService(sql=sql, metadata_gateway=gateway)  # type: ignore[arg-type]
+
+    result = svc.backfill_primary_semantic_keys(
+        workspace_id="ws-42",
+        vertical_norm=None,
+        dry_run=False,
+    )
+
+    assert result["updated"] == 1
+    assert gateway.calls == ["ws-42"]
+
+
+def test_create_concept_column_map_accepts_workspace_column_id() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [{"model_column_id": 20}],
+        [{"id": 10}],
+        [{"id": 20}],
+        [
+            {
+                "id": 7,
+                "vertical_norm": "education",
+                "semantic_concept_id": 10,
+                "concept_key": "DISTRICT_NAME",
+                "concept_name": "District Name",
+                "model_column_id": 20,
+                "workspace_column_id": 88,
+                "column_name": "lea_name",
+                "model_table_name": "dim_school",
+                "relationship_kind": "primary",
+                "weight": 1.0,
+                "created_at": datetime(2026, 2, 17, 12, 0, 0),
+            }
+        ],
+    ]
+    sql.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=7)]
+    svc = SemanticConceptService(sql=sql)
+
+    row = svc.create_concept_column_map(
+        {
+            "vertical_norm": "education",
+            "semantic_concept_id": 10,
+            "workspace_column_id": 88,
+        }
+    )
+    assert row["id"] == 7
+    assert row["model_column_id"] == 20
+    assert row["workspace_column_id"] == 88

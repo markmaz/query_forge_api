@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.config import METADATA_SOURCE_MODE
 from app.ports.sql_executor import ForgeQueryPort
 
 
@@ -15,8 +16,15 @@ class _Hit:
 
 
 class DomainResolverService:
-    def __init__(self, db_session: Optional[ForgeQueryPort] = None, *, sql: Optional[ForgeQueryPort] = None) -> None:
+    def __init__(
+        self,
+        db_session: Optional[ForgeQueryPort] = None,
+        *,
+        sql: Optional[ForgeQueryPort] = None,
+        metadata_mode: Optional[str] = None,
+    ) -> None:
         self._sql = sql or db_session or ForgeMetaSQL()
+        self._metadata_mode = str(metadata_mode or METADATA_SOURCE_MODE or "legacy").strip().lower() or "legacy"
 
     def resolve_from_table_hits(
         self,
@@ -133,22 +141,38 @@ class DomainResolverService:
         if not table_ids:
             return []
         placeholders = _placeholders("uid", len(table_ids))
-        sql = f"""
-        SELECT
-          wt.id AS workspace_table_id,
-          COALESCE(mt.source_table_name, mt.name, wt.table_name, wt.full_name) AS table_name
-        FROM workspace_table wt
-        LEFT JOIN model_table mt
-          ON mt.id = wt.model_table_id
-        LEFT JOIN domain_workspace_table dwt
-          ON dwt.workspace_table_id = wt.id
-        LEFT JOIN domain d
-          ON d.id = dwt.domain_id
-         AND d.workspace_id = :workspace_id
-        WHERE wt.workspace_id = :workspace_id
-          AND wt.id IN ({placeholders})
-          AND d.id IS NULL
-        """
+        if self._metadata_mode == "workspace":
+            sql = f"""
+            SELECT
+              wt.id AS workspace_table_id,
+              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name, wt.full_name) AS table_name
+            FROM workspace_table wt
+            LEFT JOIN domain_workspace_table dwt
+              ON dwt.workspace_table_id = wt.id
+            LEFT JOIN domain d
+              ON d.id = dwt.domain_id
+             AND d.workspace_id = :workspace_id
+            WHERE wt.workspace_id = :workspace_id
+              AND wt.id IN ({placeholders})
+              AND d.id IS NULL
+            """
+        else:
+            sql = f"""
+            SELECT
+              wt.id AS workspace_table_id,
+              COALESCE(mt.source_table_name, mt.name, wt.table_name, wt.full_name) AS table_name
+            FROM workspace_table wt
+            LEFT JOIN model_table mt
+              ON mt.id = wt.model_table_id
+            LEFT JOIN domain_workspace_table dwt
+              ON dwt.workspace_table_id = wt.id
+            LEFT JOIN domain d
+              ON d.id = dwt.domain_id
+             AND d.workspace_id = :workspace_id
+            WHERE wt.workspace_id = :workspace_id
+              AND wt.id IN ({placeholders})
+              AND d.id IS NULL
+            """
         params = {"workspace_id": workspace_id}
         params.update({f"uid{idx}": int(val) for idx, val in enumerate(table_ids)})
         rows = self._sql.execute_query_mappings(sql, params)

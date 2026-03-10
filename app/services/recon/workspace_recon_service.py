@@ -45,29 +45,36 @@ class WorkspaceReconService:
 WITH
 dbx AS (
   SELECT
-    mt.name AS logical_table_name,
+    COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS logical_table_name,
     wc.column_name,
     MIN(wc.data_type) AS dbx_data_type,
     MIN(wc.id) AS dbx_column_id
   FROM workspace_table wt
-  JOIN model_table mt ON mt.id = wt.model_table_id
-  JOIN workspace_column wc ON wc.workspace_table_id = wt.id
+  JOIN workspace_column wc
+    ON wc.workspace_table_id = wt.id
   WHERE wt.workspace_id = :ws
     AND wt.exists_in_dbx = 1
     AND wc.exists_in_dbx = 1
-  GROUP BY mt.name, wc.column_name
+  GROUP BY COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name), wc.column_name
 ),
 dic AS (
   SELECT
-    mt.name AS logical_table_name,
-    mc.column_name,
-    MIN(mc.data_type) AS dict_data_type,
-    MIN(mc.id) AS dict_column_id,
-    MIN(mc.description) AS dict_description
-  FROM model_table mt
-  JOIN model_column mc ON mc.model_table_id = mt.id
-  WHERE mc.is_active = 1
-  GROUP BY mt.name, mc.column_name
+    COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS logical_table_name,
+    wc.column_name,
+    MIN(wc.data_type) AS dict_data_type,
+    MIN(wc.id) AS dict_column_id,
+    MIN(wc.description) AS dict_description
+  FROM workspace_table wt
+  JOIN workspace_column wc
+    ON wc.workspace_table_id = wt.id
+  WHERE wt.workspace_id = :ws
+    AND (
+      wc.exists_in_dbx = 0
+      OR COALESCE(wc.origin, '') <> 'DBX'
+      OR COALESCE(wc.description, '') <> ''
+      OR COALESCE(wc.semantic_concept_key, '') <> ''
+    )
+  GROUP BY COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name), wc.column_name
 ),
 kset AS (
   SELECT logical_table_name, column_name FROM dbx

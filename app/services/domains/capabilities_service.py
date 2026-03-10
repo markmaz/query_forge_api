@@ -6,6 +6,7 @@ import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.config import METADATA_SOURCE_MODE
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
 
@@ -25,8 +26,9 @@ _OVERLAY_CATALOG: List[Dict[str, Any]] = [
 
 
 class DomainCapabilitiesService:
-    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None, metadata_mode: Optional[str] = None) -> None:
         self._sql = sql or ForgeMetaSQL()
+        self._metadata_mode = str(metadata_mode or METADATA_SOURCE_MODE or "legacy").strip().lower() or "legacy"
 
     def get_domain_capabilities(
         self,
@@ -112,6 +114,32 @@ class DomainCapabilitiesService:
         return dict(rows[0])
 
     def _load_domain_columns(self, *, workspace_id: str, domain_id: int) -> List[Dict[str, Any]]:
+        if self._metadata_mode == "workspace":
+            rows = self._sql.execute_query_mappings(
+                """
+                SELECT
+                  wt.id AS workspace_table_id,
+                  wt.table_name,
+                  wc.column_name,
+                  wc.data_type,
+                  wc.nullable,
+                  wc.model_column_id AS model_column_id,
+                  wc.semantic_type,
+                  wc.description
+                FROM domain_workspace_table dwt
+                JOIN workspace_table wt
+                  ON wt.id = dwt.workspace_table_id
+                 AND wt.workspace_id = :workspace_id
+                 AND wt.exists_in_dbx = 1
+                JOIN workspace_column wc
+                  ON wc.workspace_table_id = wt.id
+                WHERE dwt.domain_id = :domain_id
+                ORDER BY wt.id ASC, COALESCE(wc.qf_ordinal_position, wc.ordinal_position, 0) ASC
+                """,
+                {"workspace_id": str(workspace_id), "domain_id": int(domain_id)},
+            )
+            return [dict(row) for row in rows]
+
         rows = self._sql.execute_query_mappings(
             """
             SELECT

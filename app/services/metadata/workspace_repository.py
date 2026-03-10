@@ -522,12 +522,28 @@ class WorkspaceMetadataRepository:
             or 0
         )
 
-    def deactivate_columns_not_in(self, *, model_table_id: int, keep_column_names: Iterable[str]) -> int:
+    def deactivate_columns_not_in(
+        self,
+        *,
+        model_table_id: int,
+        keep_column_names: Iterable[str],
+        origin: Optional[str] = None,
+        only_not_missing: bool = False,
+    ) -> int:
         names = sorted({str(c or "").strip() for c in keep_column_names if str(c or "").strip()})
         if int(model_table_id) <= 0 or not names:
             return 0
         placeholders = ",".join(f":c{i}" for i in range(len(names)))
-        params = {"model_table_id": int(model_table_id), **{f"c{i}": name for i, name in enumerate(names)}}
+        params = {
+            "model_table_id": int(model_table_id),
+            "origin": str(origin).upper() if origin is not None else None,
+            **{f"c{i}": name for i, name in enumerate(names)},
+        }
+        extra_where = ""
+        if origin is not None:
+            extra_where += " AND wc.origin = :origin"
+        if only_not_missing:
+            extra_where += " AND wc.is_missing_in_source = 0"
         return int(
             self._sql.execute_write(
                 f"""
@@ -538,6 +554,7 @@ class WorkspaceMetadataRepository:
                     wc.updated_at = CURRENT_TIMESTAMP
                 WHERE wt.model_table_id = :model_table_id
                   AND wc.is_active = 1
+                  {extra_where}
                   AND wc.column_name NOT IN ({placeholders})
                 """,
                 params,
@@ -577,6 +594,29 @@ class WorkspaceMetadataRepository:
                 WHERE model_table_id = :model_table_id
                 """,
                 {"model_table_id": int(model_table_id)},
+            )
+            or 0
+        )
+
+    def mirror_primary_semantic_keys_from_model(self, *, workspace_id: Optional[str] = None) -> int:
+        return int(
+            self._sql.execute_write(
+                """
+                UPDATE workspace_column wc
+                JOIN model_column mc
+                  ON mc.id = wc.model_column_id
+                JOIN workspace_table wt
+                  ON wt.id = wc.workspace_table_id
+                SET wc.semantic_concept_id = mc.semantic_concept_id,
+                    wc.semantic_concept_key = mc.semantic_concept_key,
+                    wc.semantic_assigned_at = COALESCE(mc.semantic_updated_at, CURRENT_TIMESTAMP),
+                    wc.metadata_updated_at = CURRENT_TIMESTAMP,
+                    wc.updated_at = CURRENT_TIMESTAMP
+                WHERE mc.semantic_concept_key IS NOT NULL
+                  AND wc.semantic_concept_key IS NULL
+                  AND (:workspace_id IS NULL OR wt.workspace_id = :workspace_id)
+                """,
+                {"workspace_id": str(workspace_id).strip() if workspace_id is not None else None},
             )
             or 0
         )

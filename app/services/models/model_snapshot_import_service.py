@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.adapters.databricks_sql_executor import DatabricksForgeQueryPort
@@ -13,6 +14,7 @@ from app.config import (
     DBX_MODEL_TABLES_SNAPSHOT_TABLE,
 )
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.metadata.gateway import MetadataGateway
 
 COLUMNS_PATH = f"{DBX_MODEL_SNAPSHOT_CATALOG}.{DBX_MODEL_SNAPSHOT_SCHEMA}.{DBX_MODEL_COLUMNS_SNAPSHOT_TABLE}"
 TABLE_PATH = f"{DBX_MODEL_SNAPSHOT_CATALOG}.{DBX_MODEL_SNAPSHOT_SCHEMA}.{DBX_MODEL_TABLES_SNAPSHOT_TABLE}"
@@ -43,9 +45,11 @@ class ModelSnapshotImportService:
         *,
         sql: DatabricksForgeQueryPort,
         mysql: Optional[ForgeQueryPort] = None,
+        metadata_gateway: Optional[MetadataGateway] = None,
     ):
         self._sql = sql
         self._mysql = mysql or ForgeMetaSQL()
+        self._metadata_gateway = metadata_gateway or MetadataGateway(sql=self._mysql)
 
     # ----------------------------
     # DBX reads
@@ -161,6 +165,18 @@ WHERE snapshot_id = '{snapshot_id}'
                 for rr in rows:
                     name_to_id[str(rr["name"])] = int(rr["id"])
 
+            for table_name, table_id in name_to_id.items():
+                source_row = next((row for row in table_payload if str(row.get("name") or "") == table_name), None)
+                self._metadata_gateway.sync_table_patch_from_model(
+                    model_table_id=int(table_id),
+                    updates={
+                        "qf_table_name": table_name,
+                        "source_table_name": (source_row or {}).get("source_table_name"),
+                        "origin": "DBX",
+                        "is_missing_in_source": 0,
+                    },
+                )
+
             # 3) Upsert model_column (DBX truth) and CLEAR missing flag
             col_payload: List[Dict[str, Any]] = []
             cols_by_table_id: Dict[int, set] = {}
@@ -233,6 +249,23 @@ WHERE snapshot_id = '{snapshot_id}'
                     chunk,
                 )
                 columns_upserted += len(chunk)
+                for row in chunk:
+                    self._metadata_gateway.sync_column_patch_from_model_table(
+                        model_table_id=int(row["model_table_id"]),
+                        column_name=str(row["column_name"]),
+                        updates={
+                            "data_type": row.get("data_type"),
+                            "nullable": row.get("nullable"),
+                            "qf_ordinal_position": row.get("ordinal_position"),
+                            "is_active": 1,
+                            "origin": "DBX",
+                            "is_missing_in_source": 0,
+                            "sample_values_json": row.get("sample_values_json"),
+                            "sample_stats_json": row.get("sample_stats_json"),
+                            "sample_error": row.get("sample_error"),
+                            "sample_ran_at": datetime.utcnow(),
+                        },
+                    )
 
             # 4) Deactivate missing DBX columns (optional)
             # IMPORTANT: only deactivate rows that are DBX-origin AND not dictionary-missing placeholders.
@@ -257,6 +290,12 @@ WHERE snapshot_id = '{snapshot_id}'
                         params,
                     )
                     deactivated += int(res or 0)
+                    self._metadata_gateway.deactivate_workspace_columns_not_in(
+                        model_table_id=int(tid),
+                        keep_column_names=cols_list,
+                        origin="DBX",
+                        only_not_missing=True,
+                    )
 
         return ImportResult(
             snapshot_id=sid,

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from flask import current_app, has_app_context
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.config import METADATA_SOURCE_MODE
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.analytics.metadata_provider_factory import MetadataProviderFactory
@@ -14,10 +15,44 @@ from app.services.shared.jsonify import serialize_result_rows
 class DomainTableReadService:
     """Read domain/workspace table mappings and workspace table inventory."""
 
-    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None, metadata_mode: Optional[str] = None) -> None:
         self._sql = sql or ForgeMetaSQL()
+        self._metadata_mode = str(metadata_mode or METADATA_SOURCE_MODE or "legacy").strip().lower() or "legacy"
 
     def list_domain_tables(self, *, workspace_id: str, domain_id: int) -> List[Dict[str, Any]]:
+        if self._metadata_mode == "workspace":
+            rows = self._sql.execute_query_mappings(
+                """
+                SELECT
+                  wt.id               AS workspace_table_id,
+                  d.model_table_id    AS model_table_id,
+                  COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
+                  dwt.relation_kind   AS relation_kind,
+                  dwt.is_primary      AS is_primary,
+                  dwt.sort_order      AS sort_order,
+                  dwt.table_alias     AS table_alias,
+                  dwt.role            AS role,
+                  dwt.filter_mode     AS filter_mode,
+                  dwt.cardinality     AS cardinality,
+                  wt.catalog_name,
+                  wt.schema_name,
+                  wt.table_name,
+                  wt.full_name,
+                  wt.variant_code,
+                  wt.is_qe,
+                  wt.exists_in_dbx,
+                  wt.last_seen_at
+                FROM domain_workspace_table dwt
+                JOIN domain d ON d.id = dwt.domain_id
+                JOIN workspace_table wt ON wt.id = dwt.workspace_table_id
+                WHERE d.workspace_id = :ws
+                  AND d.id = :did
+                ORDER BY COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name, ''), wt.full_name
+                """,
+                {"ws": workspace_id, "did": int(domain_id)},
+            )
+            return serialize_result_rows([dict(row) for row in rows])
+
         rows = self._sql.execute_query_mappings(
             """
             SELECT
@@ -117,42 +152,79 @@ class DomainTableReadService:
             "offset": int(offset),
         }
 
-        rows = self._sql.execute_query_mappings(
-            """
-            SELECT
-              wt.id               AS workspace_table_id,
-              wt.model_table_id,
-              mt.name             AS model_table_name,
-              wt.catalog_name,
-              wt.schema_name,
-              wt.table_name,
-              wt.full_name,
-              wt.variant_code,
-              wt.is_qe,
-              wt.exists_in_dbx,
-              wt.last_seen_at
-            FROM workspace_table wt
-            LEFT JOIN model_table mt ON mt.id = wt.model_table_id
-            WHERE wt.workspace_id = :ws
-              AND (:schema IS NULL OR wt.schema_name = :schema)
-              AND (:catalog IS NULL OR wt.catalog_name = :catalog)
-              AND (
-                :q IS NULL OR
-                wt.full_name LIKE CONCAT('%', :q, '%') OR
-                wt.table_name LIKE CONCAT('%', :q, '%') OR
-                mt.name LIKE CONCAT('%', :q, '%')
-              )
-              AND (:only_dbx = 0 OR wt.exists_in_dbx = 1)
-              AND (
-                :mapped IS NULL OR
-                (:mapped = 1 AND wt.model_table_id IS NOT NULL) OR
-                (:mapped = 0 AND wt.model_table_id IS NULL)
-              )
-            ORDER BY COALESCE(mt.name, wt.table_name), wt.full_name
-            LIMIT :limit OFFSET :offset
-            """,
-            params,
-        )
+        if self._metadata_mode == "workspace":
+            rows = self._sql.execute_query_mappings(
+                """
+                SELECT
+                  wt.id               AS workspace_table_id,
+                  wt.model_table_id,
+                  COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
+                  wt.catalog_name,
+                  wt.schema_name,
+                  wt.table_name,
+                  wt.full_name,
+                  wt.variant_code,
+                  wt.is_qe,
+                  wt.exists_in_dbx,
+                  wt.last_seen_at
+                FROM workspace_table wt
+                WHERE wt.workspace_id = :ws
+                  AND (:schema IS NULL OR wt.schema_name = :schema)
+                  AND (:catalog IS NULL OR wt.catalog_name = :catalog)
+                  AND (
+                    :q IS NULL OR
+                    wt.full_name LIKE CONCAT('%', :q, '%') OR
+                    wt.table_name LIKE CONCAT('%', :q, '%') OR
+                    wt.source_table_name LIKE CONCAT('%', :q, '%')
+                  )
+                  AND (:only_dbx = 0 OR wt.exists_in_dbx = 1)
+                  AND (
+                    :mapped IS NULL OR
+                    (:mapped = 1 AND wt.model_table_id IS NOT NULL) OR
+                    (:mapped = 0 AND wt.model_table_id IS NULL)
+                  )
+                ORDER BY COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name), wt.full_name
+                LIMIT :limit OFFSET :offset
+                """,
+                params,
+            )
+        else:
+            rows = self._sql.execute_query_mappings(
+                """
+                SELECT
+                  wt.id               AS workspace_table_id,
+                  wt.model_table_id,
+                  mt.name             AS model_table_name,
+                  wt.catalog_name,
+                  wt.schema_name,
+                  wt.table_name,
+                  wt.full_name,
+                  wt.variant_code,
+                  wt.is_qe,
+                  wt.exists_in_dbx,
+                  wt.last_seen_at
+                FROM workspace_table wt
+                LEFT JOIN model_table mt ON mt.id = wt.model_table_id
+                WHERE wt.workspace_id = :ws
+                  AND (:schema IS NULL OR wt.schema_name = :schema)
+                  AND (:catalog IS NULL OR wt.catalog_name = :catalog)
+                  AND (
+                    :q IS NULL OR
+                    wt.full_name LIKE CONCAT('%', :q, '%') OR
+                    wt.table_name LIKE CONCAT('%', :q, '%') OR
+                    mt.name LIKE CONCAT('%', :q, '%')
+                  )
+                  AND (:only_dbx = 0 OR wt.exists_in_dbx = 1)
+                  AND (
+                    :mapped IS NULL OR
+                    (:mapped = 1 AND wt.model_table_id IS NOT NULL) OR
+                    (:mapped = 0 AND wt.model_table_id IS NULL)
+                  )
+                ORDER BY COALESCE(mt.name, wt.table_name), wt.full_name
+                LIMIT :limit OFFSET :offset
+                """,
+                params,
+            )
         return serialize_result_rows([dict(row) for row in rows])
 
     def _sync_workspace_inventory_from_registry(
@@ -192,7 +264,7 @@ class DomainTableReadService:
             )
 
             table_id_by_name: Dict[str, int] = {}
-            if table_names:
+            if table_names and self._metadata_mode != "workspace":
                 placeholders = ", ".join(f":n{i}" for i in range(len(table_names)))
                 params = {f"n{i}": name for i, name in enumerate(table_names)}
                 model_rows = tx.execute_query_mappings(

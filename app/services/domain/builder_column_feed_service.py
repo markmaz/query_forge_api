@@ -5,6 +5,7 @@ from datetime import date, datetime
 from typing import Any, Dict, Optional
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.config import METADATA_SOURCE_MODE
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.shared.jsonify import serialize_result_rows
 
@@ -51,10 +52,48 @@ class BuilderColumnFeedService:
     Includes optional dictionary metadata from model_column.
     """
 
-    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None, metadata_mode: Optional[str] = None) -> None:
         self._sql = sql or ForgeMetaSQL()
+        self._metadata_mode = str(metadata_mode or METADATA_SOURCE_MODE or "legacy").strip().lower() or "legacy"
 
     def list_domain_tables(self, *, workspace_id: str, user_id: str, domain_id: Optional[int]) -> Dict[str, Any]:
+        if self._metadata_mode == "workspace":
+            rows = self._sql.execute_query_mappings(
+                """
+                SELECT DISTINCT
+                  wt.id AS workspace_table_id,
+                  d.model_table_id,
+                  COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
+                  wt.catalog_name,
+                  wt.schema_name,
+                  wt.table_name,
+                  wt.full_name,
+                  wt.variant_code,
+                  wt.is_qe
+                FROM user_domain_mapping udm
+                JOIN domain d
+                  ON d.id = udm.domain_id
+                 AND d.workspace_id = :ws
+                 AND d.is_active = 1
+                 AND udm.user_id = :user_id
+                 AND udm.can_read = 1
+                 AND (:domain_id IS NULL OR d.id = :domain_id)
+                JOIN domain_workspace_table dwt
+                  ON dwt.domain_id = d.id
+                JOIN workspace_table wt
+                 ON wt.id = dwt.workspace_table_id
+                 AND wt.workspace_id = :ws
+                 AND wt.exists_in_dbx = 1
+                ORDER BY COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name), wt.full_name
+                """,
+                {
+                    "ws": workspace_id,
+                    "user_id": user_id,
+                    "domain_id": int(domain_id) if domain_id is not None else None,
+                },
+            )
+            return {"rows": serialize_result_rows([dict(row) for row in rows])}
+
         rows = self._sql.execute_query_mappings(
             """
             SELECT DISTINCT
@@ -126,6 +165,67 @@ class BuilderColumnFeedService:
         }
 
     def _base_cte_sql(self) -> str:
+        if self._metadata_mode == "workspace":
+            return """
+              WITH base AS (
+                SELECT DISTINCT
+                  wt.id                      AS workspace_table_id,
+                  wt.full_name,
+                  wt.table_name              AS base_table_name,
+                  wt.schema_name,
+                  wt.catalog_name,
+                  wt.variant_code,
+                  wt.is_qe,
+                  wt.exists_in_dbx,
+                  wt.last_seen_at,
+                  dwt.table_alias,
+                  dwt.is_primary,
+                  dwt.sort_order,
+                  d.id                       AS domain_id,
+                  d.name                     AS domain_name,
+                  d.column_name_policy,
+                  wc.id                      AS workspace_column_id,
+                  wc.column_name,
+                  wc.data_type,
+                  wc.nullable,
+                  COALESCE(wc.qf_ordinal_position, wc.ordinal_position, 0) AS ordinal_position,
+                  wc.model_column_id         AS model_column_id,
+                  wc.description             AS description,
+                  wc.sample_values_json      AS sample_values_json,
+                  wc.sample_stats_json       AS sample_stats_json,
+                  wc.sample_ran_at           AS sample_ran_at,
+                  wc.sample_error            AS sample_error
+                FROM user_domain_mapping udm
+                JOIN domain d
+                  ON d.id = udm.domain_id
+                 AND d.workspace_id = :ws
+                 AND d.is_active = 1
+                 AND udm.user_id = :user_id
+                 AND udm.can_read = 1
+                 AND (:domain_id IS NULL OR d.id = :domain_id)
+                JOIN domain_workspace_table dwt
+                  ON dwt.domain_id = d.id
+                JOIN workspace_table wt
+                  ON wt.id = dwt.workspace_table_id
+                 AND wt.workspace_id = :ws
+                 AND wt.exists_in_dbx = 1
+                 AND (:variant_code IS NULL OR wt.variant_code = :variant_code)
+                 AND (:only_qe IS NULL OR wt.is_qe = :only_qe)
+                JOIN workspace_column wc
+                  ON wc.workspace_table_id = wt.id
+                WHERE (
+                    :table_q IS NULL OR
+                    wt.full_name LIKE CONCAT('%', :table_q, '%') OR
+                    wt.table_name LIKE CONCAT('%', :table_q, '%') OR
+                    dwt.table_alias LIKE CONCAT('%', :table_q, '%')
+                )
+                  AND (
+                    :column_q IS NULL OR
+                    wc.column_name LIKE CONCAT('%', :column_q, '%') OR
+                    wc.description LIKE CONCAT('%', :column_q, '%')
+                )
+              )
+            """
         return """
           WITH base AS (
             SELECT DISTINCT

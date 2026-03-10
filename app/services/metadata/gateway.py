@@ -251,12 +251,21 @@ class MetadataGateway:
             },
         )
 
-    def deactivate_workspace_columns_not_in(self, *, model_table_id: int, keep_column_names: Iterable[str]) -> int:
+    def deactivate_workspace_columns_not_in(
+        self,
+        *,
+        model_table_id: int,
+        keep_column_names: Iterable[str],
+        origin: Optional[str] = None,
+        only_not_missing: bool = False,
+    ) -> int:
         out = self._safe_workspace_write(
             action="deactivate_workspace_columns_not_in",
             fn=self._workspace.deactivate_columns_not_in,
             model_table_id=model_table_id,
             keep_column_names=keep_column_names,
+            origin=origin,
+            only_not_missing=only_not_missing,
         )
         return int(out or 0)
 
@@ -273,6 +282,14 @@ class MetadataGateway:
             action="clear_workspace_model_table_reference",
             fn=self._workspace.clear_model_table_reference,
             model_table_id=model_table_id,
+        )
+        return int(out or 0)
+
+    def mirror_primary_semantic_keys_from_model(self, *, workspace_id: Optional[str] = None) -> int:
+        out = self._safe_workspace_write(
+            action="mirror_primary_semantic_keys_from_model",
+            fn=self._workspace.mirror_primary_semantic_keys_from_model,
+            workspace_id=workspace_id,
         )
         return int(out or 0)
 

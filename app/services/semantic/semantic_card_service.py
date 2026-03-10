@@ -6,7 +6,7 @@ from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
-from app.config import SEMANTIC_SAMPLE_VALUES_LIMIT, SEMANTIC_STATS_ENABLED
+from app.config import METADATA_SOURCE_MODE, SEMANTIC_SAMPLE_VALUES_LIMIT, SEMANTIC_STATS_ENABLED
 from app.ports.sql_executor import ForgeQueryPort
 
 _YEAR_RE = re.compile(r"^\d{4}$")
@@ -20,12 +20,27 @@ class SemanticCardService:
         sql: Optional[ForgeQueryPort] = None,
         sample_values_limit: Optional[int] = None,
         stats_enabled: Optional[bool] = None,
+        metadata_mode: Optional[str] = None,
     ) -> None:
         self._sql = sql or ForgeMetaSQL()
         self._sample_values_limit = max(1, int(sample_values_limit or SEMANTIC_SAMPLE_VALUES_LIMIT))
         self._stats_enabled = SEMANTIC_STATS_ENABLED if stats_enabled is None else bool(stats_enabled)
+        self._metadata_mode = str(metadata_mode or METADATA_SOURCE_MODE or "legacy").strip().lower() or "legacy"
 
-    def count_columns(self, *, model_table_id: Optional[int] = None) -> int:
+    def count_columns(
+        self,
+        *,
+        model_table_id: Optional[int] = None,
+        workspace_table_id: Optional[int] = None,
+    ) -> int:
+        if self._metadata_mode == "workspace":
+            return self._count_columns_workspace(
+                model_table_id=model_table_id,
+                workspace_table_id=workspace_table_id,
+            )
+        return self._count_columns_legacy(model_table_id=model_table_id)
+
+    def _count_columns_legacy(self, *, model_table_id: Optional[int]) -> int:
         params: Dict[str, Any] = {}
         where = ""
         if model_table_id is not None:
@@ -42,12 +57,57 @@ class SemanticCardService:
         )
         return int((rows[0] or {}).get("total") or 0) if rows else 0
 
+    def _count_columns_workspace(
+        self,
+        *,
+        model_table_id: Optional[int],
+        workspace_table_id: Optional[int],
+    ) -> int:
+        params: Dict[str, Any] = {}
+        where_parts = ["wt.exists_in_dbx = 1", "wc.exists_in_dbx = 1"]
+        if workspace_table_id is not None:
+            where_parts.append("wc.workspace_table_id = :workspace_table_id")
+            params["workspace_table_id"] = int(workspace_table_id)
+        if model_table_id is not None:
+            where_parts.append("wt.model_table_id = :model_table_id")
+            params["model_table_id"] = int(model_table_id)
+
+        where_sql = f"WHERE {' AND '.join(where_parts)}"
+        rows = self._sql.execute_query_mappings(
+            f"""
+            SELECT COUNT(*) AS total
+            FROM workspace_column wc
+            JOIN workspace_table wt
+              ON wt.id = wc.workspace_table_id
+            {where_sql}
+            """,
+            params,
+        )
+        return int((rows[0] or {}).get("total") or 0) if rows else 0
+
     def build_column_cards(
         self,
         *,
         offset: int,
         limit: int,
         model_table_id: Optional[int] = None,
+        workspace_table_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        if self._metadata_mode == "workspace":
+            return self._build_column_cards_workspace(
+                offset=offset,
+                limit=limit,
+                model_table_id=model_table_id,
+                workspace_table_id=workspace_table_id,
+            )
+        return self._build_column_cards_legacy(offset=offset, limit=limit, model_table_id=model_table_id)
+
+    def _build_column_cards_legacy(
+        self,
+        *,
+        offset: int,
+        limit: int,
+        model_table_id: Optional[int],
     ) -> List[Dict[str, Any]]:
         params: Dict[str, Any] = {"offset": max(0, int(offset)), "limit": max(1, int(limit))}
         where_parts = []
@@ -85,6 +145,68 @@ class SemanticCardService:
                 {
                     "modelColumnId": int(row["model_column_id"]),
                     "modelTableId": int(row["model_table_id"]) if row.get("model_table_id") is not None else None,
+                    "tableName": row.get("table_name"),
+                    "columnName": row.get("column_name"),
+                    "dataType": row.get("data_type"),
+                    "description": row.get("description"),
+                    "samples": samples,
+                    "signals": signals,
+                }
+            )
+        return cards
+
+    def _build_column_cards_workspace(
+        self,
+        *,
+        offset: int,
+        limit: int,
+        model_table_id: Optional[int],
+        workspace_table_id: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        params: Dict[str, Any] = {"offset": max(0, int(offset)), "limit": max(1, int(limit))}
+        where_parts = ["wt.exists_in_dbx = 1", "wc.exists_in_dbx = 1"]
+        if model_table_id is not None:
+            where_parts.append("wt.model_table_id = :model_table_id")
+            params["model_table_id"] = int(model_table_id)
+        if workspace_table_id is not None:
+            where_parts.append("wc.workspace_table_id = :workspace_table_id")
+            params["workspace_table_id"] = int(workspace_table_id)
+        where_sql = f"WHERE {' AND '.join(where_parts)}"
+
+        rows = self._sql.execute_query_mappings(
+            f"""
+            SELECT
+              COALESCE(wc.model_column_id, wc.id) AS model_column_id,
+              wt.model_table_id AS model_table_id,
+              wc.id AS workspace_column_id,
+              wt.id AS workspace_table_id,
+              COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name, wt.full_name) AS table_name,
+              wc.column_name,
+              wc.data_type,
+              wc.description,
+              wc.sample_values_json,
+              wc.sample_stats_json
+            FROM workspace_column wc
+            JOIN workspace_table wt
+              ON wt.id = wc.workspace_table_id
+            {where_sql}
+            ORDER BY wc.id
+            LIMIT :limit OFFSET :offset
+            """,
+            params,
+        )
+
+        cards: List[Dict[str, Any]] = []
+        for row in rows:
+            samples = _parse_samples(row.get("sample_values_json"), self._sample_values_limit)
+            stats = _parse_json_obj(row.get("sample_stats_json")) if self._stats_enabled else None
+            signals = _derive_signals(samples, stats)
+            cards.append(
+                {
+                    "modelColumnId": int(row["model_column_id"]),
+                    "modelTableId": int(row["model_table_id"]) if row.get("model_table_id") is not None else None,
+                    "workspaceColumnId": int(row["workspace_column_id"]),
+                    "workspaceTableId": int(row["workspace_table_id"]),
                     "tableName": row.get("table_name"),
                     "columnName": row.get("column_name"),
                     "dataType": row.get("data_type"),

@@ -152,20 +152,20 @@ class ConceptToColumnService:
             ),
             scored AS (
               SELECT
-                m.model_column_id,
+                COALESCE(wc.model_column_id, wc.id) AS model_column_id,
                 wt.id AS workspace_table_id,
-                wt.table_name,
-                mc.column_name,
-                mt.name AS model_table_name,
+                COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS table_name,
+                wc.column_name,
+                COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS model_table_name,
                 sc.concept_key,
-                mc.semantic_concept_key AS authoritative_concept_key,
+                wc.semantic_concept_key AS authoritative_concept_key,
                 sc.entity,
                 sc.semantic_type,
                 m.weight AS base_weight,
-                CASE WHEN LOWER(mt.name) = 'dim_student' AND LOWER(COALESCE(sc.entity, '')) = 'student' THEN 2.0 ELSE 0.0 END AS entity_bonus,
-                CASE WHEN LOWER(mt.name) LIKE 'dim\\_%' ESCAPE '\\\\' THEN 1.0 ELSE 0.0 END AS dim_bonus,
+                CASE WHEN LOWER(COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)) = 'dim_student' AND LOWER(COALESCE(sc.entity, '')) = 'student' THEN 2.0 ELSE 0.0 END AS entity_bonus,
+                CASE WHEN LOWER(COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)) LIKE 'dim\\_%' ESCAPE '\\\\' THEN 1.0 ELSE 0.0 END AS dim_bonus,
                 CASE
-                  WHEN LOWER(mt.name) LIKE 'fct\\_%' ESCAPE '\\\\'
+                  WHEN LOWER(COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)) LIKE 'fct\\_%' ESCAPE '\\\\'
                    AND LOWER(COALESCE(sc.semantic_type, '')) IN ('attribute', 'flag')
                   THEN -0.5
                   ELSE 0.0
@@ -177,39 +177,33 @@ class ConceptToColumnService:
                     WHERE at.concept_key COLLATE utf8mb4_0900_ai_ci
                       = sc.concept_key COLLATE utf8mb4_0900_ai_ci
                       AND at.alias_key_lc COLLATE utf8mb4_unicode_ci
-                        = LOWER(mc.column_name) COLLATE utf8mb4_unicode_ci
+                        = LOWER(wc.column_name) COLLATE utf8mb4_unicode_ci
                   )
                   THEN 0.5
                   ELSE 0.0
                 END AS alias_bonus,
                 CASE
-                  WHEN mc.semantic_concept_key IS NULL OR TRIM(mc.semantic_concept_key) = '' THEN 0.0
-                  WHEN mc.semantic_concept_key COLLATE utf8mb4_0900_ai_ci
+                  WHEN wc.semantic_concept_key IS NULL OR TRIM(wc.semantic_concept_key) = '' THEN 0.0
+                  WHEN wc.semantic_concept_key COLLATE utf8mb4_0900_ai_ci
                     = sc.concept_key COLLATE utf8mb4_0900_ai_ci THEN 0.75
                   ELSE -0.75
                 END AS authoritative_bonus,
                 CASE
-                  WHEN mc.semantic_concept_key IS NULL OR TRIM(mc.semantic_concept_key) = '' THEN 0
-                  WHEN mc.semantic_concept_key COLLATE utf8mb4_0900_ai_ci
+                  WHEN wc.semantic_concept_key IS NULL OR TRIM(wc.semantic_concept_key) = '' THEN 0
+                  WHEN wc.semantic_concept_key COLLATE utf8mb4_0900_ai_ci
                     = sc.concept_key COLLATE utf8mb4_0900_ai_ci THEN 1
                   ELSE 0
                 END AS authoritative_match
               FROM model_column_semantic_concept_map m
               JOIN semantic_concept sc
                 ON sc.id = m.semantic_concept_id
-              JOIN model_column mc
-                ON mc.id = m.model_column_id
-              JOIN model_table mt
-                ON mt.id = mc.model_table_id
+              JOIN workspace_column wc
+                ON wc.model_column_id = m.model_column_id
+               AND wc.exists_in_dbx = 1
               JOIN workspace_table wt
-                ON wt.model_table_id = mt.id
+                ON wt.id = wc.workspace_table_id
                AND wt.workspace_id = :workspace_id
                AND wt.exists_in_dbx = 1
-              JOIN workspace_column wc
-                ON wc.workspace_table_id = wt.id
-               AND wc.column_name COLLATE utf8mb4_unicode_ci
-                 = mc.column_name COLLATE utf8mb4_unicode_ci
-               AND wc.exists_in_dbx = 1
               {domain_join}
               WHERE m.vertical_norm IN (:vertical_norm, 'generic')
                 AND sc.concept_key IN ({in_sql})
@@ -347,20 +341,20 @@ class ConceptToColumnService:
             ),
             scored AS (
               SELECT
-                mc.id AS model_column_id,
+                COALESCE(wc.model_column_id, wc.id) AS model_column_id,
                 wt.id AS workspace_table_id,
-                wt.table_name,
-                mc.column_name,
-                mt.name AS model_table_name,
+                COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS table_name,
+                wc.column_name,
+                COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS model_table_name,
                 cr.concept_key,
                 cr.entity,
                 cr.semantic_type,
-                mc.semantic_concept_key AS authoritative_concept_key,
+                wc.semantic_concept_key AS authoritative_concept_key,
                 1.0 AS base_weight,
-                CASE WHEN LOWER(mt.name) = 'dim_student' AND LOWER(COALESCE(cr.entity, '')) = 'student' THEN 2.0 ELSE 0.0 END AS entity_bonus,
-                CASE WHEN LOWER(mt.name) LIKE 'dim\\_%' ESCAPE '\\\\' THEN 1.0 ELSE 0.0 END AS dim_bonus,
+                CASE WHEN LOWER(COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)) = 'dim_student' AND LOWER(COALESCE(cr.entity, '')) = 'student' THEN 2.0 ELSE 0.0 END AS entity_bonus,
+                CASE WHEN LOWER(COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)) LIKE 'dim\\_%' ESCAPE '\\\\' THEN 1.0 ELSE 0.0 END AS dim_bonus,
                 CASE
-                  WHEN LOWER(mt.name) LIKE 'fct\\_%' ESCAPE '\\\\'
+                  WHEN LOWER(COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)) LIKE 'fct\\_%' ESCAPE '\\\\'
                    AND LOWER(COALESCE(cr.semantic_type, '')) IN ('attribute', 'flag')
                   THEN -0.5
                   ELSE 0.0
@@ -372,31 +366,25 @@ class ConceptToColumnService:
                     WHERE at.concept_key COLLATE utf8mb4_0900_ai_ci
                       = cr.concept_key COLLATE utf8mb4_0900_ai_ci
                       AND at.alias_key_lc COLLATE utf8mb4_unicode_ci
-                        = LOWER(mc.column_name) COLLATE utf8mb4_unicode_ci
+                        = LOWER(wc.column_name) COLLATE utf8mb4_unicode_ci
                   )
                   THEN 0.5
                   ELSE 0.0
                 END AS alias_bonus,
                 0.75 AS authoritative_bonus,
                 1 AS authoritative_match
-              FROM model_column mc
-              JOIN model_table mt
-                ON mt.id = mc.model_table_id
+              FROM workspace_column wc
               JOIN workspace_table wt
-                ON wt.model_table_id = mt.id
+                ON wt.id = wc.workspace_table_id
                AND wt.workspace_id = :workspace_id
                AND wt.exists_in_dbx = 1
-              JOIN workspace_column wc
-                ON wc.workspace_table_id = wt.id
-               AND wc.column_name COLLATE utf8mb4_unicode_ci
-                 = mc.column_name COLLATE utf8mb4_unicode_ci
-               AND wc.exists_in_dbx = 1
               JOIN concept_ranked cr
                 ON cr.concept_key COLLATE utf8mb4_0900_ai_ci
-                 = mc.semantic_concept_key COLLATE utf8mb4_0900_ai_ci
+                 = wc.semantic_concept_key COLLATE utf8mb4_0900_ai_ci
                AND cr.rn_concept = 1
               {domain_join}
-              WHERE mc.semantic_concept_key IN ({in_sql})
+              WHERE wc.exists_in_dbx = 1
+                AND wc.semantic_concept_key IN ({in_sql})
             ),
             dedup AS (
               SELECT
