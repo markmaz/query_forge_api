@@ -74,14 +74,15 @@ class DatabricksForgeQueryPort:
 
         logger.debug("Submitting SQL statement: %s", self._summarize_statement_payload(payload))
         response_payload = self._post_json(DATABRICKS_STATEMENTS_URL, payload)
+        response_payload = self._with_statement_id_aliases(response_payload)
 
         if not wait:
             return response_payload
 
-        qf_statement_id = response_payload.get("qf_statement_id")
+        qf_statement_id = self._extract_statement_id(response_payload)
         if not qf_statement_id:
-            logger.error("No qf_statement_id in response: %s", response_payload)
-            raise ValueError("Databricks did not return a qf_statement_id")
+            logger.error("No statement_id in response payload keys=%s", sorted(response_payload.keys()))
+            raise ValueError("Databricks did not return a statement_id")
 
         effective_timeout = int(qf_timeout_s or self._timeout)
         logger.warning(
@@ -95,12 +96,20 @@ class DatabricksForgeQueryPort:
         state = (status_payload.get("status") or {}).get("state")
         logger.info("Statement %s finished with state=%s", qf_statement_id, state)
         if state != "SUCCEEDED":
-            return status_payload
+            error_message = self._extract_status_error_message(status_payload)
+            logger.warning(
+                "Statement %s failed with state=%s error=%s",
+                qf_statement_id,
+                state,
+                error_message,
+            )
+            raise RuntimeError(f"Databricks statement failed: {state}")
 
         if qf_result_fmt == "ARROW_STREAM":
             table = self.fetch_arrow_table(qf_statement_id)
             return {
                 "qf_statement_id": qf_statement_id,
+                "statement_id": qf_statement_id,
                 "status": status_payload.get("status"),
                 "qf_result_fmt": "ARROW_STREAM",
                 "table": table,
@@ -110,6 +119,7 @@ class DatabricksForgeQueryPort:
         qf_result_rows = self.fetch_all_json(qf_statement_id)
         return {
             "qf_statement_id": qf_statement_id,
+            "statement_id": qf_statement_id,
             "status": status_payload.get("status"),
             "qf_result_fmt": qf_result_fmt,
             "rows": qf_result_rows,
@@ -134,7 +144,8 @@ class DatabricksForgeQueryPort:
             qf_result_fmt=qf_result_fmt,
         )
         logger.debug("Submitting async SQL statement: %s", self._summarize_statement_payload(payload))
-        return self._post_json(DATABRICKS_STATEMENTS_URL, payload)
+        response_payload = self._post_json(DATABRICKS_STATEMENTS_URL, payload)
+        return self._with_statement_id_aliases(response_payload)
 
     def get_statement_status(self, qf_statement_id: str) -> Dict[str, Any]:
         response = self._get(f"{DATABRICKS_STATEMENTS_URL}/{qf_statement_id}")
@@ -242,19 +253,40 @@ class DatabricksForgeQueryPort:
         payload: Dict[str, Any] = {
             "statement": sql,
             "warehouse_id": warehouse,
-            "catalog": catalog,
-            "schema": schema,
             "disposition": "EXTERNAL_LINKS",
             "format": qf_result_fmt,
         }
+        if catalog is not None:
+            payload["catalog"] = catalog
+        if schema is not None:
+            payload["schema"] = schema
         if parameters:
             payload["parameters"] = self._encode_parameters(parameters)
         return payload
 
     def _post_json(self, path: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         response = self._post(path, json=payload)
+        logger.warning(
+            "_post_json status=%s content_length=%s content_preview=%r",
+            response.status_code,
+            len(response.content),
+            response.content[:200],
+        )
         response.raise_for_status()
-        return response.json()
+        try:
+            return response.json()
+        except Exception as exc:
+            raise RuntimeError("Databricks returned a non-JSON response") from exc
+
+    @staticmethod
+    def _extract_status_error_message(payload: Dict[str, Any]) -> str:
+        status = payload.get("status") or {}
+        error = status.get("error") or {}
+        if isinstance(error, dict):
+            message = error.get("message")
+            if isinstance(message, str) and message.strip():
+                return message.strip()
+        return "Unknown Databricks error"
 
     def _iter_statement_result_pages(self, qf_statement_id: str) -> Iterable[Dict[str, Any]]:
         next_path: Optional[str] = f"{DATABRICKS_STATEMENTS_URL}/{qf_statement_id}"
@@ -295,6 +327,22 @@ class DatabricksForgeQueryPort:
             if line.strip():
                 rows.append(json.loads(line))
         return rows
+
+    @staticmethod
+    def _extract_statement_id(payload: Dict[str, Any]) -> Optional[str]:
+        statement_id = payload.get("statement_id") or payload.get("qf_statement_id")
+        return str(statement_id) if statement_id else None
+
+    @staticmethod
+    def _with_statement_id_aliases(payload: Dict[str, Any]) -> Dict[str, Any]:
+        statement_id = DatabricksForgeQueryPort._extract_statement_id(payload)
+        if not statement_id:
+            return payload
+
+        out = dict(payload)
+        out.setdefault("statement_id", statement_id)
+        out.setdefault("qf_statement_id", statement_id)
+        return out
 
     def _encode_parameters(self, parameters: Mapping[str, Any]) -> List[Dict[str, Any]]:
         encoded: List[Dict[str, Any]] = []

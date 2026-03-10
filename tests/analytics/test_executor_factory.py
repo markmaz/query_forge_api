@@ -89,6 +89,39 @@ def test_create_snowflake_returns_executor():
     assert result is mock_executor
 
 
+def test_create_snowflake_passes_optional_authenticator_and_schema():
+    cfg = {
+        "type": "snowflake",
+        "account": "xy12345.us-east-1",
+        "user": "svc_user",
+        "database": "analytics",
+        "authenticator": "externalbrowser",
+        "schema": "MEDICAL_SALES",
+        "role": "ACCOUNTADMIN",
+    }
+
+    with patch("app.adapters.analytics.snowflake_executor.SnowflakeSQLExecutor") as mock_cls:
+        mock_instance = MagicMock()
+        mock_instance.get_dialect.return_value = "snowflake"
+        mock_cls.return_value = mock_instance
+
+        result = ExecutorFactory.create("snowflake", cfg)
+
+    assert result is mock_instance
+    mock_cls.assert_called_once_with(
+        account="xy12345.us-east-1",
+        user="svc_user",
+        database="analytics",
+        warehouse=None,
+        schema="MEDICAL_SALES",
+        authenticator="externalbrowser",
+        role="ACCOUNTADMIN",
+        password=None,
+        private_key_path=None,
+        private_key_passphrase=None,
+    )
+
+
 # ---------------------------------------------------------------------------
 # MySQL
 # ---------------------------------------------------------------------------
@@ -125,6 +158,7 @@ def test_create_mysql_default_port():
         "database": "reporting",
         "user": "reader",
         "password": "pass",
+        "ssl_ca": "/etc/ssl/certs/ca.pem",
     }
 
     with patch(

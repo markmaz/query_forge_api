@@ -53,6 +53,7 @@ def test_list_domain_joins_formats_rows():
     rows = svc.list_domain_joins(workspace_id="ws", domain_id=1)
 
     assert rows[0]["created_at"] == created.isoformat()
+    assert "FROM domain_table_join" in sql.query_mappings_calls[0].query
 
 
 def test_create_join_inserts():

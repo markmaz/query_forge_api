@@ -33,6 +33,9 @@ def test_build_uc_metadata_sql_guard() -> None:
     sql = _build_uc_metadata_sql("catalog", "schema")
     assert "catalog" in sql
     assert "schema" in sql
+    assert "c.table_name     AS qf_table_name" in sql
+    assert "c.ordinal_position AS qf_ordinal_position" in sql
+    assert "ORDER BY c.table_name, c.ordinal_position" in sql
     with pytest.raises(ValueError):
         _build_uc_metadata_sql("bad-catalog", "schema")
 

@@ -12,6 +12,7 @@ gunicorn
 SQLAlchemy
 PyMySQL
 peewee
+snowflake-connector-python
 
 # Auth / security
 PyJWT

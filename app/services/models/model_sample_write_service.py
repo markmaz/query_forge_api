@@ -158,7 +158,7 @@ TABLESAMPLE (1 PERCENT)
         *,
         full_name: str,
         column_name: str,
-        limit: int = 25,
+        limit: int = 10,
         timeout_s: Optional[int] = 120,
     ) -> List[str]:
         tbl = _quote_uc_ident(full_name)
@@ -200,7 +200,7 @@ TABLESAMPLE (1 PERCENT)
         *,
         workspace_id: str,
         schema_name: str = "asset",
-        per_column_limit: int = 25,
+        per_column_limit: int = 10,
         max_tables: Optional[int] = None,
         active_only: bool = True,
         distinct_values: bool = True,

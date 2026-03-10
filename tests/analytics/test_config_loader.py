@@ -1,12 +1,10 @@
 """Tests for app.services.analytics.config_loader."""
 from __future__ import annotations
 
-import os
 import textwrap
 from pathlib import Path
 
 import pytest
-import yaml
 
 from app.services.analytics.config_loader import (
     _resolve_env_vars,
@@ -111,11 +109,24 @@ def test_validate_datasource_passes_valid_snowflake():
         },
     )
 
+def test_validate_datasource_passes_valid_snowflake_without_warehouse():
+    _validate_datasource(
+        "ds1",
+        {
+            "type": "snowflake",
+            "account": "xy12345",
+            "user": "u",
+            "database": "db",
+            "authenticator": "externalbrowser",
+        },
+    )
+
 
 def test_validate_datasource_passes_valid_mysql():
     _validate_datasource(
         "ds1",
-        {"type": "mysql", "host": "h", "database": "db", "user": "u", "password": "p"},
+        {"type": "mysql", "host": "h", "database": "db", "user": "u", "password": "p",
+         "ssl_ca": "/etc/ssl/certs/ca.pem"},
     )
 
 

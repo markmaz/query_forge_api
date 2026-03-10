@@ -139,6 +139,54 @@ class ModelTables(ForgeResource):
 
         return _run(handler, log_message="Model tables fetch failed", client_error="Model tables fetch failed")
 
+    @token_required
+    def post(self):
+        def handler() -> Tuple[Any, int]:
+            _ = extract_workspace_id()
+            _ = require_user_id()
+            body = _json_body()
+
+            name = body.get("name")
+            if not name:
+                raise ForgeError("name is required", status_code=400)
+
+            row = _RouteServices.model_update().create_table(
+                name=str(name),
+                source_table_name=body.get("sourceTableName"),
+                description=body.get("description"),
+                origin=body.get("origin"),
+            )
+            return {"row": row}, 201
+
+        return _run(handler, log_message="Model table create failed", client_error="Model table create failed")
+
+
+@model_ns.route("/tables/<int:table_id>")
+class ModelTableById(ForgeResource):
+    @token_required
+    def patch(self, table_id: int):
+        def handler() -> Tuple[Any, int]:
+            _ = extract_workspace_id()
+            _ = require_user_id()
+            body = _json_body()
+            row = _RouteServices.model_update().patch_table(
+                table_id=int(table_id),
+                patch=body,
+            )
+            return {"row": row}, 200
+
+        return _run(handler, log_message="Model table patch failed", client_error="Model table patch failed")
+
+    @token_required
+    def delete(self, table_id: int):
+        def handler() -> Tuple[Any, int]:
+            _ = extract_workspace_id()
+            _ = require_user_id()
+            result = _RouteServices.model_update().delete_table(table_id=int(table_id))
+            return result, 200
+
+        return _run(handler, log_message="Model table delete failed", client_error="Model table delete failed")
+
 
 @model_ns.route("/tables/names")
 class ModelTableNames(ForgeResource):
@@ -229,6 +277,16 @@ class ModelColumnById(ForgeResource):
             return {"row": row}, 200
 
         return _run(handler, log_message="Model column patch failed", client_error="Model column patch failed")
+
+    @token_required
+    def delete(self, column_id: int):
+        def handler() -> Tuple[Any, int]:
+            _ = extract_workspace_id()
+            _ = require_user_id()
+            result = _RouteServices.model_update().delete_column(column_id=int(column_id))
+            return result, 200
+
+        return _run(handler, log_message="Model column delete failed", client_error="Model column delete failed")
 
 
 @model_ns.route("/columns/search")

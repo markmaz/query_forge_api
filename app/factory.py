@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import uuid
+from typing import Any
 
 import valkey
 from flask import Flask, g, jsonify, request
@@ -45,7 +47,9 @@ from app.routes.chat_minimal import chat_ns
 from app.routes.connection_routes import connection_ns
 from app.routes.data_environment import data_environment_ns
 from app.routes.datasource_routes import datasource_ns
+from app.routes.ingestion_routes import ingestion_ns
 from app.routes.domain_routes import qf_domains_ns
+from app.routes.domain_profile_embeddings import domain_profile_embeddings_ns
 from app.routes.embeddings import embeddings_ns
 from app.routes.execution_routes import executions_ns
 from app.routes.export_routes import exports_ns
@@ -95,7 +99,48 @@ VERSION = "v1"
 auth_service = AuthService()
 
 
-def _register_analytics_registry(app: Flask) -> None:  # noqa: F821
+def _is_placeholder(value: str) -> bool:
+    return "${" in value and "}" in value
+
+
+def _is_configured_value(value: str) -> bool:
+    raw = (value or "").strip()
+    return bool(raw and not _is_placeholder(raw))
+
+
+def _needs_databricks_token_manager(analytics_config: dict[str, dict[str, Any]]) -> bool:
+    """Return True when a configured Databricks datasource lacks a usable static token."""
+    for cfg in analytics_config.values():
+        ds_type = str((cfg or {}).get("type") or "").strip().lower()
+        if ds_type != "databricks":
+            continue
+        host_raw = str((cfg or {}).get("host") or "").strip()
+        http_path_raw = str((cfg or {}).get("http_path") or "").strip()
+        if not (_is_configured_value(host_raw) and _is_configured_value(http_path_raw)):
+            continue
+        token_raw = str((cfg or {}).get("token") or "").strip()
+        if (not token_raw) or _is_placeholder(token_raw):
+            return True
+    return False
+
+
+def _databricks_oauth_configured() -> bool:
+    token_url = (os.getenv("DATABRICKS_TOKEN_URL") or "").strip()
+    client_id = (os.getenv("DATABRICKS_CLIENT_ID") or "").strip()
+    client_secret = (os.getenv("DATABRICKS_CLIENT_SECRET") or "").strip()
+    return bool(token_url.startswith(("http://", "https://")) and client_id and client_secret)
+
+
+def _sigma_oauth_configured() -> bool:
+    token_url = (os.getenv("SIGMA_TOKEN_URL") or "").strip()
+    client_id = (os.getenv("SIGMA_CLIENT_ID") or "").strip()
+    client_secret = (os.getenv("SIGMA_CLIENT_SECRET") or "").strip()
+    return bool(token_url.startswith(("http://", "https://")) and client_id and client_secret)
+
+
+def _register_analytics_registry(
+    app: Flask, *, config: dict[str, dict[str, Any]] | None = None
+) -> None:  # noqa: F821
     """Load analytics datasource config and register the registry in ``app.extensions``.
 
     Failures are logged but never crash app startup — the registry will simply be
@@ -103,20 +148,46 @@ def _register_analytics_registry(app: Flask) -> None:  # noqa: F821
     """
     _logger = logging.getLogger(__name__)
     try:
-        config = load_analytics_config()
-        executors = {
-            name: ExecutorFactory.create(cfg["type"], cfg)
-            for name, cfg in config.items()
-        }
+        config = config if config is not None else load_analytics_config()
+        executors = {}
+        skipped: list[str] = []
+        for name, cfg in config.items():
+            try:
+                effective_cfg = dict(cfg)
+                if str(effective_cfg.get("type") or "").strip().lower() == "databricks":
+                    token_raw = str(effective_cfg.get("token") or "").strip()
+                    if (not token_raw) or "${" in token_raw or "}" in token_raw:
+                        token_manager = app.config.get("DATABRICKS_TOKEN_MANAGER")
+                        if token_manager is not None:
+                            effective_cfg.pop("token", None)
+                            effective_cfg["token_provider"] = token_manager
+
+                executors[name] = ExecutorFactory.create(effective_cfg["type"], effective_cfg)
+            except Exception as exc:
+                skipped.append(name)
+                _logger.error(
+                    "Skipping analytics datasource '%s' due to invalid configuration: %s",
+                    name,
+                    exc,
+                )
+
         registry = AnalyticsDatasourceRegistry(executors)
         app.extensions["analytics_registry"] = registry
-        _logger.info(
-            "Analytics datasource registry initialised with %d datasource(s): %s",
-            len(executors),
-            ", ".join(
-                f"{name}({executor.get_dialect()})" for name, executor in executors.items()
-            ),
-        )
+        if skipped:
+            _logger.warning(
+                "Analytics datasource registry initialised with %d datasource(s); skipped %d datasource(s): %s",
+                len(executors),
+                len(skipped),
+                ", ".join(sorted(skipped)),
+            )
+        else:
+            _logger.info(
+                "Analytics datasource registry initialised with %d datasource(s): %s",
+                len(executors),
+                ", ".join(
+                    f"{name}({executor.get_dialect()})" for name, executor in executors.items()
+                ),
+            )
     except Exception:
         _logger.exception("Failed to initialise analytics datasource registry")
 
@@ -208,6 +279,7 @@ def create_app():
     api.add_namespace(value_override_ns, path=build_url("/", NAME, VERSION, "value_overrides"))
     api.add_namespace(public_ns, path=build_url("/", NAME, VERSION, "public"))
     api.add_namespace(qf_domains_ns, path=build_url("/", NAME, VERSION, "domains"))
+    api.add_namespace(domain_profile_embeddings_ns, path=build_url("/", NAME, VERSION, "domain-profiles"))
     api.add_namespace(embeddings_ns, path=build_url("/", NAME, VERSION, "embeddings"))
     api.add_namespace(executions_ns, path=build_url("/", NAME, VERSION, "executions"))
     api.add_namespace(exports_ns, path=build_url("/", NAME, VERSION, "exports"))
@@ -236,6 +308,7 @@ def create_app():
     api.add_namespace(vector_ns, path=build_url("/", NAME, VERSION, "vector"))
     api.add_namespace(data_environment_ns, path=f"/{NAME}/{VERSION}/data-environment")
     api.add_namespace(datasource_ns, path=build_url("/", NAME, VERSION, "datasources"))
+    api.add_namespace(ingestion_ns, path=build_url("/", NAME, VERSION, "ingestion"))
 
     configure_logging()
     logger = logging.getLogger(__name__)
@@ -248,13 +321,32 @@ def create_app():
         except Exception:
             logger.exception("Semantic concept startup seed failed")
 
-    databricks_token_manager = DatabricksForgeTokenPort()
-    sigma_token_manager = ForgeTokenManager()
-    databricks_token_manager.start_auto_refresh()
-    sigma_token_manager.start_auto_refresh()
+    bootstrap_analytics_config: dict[str, dict[str, Any]] | None = None
+    try:
+        bootstrap_analytics_config = load_analytics_config()
+    except Exception:
+        logger.exception("Failed to load analytics config for token-manager bootstrap")
 
-    app.config["DATABRICKS_TOKEN_MANAGER"] = databricks_token_manager
-    app.config["SIGMA_TOKEN_MANAGER"] = sigma_token_manager
+    if bootstrap_analytics_config is None:
+        logger.warning("Databricks token manager bootstrap skipped: analytics config could not be loaded")
+    elif _needs_databricks_token_manager(bootstrap_analytics_config):
+        if _databricks_oauth_configured():
+            databricks_token_manager = DatabricksForgeTokenPort()
+            databricks_token_manager.start_auto_refresh()
+            app.config["DATABRICKS_TOKEN_MANAGER"] = databricks_token_manager
+        else:
+            logger.warning(
+                "Databricks token manager not started: OAuth env is incomplete for configured Databricks datasource(s)"
+            )
+    else:
+        logger.info("Databricks token manager not started: no Databricks datasource needs token refresh")
+
+    if _sigma_oauth_configured():
+        sigma_token_manager = ForgeTokenManager()
+        sigma_token_manager.start_auto_refresh()
+        app.config["SIGMA_TOKEN_MANAGER"] = sigma_token_manager
+    else:
+        logger.info("Sigma token manager not started: SIGMA OAuth env is incomplete")
 
     valkey_client = valkey.StrictValkey(host=VALKEY_ADDRESS, port=VALKEY_PORT, decode_responses=True)
 
@@ -293,6 +385,6 @@ def create_app():
         response.status_code = error.status_code
         return response
 
-    _register_analytics_registry(app)
+    _register_analytics_registry(app, config=bootstrap_analytics_config)
 
     return app

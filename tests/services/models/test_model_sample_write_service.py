@@ -17,7 +17,7 @@ class _SampleService(ModelSampleService):
         *,
         full_name: str,
         column_name: str,
-        limit: int = 25,
+        limit: int = 10,
         qf_timeout_s: Optional[int] = 120,
         **_kwargs: Any,
     ) -> List[str]:

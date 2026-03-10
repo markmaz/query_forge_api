@@ -70,10 +70,12 @@ class ExecutorFactory:
 
         return DatabricksSQLExecutor(
             host=config["host"],
-            token=config["token"],
+            token=config.get("token"),
             http_path=config["http_path"],
             catalog=config.get("catalog"),
             schema=config.get("schema"),
+            token_provider=config.get("token_provider"),
+            platform=config.get("platform"),
         )
 
     @staticmethod
@@ -84,7 +86,9 @@ class ExecutorFactory:
             account=config["account"],
             user=config["user"],
             database=config["database"],
-            warehouse=config["warehouse"],
+            warehouse=config.get("warehouse"),
+            schema=config.get("schema"),
+            authenticator=config.get("authenticator"),
             role=config.get("role"),
             password=config.get("password"),
             private_key_path=config.get("private_key_path"),

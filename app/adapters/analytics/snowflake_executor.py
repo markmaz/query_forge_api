@@ -1,11 +1,36 @@
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlparse
 from typing import Optional
 
 from app.ports.sql_executor_abc import SQLExecutor
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_account_identifier(account: str) -> str:
+    """Normalise a Snowflake account input for the Python connector.
+
+    Accepts either:
+    - account identifier (e.g. ``xy12345.us-east-1`` or ``org-account``), or
+    - full account URL (e.g. ``https://org-account.snowflakecomputing.com``).
+    """
+    raw = (account or "").strip()
+    if not raw:
+        return raw
+
+    host_or_account = raw
+    if "://" in raw:
+        parsed = urlparse(raw)
+        host_or_account = parsed.hostname or raw
+
+    host_or_account = host_or_account.strip().split("/")[0].split(":")[0]
+    suffix = ".snowflakecomputing.com"
+    if host_or_account.lower().endswith(suffix):
+        host_or_account = host_or_account[: -len(suffix)]
+
+    return host_or_account.strip().lower()
 
 
 def _load_private_key(private_key_path: str, private_key_passphrase: Optional[str]):
@@ -46,7 +71,10 @@ class SnowflakeSQLExecutor(SQLExecutor):
     :param account: Snowflake account identifier, e.g. ``xy12345.us-east-1``.
     :param user: Snowflake username.
     :param database: Default database name.
-    :param warehouse: Virtual warehouse to use.
+    :param warehouse: Optional virtual warehouse to use.
+    :param schema: Optional default schema.
+    :param authenticator: Optional Snowflake authenticator (for example,
+        ``externalbrowser`` for SSO/browser login).
     :param role: Optional Snowflake role to adopt.
     :param password: Password for username/password auth.
     :param private_key_path: Path to PEM private key file for keypair auth.
@@ -58,7 +86,9 @@ class SnowflakeSQLExecutor(SQLExecutor):
         account: str,
         user: str,
         database: str,
-        warehouse: str,
+        warehouse: Optional[str] = None,
+        schema: Optional[str] = None,
+        authenticator: Optional[str] = None,
         role: Optional[str] = None,
         password: Optional[str] = None,
         private_key_path: Optional[str] = None,
@@ -70,17 +100,19 @@ class SnowflakeSQLExecutor(SQLExecutor):
             raise ValueError("SnowflakeSQLExecutor: 'user' is required")
         if not database:
             raise ValueError("SnowflakeSQLExecutor: 'database' is required")
-        if not warehouse:
-            raise ValueError("SnowflakeSQLExecutor: 'warehouse' is required")
-        if not password and not private_key_path:
+        if not password and not private_key_path and not authenticator:
             raise ValueError(
-                "SnowflakeSQLExecutor: either 'password' or 'private_key_path' is required"
+                "SnowflakeSQLExecutor: one auth method is required "
+                "('password', 'private_key_path', or 'authenticator')"
             )
 
-        self._account = account
+        self._account = _normalize_account_identifier(account)
         self._user = user
         self._database = database
-        self._warehouse = warehouse
+        self._warehouse = (warehouse or "").strip() or None
+        self._schema = (schema or "").strip() or None
+        auth = (authenticator or "").strip()
+        self._authenticator = ("externalbrowser" if auth.lower() == "externalbrowser" else auth) or None
         self._role = role
         self._password = password
         self._private_key_path = private_key_path
@@ -106,20 +138,25 @@ class SnowflakeSQLExecutor(SQLExecutor):
             "account": self._account,
             "user": self._user,
             "database": self._database,
-            "warehouse": self._warehouse,
             # FIND-022: insecure_mode must always be False.  This is the Snowflake
             # connector's default but we set it explicitly so that no YAML config
             # value can silently override it.
             "insecure_mode": False,
         }
+        if self._warehouse:
+            connect_kwargs["warehouse"] = self._warehouse
+        if self._schema:
+            connect_kwargs["schema"] = self._schema
         if self._role:
             connect_kwargs["role"] = self._role
+        if self._authenticator:
+            connect_kwargs["authenticator"] = self._authenticator
 
         if self._private_key_path:
             connect_kwargs["private_key"] = _load_private_key(
                 self._private_key_path, self._private_key_passphrase
             )
-        else:
+        elif self._password:
             connect_kwargs["password"] = self._password
 
         return snowflake.connector.connect(**connect_kwargs)
@@ -160,6 +197,17 @@ class SnowflakeSQLExecutor(SQLExecutor):
             # message so Snowflake account identifiers/hostnames are not returned
             # to callers.
             logger.exception("SnowflakeSQLExecutor.execute failed")
+            err_no = getattr(exc, "errno", None)
+            if err_no == 390190:
+                raise RuntimeError(
+                    "Analytics authentication failed: check Snowflake account identifier and authenticator settings"
+                ) from exc
+            if err_no == 250001:
+                raise RuntimeError(
+                    "Analytics authentication failed: Snowflake JWT token is invalid. "
+                    "Verify SNOWFLAKE_PRIVATE_KEY_PATH/SNOWFLAKE_PRIVATE_KEY_PASSPHRASE and "
+                    "that the matching RSA public key is configured for the Snowflake user."
+                ) from exc
             raise RuntimeError("Analytics query execution failed") from exc
         finally:
             if cursor is not None:

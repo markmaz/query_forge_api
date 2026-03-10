@@ -27,7 +27,12 @@ class LLMClient:
         model: Optional[str] = None,
         timeout_seconds: Optional[int] = None,
     ) -> None:
-        self._endpoint = (endpoint or SEMANTIC_LLM_ENDPOINT).strip()
+        raw_endpoint = str(endpoint if endpoint is not None else SEMANTIC_LLM_ENDPOINT)
+        normalized_endpoint = raw_endpoint.strip().strip('"').strip("'")
+        if normalized_endpoint.startswith("="):
+            logger.warning("LLM endpoint had leading '=' characters; normalizing endpoint value")
+            normalized_endpoint = normalized_endpoint.lstrip("=").strip()
+        self._endpoint = normalized_endpoint
         self._model = (model or SEMANTIC_LLM_MODEL).strip()
         self._timeout_seconds = int(timeout_seconds or SEMANTIC_LLM_TIMEOUT_SECONDS)
 

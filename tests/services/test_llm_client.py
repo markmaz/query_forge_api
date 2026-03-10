@@ -126,3 +126,8 @@ def test_chat_json_with_trace_timeout_returns_gateway_timeout(monkeypatch) -> No
     assert exc.value.message == "LLM request timed out"
     assert exc.value.status_code == 504
     assert exc.value.details["timeout_seconds"] == 1
+
+
+def test_llm_client_normalizes_endpoint_with_leading_equals() -> None:
+    client = LLMClient(endpoint="==http://localhost:8000", model="qwen25-7b", timeout_seconds=1)
+    assert client._chat_url() == "http://localhost:8000/v1/chat/completions"

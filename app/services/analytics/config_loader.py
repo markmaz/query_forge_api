@@ -19,7 +19,7 @@ _ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
 # Required keys per datasource type
 _REQUIRED_KEYS: dict[str, list[str]] = {
     "databricks": ["host", "token", "http_path"],
-    "snowflake": ["account", "user", "database", "warehouse"],
+    "snowflake": ["account", "user", "database"],
     # FIND-022: ssl_ca is required for MySQL analytics connections.
     "mysql": ["host", "database", "user", "password", "ssl_ca"],
 }

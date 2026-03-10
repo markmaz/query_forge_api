@@ -244,7 +244,7 @@ class ExecutionService:
             params,
         )
 
-        statement_id = resp.get("statement_id")
+        statement_id = resp.get("statement_id") or resp.get("qf_statement_id")
         if not statement_id:
             raise ForgeError("Databricks did not return statement_id", status_code=500)
 

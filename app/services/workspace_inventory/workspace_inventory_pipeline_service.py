@@ -29,7 +29,7 @@ class WorkspacePipelineService:
         del sample_rows
         result: SnapshotResult = self._snapshot_service.sync_snapshot(
             workspace_id=workspace_id,
-            schema_name=schema_name,
-            catalog_name=catalog_name,
+            qf_schema_name=schema_name,
+            qf_catalog_name=catalog_name,
         )
         return asdict(result)

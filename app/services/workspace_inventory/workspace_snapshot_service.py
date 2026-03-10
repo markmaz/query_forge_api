@@ -45,15 +45,15 @@ def _build_uc_metadata_sql(catalog: str, schema: str) -> str:
 SELECT
   c.table_catalog  AS qf_catalog_name,
   c.table_schema   AS qf_schema_name,
-  c.qf_table_name,
+  c.table_name     AS qf_table_name,
   c.column_name,
-  c.qf_ordinal_position,
+  c.ordinal_position AS qf_ordinal_position,
   c.data_type,
   c.is_nullable
 FROM system.information_schema.columns c
 WHERE c.table_catalog = '{catalog}'
   AND c.table_schema  = '{schema}'
-ORDER BY c.qf_table_name, c.qf_ordinal_position
+ORDER BY c.table_name, c.ordinal_position
 """.strip()
 
 
@@ -265,9 +265,9 @@ class WorkspaceSnapshotService:
         tx.execute_write(
             """
             UPDATE workspace_table
-            SET qf_exists_in_dbx=0, updated_at=CURRENT_TIMESTAMP
+            SET exists_in_dbx=0, updated_at=CURRENT_TIMESTAMP
             WHERE workspace_id=:ws
-              AND qf_schema_name=:schema
+              AND schema_name=:schema
             """,
             {"ws": workspace_id, "schema": qf_schema_name},
         )
@@ -275,9 +275,9 @@ class WorkspaceSnapshotService:
             """
             UPDATE workspace_column wc
             JOIN workspace_table wt ON wt.id = wc.workspace_table_id
-            SET wc.qf_exists_in_dbx=0, wc.updated_at=CURRENT_TIMESTAMP
+            SET wc.exists_in_dbx=0, wc.updated_at=CURRENT_TIMESTAMP
             WHERE wt.workspace_id=:ws
-              AND wt.qf_schema_name=:schema
+              AND wt.schema_name=:schema
             """,
             {"ws": workspace_id, "schema": qf_schema_name},
         )
@@ -298,13 +298,13 @@ class WorkspaceSnapshotService:
             {
                 "workspace_id": workspace_id,
                 "model_table_id": model_id_by_base.get(stage.qf_table_name),
-                "qf_catalog_name": stage.qf_catalog_name,
-                "qf_schema_name": stage.qf_schema_name,
-                "qf_table_name": stage.qf_table_name,
+                "catalog_name": stage.qf_catalog_name,
+                "schema_name": stage.qf_schema_name,
+                "table_name": stage.qf_table_name,
                 "full_name": stage.full_name,
-                "qf_variant_code": stage.qf_variant_code,
+                "variant_code": stage.qf_variant_code,
                 "is_qe": stage.is_qe,
-                "qf_last_seen_at": now,
+                "last_seen_at": now,
             }
             for stage in staged_tables
         ]
@@ -312,20 +312,20 @@ class WorkspaceSnapshotService:
         tx.execute_write(
             """
             INSERT INTO workspace_table
-            (workspace_id, model_table_id, qf_catalog_name, qf_schema_name, qf_table_name, full_name,
-             qf_variant_code, is_qe, qf_exists_in_dbx, qf_last_seen_at, created_at)
+            (workspace_id, model_table_id, catalog_name, schema_name, table_name, full_name,
+             variant_code, is_qe, exists_in_dbx, last_seen_at, created_at)
             VALUES
-            (:workspace_id, :model_table_id, :qf_catalog_name, :qf_schema_name, :qf_table_name, :full_name,
-             :qf_variant_code, :is_qe, 1, :qf_last_seen_at, CURRENT_TIMESTAMP)
+            (:workspace_id, :model_table_id, :catalog_name, :schema_name, :table_name, :full_name,
+             :variant_code, :is_qe, 1, :last_seen_at, CURRENT_TIMESTAMP)
             ON DUPLICATE KEY UPDATE
              model_table_id=VALUES(model_table_id),
-             qf_catalog_name=VALUES(qf_catalog_name),
-             qf_schema_name=VALUES(qf_schema_name),
-             qf_table_name=VALUES(qf_table_name),
-             qf_variant_code=VALUES(qf_variant_code),
+             catalog_name=VALUES(catalog_name),
+             schema_name=VALUES(schema_name),
+             table_name=VALUES(table_name),
+             variant_code=VALUES(variant_code),
              is_qe=VALUES(is_qe),
-             qf_exists_in_dbx=1,
-             qf_last_seen_at=VALUES(qf_last_seen_at),
+             exists_in_dbx=1,
+             last_seen_at=VALUES(last_seen_at),
              updated_at=CURRENT_TIMESTAMP
             """,
             payload,
@@ -337,8 +337,8 @@ class WorkspaceSnapshotService:
             SELECT id, full_name
             FROM workspace_table
             WHERE workspace_id=:ws
-              AND qf_schema_name=:schema
-              AND qf_exists_in_dbx=1
+              AND schema_name=:schema
+              AND exists_in_dbx=1
             """,
             {"ws": workspace_id, "schema": qf_schema_name},
         )
@@ -363,8 +363,8 @@ class WorkspaceSnapshotService:
                     "column_name": column.column_name,
                     "data_type": column.data_type,
                     "nullable": column.nullable,
-                    "qf_ordinal_position": column.qf_ordinal_position,
-                    "qf_last_seen_at": now,
+                    "ordinal_position": column.qf_ordinal_position,
+                    "last_seen_at": now,
                 }
             )
 
@@ -374,17 +374,17 @@ class WorkspaceSnapshotService:
         tx.execute_write(
             """
             INSERT INTO workspace_column
-            (workspace_table_id, column_name, data_type, nullable, qf_ordinal_position,
-             qf_exists_in_dbx, qf_last_seen_at, created_at)
+            (workspace_table_id, column_name, data_type, nullable, ordinal_position,
+             exists_in_dbx, last_seen_at, created_at)
             VALUES
-            (:workspace_table_id, :column_name, :data_type, :nullable, :qf_ordinal_position,
-             1, :qf_last_seen_at, CURRENT_TIMESTAMP)
+            (:workspace_table_id, :column_name, :data_type, :nullable, :ordinal_position,
+             1, :last_seen_at, CURRENT_TIMESTAMP)
             ON DUPLICATE KEY UPDATE
              data_type=VALUES(data_type),
              nullable=VALUES(nullable),
-             qf_ordinal_position=VALUES(qf_ordinal_position),
-             qf_exists_in_dbx=1,
-             qf_last_seen_at=VALUES(qf_last_seen_at),
+             ordinal_position=VALUES(ordinal_position),
+             exists_in_dbx=1,
+             last_seen_at=VALUES(last_seen_at),
              updated_at=CURRENT_TIMESTAMP
             """,
             payload,

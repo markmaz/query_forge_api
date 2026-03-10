@@ -15,6 +15,10 @@ class DictColumnRow:
     columnName: str
     dataType: Optional[str]
     description: Optional[str]
+    semanticType: Optional[str]
+    semanticEntity: Optional[str]
+    semanticSubType: Optional[str]
+    semanticConfidence: Optional[float]
     isActive: bool
 
     # column sample fields (now live on model_column)
@@ -31,6 +35,10 @@ class DictColumnRow:
             "columnName": self.columnName,
             "dataType": self.dataType,
             "description": self.description,
+            "semanticType": self.semanticType,
+            "semanticEntity": self.semanticEntity,
+            "semanticSubType": self.semanticSubType,
+            "semanticConfidence": self.semanticConfidence,
             "isActive": bool(self.isActive),
 
             # keep camelCase for the UI
@@ -86,7 +94,9 @@ class ModelReadService:
           t.id,
           t.name,
           t.source_table_name,
-          t.description
+          t.description,
+          t.origin,
+          t.is_missing_in_source
         FROM model_table t
         WHERE (:q IS NULL OR t.name LIKE CONCAT('%', :q, '%'))
           AND (
@@ -108,12 +118,16 @@ class ModelReadService:
 
         out: List[Dict[str, Any]] = []
         for r in rows:
+            origin = str(r[4] or "") if len(r) > 4 else ""
+            is_missing_in_source = bool(r[5]) if len(r) > 5 else False
             out.append(
                 {
                     "id": int(r[0]),
                     "name": str(r[1]),
                     "sourceTableName": (str(r[2]) if r[2] is not None else None),
                     "description": r[3],
+                    "origin": origin,
+                    "isMissingInSource": is_missing_in_source,
                 }
             )
 
@@ -186,6 +200,10 @@ class ModelReadService:
           c.column_name,
           c.data_type,
           c.description,
+          c.semantic_type,
+          c.semantic_entity,
+          c.semantic_sub_type,
+          c.semantic_confidence,
           c.is_active,
           c.sample_values_json,
           c.sample_stats_json,
@@ -208,7 +226,30 @@ class ModelReadService:
 
         out_rows: List[Dict[str, Any]] = []
         for r in rows:
-            sample_ran_at = r[9]
+            # Backward-compatible row mapping:
+            # - legacy shape (11 cols): no semantic_* fields
+            # - current shape (15 cols): includes semantic_* fields
+            if len(r) >= 15:
+                semantic_type = r[6]
+                semantic_entity = r[7]
+                semantic_sub_type = r[8]
+                semantic_confidence = (float(r[9]) if r[9] is not None else None)
+                is_active = bool(r[10])
+                sample_values_json = r[11]
+                sample_stats_json = r[12]
+                sample_ran_at = r[13]
+                sample_error = r[14]
+            else:
+                semantic_type = None
+                semantic_entity = None
+                semantic_sub_type = None
+                semantic_confidence = None
+                is_active = bool(r[6]) if len(r) > 6 else True
+                sample_values_json = r[7] if len(r) > 7 else None
+                sample_stats_json = r[8] if len(r) > 8 else None
+                sample_ran_at = r[9] if len(r) > 9 else None
+                sample_error = r[10] if len(r) > 10 else None
+
             out_rows.append(
                 DictColumnRow(
                     id=int(r[0]),
@@ -217,11 +258,15 @@ class ModelReadService:
                     columnName=str(r[3]),
                     dataType=r[4],
                     description=r[5],
-                    isActive=bool(r[6]),
-                    sampleValuesJson=r[7],
-                    sampleStatsJson=r[8],
+                    semanticType=semantic_type,
+                    semanticEntity=semantic_entity,
+                    semanticSubType=semantic_sub_type,
+                    semanticConfidence=semantic_confidence,
+                    isActive=is_active,
+                    sampleValuesJson=sample_values_json,
+                    sampleStatsJson=sample_stats_json,
                     sampleRanAt=(sample_ran_at.isoformat() if sample_ran_at else None),
-                    sampleError=r[10],
+                    sampleError=sample_error,
                 ).to_dict()
             )
 

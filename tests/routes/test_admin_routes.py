@@ -213,6 +213,60 @@ def test_domain_profile_delete(client, monkeypatch):
     assert resp.json["deleted"] is True
 
 
+def test_domain_profile_generate_one(client, monkeypatch):
+    class _FakeSvc:
+        def generate_one(self, *, workspace_id, domain_id, force=False):
+            assert workspace_id == "ws-1"
+            assert domain_id == 4
+            assert force is True
+            return {"domain_id": 4, "status": "generated"}
+
+    monkeypatch.setattr(admin_routes, "DomainProfileEmbeddingService", _FakeSvc)
+    resp = client.post(
+        "/api/v1/admin/domain-profiles/4/generate",
+        json={"force": True},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["result"]["status"] == "generated"
+
+
+def test_domain_profile_generate_batch(client, monkeypatch):
+    class _FakeSvc:
+        def generate_many(self, *, workspace_id, domain_ids, force=False):
+            assert workspace_id == "ws-1"
+            assert domain_ids == [4, 7]
+            assert force is False
+            return {"total": 2, "generated": 2, "failed": 0, "results": []}
+
+    monkeypatch.setattr(admin_routes, "DomainProfileEmbeddingService", _FakeSvc)
+    resp = client.post(
+        "/api/v1/admin/domain-profiles/generate",
+        json={"domain_ids": [4, 7]},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["total"] == 2
+
+
+def test_domain_profile_generate_all(client, monkeypatch):
+    class _FakeSvc:
+        def generate_all(self, *, workspace_id, force=False, include_inactive=False):
+            assert workspace_id == "ws-1"
+            assert force is True
+            assert include_inactive is True
+            return {"total": 3, "generated": 2, "failed": 1, "results": []}
+
+    monkeypatch.setattr(admin_routes, "DomainProfileEmbeddingService", _FakeSvc)
+    resp = client.post(
+        "/api/v1/admin/domain-profiles/generate-all",
+        json={"force": True, "include_inactive": True},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["total"] == 3
+
+
 # ---------------------------------------------------------------------------
 # Vector rebuild
 # ---------------------------------------------------------------------------

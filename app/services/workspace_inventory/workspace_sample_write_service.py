@@ -91,21 +91,21 @@ WITH ranked AS (
     wt.id,
     wt.full_name,
     wt.model_table_id,
-    wt.qf_variant_code,
-    wt.qf_last_seen_at,
+    wt.variant_code,
+    wt.last_seen_at,
     wt.sample_ran_at,
     ROW_NUMBER() OVER (
       PARTITION BY wt.model_table_id
       ORDER BY
-        CASE WHEN wt.qf_variant_code IS NULL THEN 0 ELSE 1 END,
+        CASE WHEN wt.variant_code IS NULL THEN 0 ELSE 1 END,
         wt.full_name
     ) AS rn
   FROM workspace_table wt
   WHERE wt.workspace_id = :ws
-    AND wt.qf_schema_name = :schema
-    AND wt.qf_exists_in_dbx = 1
+    AND wt.schema_name = :schema
+    AND wt.exists_in_dbx = 1
     AND wt.model_table_id IS NOT NULL
-    AND (wt.sample_ran_at IS NULL OR wt.sample_ran_at < wt.qf_last_seen_at)
+    AND (wt.sample_ran_at IS NULL OR wt.sample_ran_at < wt.last_seen_at)
 )
 SELECT id, full_name
 FROM ranked

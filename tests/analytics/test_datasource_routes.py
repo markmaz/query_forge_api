@@ -3,9 +3,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 
-import app.routes.datasource_routes as datasource_routes
 from app.services.analytics.registry import AnalyticsDatasourceRegistry
 
 

@@ -47,7 +47,7 @@ class DomainJoinService:
                 dtj.is_active,
                 dtj.created_at,
                 dtj.updated_at
-            FROM qf_domain_table_join dtj
+            FROM domain_table_join dtj
             JOIN domain d ON d.id = dtj.domain_id
             WHERE d.workspace_id = :ws
               AND dtj.domain_id = :did
@@ -87,7 +87,7 @@ class DomainJoinService:
             existing = tx.execute_query_mappings(
                 """
                 SELECT id, is_active
-                FROM qf_domain_table_join
+                FROM domain_table_join
                 WHERE domain_id = :did
                   AND from_workspace_table_id = :qf_from_id
                   AND to_workspace_table_id = :qf_to_id
@@ -106,7 +106,7 @@ class DomainJoinService:
             if existing_row:
                 tx.execute_write(
                     """
-                    UPDATE qf_domain_table_join
+                    UPDATE domain_table_join
                     SET
                         join_type = :join_type,
                         join_spec_json = :join_spec,
@@ -125,7 +125,7 @@ class DomainJoinService:
 
             result = tx.execute_insert(
                 """
-                INSERT INTO qf_domain_table_join
+                INSERT INTO domain_table_join
                   (domain_id, from_workspace_table_id, to_workspace_table_id, join_type, join_spec_json, sort_order, is_active)
                 VALUES
                   (:did, :qf_from_id, :qf_to_id, :join_type, :join_spec, :sort_order, 1)
@@ -178,7 +178,7 @@ class DomainJoinService:
 
             tx.execute_write(
                 """
-                UPDATE qf_domain_table_join
+                UPDATE domain_table_join
                 SET
                     from_workspace_table_id = :qf_from_id,
                     to_workspace_table_id = :qf_to_id,
@@ -207,7 +207,7 @@ class DomainJoinService:
             self._ensure_join_exists(tx, domain_id, join_id)
             tx.execute_write(
                 """
-                UPDATE qf_domain_table_join
+                UPDATE domain_table_join
                 SET is_active = 0
                 WHERE domain_id = :did
                   AND id = :join_id
@@ -247,7 +247,7 @@ class DomainJoinService:
             )
             tx.execute_write(
                 """
-                UPDATE qf_domain_table_join
+                UPDATE domain_table_join
                 SET is_active = 0
                 WHERE domain_id = :did
                   AND to_workspace_table_id = :wtid
@@ -343,7 +343,7 @@ class DomainJoinService:
         rows = tx.execute_query_mappings(
             """
             SELECT id
-            FROM qf_domain_table_join
+            FROM domain_table_join
             WHERE domain_id = :did
               AND to_workspace_table_id = :qf_to_id
               AND is_active = 1
@@ -357,7 +357,7 @@ class DomainJoinService:
 
     def _ensure_join_exists(self, tx: ForgeQueryTx, domain_id: int, join_id: str) -> None:
         rows = tx.execute_query_mappings(
-            "SELECT id FROM qf_domain_table_join WHERE domain_id = :did AND id = :join_id LIMIT 1",
+            "SELECT id FROM domain_table_join WHERE domain_id = :did AND id = :join_id LIMIT 1",
             {"did": int(domain_id), "join_id": join_id},
         )
         if not rows:
