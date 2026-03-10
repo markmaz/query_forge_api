@@ -6,7 +6,7 @@ import app.routes.ai as ai_routes
 def _headers(monkeypatch):
     from app import factory
     from app.decorators import security
-    from app.routes import _route_utils
+    from app.routes import request_helpers as _route_utils
     from app.services.workspace_inventory import workspace_context
 
     def _verify_token(_token):

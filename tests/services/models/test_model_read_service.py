@@ -3,11 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.services.models.model_read_service import ModelReadService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_list_tables_with_counts() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_responses = [
         [(2,)],
         [(1, "patients", "src_patients", "desc"), (2, "visits", None, None)],
@@ -23,14 +23,14 @@ def test_list_tables_with_counts() -> None:
 
 
 def test_list_table_names() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_responses = [[("alpha",), ("beta",)]]
     svc = ModelReadService(sql=sql)
     assert svc.list_table_names() == ["alpha", "beta"]
 
 
 def test_list_columns_with_table_names() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_responses = [
         [
             (

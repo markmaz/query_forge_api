@@ -2,26 +2,26 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import ExecuteResult
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeExecResult
 from app.services.models.model_update_service import ModelUpdateService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_patch_column_rejects_invalid_fields():
-    svc = ModelUpdateService(sql=FakeSQLExecutor())
-    with pytest.raises(ServiceError):
+    svc = ModelUpdateService(sql=FakeForgeQueryPort())
+    with pytest.raises(ForgeError):
         svc.patch_column(column_id=1, patch={"nope": "x"})
 
 
 def test_patch_column_requires_sets():
-    svc = ModelUpdateService(sql=FakeSQLExecutor())
-    with pytest.raises(ServiceError):
+    svc = ModelUpdateService(sql=FakeForgeQueryPort())
+    with pytest.raises(ForgeError):
         svc.patch_column(column_id=1, patch={})
 
 
 def test_patch_column_success():
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [1]
     fake.query_responses = [[(1, 10, "patients", "id", "INT", "desc", 1)]]
     svc = ModelUpdateService(sql=fake)
@@ -31,24 +31,24 @@ def test_patch_column_success():
 
 
 def test_patch_column_not_found():
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [0]
     svc = ModelUpdateService(sql=fake)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.patch_column(column_id=99, patch={"description": "x"})
 
 
 def test_patch_column_missing_after_update():
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.write_responses = [1]
     fake.query_responses = [[]]
     svc = ModelUpdateService(sql=fake)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.patch_column(column_id=99, patch={"description": "x"})
 
 
 def test_create_column_creates_table():
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [
         [],
         [
@@ -63,7 +63,7 @@ def test_create_column_creates_table():
             }
         ],
     ]
-    fake.insert_responses = [ExecuteResult(rowcount=1, lastrowid=2), ExecuteResult(rowcount=1, lastrowid=5)]
+    fake.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=2), ForgeExecResult(rowcount=1, lastrowid=5)]
     svc = ModelUpdateService(sql=fake)
     result = svc.create_column(
         table_name="patients",
@@ -77,7 +77,7 @@ def test_create_column_creates_table():
 
 
 def test_create_column_existing_table():
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [
         [{"id": 7, "name": "visits"}],
         [
@@ -92,7 +92,7 @@ def test_create_column_existing_table():
             }
         ],
     ]
-    fake.insert_responses = [ExecuteResult(rowcount=1, lastrowid=9)]
+    fake.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=9)]
     svc = ModelUpdateService(sql=fake)
     result = svc.create_column(
         table_name="visits",
@@ -106,11 +106,11 @@ def test_create_column_existing_table():
 
 
 def test_create_column_duplicate_raises():
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[{"id": 7, "name": "visits"}]]
     fake.insert_exceptions = [RuntimeError("dup")]
     svc = ModelUpdateService(sql=fake)
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.create_column(
             table_name="visits",
             column_name="visit_id",

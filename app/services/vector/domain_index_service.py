@@ -10,12 +10,12 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from qdrant_client.http import models as qdrant_models
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import EMBEDDING_MODEL_NAME, QDRANT_DOMAIN_COLLECTION, QF_VERTICAL_DEFAULT
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.infra.embedding_model import EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
 
@@ -80,12 +80,12 @@ class DomainVectorIndexService:
     def __init__(
         self,
         *,
-        sql: Optional[SQLExecutor] = None,
+        sql: Optional[ForgeQueryPort] = None,
         qdrant: Optional[QdrantClientWrapper] = None,
         model: Optional[EmbeddingModel] = None,
         collection_name: Optional[str] = None,
     ) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+        self._sql = sql or ForgeMetaSQL()
         self._model = model or EmbeddingModel(model_name=EMBEDDING_MODEL_NAME)
         self._collection_name = collection_name or DEFAULT_COLLECTION
         self._qdrant = qdrant or QdrantClientWrapper(collection_name=self._collection_name)
@@ -242,11 +242,11 @@ class DomainVectorIndexService:
     ) -> Dict[str, Any]:
         query_text = _normalize_query_text(query)
         if query_text == "":
-            raise ServiceError("query is required", status_code=400)
+            raise ForgeError("query is required", status_code=400)
 
         ws = str(workspace_id or "").strip()
         if ws == "":
-            raise ServiceError("workspace_id is required", status_code=400)
+            raise ForgeError("workspace_id is required", status_code=400)
 
         k = max(1, min(int(limit or DEFAULT_LIMIT), MAX_LIMIT))
         vertical = _normalize_vertical(vertical_norm)

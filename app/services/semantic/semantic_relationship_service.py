@@ -3,15 +3,15 @@ from __future__ import annotations
 from collections import deque
 from typing import Any, Dict, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 from app.services.semantic.semantic_registry_service import _coerce_positive_int, _normalize_vertical
 
 
 class SemanticRelationshipService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def list_relationships(
         self,
@@ -113,28 +113,28 @@ class SemanticRelationshipService:
             {"id": rel_id},
         )
         if not rows:
-            raise ServiceError("semantic_relationship entry not found", status_code=404)
+            raise ForgeError("semantic_relationship entry not found", status_code=404)
         return self._normalize_row(rows[0])
 
     def create_relationship(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(payload, dict):
-            raise ServiceError("Invalid JSON body", status_code=400)
+            raise ForgeError("Invalid JSON body", status_code=400)
 
         parent_id = _coerce_positive_int(payload.get("parent_concept_id"), field="parent_concept_id")
         child_id = _coerce_positive_int(payload.get("child_concept_id"), field="child_concept_id")
         relation_type = str(payload.get("relationship_type") or "").strip().lower()
 
         if not relation_type:
-            raise ServiceError("relationship_type is required", status_code=400)
+            raise ForgeError("relationship_type is required", status_code=400)
         if len(relation_type) > 100:
-            raise ServiceError("relationship_type exceeds 100 characters", status_code=400)
+            raise ForgeError("relationship_type exceeds 100 characters", status_code=400)
         if parent_id == child_id:
-            raise ServiceError("parent_concept_id and child_concept_id must differ", status_code=400)
+            raise ForgeError("parent_concept_id and child_concept_id must differ", status_code=400)
 
         self._assert_same_vertical(parent_id, child_id)
 
         if self._has_path(start_concept_id=child_id, target_concept_id=parent_id):
-            raise ServiceError("relationship would create a cycle", status_code=400)
+            raise ForgeError("relationship would create a cycle", status_code=400)
 
         try:
             result = self._sql.execute_insert(
@@ -160,7 +160,7 @@ class SemanticRelationshipService:
 
         if result.lastrowid:
             return self.get_relationship(int(result.lastrowid))
-        raise ServiceError("Failed to create semantic_relationship entry", status_code=500)
+        raise ForgeError("Failed to create semantic_relationship entry", status_code=500)
 
     def delete_relationship(self, relationship_id: int) -> None:
         rel_id = _coerce_positive_int(relationship_id, field="id")
@@ -172,7 +172,7 @@ class SemanticRelationshipService:
             {"id": rel_id},
         )
         if int(affected or 0) <= 0:
-            raise ServiceError("semantic_relationship entry not found", status_code=404)
+            raise ForgeError("semantic_relationship entry not found", status_code=404)
 
     def get_children(self, concept_id: int, relationship_type: Optional[str] = None) -> list[Dict[str, Any]]:
         parent_id = _coerce_positive_int(concept_id, field="concept_id")
@@ -241,11 +241,11 @@ class SemanticRelationshipService:
         )
 
         if len(rows) != 2:
-            raise ServiceError("parent_concept_id or child_concept_id not found", status_code=404)
+            raise ForgeError("parent_concept_id or child_concept_id not found", status_code=404)
 
         vertical_by_id = {int(row["id"]): str(row.get("vertical_norm") or "") for row in rows}
         if vertical_by_id.get(parent_id) != vertical_by_id.get(child_id):
-            raise ServiceError("Cross-vertical relationships are not allowed", status_code=400)
+            raise ForgeError("Cross-vertical relationships are not allowed", status_code=400)
 
     def _has_path(self, *, start_concept_id: int, target_concept_id: int) -> bool:
         queue: deque[int] = deque([start_concept_id])
@@ -287,5 +287,5 @@ class SemanticRelationshipService:
 def _raise_write_error(exc: Exception) -> None:
     msg = str(exc)
     if "Duplicate entry" in msg:
-        raise ServiceError("Duplicate semantic_relationship entry", status_code=409) from exc
-    raise ServiceError("semantic_relationship write failed", status_code=500, details={"message": msg}) from exc
+        raise ForgeError("Duplicate semantic_relationship entry", status_code=409) from exc
+    raise ForgeError("semantic_relationship write failed", status_code=500, details={"message": msg}) from exc

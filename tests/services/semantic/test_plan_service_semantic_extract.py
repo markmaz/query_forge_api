@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.services.semantic.plan_service import PlanService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_plan_includes_semantic_extract_debug_payload() -> None:
@@ -41,7 +41,7 @@ def test_plan_includes_semantic_extract_debug_payload() -> None:
             return {"filtered_to_candidate_count": 0, "hits": []}
 
     svc = PlanService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         deterministic=_Deterministic(),
         concept_retrieval=_ConceptRetrieval(),
         concept_to_column=_ConceptToColumn(),

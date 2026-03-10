@@ -4,7 +4,7 @@ import logging
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services import workspace_service
 from app.services.workspace_service import WorkspaceService
 
@@ -20,7 +20,7 @@ class _Resp:
 
 
 def test_get_all_workspaces(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.services.workspace_service.get_headers", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("app.services.workspace_service.forge_auth_headers", lambda *_args, **_kwargs: {})
     monkeypatch.setattr("app.services.workspace_service.requests.get", lambda *_args, **_kwargs: _Resp(200))
     monkeypatch.setattr(
         "app.services.workspace_service.process_response",
@@ -35,7 +35,7 @@ def test_get_all_workspaces(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_get_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.services.workspace_service.get_headers", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("app.services.workspace_service.forge_auth_headers", lambda *_args, **_kwargs: {})
     monkeypatch.setattr("app.services.workspace_service.requests.get", lambda *_args, **_kwargs: _Resp(200))
     monkeypatch.setattr(
         "app.services.workspace_service.process_response",
@@ -48,7 +48,7 @@ def test_get_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_get_workspace_does_not_log_auth_header(caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "app.services.workspace_service.get_headers",
+        "app.services.workspace_service.forge_auth_headers",
         lambda *_args, **_kwargs: {"Authorization": "Bearer super-secret"},
     )
     monkeypatch.setattr("app.services.workspace_service.requests.get", lambda *_args, **_kwargs: _Resp(200))
@@ -63,7 +63,7 @@ def test_get_workspace_does_not_log_auth_header(caplog: pytest.LogCaptureFixture
 
 
 def test_get_workspace_users_from_dbx(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.services.workspace_service.get_headers", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("app.services.workspace_service.forge_auth_headers", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(
         workspace_service.User,
         "to_dict",
@@ -91,9 +91,9 @@ def test_get_workspace_users_from_dbx(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_get_workspace_users_from_dbx_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     def _raise(*_args, **_kwargs):
-        raise ServiceError("missing", 404)
+        raise ForgeError("missing", 404)
 
     monkeypatch.setattr(WorkspaceService, "get_workspace", _raise)
     svc = WorkspaceService()
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.get_workspace_users_from_dbx("1")

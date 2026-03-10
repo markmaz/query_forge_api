@@ -6,9 +6,9 @@ from typing import Any, Dict, Optional
 
 import requests
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import QDRANT_URL, VLLM_BASE_URL, VLLM_MODEL
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
 
@@ -17,12 +17,12 @@ class AdminHealthService:
     def __init__(
         self,
         *,
-        sql: Optional[SQLExecutor] = None,
+        sql: Optional[ForgeQueryPort] = None,
         vllm_base_url: Optional[str] = None,
         vllm_model: Optional[str] = None,
         qdrant_url: Optional[str] = None,
     ) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+        self._sql = sql or ForgeMetaSQL()
         self._vllm_base_url = vllm_base_url or VLLM_BASE_URL
         self._vllm_model = vllm_model or VLLM_MODEL
         self._qdrant_url = qdrant_url or QDRANT_URL

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.ports.sql_executor import SQLExecutor
-from app.services.shared.jsonify import jsonify_rows
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.ports.sql_executor import ForgeQueryPort
+from app.services.shared.jsonify import serialize_result_rows
 
 
 class DomainSummaryReadService:
@@ -14,8 +14,8 @@ class DomainSummaryReadService:
       - table_sample: up to N table_name values (chips)
     """
 
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def list_domain_summaries(self, *, workspace_id: str, sample_size: int = 2) -> List[Dict[str, Any]]:
         sample_size = max(0, int(sample_size))
@@ -74,4 +74,4 @@ class DomainSummaryReadService:
 
         # Ensure domains with zero mappings still appear even if query returns none (shouldn’t, but safe)
         result = list(by_id.values())
-        return jsonify_rows(result)
+        return serialize_result_rows(result)

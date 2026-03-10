@@ -1,33 +1,55 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.ports.sql_executor import ForgeQueryPort
 
 
 class UnmappedWorkspaceTablesReadService:
-    """
-    Unmapped = workspace_table rows that exist in DBX snapshot, but do not map to model_table.
-    This is the admin view you want for the Recon tab.
+    """Read unmapped workspace tables from cached workspace inventory snapshot."""
 
-    Requires:
-      - workspace_table.model_table_id nullable
-    """
-
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: ForgeQueryPort | None = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def list_unmapped_tables(
         self,
         *,
         workspace_id: str,
-        schema_name: Optional[str] = None,
-        q: Optional[str] = None,
+        schema_name: str | None = None,
+        q: str | None = None,
         limit: int = 200,
         offset: int = 0,
-    ) -> Dict[str, Any]:
-        params = {
+    ) -> dict[str, Any]:
+        params = self._params(
+            workspace_id=workspace_id,
+            schema_name=schema_name,
+            q=q,
+            limit=limit,
+            offset=offset,
+        )
+
+        total_rows = self._sql.execute_query_mappings(self._count_sql(), params)
+        data_rows = self._sql.execute_query_mappings(self._rows_sql(), params)
+
+        total = int((total_rows[0].get("total") if total_rows else 0) or 0)
+        return {
+            "rows": [dict(row) for row in data_rows],
+            "total": total,
+            "limit": params["limit"],
+            "offset": params["offset"],
+        }
+
+    def _params(
+        self,
+        *,
+        workspace_id: str,
+        schema_name: str | None,
+        q: str | None,
+        limit: int,
+        offset: int,
+    ) -> dict[str, Any]:
+        return {
             "ws": workspace_id,
             "schema": (schema_name or "").strip() or None,
             "q": (q or "").strip() or None,
@@ -35,7 +57,8 @@ class UnmappedWorkspaceTablesReadService:
             "offset": int(offset),
         }
 
-        count_sql = """
+    def _count_sql(self) -> str:
+        return """
 SELECT COUNT(*) AS total
 FROM workspace_table wt
 WHERE wt.workspace_id = :ws
@@ -49,13 +72,14 @@ WHERE wt.workspace_id = :ws
   ))
 """
 
-        rows_sql = """
+    def _rows_sql(self) -> str:
+        return """
 SELECT
   wt.id,
   wt.catalog_name,
   wt.schema_name,
-  wt.table_name,     -- base name
-  wt.full_name,      -- physical catalog.schema.table
+  wt.table_name,
+  wt.full_name,
   wt.variant_code,
   wt.is_qe,
   wt.exists_in_dbx,
@@ -73,14 +97,3 @@ WHERE wt.workspace_id = :ws
 ORDER BY wt.schema_name, wt.table_name, wt.variant_code, wt.full_name
 LIMIT :limit OFFSET :offset
 """
-
-        total_rows = self._sql.execute_query_mappings(count_sql, params)
-        total = int((total_rows[0].get("total") if total_rows else 0) or 0)
-        rows = self._sql.execute_query_mappings(rows_sql, params)
-
-        return {
-            "rows": [dict(r) for r in rows],
-            "total": total,
-            "limit": params["limit"],
-            "offset": params["offset"],
-        }

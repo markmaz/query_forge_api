@@ -4,11 +4,12 @@ import logging
 from typing import Any, Dict
 
 from flask import request
-from flask_restx import Namespace, Resource, fields
+from flask_restx import Namespace, fields
+from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
-from app.routes._route_utils import get_workspace_id_from_header
+from app.exceptions.forge_error import ForgeError
+from app.routes.request_helpers import extract_workspace_id
 from app.services.semantic.plan_service import PlanService
 
 logger = logging.getLogger(__name__)
@@ -30,16 +31,16 @@ plan_request_model = semantic_ns.model(
 
 
 @semantic_ns.route("/plan")
-class SemanticPlan(Resource):
+class SemanticPlan(ForgeResource):
     @token_required
     @semantic_ns.expect(plan_request_model, validate=False)
     def post(self):
         try:
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            body["workspace_id"] = get_workspace_id_from_header()
+            body["workspace_id"] = extract_workspace_id()
             result = PlanService().plan(body, include_llm=True)
             return _shape_plan_response(result), 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("semantic plan failed")
@@ -47,16 +48,16 @@ class SemanticPlan(Resource):
 
 
 @semantic_ns.route("/suggest-columns")
-class SemanticSuggestColumns(Resource):
+class SemanticSuggestColumns(ForgeResource):
     @token_required
     @semantic_ns.expect(plan_request_model, validate=False)
     def post(self):
         try:
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            body["workspace_id"] = get_workspace_id_from_header()
+            body["workspace_id"] = extract_workspace_id()
             result = PlanService().plan(body, include_llm=False)
             return result, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("semantic suggest-columns failed")

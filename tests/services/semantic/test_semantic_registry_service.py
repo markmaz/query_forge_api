@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import ExecuteResult
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeExecResult
 from app.services.semantic.semantic_registry_service import SemanticRegistryService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_registry_create_success() -> None:
-    sql = FakeSQLExecutor()
-    sql.insert_responses = [ExecuteResult(rowcount=1, lastrowid=5)]
+    sql = FakeForgeQueryPort()
+    sql.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=5)]
     sql.query_mappings_responses = [
         [
             {
@@ -54,9 +54,9 @@ def test_registry_create_success() -> None:
 
 
 def test_registry_invalid_semantic_type_rejected() -> None:
-    svc = SemanticRegistryService(sql=FakeSQLExecutor())
+    svc = SemanticRegistryService(sql=FakeForgeQueryPort())
 
-    with pytest.raises(ServiceError, match="semantic_type must be one of"):
+    with pytest.raises(ForgeError, match="semantic_type must be one of"):
         svc.create_entry(
             {
                 "concept_key": "bad",
@@ -66,18 +66,18 @@ def test_registry_invalid_semantic_type_rejected() -> None:
 
 
 def test_registry_duplicate_constraint_maps_to_conflict() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.insert_exceptions = [Exception("Duplicate entry 'education-student.id' for key 'uq_semantic_registry_vertical_concept'")]
     svc = SemanticRegistryService(sql=sql)
 
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         svc.create_entry({"vertical": "education", "concept_key": "student.id", "semantic_type": "identifier"})
 
     assert exc.value.status_code == 409
 
 
 def test_registry_list_filtering_uses_expected_predicates() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -126,7 +126,7 @@ def test_registry_list_filtering_uses_expected_predicates() -> None:
 
 
 def test_registry_update_and_delete() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.write_responses = [1, 1]
     sql.query_mappings_responses = [
         [

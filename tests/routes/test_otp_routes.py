@@ -42,7 +42,7 @@ def test_otp_verify_success(client, monkeypatch):
             "expires_in": 900,
         },
     )
-    monkeypatch.setattr(otp_routes.AuthService, "refresh_ttl_seconds", 1209600, raising=False)
+    monkeypatch.setattr(otp_routes.AuthService, "qf_refresh_ttl", 1209600, raising=False)
 
     resp = client.post(
         "/api/v1/otp/verify",

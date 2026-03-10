@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.ports.sql_executor import ForgeQueryPort
 from app.services.semantic.semantic_llm_schema import normalize_concept_key
 
 
 class ConceptSeedService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def ensure_seeded(self, vertical_norm: str) -> Dict[str, Any]:
         vertical = _normalize_vertical(vertical_norm)

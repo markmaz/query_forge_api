@@ -5,7 +5,7 @@ import io
 import pytest
 from werkzeug.datastructures import FileStorage
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.models.model_upload_service import ModelUploadService
 
 
@@ -29,28 +29,28 @@ def _file_storage(data: bytes, filename: str) -> FileStorage:
 
 def test_upload_missing_file() -> None:
     svc = ModelUploadService(writer=DummyWriter())
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.upload(workspace_id="ws", user_id="u", file_storage=None)
 
 
 def test_upload_missing_filename() -> None:
     svc = ModelUploadService(writer=DummyWriter())
     fs = _file_storage(b"data", "")
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.upload(workspace_id="ws", user_id="u", file_storage=fs)
 
 
 def test_upload_empty_file() -> None:
     svc = ModelUploadService(writer=DummyWriter())
     fs = _file_storage(b"", "data.csv")
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.upload(workspace_id="ws", user_id="u", file_storage=fs)
 
 
 def test_upload_unsupported_file_type() -> None:
     svc = ModelUploadService(writer=DummyWriter())
     fs = _file_storage(b"data", "data.txt")
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.upload(workspace_id="ws", user_id="u", file_storage=fs)
 
 

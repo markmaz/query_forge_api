@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, Optional
 import httpx
 
 from app.config import SEMANTIC_LLM_ENDPOINT, SEMANTIC_LLM_MODEL, SEMANTIC_LLM_TIMEOUT_SECONDS
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.llm.io_logging import (
     log_llm_exception,
     log_llm_request,
@@ -27,7 +27,12 @@ class LLMClient:
         model: Optional[str] = None,
         timeout_seconds: Optional[int] = None,
     ) -> None:
-        self._endpoint = (endpoint or SEMANTIC_LLM_ENDPOINT).strip()
+        raw_endpoint = str(endpoint if endpoint is not None else SEMANTIC_LLM_ENDPOINT)
+        normalized_endpoint = raw_endpoint.strip().strip('"').strip("'")
+        if normalized_endpoint.startswith("="):
+            logger.warning("LLM endpoint had leading '=' characters; normalizing endpoint value")
+            normalized_endpoint = normalized_endpoint.lstrip("=").strip()
+        self._endpoint = normalized_endpoint
         self._model = (model or SEMANTIC_LLM_MODEL).strip()
         self._timeout_seconds = int(timeout_seconds or SEMANTIC_LLM_TIMEOUT_SECONDS)
 
@@ -78,7 +83,7 @@ class LLMClient:
             parsed = second.get("parsed") if isinstance(second.get("parsed"), dict) else None
             is_valid = parsed is not None and (validator(parsed) if validator is not None else True)
         if not is_valid or parsed is None:
-            raise ServiceError(
+            raise ForgeError(
                 "Invalid model response JSON",
                 status_code=500,
                 details={
@@ -112,7 +117,7 @@ class LLMClient:
         content = trace.get("content")
         if isinstance(content, str) and content.strip() != "":
             return content
-        raise ServiceError("LLM response missing content", status_code=502, details={"trace": trace})
+        raise ForgeError("LLM response missing content", status_code=502, details={"trace": trace})
 
     def _chat_once_with_trace(
         self,
@@ -203,7 +208,7 @@ class LLMClient:
                 message=str(exc),
             )
             if isinstance(exc, httpx.ConnectError):
-                raise ServiceError(
+                raise ForgeError(
                     "LLM provider unavailable",
                     status_code=503,
                     details={
@@ -215,7 +220,7 @@ class LLMClient:
                     },
                 ) from exc
             if isinstance(exc, httpx.TimeoutException):
-                raise ServiceError(
+                raise ForgeError(
                     "LLM request timed out",
                     status_code=504,
                     details={
@@ -225,7 +230,7 @@ class LLMClient:
                         "model": self._model,
                     },
                 ) from exc
-            raise ServiceError(
+            raise ForgeError(
                 "LLM request failed",
                 status_code=502,
                 details={
@@ -311,7 +316,7 @@ class LLMClient:
         content = trace.get("content")
         if isinstance(content, str) and content.strip() != "":
             return content
-        raise ServiceError("LLM response missing content", status_code=502, details={"trace": trace})
+        raise ForgeError("LLM response missing content", status_code=502, details={"trace": trace})
 
     def _chat_url(self) -> str:
         if self._endpoint.endswith("/v1/chat/completions"):

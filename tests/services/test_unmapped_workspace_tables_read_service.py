@@ -3,11 +3,11 @@ from __future__ import annotations
 from app.services.workspace_inventory.unmapped_workspace_tables_read_service import (
     UnmappedWorkspaceTablesReadService,
 )
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_list_unmapped_tables() -> None:
-    fake = FakeSQLExecutor()
+    fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [
         [{"total": 2}],
         [
@@ -17,10 +17,10 @@ def test_list_unmapped_tables() -> None:
                 "schema_name": "asset",
                 "table_name": "patients",
                 "full_name": "main.asset.patients",
-                "variant_code": None,
+                "qf_variant_code": None,
                 "is_qe": 0,
-                "exists_in_dbx": 1,
-                "last_seen_at": "now",
+                "qf_exists_in_dbx": 1,
+                "qf_last_seen_at": "now",
             }
         ],
     ]

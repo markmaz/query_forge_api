@@ -3,16 +3,16 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 
 
 class NLPReviewService:
     VALID_STATUSES = {"pending", "approved", "rejected"}
 
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def enqueue(
         self,
@@ -25,9 +25,9 @@ class NLPReviewService:
         ws = str(workspace_id or "").strip()
         text = str(prompt or "").strip()
         if ws == "":
-            raise ServiceError("workspace_id is required", status_code=400)
+            raise ForgeError("workspace_id is required", status_code=400)
         if text == "":
-            raise ServiceError("prompt is required", status_code=400)
+            raise ForgeError("prompt is required", status_code=400)
 
         insert = self._sql.execute_insert(
             """
@@ -58,7 +58,7 @@ class NLPReviewService:
     def get_item(self, *, workspace_id: str, item_id: int) -> Dict[str, Any]:
         row = self._fetch_one(workspace_id=workspace_id, item_id=item_id)
         if row is None:
-            raise ServiceError("review item not found", status_code=404)
+            raise ForgeError("review item not found", status_code=404)
         return row
 
     def list_items(
@@ -70,14 +70,14 @@ class NLPReviewService:
     ) -> Dict[str, Any]:
         ws = str(workspace_id or "").strip()
         if ws == "":
-            raise ServiceError("workspace_id is required", status_code=400)
+            raise ForgeError("workspace_id is required", status_code=400)
 
         params: Dict[str, Any] = {"workspace_id": ws, "limit": max(1, min(500, int(limit or 50)))}
         where = ["workspace_id = :workspace_id"]
         status_norm = str(status or "").strip().lower()
         if status_norm:
             if status_norm not in self.VALID_STATUSES:
-                raise ServiceError("invalid status", status_code=400)
+                raise ForgeError("invalid status", status_code=400)
             where.append("status = :status")
             params["status"] = status_norm
 
@@ -115,7 +115,7 @@ class NLPReviewService:
     ) -> Dict[str, Any]:
         ws = str(workspace_id or "").strip()
         if ws == "":
-            raise ServiceError("workspace_id is required", status_code=400)
+            raise ForgeError("workspace_id is required", status_code=400)
 
         updates: List[str] = []
         params: Dict[str, Any] = {"workspace_id": ws, "id": int(item_id)}
@@ -123,7 +123,7 @@ class NLPReviewService:
         if status is not None:
             status_norm = str(status).strip().lower()
             if status_norm not in self.VALID_STATUSES:
-                raise ServiceError("invalid status", status_code=400)
+                raise ForgeError("invalid status", status_code=400)
             updates.append("status = :status")
             params["status"] = status_norm
 
@@ -143,7 +143,7 @@ class NLPReviewService:
             params,
         )
         if rowcount <= 0:
-            raise ServiceError("review item not found", status_code=404)
+            raise ForgeError("review item not found", status_code=404)
         return self.get_item(workspace_id=ws, item_id=item_id)
 
     def approve_item(self, *, workspace_id: str, item_id: int) -> Dict[str, Any]:
@@ -152,11 +152,11 @@ class NLPReviewService:
     def export_item_jsonl(self, *, workspace_id: str, item_id: int) -> Dict[str, Any]:
         row = self.get_item(workspace_id=workspace_id, item_id=item_id)
         if str(row.get("status") or "").lower() != "approved":
-            raise ServiceError("review item must be approved before export", status_code=400)
+            raise ForgeError("review item must be approved before export", status_code=400)
 
         corrected = row.get("corrected")
         if not isinstance(corrected, dict):
-            raise ServiceError("review item has no corrected payload", status_code=400)
+            raise ForgeError("review item has no corrected payload", status_code=400)
 
         line = {
             "text": row.get("prompt") or "",

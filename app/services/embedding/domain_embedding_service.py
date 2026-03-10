@@ -8,12 +8,12 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from qdrant_client.http import models as qdrant_models
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import QDRANT_DOMAIN_COLLECTION
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.infra.embedding_model import DEFAULT_VECTOR_SIZE, EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
 
@@ -53,18 +53,18 @@ class DomainEmbeddingService:
     def __init__(
         self,
         *,
-        sql: Optional[SQLExecutor] = None,
+        sql: Optional[ForgeQueryPort] = None,
         qdrant: Optional[QdrantClientWrapper] = None,
         model: Optional[EmbeddingModel] = None,
     ) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+        self._sql = sql or ForgeMetaSQL()
         self._qdrant = qdrant or QdrantClientWrapper(collection_name=COLLECTION_NAME)
         self._model = model or EmbeddingModel()
 
     def upsert_domain_profiles(self, workspace_id: str, *, force: bool = False) -> Dict[str, Any]:
         workspace = (workspace_id or "").strip()
         if not workspace:
-            raise ServiceError("workspace_id is required", status_code=400)
+            raise ForgeError("workspace_id is required", status_code=400)
 
         self._qdrant.ensure_collection(COLLECTION_NAME, VECTOR_SIZE)
 

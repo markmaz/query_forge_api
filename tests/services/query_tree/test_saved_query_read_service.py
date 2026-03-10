@@ -4,13 +4,13 @@ from datetime import datetime
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.query_tree.saved_query_read_service import SavedQueryReadService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_get_query_library_access() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -34,7 +34,7 @@ def test_get_query_library_access() -> None:
 
 
 def test_get_query_owner_access() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -58,7 +58,7 @@ def test_get_query_owner_access() -> None:
 
 
 def test_get_query_shared_access() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -83,7 +83,7 @@ def test_get_query_shared_access() -> None:
 
 
 def test_get_query_wrong_workspace() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -101,12 +101,12 @@ def test_get_query_wrong_workspace() -> None:
         ]
     ]
     svc = SavedQueryReadService(workspace_id="ws1", user_id="user1", sql=sql)
-    with pytest.raises(ServiceError, match="Query not found in this workspace"):
+    with pytest.raises(ForgeError, match="Query not found in this workspace"):
         svc.get_query("q4")
 
 
 def test_fetch_recent_queries() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {

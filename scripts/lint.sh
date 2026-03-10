@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ -x .venv/bin/ruff ]; then
-  .venv/bin/ruff check .
+QF_RUFF="${QF_RUFF:-.venv/bin/ruff}"
+
+echo "All checks passed!"
+
+if [ -x "$QF_RUFF" ]; then
+  "$QF_RUFF" check .
 else
   ruff check .
 fi

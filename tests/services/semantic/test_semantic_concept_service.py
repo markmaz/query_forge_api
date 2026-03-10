@@ -3,11 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 
 from app.services.semantic.semantic_concept_service import SemanticConceptService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_list_aliases_serializes_created_at_datetime() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -28,7 +28,7 @@ def test_list_aliases_serializes_created_at_datetime() -> None:
 
 
 def test_list_concepts_serializes_datetime_fields() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -64,7 +64,7 @@ def test_list_concepts_serializes_datetime_fields() -> None:
 
 
 def test_list_concept_column_maps_includes_human_readable_names() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -94,7 +94,7 @@ def test_list_concept_column_maps_includes_human_readable_names() -> None:
 
 
 def test_list_value_aliases_includes_concept_name() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -124,7 +124,7 @@ def test_list_value_aliases_includes_concept_name() -> None:
 
 
 def test_list_concept_keys_returns_distinct_sorted_keys() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {"concept_key": "ATTENDANCE_RATE"},
@@ -144,7 +144,7 @@ def test_list_concept_keys_returns_distinct_sorted_keys() -> None:
 
 
 def test_list_concept_column_maps_supports_typeahead_filters() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -198,7 +198,7 @@ def test_list_concept_column_maps_supports_typeahead_filters() -> None:
 
 
 def test_backfill_primary_semantic_keys_dry_run() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [[{"total": 3}]]
     svc = SemanticConceptService(sql=sql)
 
@@ -222,7 +222,7 @@ def test_backfill_primary_semantic_keys_dry_run() -> None:
 
 
 def test_backfill_primary_semantic_keys_execute() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [[{"total": 2}]]
     sql.write_responses = [2]
     svc = SemanticConceptService(sql=sql)

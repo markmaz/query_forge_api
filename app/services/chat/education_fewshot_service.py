@@ -4,7 +4,7 @@ import json
 import time
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import (
     QF_FORGE_INSIGHTS_ROUTE_FEWSHOT_CACHE_SECONDS,
     QF_FORGE_INSIGHTS_ROUTE_FEWSHOT_ENABLED,
@@ -12,21 +12,21 @@ from app.config import (
     QF_FORGE_INSIGHTS_ROUTE_FEWSHOT_MAX_PROMPT_CHARS,
     QF_FORGE_INSIGHTS_ROUTE_FEWSHOT_SCAN_LIMIT,
 )
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 
 
 class EducationFewshotService:
     def __init__(
         self,
         *,
-        sql: Optional[SQLExecutor] = None,
+        sql: Optional[ForgeQueryPort] = None,
         enabled: bool = QF_FORGE_INSIGHTS_ROUTE_FEWSHOT_ENABLED,
         limit: int = QF_FORGE_INSIGHTS_ROUTE_FEWSHOT_LIMIT,
         scan_limit: int = QF_FORGE_INSIGHTS_ROUTE_FEWSHOT_SCAN_LIMIT,
         cache_seconds: int = QF_FORGE_INSIGHTS_ROUTE_FEWSHOT_CACHE_SECONDS,
         max_prompt_chars: int = QF_FORGE_INSIGHTS_ROUTE_FEWSHOT_MAX_PROMPT_CHARS,
     ) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+        self._sql = sql or ForgeMetaSQL()
         self._enabled = bool(enabled)
         self._limit = max(1, min(int(limit), 20))
         self._scan_limit = max(self._limit, min(int(scan_limit), 500))

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services import warehouse_service
 from app.services.warehouse_service import WarehouseService, get_server_name, parse_warehouse_list
 
@@ -50,7 +50,7 @@ def test_get_server_name_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_get_server_name_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(warehouse_service, "get_workspace", lambda _ws: SimpleNamespace(server=None))
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         get_server_name("ws")
 
 
@@ -68,13 +68,13 @@ def test_get_warehouse_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_get_warehouse_by_name_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     svc = WarehouseService()
     monkeypatch.setattr(WarehouseService, "get_all_warehouses", lambda *_args, **_kwargs: [])
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.get_warehouse_by_name(workspace_id="ws", warehouse_name="missing")
 
 
 def test_get_warehouses_for_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(warehouse_service, "get_server_name", lambda _ws: "https://dbx")
-    monkeypatch.setattr("app.services.warehouse_service.get_headers", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("app.services.warehouse_service.forge_auth_headers", lambda *_args, **_kwargs: {})
     monkeypatch.setattr("app.services.warehouse_service.requests.get", lambda *_a, **_k: _Resp(200))
     monkeypatch.setattr(
         "app.services.warehouse_service.process_response",
@@ -97,7 +97,7 @@ def test_get_warehouses_for_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_get_all_warehouses_does_not_log_auth_header(caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(warehouse_service, "get_server_name", lambda _ws: "https://dbx")
     monkeypatch.setattr(
-        "app.services.warehouse_service.get_headers",
+        "app.services.warehouse_service.forge_auth_headers",
         lambda *_args, **_kwargs: {"Authorization": "Bearer super-secret"},
     )
     monkeypatch.setattr("app.services.warehouse_service.requests.get", lambda *_a, **_k: _Resp(200))

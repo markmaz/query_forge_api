@@ -5,16 +5,16 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
 
 
 class ForgeInsightsThreadsService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     # ---------- Projects ----------
     def create_project(
@@ -54,7 +54,7 @@ class ForgeInsightsThreadsService:
             )
             project_id = int(inserted.lastrowid or 0)
             if project_id <= 0:
-                raise ServiceError("failed to create forge insights project", status_code=500)
+                raise ForgeError("failed to create forge insights project", status_code=500)
             return self._get_project_tx(tx=tx, workspace_id=ws, user_id=uid, project_id=project_id)
 
     def list_projects(
@@ -95,7 +95,7 @@ class ForgeInsightsThreadsService:
             {"project_id": project_key, "workspace_id": ws, "user_id": uid},
         )
         if not rows:
-            raise ServiceError("ForgeInsights project not found", status_code=404)
+            raise ForgeError("ForgeInsights project not found", status_code=404)
         return _normalize_project_row(rows[0])
 
     def update_project(
@@ -116,7 +116,7 @@ class ForgeInsightsThreadsService:
         patch_archived = _optional_bool(is_archived)
 
         if patch_name is None and description is None and patch_archived is None:
-            raise ServiceError("no project fields supplied for update", status_code=400)
+            raise ForgeError("no project fields supplied for update", status_code=400)
 
         with self._sql.transaction() as tx:
             self._assert_project_exists_tx(tx=tx, workspace_id=ws, user_id=uid, project_id=project_key)
@@ -391,7 +391,7 @@ class ForgeInsightsThreadsService:
             {"thread_id": thread_key, "workspace_id": ws, "user_id": uid},
         )
         if not rows:
-            raise ServiceError("ForgeInsights thread not found", status_code=404)
+            raise ForgeError("ForgeInsights thread not found", status_code=404)
         return _normalize_thread_row(rows[0])
 
     def update_thread(
@@ -423,7 +423,7 @@ class ForgeInsightsThreadsService:
             and patch_archived is None
             and last_message_at is None
         ):
-            raise ServiceError("no thread fields supplied for update", status_code=400)
+            raise ForgeError("no thread fields supplied for update", status_code=400)
 
         if project_key is not None:
             # project_id=0 is invalid and already rejected; NULL project unlink is supported via project_id=None+project_set=1
@@ -496,7 +496,7 @@ class ForgeInsightsThreadsService:
             {"project_id": project_id, "workspace_id": workspace_id, "user_id": user_id},
         )
         if not rows:
-            raise ServiceError("ForgeInsights project not found", status_code=404)
+            raise ForgeError("ForgeInsights project not found", status_code=404)
 
     def _assert_thread_exists_tx(self, *, tx: Any, workspace_id: str, user_id: str, thread_id: int) -> None:
         rows = tx.execute_query_mappings(
@@ -511,7 +511,7 @@ class ForgeInsightsThreadsService:
             {"thread_id": thread_id, "workspace_id": workspace_id, "user_id": user_id},
         )
         if not rows:
-            raise ServiceError("ForgeInsights thread not found", status_code=404)
+            raise ForgeError("ForgeInsights thread not found", status_code=404)
 
     def _get_thread_tx(self, *, tx: Any, workspace_id: str, user_id: str, thread_id: int) -> Dict[str, Any]:
         rows = tx.execute_query_mappings(
@@ -538,7 +538,7 @@ class ForgeInsightsThreadsService:
             {"thread_id": thread_id, "workspace_id": workspace_id, "user_id": user_id},
         )
         if not rows:
-            raise ServiceError("failed to load forge insights thread row", status_code=500)
+            raise ForgeError("failed to load forge insights thread row", status_code=500)
         return _normalize_thread_row(rows[0])
 
     def _get_project_tx(self, *, tx: Any, workspace_id: str, user_id: str, project_id: int) -> Dict[str, Any]:
@@ -554,7 +554,7 @@ class ForgeInsightsThreadsService:
             {"project_id": project_id, "workspace_id": workspace_id, "user_id": user_id},
         )
         if not rows:
-            raise ServiceError("failed to load forge insights project row", status_code=500)
+            raise ForgeError("failed to load forge insights project row", status_code=500)
         return _normalize_project_row(rows[0])
 
     def _get_thread_id_by_conversation_tx(
@@ -577,7 +577,7 @@ class ForgeInsightsThreadsService:
             {"workspace_id": workspace_id, "user_id": user_id, "conversation_id": conversation_id},
         )
         if not rows:
-            raise ServiceError("failed to resolve forge insights thread id", status_code=500)
+            raise ForgeError("failed to resolve forge insights thread id", status_code=500)
         return int(rows[0]["id"])
 
 
@@ -588,9 +588,9 @@ def _new_conversation_id() -> str:
 def _required_text(value: Any, field_name: str, *, max_len: int) -> str:
     text = str(value or "").strip()
     if text == "":
-        raise ServiceError(f"{field_name} is required", status_code=400)
+        raise ForgeError(f"{field_name} is required", status_code=400)
     if len(text) > max_len:
-        raise ServiceError(f"{field_name} must be {max_len} characters or fewer", status_code=400)
+        raise ForgeError(f"{field_name} must be {max_len} characters or fewer", status_code=400)
     return text
 
 
@@ -601,7 +601,7 @@ def _optional_text(value: Any, *, max_len: int) -> Optional[str]:
     if text == "":
         return None
     if len(text) > max_len:
-        raise ServiceError(f"value must be {max_len} characters or fewer", status_code=400)
+        raise ForgeError(f"value must be {max_len} characters or fewer", status_code=400)
     return text
 
 
@@ -609,9 +609,9 @@ def _required_int(value: Any, field_name: str) -> int:
     try:
         parsed = int(value)
     except Exception as exc:
-        raise ServiceError(f"{field_name} must be an integer", status_code=400) from exc
+        raise ForgeError(f"{field_name} must be an integer", status_code=400) from exc
     if parsed <= 0:
-        raise ServiceError(f"{field_name} must be > 0", status_code=400)
+        raise ForgeError(f"{field_name} must be > 0", status_code=400)
     return parsed
 
 
@@ -675,4 +675,4 @@ def _coerce_datetime(value: Any, field_name: str) -> datetime:
                 return datetime.strptime(text, fmt)
             except ValueError:
                 continue
-    raise ServiceError(f"invalid {field_name} value returned from database", status_code=500)
+    raise ForgeError(f"invalid {field_name} value returned from database", status_code=500)

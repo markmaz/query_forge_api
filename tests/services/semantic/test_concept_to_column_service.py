@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from app.services.semantic.concept_to_column_service import ConceptToColumnService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_concept_mapping_query_returns_columns() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -77,7 +77,7 @@ def test_concept_mapping_query_returns_columns() -> None:
 
 
 def test_concept_mapping_rejects_race_ethnicity_to_city_with_warning() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -134,7 +134,7 @@ def test_concept_mapping_rejects_race_ethnicity_to_city_with_warning() -> None:
 
 
 def test_concept_mapping_entity_intent_ranks_student_name_over_staff_name() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -194,7 +194,7 @@ def test_concept_mapping_entity_intent_ranks_student_name_over_staff_name() -> N
 
 
 def test_concept_mapping_student_name_intent_boosts_student_specific_and_downranks_generic_staff() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {

@@ -10,13 +10,13 @@ import sqlite3
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.nlp.tier2_spacy.training.dataset import DatasetEntity, DatasetExample, write_jsonl
+from app.nlp.tier2_spacy.training.dataset import DatasetEntity, DatasetExample, write_jsonl  # noqa: E402
 
 ALLOWED_ENTITY_LABELS = {"SUBGROUP", "DIMENSION", "TIME_RANGE", "METRIC"}
 DEFAULT_TOPICS_PATH = "data/topics.json"

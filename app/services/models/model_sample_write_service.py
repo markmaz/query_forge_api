@@ -8,9 +8,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
-from app.adapters.databricks_sql_executor import DatabricksSQLExecutor
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.databricks_sql_executor import DatabricksForgeQueryPort
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +60,9 @@ class ModelSampleService:
       - model_column.sample_error
     """
 
-    def __init__(self, *, sql: DatabricksSQLExecutor, mysql: Optional[SQLExecutor] = None):
+    def __init__(self, *, sql: DatabricksForgeQueryPort, mysql: Optional[ForgeQueryPort] = None):
         self._sql = sql
-        self._mysql = mysql or MySQLSQLExecutor()
+        self._mysql = mysql or ForgeMetaSQL()
 
     def _pick_representative_tables(self, *, workspace_id: str, schema_name: str) -> List[Tuple[int, str]]:
         """
@@ -130,8 +130,8 @@ TABLESAMPLE (1 PERCENT)
 """
         resp = self._sql.submit_statement(
             sql_text,
-            result_format="ARROW_STREAM",
-            timeout_s=timeout_s,  # if your executor supports it
+            qf_result_fmt="ARROW_STREAM",
+            qf_timeout_s=timeout_s,  # if your executor supports it
         )
 
         table: Optional[pa.Table] = resp.get("table")
@@ -158,7 +158,7 @@ TABLESAMPLE (1 PERCENT)
         *,
         full_name: str,
         column_name: str,
-        limit: int = 25,
+        limit: int = 10,
         timeout_s: Optional[int] = 120,
     ) -> List[str]:
         tbl = _quote_uc_ident(full_name)
@@ -176,8 +176,8 @@ TABLESAMPLE (1 PERCENT)
 
         resp = self._sql.submit_statement(
             sql_text,
-            result_format="ARROW_STREAM",
-            timeout_s=timeout_s,
+            qf_result_fmt="ARROW_STREAM",
+            qf_timeout_s=timeout_s,
         )
 
         table: Optional[pa.Table] = resp.get("table")
@@ -200,7 +200,7 @@ TABLESAMPLE (1 PERCENT)
         *,
         workspace_id: str,
         schema_name: str = "asset",
-        per_column_limit: int = 25,
+        per_column_limit: int = 10,
         max_tables: Optional[int] = None,
         active_only: bool = True,
         distinct_values: bool = True,
@@ -244,14 +244,14 @@ TABLESAMPLE (1 PERCENT)
                         stats = self._fetch_column_stats(
                             full_name=full_name,
                             column_name=col_name,
-                            timeout_s=statement_timeout_s,
+                            qf_timeout_s=statement_timeout_s,
                         )
                         samples = self._fetch_column_samples(
                             full_name=full_name,
                             column_name=col_name,
                             limit=per_column_limit,
                             distinct=distinct_values,
-                            timeout_s=statement_timeout_s,
+                            qf_timeout_s=statement_timeout_s,
                         )
 
                         tx.execute_write(

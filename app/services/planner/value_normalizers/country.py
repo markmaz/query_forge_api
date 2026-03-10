@@ -4,7 +4,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ def normalize_country_values(value_or_values: Any) -> List[str]:
     return out
 
 
-def resolve_country_from_db(sql: SQLExecutor, normalized_text: str) -> Optional[str]:
+def resolve_country_from_db(sql: ForgeQueryPort, normalized_text: str) -> Optional[str]:
     """
     Optional DB fallback to resolve country aliases/codes.
     If reference tables are unavailable, returns None.

@@ -6,7 +6,7 @@ import pyotp
 import pytest
 from werkzeug.security import generate_password_hash
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.auth.login_challenge_service import LoginChallengeService
 from app.services.auth.rate_limit_service import RateLimitService
 from app.services.auth.totp_service import TotpService
@@ -127,7 +127,7 @@ def test_rate_limit_enforce() -> None:
     svc = RateLimitService(redis_client=redis_fake)
     svc.enforce(scope="mfa:test", identifier="u1", max_attempts=2, window_s=60)
     svc.enforce(scope="mfa:test", identifier="u1", max_attempts=2, window_s=60)
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         svc.enforce(scope="mfa:test", identifier="u1", max_attempts=2, window_s=60)
     assert exc.value.status_code == 429
 

@@ -9,22 +9,23 @@ from typing import Any, List, Optional
 import pyarrow as pa
 import valkey
 from flask import request, send_file
-from flask_restx import Namespace, Resource
+from flask_restx import Namespace
+from app.routes.forge_resource import ForgeResource
 from openpyxl import Workbook
 
 from app.config import VALKEY_ADDRESS, VALKEY_PORT
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
-from app.routes._route_utils import get_workspace_id_from_header
+from app.exceptions.forge_error import ForgeError
+from app.routes.request_helpers import extract_workspace_id
 from app.services.domain_resolver import DomainResolver
 from app.services.exports.export_policy import (
-    EXCEL_MAX_ROWS,
-    build_export_policy,
-    get_cached_rowcount,
-    make_rowcount_signature,
-    set_cached_rowcount,
+    QF_EXCEL_MAX_ROWS,
+    build_qf_export_policy,
+    fetch_cached_rowcount,
+    qf_rowcount_signature,
+    store_cached_rowcount,
 )
-from app.services.no_code_query_service import NoCodeQueryService
+from app.services.query_forge_service import QueryForgeService
 from app.services.sql_guard_service import assert_no_disallowed_client_sql_fields, assert_read_only_sql_statement
 from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
 
@@ -34,11 +35,11 @@ _EXPORT_TOKEN_TTL_S = 300
 _valkey_client: Optional[valkey.StrictValkey] = None
 
 
-def _handle_service_error(e: ServiceError):
+def _abort_with_service_error(e: ForgeError):
     return {"error": str(e)}, getattr(e, "status_code", 400) or 400
 
 
-def _extract_total(count_rows: List[Any]) -> int:
+def _parse_count_result(count_rows: List[Any]) -> int:
     if not count_rows:
         return 0
     first = count_rows[0]
@@ -62,14 +63,14 @@ def _get_valkey_client() -> valkey.StrictValkey:
 
 def _set_export_job(payload: dict[str, Any]) -> str:
     token = uuid.uuid4().hex
-    key = f"export:excel:{token}"
+    key = f"qf:export:{token}"
     data = json.dumps(payload, default=str)
     _get_valkey_client().setex(key, _EXPORT_TOKEN_TTL_S, data)
     return token
 
 
 def _pop_export_job(token: str) -> Optional[dict[str, Any]]:
-    key = f"export:excel:{token}"
+    key = f"qf:export:{token}"
     client = _get_valkey_client()
     data = client.get(key)
     if not data:
@@ -100,58 +101,58 @@ def _table_to_excel_bytes(table: pa.Table) -> bytes:
 
 
 @exports_ns.route("/excel")
-class ExcelExport(Resource):
+class ExcelExport(ForgeResource):
     @token_required
     def post(self):
         try:
-            workspace_id = get_workspace_id_from_header()
+            workspace_id = extract_workspace_id()
             payload = request.get_json(silent=True) or {}
             if not isinstance(payload, dict):
-                raise ServiceError("Invalid JSON body", status_code=400)
+                raise ForgeError("Invalid JSON body", status_code=400)
 
             signature = (payload.get("signature") or "").strip() or None
-            total_rows = get_cached_rowcount(signature) if signature else None
+            total_rows = fetch_cached_rowcount(signature) if signature else None
 
             assert_no_disallowed_client_sql_fields(payload)
 
             sql_json = payload.get("sqlJson") or payload.get("sql_json")
             if sql_json is None:
-                raise ServiceError("sqlJson is required", status_code=400)
+                raise ForgeError("sqlJson is required", status_code=400)
             if not isinstance(sql_json, dict):
-                raise ServiceError("sqlJson must be an object", status_code=400)
+                raise ForgeError("sqlJson must be an object", status_code=400)
 
             ctx = WorkspaceContextBuilder().build(workspace_id)
             domain_resolver = DomainResolver(workspace_id=workspace_id)
-            svc = NoCodeQueryService(executor=ctx.sql_exec, domain_resolver=domain_resolver)
+            svc = QueryForgeService(executor=ctx.sql_exec, domain_resolver=domain_resolver)
             normalized = svc.normalize(sql_json)
             compiled = svc.compile(normalized, mode="export", limit=0, offset=0)
             sql = compiled.sql
             params = compiled.params or {}
-            count_sql = compiled.count_sql
+            qf_count_sql = compiled.qf_count_sql
 
             if not isinstance(sql, str):
-                raise ServiceError("sql must be a string", status_code=400)
+                raise ForgeError("sql must be a string", status_code=400)
             if params and not isinstance(params, dict):
-                raise ServiceError("Compiled params must be an object", status_code=500)
+                raise ForgeError("Compiled params must be an object", status_code=500)
 
             assert_read_only_sql_statement(sql, context="Compiled SQL statement")
-            if not count_sql:
-                count_sql = f"SELECT COUNT(*) AS total FROM (\n{sql}\n) q"
-            assert_read_only_sql_statement(str(count_sql), context="Compiled count SQL statement")
+            if not qf_count_sql:
+                qf_count_sql = f"SELECT COUNT(*) AS total FROM (\n{sql}\n) q"
+            assert_read_only_sql_statement(str(qf_count_sql), context="Compiled count SQL statement")
 
-            signature = signature or make_rowcount_signature(sql, params)
+            signature = signature or qf_rowcount_signature(sql, params)
 
             if total_rows is None:
-                count_resp = ctx.sql_exec.submit_statement(count_sql, parameters=params)
-                total_rows = _extract_total((count_resp or {}).get("rows") or [])
-                set_cached_rowcount(signature, total_rows)
+                count_resp = ctx.sql_exec.submit_statement(qf_count_sql, parameters=params)
+                total_rows = _parse_count_result((count_resp or {}).get("rows") or [])
+                store_cached_rowcount(signature, total_rows)
 
-            policy = build_export_policy(int(total_rows or 0))
+            policy = build_qf_export_policy(int(total_rows or 0))
             if not policy["excel"]["allowed"]:
                 return {
                     "error": "EXCEL_ROW_LIMIT",
                     "rowCount": int(total_rows or 0),
-                    "maxRows": EXCEL_MAX_ROWS,
+                    "maxRows": QF_EXCEL_MAX_ROWS,
                     "message": "Result set exceeds Excel row limit.",
                 }, 409
 
@@ -172,32 +173,32 @@ class ExcelExport(Resource):
                 "filename": filename,
             }, 200
 
-        except ServiceError as e:
-            return _handle_service_error(e)
+        except ForgeError as e:
+            return _abort_with_service_error(e)
         except Exception:
             logger.exception("Excel export failed")
             return {"error": "Excel export failed"}, 500
 
 
 @exports_ns.route("/excel/<string:token>")
-class ExcelDownload(Resource):
+class ExcelDownload(ForgeResource):
     @token_required
     def get(self, token: str):
         try:
-            workspace_id = get_workspace_id_from_header()
+            workspace_id = extract_workspace_id()
             payload = _pop_export_job(token)
             if not payload:
-                raise ServiceError("Export not found", status_code=404)
+                raise ForgeError("Export not found", status_code=404)
             if payload.get("workspace_id") != workspace_id:
-                raise ServiceError("Export not found", status_code=404)
+                raise ForgeError("Export not found", status_code=404)
 
             sql = payload.get("sql")
             params = payload.get("params") or {}
             filename = payload.get("filename") or "export.xlsx"
             if not isinstance(sql, str):
-                raise ServiceError("Export not available", status_code=404)
+                raise ForgeError("Export not available", status_code=404)
             if params and not isinstance(params, dict):
-                raise ServiceError("Export not available", status_code=404)
+                raise ForgeError("Export not available", status_code=404)
 
             assert_read_only_sql_statement(sql, context="Stored export SQL statement")
 
@@ -205,11 +206,11 @@ class ExcelDownload(Resource):
             data_resp = ctx.sql_exec.submit_statement(
                 sql,
                 parameters=params,
-                result_format="ARROW_STREAM",
+                qf_result_fmt="ARROW_STREAM",
             )
             table = data_resp.get("table")
             if not isinstance(table, pa.Table):
-                raise ServiceError("Failed to fetch export rows", status_code=500)
+                raise ForgeError("Failed to fetch export rows", status_code=500)
 
             xlsx_bytes = _table_to_excel_bytes(table)
             return send_file(
@@ -219,8 +220,8 @@ class ExcelDownload(Resource):
                 download_name=filename,
                 max_age=0,
             )
-        except ServiceError as e:
-            return _handle_service_error(e)
+        except ForgeError as e:
+            return _abort_with_service_error(e)
         except Exception:
             logger.exception("Excel download failed")
             return {"error": "Excel download failed"}, 500

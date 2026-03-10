@@ -1,9 +1,9 @@
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.domain_resolver import DomainPlan, DomainPlanJoin, DomainPlanTable
-from app.services.no_code_query_service import NoCodeQueryService
+from app.services.query_forge_service import QueryForgeService
 
 
 class FakeDomainResolver:
@@ -57,7 +57,7 @@ def test_compile_with_aliases_where_sorting():
         column_name_policy="DEDUP_PRIMARY_FIRST",
     )
 
-    svc = NoCodeQueryService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
+    svc = QueryForgeService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
 
     q = {
         "version": 1,
@@ -142,7 +142,7 @@ def test_exists_filters_secondary_table():
         column_name_policy="DEDUP_PRIMARY_FIRST",
     )
 
-    svc = NoCodeQueryService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
+    svc = QueryForgeService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
 
     q = {
         "version": 1,
@@ -233,7 +233,7 @@ def test_exists_filters_multiple_buckets():
         column_name_policy="DEDUP_PRIMARY_FIRST",
     )
 
-    svc = NoCodeQueryService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
+    svc = QueryForgeService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
 
     q = {
         "version": 1,
@@ -293,7 +293,7 @@ def test_compile_distinct_select():
         column_name_policy="DEDUP_PRIMARY_FIRST",
     )
 
-    svc = NoCodeQueryService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
+    svc = QueryForgeService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
     q = {
         "version": 1,
         "domainId": 99,
@@ -327,7 +327,7 @@ def test_compile_distinct_with_aggs_errors():
         column_name_policy="DEDUP_PRIMARY_FIRST",
     )
 
-    svc = NoCodeQueryService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
+    svc = QueryForgeService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
     q = {
         "version": 1,
         "domainId": 99,
@@ -338,7 +338,7 @@ def test_compile_distinct_with_aggs_errors():
         "distinct": True,
     }
 
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         svc.compile(svc.normalize(q), mode="preview")
 
 
@@ -361,7 +361,7 @@ def test_compile_aggs_group_by_and_metric():
         column_name_policy="DEDUP_PRIMARY_FIRST",
     )
 
-    svc = NoCodeQueryService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
+    svc = QueryForgeService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
     q = {
         "version": 1,
         "domainId": 99,
@@ -428,7 +428,7 @@ def test_compile_auto_alias_for_duplicates():
         column_name_policy="SHOW_ALL_QUALIFIED",
     )
 
-    svc = NoCodeQueryService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
+    svc = QueryForgeService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
     q = {
         "version": 1,
         "domainId": 99,
@@ -465,7 +465,7 @@ def test_compile_duplicate_output_names_error():
         column_name_policy="DEDUP_PRIMARY_FIRST",
     )
 
-    svc = NoCodeQueryService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
+    svc = QueryForgeService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
     q = {
         "version": 1,
         "domainId": 99,
@@ -481,7 +481,7 @@ def test_compile_duplicate_output_names_error():
     compiled = svc.compile(svc.normalize(q), mode="preview")
     assert "AS dup" in compiled.sql
     assert "AS dup_2" in compiled.sql
-    assert [c["key"] for c in compiled.output_columns] == ["dup", "dup_2"]
+    assert [c["key"] for c in compiled.qf_output_cols] == ["dup", "dup_2"]
 
 
 def test_compile_data_prep_fill_empty():
@@ -503,7 +503,7 @@ def test_compile_data_prep_fill_empty():
         column_name_policy="DEDUP_PRIMARY_FIRST",
     )
 
-    svc = NoCodeQueryService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
+    svc = QueryForgeService(executor=FakeExecutor(), domain_resolver=FakeDomainResolver(plan))
     q = {
         "version": 1,
         "domainId": 99,

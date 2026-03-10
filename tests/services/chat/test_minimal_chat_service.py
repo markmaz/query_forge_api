@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.chat.minimal_chat_service import ForgeInsightsChatService, MinimalChatService
 
 
@@ -56,8 +56,8 @@ class _MemoryStore:
     def get_messages(self, *, workspace_id: str, user_id: str, conversation_id: str):
         return self.rows.get((workspace_id, user_id, conversation_id))
 
-    def save_messages(self, *, workspace_id: str, user_id: str, conversation_id: str, messages, ttl_seconds: int):
-        del ttl_seconds
+    def save_messages(self, *, workspace_id: str, user_id: str, conversation_id: str, messages, qf_ttl_seconds: int):
+        del qf_ttl_seconds
         self.rows[(workspace_id, user_id, conversation_id)] = [dict(m) for m in messages]
 
 
@@ -78,9 +78,9 @@ class _ConversationStoreV2:
         user_id: str,
         conversation_id: str,
         conversation,
-        ttl_seconds: int,
+        qf_ttl_seconds: int,
     ):
-        del ttl_seconds
+        del qf_ttl_seconds
         self.rows[(workspace_id, user_id, conversation_id)] = dict(conversation)
 
     def list_conversations(self, *, workspace_id: str, user_id: str, limit: int):
@@ -165,7 +165,7 @@ def test_provider_error_maps_to_502(monkeypatch) -> None:
     )
     svc = MinimalChatService(base_url="http://localhost:8000", model="qwen", timeout_seconds=10, conversation_store=_MemoryStore())
 
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         svc.chat(_valid_body(), workspace_id="ws-1", user_id="user-1")
     assert exc.value.status_code == 502
 
@@ -192,7 +192,7 @@ def test_debug_true_includes_debug_payload(monkeypatch) -> None:
 
 def test_invalid_request_empty_messages_raises_400() -> None:
     svc = MinimalChatService(base_url="http://localhost:8000", model="qwen", timeout_seconds=10, conversation_store=_MemoryStore())
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         svc.chat({"messages": []}, workspace_id="ws-1", user_id="user-1")
     assert exc.value.status_code == 400
 
@@ -258,7 +258,7 @@ def test_unknown_conversation_id_returns_404(monkeypatch) -> None:
     )
     svc = MinimalChatService(base_url="http://localhost:8000", model="qwen", timeout_seconds=10, conversation_store=_MemoryStore())
 
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         svc.chat(
             {"conversation_id": "conv_missing", "messages": [{"role": "user", "content": "Hello"}]},
             workspace_id="ws-1",
@@ -331,7 +331,7 @@ def test_forge_insights_list_get_and_reset_conversation(monkeypatch) -> None:
     deleted = svc.reset_conversation(workspace_id="ws-1", user_id="u1", conversation_id=conv_id)
     assert deleted["deleted"] is True
 
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         svc.get_conversation(workspace_id="ws-1", user_id="u1", conversation_id=conv_id)
     assert exc.value.status_code == 404
 

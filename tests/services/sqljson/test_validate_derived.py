@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.domain_resolver import DomainPlan, DomainPlanTable
 from app.services.sqljson.validate_derived import validate_and_normalize_derived_sqljson
 
@@ -76,5 +76,5 @@ def test_validate_and_normalize_invalid_metric_type_raises_when_strict() -> None
             }
         ],
     }
-    with pytest.raises(ServiceError, match="derived_validation_failed: invalid_metric_type"):
+    with pytest.raises(ForgeError, match="derived_validation_failed: invalid_metric_type"):
         validate_and_normalize_derived_sqljson(q, plan=_plan(), strict=True)

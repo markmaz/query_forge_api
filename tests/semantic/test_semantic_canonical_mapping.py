@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from app.services.semantic.semantic_concept_matcher import SemanticConceptMatcher
 from app.services.semantic.semantic_suggestion_service import SemanticSuggestionService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 class _StubCardService:
@@ -183,7 +183,7 @@ def _run_row(status: str = "created") -> Dict[str, Any]:
 
 
 def test_llm_canonical_not_in_known_list_flips_to_fallback() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -224,7 +224,7 @@ def test_llm_canonical_not_in_known_list_flips_to_fallback() -> None:
 
 
 def test_alias_and_heuristic_mapping() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [],
         [
@@ -267,7 +267,7 @@ def test_alias_and_heuristic_mapping() -> None:
 
 
 def test_execute_run_stores_canonical_concept_fields() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [_run_row(status="created")],
         [{"id": 101}],
@@ -352,7 +352,7 @@ def test_execute_run_stores_canonical_concept_fields() -> None:
 
 
 def test_alias_override_k_school_to_school_id() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [_run_row(status="created")],
         [
@@ -431,7 +431,7 @@ def test_alias_override_k_school_to_school_id() -> None:
 
 
 def test_k_lea_to_lea_id_identifier_prepass() -> None:
-    matcher = SemanticConceptMatcher(sql=FakeSQLExecutor())
+    matcher = SemanticConceptMatcher(sql=FakeForgeQueryPort())
     proposal, _notes = matcher.resolve_pre_llm(
         card={"columnName": "k_lea", "description": "", "samples": []},
         vertical_norm="education",
@@ -445,7 +445,7 @@ def test_k_lea_to_lea_id_identifier_prepass() -> None:
 
 
 def test_k_school_to_school_id_identifier_prepass() -> None:
-    matcher = SemanticConceptMatcher(sql=FakeSQLExecutor())
+    matcher = SemanticConceptMatcher(sql=FakeForgeQueryPort())
     proposal, _notes = matcher.resolve_pre_llm(
         card={"columnName": "k_school", "description": "", "samples": []},
         vertical_norm="education",
@@ -459,7 +459,7 @@ def test_k_school_to_school_id_identifier_prepass() -> None:
 
 
 def test_student_id_to_student_id_identifier_prepass() -> None:
-    matcher = SemanticConceptMatcher(sql=FakeSQLExecutor())
+    matcher = SemanticConceptMatcher(sql=FakeForgeQueryPort())
     proposal, _notes = matcher.resolve_pre_llm(
         card={"columnName": "student_id", "description": "", "samples": []},
         vertical_norm="education",
@@ -473,7 +473,7 @@ def test_student_id_to_student_id_identifier_prepass() -> None:
 
 
 def test_tenant_code_to_tenant_code_identifier_prepass() -> None:
-    matcher = SemanticConceptMatcher(sql=FakeSQLExecutor())
+    matcher = SemanticConceptMatcher(sql=FakeForgeQueryPort())
     proposal, _notes = matcher.resolve_pre_llm(
         card={"columnName": "tenant_code", "description": "", "samples": []},
         vertical_norm="education",

@@ -1,57 +1,43 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 
 
 class WorkspaceUserReadService:
-    """
-    Lists users in a workspace using user_workspace_map + users.
-
-    users.status values:
-      - Invited
-      - Active
-      - Inactive
-
-    include_inactive=False => returns Invited + Active only
-    include_inactive=True  => returns all
-    """
-
     ACTIVE_STATUSES = ("Active", "Invited")
 
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: ForgeQueryPort | None = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def list_workspace_users(
         self,
         *,
         workspace_id: str,
-        q: Optional[str] = None,
+        q: str | None = None,
         limit: int = 5000,
         offset: int = 0,
         include_inactive: bool = True,
-    ) -> List[Dict[str, Any]]:
-        if not (workspace_id or "").strip():
-            raise ServiceError("workspace_id is required", status_code=400)
+    ) -> list[dict[str, Any]]:
+        workspace_id = (workspace_id or "").strip()
+        if not workspace_id:
+            raise ForgeError("workspace_id is required", status_code=400)
 
         try:
-            limit_i = int(limit)
-            offset_i = int(offset)
-        except Exception:
-            raise ServiceError("limit/offset must be integers", status_code=400)
+            limit_value = int(limit)
+            offset_value = int(offset)
+        except Exception as exc:
+            raise ForgeError("limit/offset must be integers", status_code=400) from exc
 
-        if limit_i <= 0 or limit_i > 20000:
-            raise ServiceError("limit must be between 1 and 20000", status_code=400)
-        if offset_i < 0:
-            raise ServiceError("offset must be >= 0", status_code=400)
+        if limit_value <= 0 or limit_value > 20000:
+            raise ForgeError("limit must be between 1 and 20000", status_code=400)
+        if offset_value < 0:
+            raise ForgeError("offset must be >= 0", status_code=400)
 
-        q_norm = (q or "").strip()
-        q_like = f"%{q_norm.lower()}%" if q_norm else None
-
-        sql = """
+        query = """
 SELECT
   u.user_id                                           AS user_id,
   u.username                                          AS username,
@@ -80,31 +66,29 @@ ORDER BY
   u.username ASC, u.email ASC
 LIMIT :limit OFFSET :offset
 """
+        term = (q or "").strip().lower()
+        rows = self._sql.execute_query_mappings(
+            query,
+            {
+                "ws": workspace_id,
+                "include_inactive": 1 if include_inactive else 0,
+                "q_is_null": 0 if term else 1,
+                "q_like": f"%{term}%" if term else "%",
+                "limit": limit_value,
+                "offset": offset_value,
+            },
+        )
+        return [self._serialize_row(row) for row in rows]
 
-        params: Dict[str, Any] = {
-            "ws": workspace_id,
-            "include_inactive": 1 if include_inactive else 0,
-            "q_is_null": 1 if not q_norm else 0,
-            "q_like": q_like if q_like else "%",  # harmless fallback
-            "limit": limit_i,
-            "offset": offset_i,
+    def _serialize_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        full_name = (row.get("display_name") or "").strip()
+        return {
+            "user_id": row.get("user_id"),
+            "username": row.get("username"),
+            "email": row.get("email"),
+            "first_name": row.get("first_name"),
+            "last_name": row.get("last_name"),
+            "status": row.get("status"),
+            "is_default": bool(row.get("is_default")) if row.get("is_default") is not None else False,
+            "display_name": full_name or None,
         }
-
-        rows = self._sql.execute_query_mappings(sql, params)
-
-        out: List[Dict[str, Any]] = []
-        for r in rows:
-            out.append(
-                {
-                    "user_id": r["user_id"],
-                    "username": r["username"],
-                    "email": r["email"],
-                    "first_name": r["first_name"],
-                    "last_name": r["last_name"],
-                    "status": r["status"],
-                    "is_default": bool(r["is_default"]) if r["is_default"] is not None else False,
-                    "display_name": (r["display_name"] or "").strip() or None,
-                }
-            )
-
-        return out

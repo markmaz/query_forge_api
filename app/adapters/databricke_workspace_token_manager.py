@@ -4,13 +4,13 @@ import os
 
 from dotenv import load_dotenv
 
-from app.adapters.base_token_manager import BaseTokenManager
+from app.adapters.base_token_manager import BaseForgeTokenManager
 from app.services.base_service import build_url
 
 logger = logging.getLogger(__name__)
 
 
-class DatabricksWorkspaceTokenManager(BaseTokenManager):
+class DatabricksWorkspaceForgeTokenPort(BaseForgeTokenManager):
     def __init__(self, workspace_host: str, workspace_id: str):
         load_dotenv()
 

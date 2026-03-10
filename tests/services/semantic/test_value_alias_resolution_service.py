@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from app.services.semantic.value_alias_resolution_service import ValueAliasResolutionService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_value_alias_resolution_maps_metro_schools_to_district_name() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {

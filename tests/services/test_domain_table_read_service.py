@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-import pytest
+from unittest.mock import MagicMock
 
-from app.exceptions.service_error import ServiceError
+import pytest
+from flask import Flask
+
+from app.exceptions.forge_error import ForgeError
 from app.services.domain.domain_table_read_service import DomainTableReadService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_list_domain_tables() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -26,10 +29,10 @@ def test_list_domain_tables() -> None:
                 "schema_name": "asset",
                 "table_name": "tbl",
                 "full_name": "main.asset.tbl",
-                "variant_code": None,
+                "qf_variant_code": None,
                 "is_qe": 0,
-                "exists_in_dbx": 1,
-                "last_seen_at": None,
+                "qf_exists_in_dbx": 1,
+                "qf_last_seen_at": None,
             }
         ]
     ]
@@ -39,23 +42,97 @@ def test_list_domain_tables() -> None:
 
 
 def test_get_domain_validation() -> None:
-    service = DomainTableReadService(sql=FakeSQLExecutor())
-    with pytest.raises(ServiceError):
+    service = DomainTableReadService(sql=FakeForgeQueryPort())
+    with pytest.raises(ForgeError):
         service.get_domain(workspace_id="", domain_name="Name")
 
 
-def test_list_workspace_tables_calls_snapshot(monkeypatch) -> None:
-    sql = FakeSQLExecutor()
+def test_list_workspace_tables_calls_registry_sync_when_schema_present(monkeypatch) -> None:
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [[]]
     service = DomainTableReadService(sql=sql)
     called = {}
 
-    def fake_ensure(*_args, **_kwargs):
+    def fake_sync(*_args, **_kwargs):
         called["ok"] = True
 
     monkeypatch.setattr(
-        "app.services.domain.domain_table_read_service.WorkspaceSnapshotEnsureService.ensure",
-        fake_ensure,
+        service,
+        "_sync_workspace_inventory_from_registry",
+        fake_sync,
+    )
+    service.list_workspace_tables(workspace_id="ws1", schema_name="asset", ensure_snapshot=True)
+    assert called["ok"] is True
+
+
+def test_list_workspace_tables_skips_registry_sync_when_schema_missing(monkeypatch) -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[]]
+    service = DomainTableReadService(sql=sql)
+    called = {"count": 0}
+
+    def fake_sync(*_args, **_kwargs):
+        called["count"] += 1
+
+    monkeypatch.setattr(
+        service,
+        "_sync_workspace_inventory_from_registry",
+        fake_sync,
     )
     service.list_workspace_tables(workspace_id="ws1", ensure_snapshot=True)
-    assert called["ok"] is True
+    assert called["count"] == 0
+
+
+def test_sync_workspace_inventory_uses_factory_registry(monkeypatch) -> None:
+    app = Flask(__name__)
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [],
+        [{"id": 11, "table_name": "orders"}],
+    ]
+    service = DomainTableReadService(sql=sql)
+
+    executor = MagicMock()
+    executor.get_dialect.return_value = "snowflake"
+    registry = MagicMock()
+    registry.get.return_value = executor
+
+    provider = MagicMock()
+    provider.list_tables.return_value = [{"table_name": "orders"}]
+    provider.list_columns.return_value = [
+        {
+            "table_name": "orders",
+            "column_name": "id",
+            "data_type": "NUMBER",
+            "is_nullable": False,
+            "ordinal_position": 1,
+        }
+    ]
+
+    captured = {}
+
+    def fake_create(dialect, exec_obj):
+        captured["dialect"] = dialect
+        captured["executor"] = exec_obj
+        return provider
+
+    monkeypatch.setattr(
+        "app.services.domain.domain_table_read_service.MetadataProviderFactory.create",
+        fake_create,
+    )
+
+    with app.app_context():
+        app.extensions["analytics_registry"] = registry
+        service._sync_workspace_inventory_from_registry(
+            workspace_id="ws1",
+            schema_name="MEDICAL_SALES",
+            catalog_name="QUERYFORGE_DEMO",
+        )
+
+    registry.get.assert_called_once_with("primary")
+    assert captured["dialect"] == "snowflake"
+    assert captured["executor"] is executor
+    provider.list_tables.assert_called_once_with("QUERYFORGE_DEMO", "MEDICAL_SALES")
+    provider.list_columns.assert_called_once_with("QUERYFORGE_DEMO", "MEDICAL_SALES", ["orders"])
+    assert any("INSERT INTO workspace_table" in call.query for call in sql.write_calls)
+    assert any("INSERT INTO workspace_column" in call.query for call in sql.write_calls)

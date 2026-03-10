@@ -4,11 +4,12 @@ import logging
 from typing import Any, Dict
 
 from flask import request
-from flask_restx import Resource, fields
+from flask_restx import fields
+from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
-from app.routes._route_utils import get_user_id, get_workspace_id_from_header
+from app.exceptions.forge_error import ForgeError
+from app.routes.request_helpers import require_user_id, extract_workspace_id
 from app.routes.planner_extract import planner_ns
 from app.services.planner_domain import PlannerDomainService
 
@@ -46,22 +47,22 @@ next_actions_request_model = planner_ns.model(
 
 
 @planner_ns.route("/plan_domain")
-class PlannerPlanDomain(Resource):
+class PlannerPlanDomain(ForgeResource):
     @token_required
     @planner_ns.expect(plan_domain_request_model, validate=False)
     def post(self):
         try:
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            header_workspace_id = get_workspace_id_from_header()
+            header_workspace_id = extract_workspace_id()
             payload_workspace_id = str(body.get("workspace_id") or "").strip()
             if payload_workspace_id and payload_workspace_id != header_workspace_id:
-                raise ServiceError("workspace_id must match X-Workspace-Id header", status_code=400)
+                raise ForgeError("workspace_id must match X-Workspace-Id header", status_code=400)
 
             body["workspace_id"] = header_workspace_id
-            user_id = get_user_id()
+            user_id = require_user_id()
             result = PlannerDomainService().plan(body, user_id=user_id)
             return result, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("planner domain failed")
@@ -69,19 +70,19 @@ class PlannerPlanDomain(Resource):
 
 
 @planner_ns.route("/plan_domain/profile/<string:trace_id>")
-class PlannerPlanDomainProfile(Resource):
+class PlannerPlanDomainProfile(ForgeResource):
     @token_required
     def get(self, trace_id: str):
         try:
-            workspace_id = get_workspace_id_from_header()
-            user_id = get_user_id()
+            workspace_id = extract_workspace_id()
+            user_id = require_user_id()
             result = PlannerDomainService().get_pipeline_profile(
                 trace_id=trace_id,
                 workspace_id=workspace_id,
                 user_id=user_id,
             )
             return result, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("planner domain profile lookup failed")
@@ -89,22 +90,22 @@ class PlannerPlanDomainProfile(Resource):
 
 
 @planner_ns.route("/plan_domain/next_actions")
-class PlannerPlanDomainNextActions(Resource):
+class PlannerPlanDomainNextActions(ForgeResource):
     @token_required
     @planner_ns.expect(next_actions_request_model, validate=False)
     def post(self):
         try:
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            header_workspace_id = get_workspace_id_from_header()
+            header_workspace_id = extract_workspace_id()
             payload_workspace_id = str(body.get("workspace_id") or "").strip()
             if payload_workspace_id and payload_workspace_id != header_workspace_id:
-                raise ServiceError("workspace_id must match X-Workspace-Id header", status_code=400)
+                raise ForgeError("workspace_id must match X-Workspace-Id header", status_code=400)
 
             body["workspace_id"] = header_workspace_id
-            user_id = get_user_id()
+            user_id = require_user_id()
             result = PlannerDomainService().generate_next_actions(body, user_id=user_id)
             return result, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("planner domain next actions failed")

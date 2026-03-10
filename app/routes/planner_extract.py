@@ -4,10 +4,11 @@ import logging
 from typing import Any, Dict
 
 from flask import request
-from flask_restx import Namespace, Resource, fields
+from flask_restx import Namespace, fields
+from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.planner.semantic_extract_service import SemanticExtractService
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ extract_model = planner_ns.model(
 
 
 @planner_ns.route("/extract")
-class PlannerExtract(Resource):
+class PlannerExtract(ForgeResource):
     @token_required
     @planner_ns.expect(extract_model, validate=False)
     def post(self):
@@ -31,7 +32,7 @@ class PlannerExtract(Resource):
             body: Dict[str, Any] = request.get_json(silent=True) or {}
             prompt = str(body.get("prompt") or "").strip()
             if prompt == "":
-                raise ServiceError("prompt is required", status_code=400)
+                raise ForgeError("prompt is required", status_code=400)
 
             payload = SemanticExtractService().extract(prompt)
             return {
@@ -42,7 +43,7 @@ class PlannerExtract(Resource):
                 "model": payload.get("model") or {},
                 "warnings": payload.get("warnings") or [],
             }, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("planner extract failed")

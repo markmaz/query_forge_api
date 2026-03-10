@@ -8,7 +8,7 @@ import pyotp
 import redis
 
 from app.config import OTP_VALID_WINDOW, VALKEY_ADDRESS, VALKEY_PORT
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.user_service import UserService
 
 OTP_CHALLENGE_TTL_S = int(os.getenv("OTP_CHALLENGE_TTL_SECONDS", "300"))
@@ -38,20 +38,20 @@ def _incr_with_ttl(key: str, ttl_s: int) -> int:
 def _enforce_issue_rate_limit(*, user_id: str, ip_address: Optional[str]) -> None:
     user_count = _incr_with_ttl(f"{_RATE_USER_PREFIX}{user_id}", OTP_ISSUE_RATE_WINDOW_S)
     if user_count > OTP_ISSUE_MAX_PER_USER:
-        raise ServiceError("Too many OTP requests", status_code=429)
+        raise ForgeError("Too many OTP requests", status_code=429)
 
     ip = (ip_address or "").strip()
     if ip:
         ip_count = _incr_with_ttl(f"{_RATE_IP_PREFIX}{ip}", OTP_ISSUE_RATE_WINDOW_S)
         if ip_count > OTP_ISSUE_MAX_PER_IP:
-            raise ServiceError("Too many OTP requests", status_code=429)
+            raise ForgeError("Too many OTP requests", status_code=429)
 
 
 def issue_otp_challenge(*, user_id: str, ip_address: Optional[str] = None, user_agent: Optional[str] = None) -> str:
     user_service = UserService()
     user = user_service.get_user(user_id)
     if not user or not user.otp_secret or not user.email:
-        raise ServiceError("Unable to start OTP challenge", status_code=400)
+        raise ForgeError("Unable to start OTP challenge", status_code=400)
 
     _enforce_issue_rate_limit(user_id=user_id, ip_address=ip_address)
 

@@ -5,15 +5,15 @@ import logging
 from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import (
     SEMANTIC_AUTO_APPROVE_MAX_ERRORS,
     SEMANTIC_AUTO_APPROVE_THRESHOLD,
     SEMANTIC_LLM_BATCH_SIZE,
     SEMANTIC_VERTICAL_DEFAULT,
 )
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 from app.services.semantic.semantic_card_service import SemanticCardService
 from app.services.semantic.semantic_assignment_service import SemanticAssignmentService
 from app.services.semantic.semantic_concept_matcher import SemanticConceptMatcher
@@ -30,7 +30,7 @@ class SemanticSuggestionService:
     def __init__(
         self,
         *,
-        sql: Optional[SQLExecutor] = None,
+        sql: Optional[ForgeQueryPort] = None,
         card_service: Optional[SemanticCardService] = None,
         labeler: Optional[SemanticLLMLabeler] = None,
         matcher: Optional[SemanticConceptMatcher] = None,
@@ -39,7 +39,7 @@ class SemanticSuggestionService:
         auto_approve_threshold: Optional[float] = None,
         auto_approve_max_errors: Optional[int] = None,
     ) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+        self._sql = sql or ForgeMetaSQL()
         self._cards = card_service or SemanticCardService(sql=self._sql)
         self._labeler = labeler or SemanticLLMLabeler()
         self._matcher = matcher or SemanticConceptMatcher(sql=self._sql)
@@ -54,7 +54,7 @@ class SemanticSuggestionService:
 
     def create_run(self, payload: Dict[str, Any], *, created_by: Optional[str] = None) -> Dict[str, Any]:
         if not isinstance(payload, dict):
-            raise ServiceError("Invalid JSON body", status_code=400)
+            raise ForgeError("Invalid JSON body", status_code=400)
 
         vertical = _normalize_optional_text(payload.get("vertical"), max_len=50) or SEMANTIC_VERTICAL_DEFAULT
         workspace_id = _normalize_optional_text(payload.get("workspace_id"), max_len=100)
@@ -90,15 +90,15 @@ class SemanticSuggestionService:
             },
         )
         if not result.lastrowid:
-            raise ServiceError("Failed to create suggestion run", status_code=500)
+            raise ForgeError("Failed to create suggestion run", status_code=500)
         return self.get_run(int(result.lastrowid))
 
     def execute_run(self, run_id: int) -> Dict[str, Any]:
         run = self.get_run(run_id)
         if run["status"] == "running":
-            raise ServiceError("Run is already in progress", status_code=409)
+            raise ForgeError("Run is already in progress", status_code=409)
         if run["status"] == "applied":
-            raise ServiceError("Run already applied", status_code=409)
+            raise ForgeError("Run already applied", status_code=409)
 
         params = _parse_json_obj(run.get("params_json")) or {}
         model_table_id = _normalize_optional_int(params.get("model_table_id"), field="model_table_id")
@@ -225,9 +225,9 @@ class SemanticSuggestionService:
                 current_card=None,
             )
             self._set_run_status(run_id, status="failed", error_message=_format_exception_for_run(exc))
-            if isinstance(exc, ServiceError):
+            if isinstance(exc, ForgeError):
                 raise
-            raise ServiceError("Suggestion run execution failed", status_code=500, details={"message": str(exc)}) from exc
+            raise ForgeError("Suggestion run execution failed", status_code=500, details={"message": str(exc)}) from exc
 
         return self.get_run(run_id)
 
@@ -264,7 +264,7 @@ class SemanticSuggestionService:
             {"id": run_id},
         )
         if not rows:
-            raise ServiceError("suggestion run not found", status_code=404)
+            raise ForgeError("suggestion run not found", status_code=404)
 
         row = dict(rows[0])
         row["id"] = int(row["id"])
@@ -307,7 +307,7 @@ class SemanticSuggestionService:
         if decision_status is not None and str(decision_status).strip() != "":
             ds = str(decision_status).strip().lower()
             if ds not in ITEM_DECISIONS:
-                raise ServiceError("invalid decision_status", status_code=400)
+                raise ForgeError("invalid decision_status", status_code=400)
             where.append("ssi.decision_status = :decision_status")
             params["decision_status"] = ds
 
@@ -388,7 +388,7 @@ class SemanticSuggestionService:
     def update_item(self, item_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
         item_id = _require_positive_int(item_id, field="item_id")
         if not isinstance(payload, dict):
-            raise ServiceError("Invalid JSON body", status_code=400)
+            raise ForgeError("Invalid JSON body", status_code=400)
 
         item = self._get_item(item_id)
         decision_status = payload.get("decision_status")
@@ -402,9 +402,9 @@ class SemanticSuggestionService:
             elif ds in {"reject", "rejected"}:
                 ds = "rejected"
             if ds not in {"approved", "rejected", "pending"}:
-                raise ServiceError("decision_status must be approved, rejected, or pending", status_code=400)
+                raise ForgeError("decision_status must be approved, rejected, or pending", status_code=400)
             if ds == "approved" and not bool(item.get("is_valid")):
-                raise ServiceError("Cannot approve invalid item", status_code=400)
+                raise ForgeError("Cannot approve invalid item", status_code=400)
             updates["decision_status"] = ds
 
         if "decision_reason" in payload:
@@ -714,7 +714,7 @@ class SemanticSuggestionService:
     def _upsert_registry(self, *, run: Dict[str, Any], item: Dict[str, Any]) -> int:
         concept_key = str(item.get("proposed_concept_key") or "").strip()
         if not concept_key:
-            raise ServiceError("Missing proposed_concept_key", status_code=400)
+            raise ForgeError("Missing proposed_concept_key", status_code=400)
 
         vertical_norm = _normalize_vertical_norm(run.get("vertical"))
         registry_source = self._resolve_registry_source(item=item, vertical_norm=vertical_norm)
@@ -802,7 +802,7 @@ class SemanticSuggestionService:
             },
         )
         if not rows:
-            raise ServiceError("Failed to resolve semantic_registry id", status_code=500)
+            raise ForgeError("Failed to resolve semantic_registry id", status_code=500)
         return int(rows[0]["id"])
 
     def _upsert_mapping(self, *, run: Dict[str, Any], item: Dict[str, Any], semantic_registry_id: int) -> None:
@@ -987,7 +987,7 @@ class SemanticSuggestionService:
 
     def _set_run_status(self, run_id: int, *, status: str, error_message: Optional[str] = None) -> None:
         if status not in RUN_STATUSES:
-            raise ServiceError("invalid run status", status_code=400)
+            raise ForgeError("invalid run status", status_code=400)
 
         set_parts = ["status = :status"]
         params: Dict[str, Any] = {"id": int(run_id), "status": status}
@@ -1055,7 +1055,7 @@ class SemanticSuggestionService:
             {"id": int(item_id)},
         )
         if not rows:
-            raise ServiceError("suggestion item not found", status_code=404)
+            raise ForgeError("suggestion item not found", status_code=404)
         return self._normalize_item_row(rows[0])
 
     @staticmethod
@@ -1108,7 +1108,7 @@ def _normalize_optional_text(value: Any, *, max_len: int) -> Optional[str]:
     if text == "":
         return None
     if len(text) > max_len:
-        raise ServiceError(f"value exceeds {max_len} characters", status_code=400)
+        raise ForgeError(f"value exceeds {max_len} characters", status_code=400)
     return text
 
 
@@ -1125,16 +1125,16 @@ def _normalize_optional_int(value: Any, *, field: str) -> Optional[int]:
     try:
         return int(value)
     except Exception as exc:
-        raise ServiceError(f"{field} must be an integer", status_code=400) from exc
+        raise ForgeError(f"{field} must be an integer", status_code=400) from exc
 
 
 def _require_positive_int(value: Any, *, field: str) -> int:
     try:
         out = int(value)
     except Exception as exc:
-        raise ServiceError(f"{field} must be a positive integer", status_code=400) from exc
+        raise ForgeError(f"{field} must be a positive integer", status_code=400) from exc
     if out <= 0:
-        raise ServiceError(f"{field} must be a positive integer", status_code=400)
+        raise ForgeError(f"{field} must be a positive integer", status_code=400)
     return out
 
 
@@ -1184,8 +1184,8 @@ def _to_llm_card(card: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _format_exception_for_run(exc: Exception) -> str:
-    if isinstance(exc, ServiceError):
-        message = str(exc.message or "ServiceError")
+    if isinstance(exc, ForgeError):
+        message = str(exc.message or "ForgeError")
         details = exc.details or {}
         if details:
             try:

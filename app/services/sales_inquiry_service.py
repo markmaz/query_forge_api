@@ -5,17 +5,17 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy import exc
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import SALES_INQUIRY_EMAIL
 from app.email.mailer import get_logo, send_email
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
 
 
 class SalesInquiryService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def _send_notification(self, inquiry_id: uuid.UUID, payload: Dict[str, Any]) -> None:
         if not SALES_INQUIRY_EMAIL:

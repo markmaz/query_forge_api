@@ -1,4 +1,5 @@
-# utils/hibp.py
+from __future__ import annotations
+
 import hashlib
 import re
 
@@ -6,41 +7,38 @@ import requests
 
 from app.config import MIN_PASSWORD_LENGTH, PASSWORD_CHECK_URL
 
-pattern = re.compile(
-    r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$'
-)
+_PASSWORD_PATTERN = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$")
 
-def is_strong_password(password):
-    return bool(pattern.match(password))
 
-def is_proper_length(password) -> bool:
-    return len(password) >= int(MIN_PASSWORD_LENGTH)
+def is_strong_password(password: str) -> bool:
+    return bool(_PASSWORD_PATTERN.match(password or ""))
+
+
+def is_proper_length(password: str) -> bool:
+    return len(password or "") >= int(MIN_PASSWORD_LENGTH)
+
 
 def is_good_password(password: str) -> bool:
     if not is_proper_length(password):
         return False
-    
     if not is_strong_password(password):
         return False
-    
-    if check_password_pwned(password) > 0:
-        return False
-    
-    return True
+    return pwned_count(password) <= 0
 
-def check_password_pwned(password: str) -> int:
-    sha1 = hashlib.sha1(password.encode('utf-8')).hexdigest().upper()
-    prefix, suffix = sha1[:5], sha1[5:]
 
-    url = f"{PASSWORD_CHECK_URL}{prefix}"
-    response = requests.get(url)
+def pwned_count(password: str) -> int:
+    digest = hashlib.sha1((password or "").encode("utf-8")).hexdigest().upper()
+    prefix, suffix = digest[:5], digest[5:]
 
-    if response.status_code != 200:
+    response = requests.get(f"{PASSWORD_CHECK_URL}{prefix}")
+    if int(response.status_code) != 200:
         raise Exception("Error querying HIBP")
 
-    hashes = (line.split(":") for line in response.text.splitlines())
-    for hash_suffix, count in hashes:
-        if hash_suffix == suffix:
+    for line in (response.text or "").splitlines():
+        parts = line.split(":", 1)
+        if len(parts) != 2:
+            continue
+        candidate_suffix, count = parts
+        if candidate_suffix == suffix:
             return int(count)
-
     return 0

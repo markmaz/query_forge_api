@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 
 ALLOWED_SEMANTIC_TYPES = {
     "entity",
@@ -46,8 +46,8 @@ PATCHABLE_FIELDS = {
 
 
 class SemanticRegistryService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def list_entries(
         self,
@@ -122,7 +122,7 @@ class SemanticRegistryService:
             {"id": self._validate_uuid(entry_id)},
         )
         if not rows:
-            raise ServiceError("semantic_registry entry not found", status_code=404)
+            raise ForgeError("semantic_registry entry not found", status_code=404)
         return self._normalize_row(rows[0])
 
     def create_entry(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -151,7 +151,7 @@ class SemanticRegistryService:
             {"concept_key": clean["concept_key"]},
         )
         if not rows:
-            raise ServiceError("Failed to create semantic_registry entry", status_code=500)
+            raise ForgeError("Failed to create semantic_registry entry", status_code=500)
         return self.get_entry(str(rows[0]["id"]))
 
     def update_entry(self, entry_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -173,7 +173,7 @@ class SemanticRegistryService:
             clean,
         )
         if affected <= 0:
-            raise ServiceError("semantic_registry entry not found", status_code=404)
+            raise ForgeError("semantic_registry entry not found", status_code=404)
         return self.get_entry(entry_uuid)
 
     def delete_entry(self, entry_id: str) -> None:
@@ -185,11 +185,11 @@ class SemanticRegistryService:
             {"id": self._validate_uuid(entry_id)},
         )
         if affected <= 0:
-            raise ServiceError("semantic_registry entry not found", status_code=404)
+            raise ForgeError("semantic_registry entry not found", status_code=404)
 
     def _normalize_payload(self, payload: Dict[str, Any], *, partial: bool) -> Dict[str, Any]:
         if not isinstance(payload, dict):
-            raise ServiceError("Invalid JSON body", status_code=400)
+            raise ForgeError("Invalid JSON body", status_code=400)
 
         data: Dict[str, Any] = {}
         for key, value in payload.items():
@@ -199,16 +199,16 @@ class SemanticRegistryService:
 
         if not partial:
             if "concept_key" not in data or not str(data["concept_key"] or "").strip():
-                raise ServiceError("concept_key is required", status_code=400)
+                raise ForgeError("concept_key is required", status_code=400)
             if "semantic_type" not in data or not str(data["semantic_type"] or "").strip():
-                raise ServiceError("semantic_type is required", status_code=400)
+                raise ForgeError("semantic_type is required", status_code=400)
 
         if "concept_key" in data:
             data["concept_key"] = str(data["concept_key"] or "").strip()
             if not data["concept_key"]:
-                raise ServiceError("concept_key is required", status_code=400)
+                raise ForgeError("concept_key is required", status_code=400)
             if len(data["concept_key"]) > 150:
-                raise ServiceError("concept_key exceeds 150 characters", status_code=400)
+                raise ForgeError("concept_key exceeds 150 characters", status_code=400)
 
         if "semantic_type" in data:
             st = str(data["semantic_type"] or "").strip().lower()
@@ -222,11 +222,11 @@ class SemanticRegistryService:
                     data[key] = None
 
         if "vertical" in data and data["vertical"] is not None and len(data["vertical"]) > 50:
-            raise ServiceError("vertical exceeds 50 characters", status_code=400)
+            raise ForgeError("vertical exceeds 50 characters", status_code=400)
         if "sub_type" in data and data["sub_type"] is not None and len(data["sub_type"]) > 200:
-            raise ServiceError("sub_type exceeds 200 characters", status_code=400)
+            raise ForgeError("sub_type exceeds 200 characters", status_code=400)
         if "entity" in data and data["entity"] is not None and len(data["entity"]) > 100:
-            raise ServiceError("entity exceeds 100 characters", status_code=400)
+            raise ForgeError("entity exceeds 100 characters", status_code=400)
 
         if "description" in data and data["description"] is not None:
             data["description"] = str(data["description"])
@@ -278,13 +278,13 @@ class SemanticRegistryService:
     def _validate_uuid(value: str) -> str:
         text = str(value or "").strip()
         if not text or len(text) > 36:
-            raise ServiceError("Invalid semantic_registry id", status_code=400)
+            raise ForgeError("Invalid semantic_registry id", status_code=400)
         return text
 
     @staticmethod
     def _validate_semantic_type(value: str) -> None:
         if value not in ALLOWED_SEMANTIC_TYPES:
-            raise ServiceError(
+            raise ForgeError(
                 f"Invalid semantic_type '{value}'. Allowed: {', '.join(sorted(ALLOWED_SEMANTIC_TYPES))}",
                 status_code=400,
             )

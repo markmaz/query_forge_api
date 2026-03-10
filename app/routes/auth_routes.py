@@ -3,11 +3,12 @@ import os
 from typing import Any, Dict
 
 from flask import g, jsonify, make_response, request
-from flask_restx import Namespace, Resource, fields
+from flask_restx import Namespace, fields
+from app.routes.forge_resource import ForgeResource
 
 from app.config import COOKIE_SAMESITE, COOKIE_SECURE, REFRESH_COOKIE_PATH
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.models.status_enum import UserStatus
 from app.models.user import User
 from app.services.auth import (
@@ -21,7 +22,7 @@ from app.services.otp_service import OTP_CHALLENGE_TTL_S, issue_otp_challenge
 from app.services.user_service import UserService
 from app.utils.token_utils import validate_token
 
-auth_ns = Namespace('auth', description='Authentication operations')
+qf_auth_ns = Namespace('auth', description='Authentication operations')
 logger = logging.getLogger(__name__)
 
 MFA_VERIFY_MAX_ATTEMPTS = int(os.getenv("MFA_VERIFY_MAX_ATTEMPTS", "8"))
@@ -31,12 +32,12 @@ MFA_CONFIRM_WINDOW_SECONDS = int(os.getenv("MFA_CONFIRM_WINDOW_SECONDS", "600"))
 MFA_DISABLE_MAX_ATTEMPTS = int(os.getenv("MFA_DISABLE_MAX_ATTEMPTS", "6"))
 MFA_DISABLE_WINDOW_SECONDS = int(os.getenv("MFA_DISABLE_WINDOW_SECONDS", "600"))
 
-login_model = auth_ns.model('Login', {
+login_model = qf_auth_ns.model('Login', {
     'username': fields.String(required=True, description="Username"),
     'password': fields.String(required=True, description="Password")
 })
 
-invite_accept_model = auth_ns.model(
+invite_accept_model = qf_auth_ns.model(
     "InviteAcceptRequest",
     {
         "token": fields.String(required=False, description="Invite token (or use ?token=...)"),
@@ -50,14 +51,14 @@ invite_accept_model = auth_ns.model(
     },
 )
 
-totp_confirm_model = auth_ns.model(
+totp_confirm_model = qf_auth_ns.model(
     "TotpConfirmRequest",
     {
         "code": fields.String(required=True, description="6-digit authenticator code"),
     },
 )
 
-totp_verify_model = auth_ns.model(
+totp_verify_model = qf_auth_ns.model(
     "TotpVerifyRequest",
     {
         "challenge_id": fields.String(required=True, description="MFA login challenge id"),
@@ -65,7 +66,7 @@ totp_verify_model = auth_ns.model(
     },
 )
 
-totp_disable_model = auth_ns.model(
+totp_disable_model = qf_auth_ns.model(
     "TotpDisableRequest",
     {
         "password": fields.String(required=True, description="Current account password"),
@@ -74,15 +75,24 @@ totp_disable_model = auth_ns.model(
 )
 
 
+def _extract_default_workspace_id(user: Any) -> str | None:
+    workspaces = getattr(user, "workspaces", None) or []
+    default_ws = next((w for w in workspaces if getattr(w, "is_default", False)), None)
+    workspace_id = getattr(default_ws, "workspace_id", None)
+    if workspace_id is None:
+        return None
+    return str(workspace_id)
+
+
 def _extract_invite_token(body: Dict[str, Any]) -> str:
     body_token = str((body or {}).get("token") or "").strip()
     if body_token:
         return body_token
     return str(request.args.get("token") or "").strip()
 
-@auth_ns.route('/auth')
-@auth_ns.expect(login_model)
-class Authenticate(Resource):
+@qf_auth_ns.route('/auth')
+@qf_auth_ns.expect(login_model)
+class Authenticate(ForgeResource):
     def post(self):
         data = request.json
         username = data.get("username")
@@ -95,6 +105,7 @@ class Authenticate(Resource):
             return {"message": "Invalid username or password"}, 401
 
         tokens = auth.issue_tokens(user)
+        workspace_id = _extract_default_workspace_id(user)
         response = make_response(
             jsonify(
                 {
@@ -102,6 +113,8 @@ class Authenticate(Resource):
                     "token_type": "Bearer",
                     "expires_in": tokens["expires_in"],
                     "token": tokens["access_token"],
+                    "workspace_id": workspace_id,
+                    "workspaceId": workspace_id,
                 }
             )
         )
@@ -111,18 +124,18 @@ class Authenticate(Resource):
             httponly=True,
             secure=bool(COOKIE_SECURE),
             samesite=COOKIE_SAMESITE,
-            max_age=auth.refresh_ttl_seconds,
+            max_age=auth.qf_refresh_ttl,
             path=REFRESH_COOKIE_PATH,
         )
         return response
 
-@auth_ns.route('/login')
-@auth_ns.expect(login_model)
-class Login(Resource):
-    @auth_ns.expect(login_model)
-    @auth_ns.response(code=200, description="Credentials accepted and OTP challenge issued")
-    @auth_ns.doc(security=[])
-    @auth_ns.doc(
+@qf_auth_ns.route('/login')
+@qf_auth_ns.expect(login_model)
+class Login(ForgeResource):
+    @qf_auth_ns.expect(login_model)
+    @qf_auth_ns.response(code=200, description="Credentials accepted and OTP challenge issued")
+    @qf_auth_ns.doc(security=[])
+    @qf_auth_ns.doc(
         description=(
             "## Authentication\n"
             "This endpoint validates username and password, then starts an OTP challenge. "
@@ -150,12 +163,15 @@ class Login(Resource):
         if TotpService().is_totp_enabled(user_id):
             challenge_id = LoginChallengeService().create_challenge(user_id)
             logger.info("mfa_event=totp_login_challenge user_id=%s challenge_id=%s", user_id, challenge_id)
+            workspace_id = str(user.get("workspace_id") or user.get("workspaceId") or "").strip() or None
             return jsonify(
                 {
                     "mfa_required": True,
                     "mfa_type": "totp",
                     "challenge_id": challenge_id,
                     "challenge_expires_in": LOGIN_CHALLENGE_TTL_S,
+                    "workspace_id": workspace_id,
+                    "workspaceId": workspace_id,
                 }
             )
 
@@ -164,17 +180,20 @@ class Login(Resource):
             ip_address=request.remote_addr,
             user_agent=request.headers.get("User-Agent"),
         )
+        workspace_id = str(user.get("workspace_id") or user.get("workspaceId") or "").strip() or None
         return jsonify(
             {
                 "requires_otp": True,
                 "challenge_id": challenge_id,
                 "challenge_expires_in": OTP_CHALLENGE_TTL_S,
+                "workspace_id": workspace_id,
+                "workspaceId": workspace_id,
             }
         )
 
 
-@auth_ns.route("/mfa/totp/start")
-class StartTotpEnrollment(Resource):
+@qf_auth_ns.route("/mfa/totp/start")
+class StartTotpEnrollment(ForgeResource):
     @token_required
     def post(self):
         user_id = str(getattr(g, "user_id", "") or "").strip()
@@ -182,9 +201,9 @@ class StartTotpEnrollment(Resource):
         return payload, 200
 
 
-@auth_ns.route("/mfa/totp/confirm")
-class ConfirmTotpEnrollment(Resource):
-    @auth_ns.expect(totp_confirm_model, validate=False)
+@qf_auth_ns.route("/mfa/totp/confirm")
+class ConfirmTotpEnrollment(ForgeResource):
+    @qf_auth_ns.expect(totp_confirm_model, validate=False)
     @token_required
     def post(self):
         user_id = str(getattr(g, "user_id", "") or "").strip()
@@ -203,10 +222,10 @@ class ConfirmTotpEnrollment(Resource):
         return result, 200
 
 
-@auth_ns.route("/mfa/totp/verify")
-class VerifyTotpChallenge(Resource):
-    @auth_ns.expect(totp_verify_model, validate=False)
-    @auth_ns.doc(security=[])
+@qf_auth_ns.route("/mfa/totp/verify")
+class VerifyTotpChallenge(ForgeResource):
+    @qf_auth_ns.expect(totp_verify_model, validate=False)
+    @qf_auth_ns.doc(security=[])
     def post(self):
         data = request.get_json(silent=True) or {}
         challenge_id = str(data.get("challenge_id") or "").strip()
@@ -242,13 +261,23 @@ class VerifyTotpChallenge(Resource):
             return {"error": "Invalid code or expired challenge"}, 401
 
         auth = AuthService()
-        tokens = auth.issue_tokens(User(user_id=user_id, user_name=user_id))
+        full_user = None
+        try:
+            full_user = UserService().get_user(user_id)
+        except ForgeError:
+            logger.warning("mfa_event=totp_verify user_lookup_failed user_id=%s", user_id)
+
+        token_user = full_user or User(user_id=user_id, user_name=user_id)
+        tokens = auth.issue_tokens(token_user)
+        workspace_id = _extract_default_workspace_id(full_user or token_user)
         response = make_response(
             {
                 "access_token": tokens["access_token"],
                 "token_type": "Bearer",
                 "expires_in": tokens["expires_in"],
                 "mfa_type": "totp",
+                "workspace_id": workspace_id,
+                "workspaceId": workspace_id,
             },
             200,
         )
@@ -258,15 +287,15 @@ class VerifyTotpChallenge(Resource):
             httponly=True,
             secure=bool(COOKIE_SECURE),
             samesite=COOKIE_SAMESITE,
-            max_age=auth.refresh_ttl_seconds,
+            max_age=auth.qf_refresh_ttl,
             path=REFRESH_COOKIE_PATH,
         )
         return response
 
 
-@auth_ns.route("/mfa/totp/disable")
-class DisableTotp(Resource):
-    @auth_ns.expect(totp_disable_model, validate=False)
+@qf_auth_ns.route("/mfa/totp/disable")
+class DisableTotp(ForgeResource):
+    @qf_auth_ns.expect(totp_disable_model, validate=False)
     @token_required
     def post(self):
         user_id = str(getattr(g, "user_id", "") or "").strip()
@@ -296,18 +325,24 @@ def _get_refresh_from_request() -> str | None:
     return None
 
 
-@auth_ns.route("/refresh")
-class Refresh(Resource):
+@qf_auth_ns.route("/refresh")
+class Refresh(ForgeResource):
     def post(self):
         token = _get_refresh_from_request()
         if not token:
             return {"error": "Missing refresh token"}, 401
 
         auth = AuthService()
+        workspace_id = None
         try:
             new_refresh, user_id = auth.rotate_refresh_token(token)
+            try:
+                full_user = UserService().get_user(user_id)
+                workspace_id = _extract_default_workspace_id(full_user)
+            except ForgeError:
+                logger.warning("refresh user_lookup_failed user_id=%s", user_id)
             access_token = auth.generate_access_token(user_id)
-        except ServiceError as e:
+        except ForgeError as e:
             return {"error": str(e)}, getattr(e, "status_code", 401) or 401
 
         response = make_response(
@@ -316,6 +351,8 @@ class Refresh(Resource):
                     "access_token": access_token,
                     "token_type": "Bearer",
                     "expires_in": auth.access_ttl_seconds,
+                    "workspace_id": workspace_id,
+                    "workspaceId": workspace_id,
                 }
             )
         )
@@ -325,14 +362,14 @@ class Refresh(Resource):
             httponly=True,
             secure=bool(COOKIE_SECURE),
             samesite=COOKIE_SAMESITE,
-            max_age=auth.refresh_ttl_seconds,
+            max_age=auth.qf_refresh_ttl,
             path=REFRESH_COOKIE_PATH,
         )
         return response
 
 
-@auth_ns.route("/logout")
-class Logout(Resource):
+@qf_auth_ns.route("/logout")
+class Logout(ForgeResource):
     def post(self):
         auth = AuthService()
         refresh_token = request.cookies.get("refresh_token")
@@ -351,7 +388,7 @@ class Logout(Resource):
                 jti = payload.get("jti")
                 if jti:
                     auth.revoke_refresh_jti(jti)
-            except ServiceError:
+            except ForgeError:
                 return {"error": "Invalid refresh token"}, 401
 
         if access_token:
@@ -370,8 +407,8 @@ class Logout(Resource):
         )
         return response
 
-@auth_ns.route("/invite/validate/<string:token>")
-class InviteValidationResource(Resource):
+@qf_auth_ns.route("/invite/validate/<string:token>")
+class InviteValidationResource(ForgeResource):
     def get(self, token):
         if not token:
             return {"error": "Missing token"}, 400
@@ -385,10 +422,10 @@ class InviteValidationResource(Resource):
             return {"error": "Invalid or expired token"}, 400
 
 
-@auth_ns.route("/invite/accept")
-class InviteAcceptResource(Resource):
-    @auth_ns.expect(invite_accept_model, validate=False)
-    @auth_ns.doc(security=[])
+@qf_auth_ns.route("/invite/accept")
+class InviteAcceptResource(ForgeResource):
+    @qf_auth_ns.expect(invite_accept_model, validate=False)
+    @qf_auth_ns.doc(security=[])
     def post(self):
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict):
@@ -422,7 +459,7 @@ class InviteAcceptResource(Resource):
         user_service = UserService()
         try:
             current_user = user_service.get_user(user_id)
-        except ServiceError:
+        except ForgeError:
             return {"error": "Invalid or expired token"}, 400
 
         status_text = str(getattr(current_user, "status", "") or "").strip().lower()
@@ -446,7 +483,7 @@ class InviteAcceptResource(Resource):
 
         try:
             updated = user_service.update_user(user_id=user_id, update_data=update_payload)
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
 
         return {
@@ -455,16 +492,16 @@ class InviteAcceptResource(Resource):
             "status": str(updated.status or UserStatus.ACTIVE),
         }, 200
 
-@auth_ns.route("/reset/request")
-class ResetPasswordRequest(Resource):
+@qf_auth_ns.route("/reset/request")
+class ResetPasswordRequest(ForgeResource):
     def post(self):
         email = request.json["email"]
         auth = AuthService()
 
         return auth.send_reset_request(email)
     
-@auth_ns.route("/reset/validate")
-class ResetPasswordValidate(Resource):
+@qf_auth_ns.route("/reset/validate")
+class ResetPasswordValidate(ForgeResource):
     def post(self):
         token = request.json["token"]
         
@@ -479,8 +516,8 @@ class ResetPasswordValidate(Resource):
         else:
             return  {"error": "Missing token"}, 400
 
-@auth_ns.route("/reset/password")
-class ResetPassword(Resource):
+@qf_auth_ns.route("/reset/password")
+class ResetPassword(ForgeResource):
     def post(self):
         token_hash = request.cookies.get("reset_session")
 

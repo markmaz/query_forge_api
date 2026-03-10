@@ -3,11 +3,12 @@ from __future__ import annotations
 import logging
 
 from flask import request
-from flask_restx import Namespace, Resource
+from flask_restx import Namespace
+from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
-from app.routes._route_utils import bool_arg, get_workspace_id_from_header, int_arg
+from app.exceptions.forge_error import ForgeError
+from app.routes.request_helpers import bool_arg, extract_workspace_id, int_arg
 from app.services.models.model_snapshot_import_service import ModelSnapshotImportService
 from app.services.recon.workspace_recon_read_service import WorkspaceReconReadService
 from app.services.recon.workspace_recon_service import ReconQuery, WorkspaceReconService
@@ -16,147 +17,107 @@ from app.services.workspace_inventory.workspace_context import WorkspaceContextB
 from app.services.workspace_inventory.workspace_inventory_pipeline_service import WorkspacePipelineService
 
 logger = logging.getLogger(__name__)
+
 wsinv_ns = Namespace("workspace-inventory", description="Workspace inventory (DBX snapshot cache)")
 
 
-def _handle_service_error(e: ServiceError):
-    return {"error": str(e)}, getattr(e, "status_code", 400) or 400
+def _handle_service_error(exc: ForgeError):
+    return {"error": str(exc)}, getattr(exc, "status_code", 400) or 400
 
 
-# If Recon services are cheap, this is fine; otherwise hoist to module-level singletons.
-def _recon_svc() -> WorkspaceReconReadService:
+def _recon_service() -> WorkspaceReconReadService:
     return WorkspaceReconReadService(recon=WorkspaceReconService())
 
 
 @wsinv_ns.route("/sync")
-class WorkspaceInventorySync(Resource):
+class WorkspaceInventorySync(ForgeResource):
     @token_required
     def post(self):
-        """
-        POST /workspace-inventory/sync?schema=asset&catalog=&force=true|false
-
-        headers:
-          - X-Workspace-Id
-
-        Notes:
-          - If force=true, runs a Databricks snapshot sync for workspace_table/workspace_column
-          - Always refreshes model snapshot (model_table/model_column)
-        """
         try:
-            workspace_id = get_workspace_id_from_header()
-            ctx = WorkspaceContextBuilder().build(workspace_id)
+            workspace_id = extract_workspace_id()
+            context = WorkspaceContextBuilder().build(workspace_id)
+
             schema_name = (request.args.get("schema") or "asset").strip()
             catalog_name = (request.args.get("catalog") or "").strip() or None
-            force = bool_arg("force", default=False)
+            force_snapshot = bool_arg("force", default=False)
 
             snapshot_result = None
-            if force:
-                snapshot_result = WorkspacePipelineService(sql=ctx.sql_exec).sync_snapshot(
+            if force_snapshot:
+                snapshot_result = WorkspacePipelineService(sql=context.sql_exec).sync_snapshot(
                     workspace_id=workspace_id,
                     schema_name=schema_name,
                     catalog_name=catalog_name,
                 )
 
-            svc = ModelSnapshotImportService(
-                sql=ctx.sql_exec,
+            import_result = ModelSnapshotImportService(sql=context.sql_exec).import_snapshot(
+                deactivate_missing=True
             )
-            res = svc.import_snapshot(deactivate_missing=True)
-            return {"ok": True, "workspaceSnapshot": snapshot_result, **res.__dict__}
-
-        except ServiceError as e:
-            return _handle_service_error(e)
+            return {"ok": True, "workspaceSnapshot": snapshot_result, **import_result.__dict__}
+        except ForgeError as exc:
+            return _handle_service_error(exc)
         except Exception:
             logger.exception("Workspace inventory sync failed")
             return {"error": "Workspace inventory sync failed"}, 500
 
 
 @wsinv_ns.route("/unmapped-tables")
-class WorkspaceInventoryUnmapped(Resource):
+class WorkspaceInventoryUnmapped(ForgeResource):
     @token_required
     def get(self):
-        """
-        GET /workspace-inventory/unmapped-tables?schema=&q=&limit=&offset=
-        headers:
-          - X-Workspace-Id
-        """
         try:
-            workspace_id = get_workspace_id_from_header()
-            schema_name = (request.args.get("schema") or "").strip() or None
-            q = (request.args.get("q") or "").strip() or None
-            limit = int_arg("limit", 200)
-            offset = int_arg("offset", 0)
-
+            workspace_id = extract_workspace_id()
             payload = UnmappedWorkspaceTablesReadService().list_unmapped_tables(
                 workspace_id=workspace_id,
-                schema_name=schema_name,
-                q=q,
-                limit=limit,
-                offset=offset,
+                schema_name=(request.args.get("schema") or "").strip() or None,
+                q=(request.args.get("q") or "").strip() or None,
+                limit=int_arg("limit", 200),
+                offset=int_arg("offset", 0),
             )
             return payload, 200
-
-        except ServiceError as e:
-            return _handle_service_error(e)
+        except ForgeError as exc:
+            return _handle_service_error(exc)
         except Exception:
             logger.exception("Unmapped tables fetch failed")
             return {"error": "Unmapped tables fetch failed"}, 500
 
 
 @wsinv_ns.route("/recon")
-class WorkspaceInventoryRecon(Resource):
+class WorkspaceInventoryRecon(ForgeResource):
     @token_required
     def get(self):
-        """
-        GET /workspace-inventory/recon?status=&logical_table_name=&limit=&offset=
-        headers:
-          - X-Workspace-Id
-        """
         try:
-            workspace_id = get_workspace_id_from_header()
-
+            workspace_id = extract_workspace_id()
             status = (request.args.get("status") or "").strip() or None
             if status:
                 status = status.upper()
 
-            logical = (request.args.get("logical_table_name") or "").strip() or None
-            limit = int_arg("limit", 200)
-            offset = int_arg("offset", 0)
-
-            rows = _recon_svc().list_recon(
+            rows = _recon_service().list_recon(
                 ReconQuery(
                     workspace_id=workspace_id,
                     status=status,
-                    logical_table_name=logical,
-                    limit=limit,
-                    offset=offset,
+                    logical_table_name=(request.args.get("logical_table_name") or "").strip() or None,
+                    limit=int_arg("limit", 200),
+                    offset=int_arg("offset", 0),
                 )
             )
-
             return {"rows": rows}, 200
-
-        except ServiceError as e:
-            return _handle_service_error(e)
+        except ForgeError as exc:
+            return _handle_service_error(exc)
         except Exception:
             logger.exception("Fetch recon failed")
             return {"error": "Fetch recon failed"}, 500
 
 
 @wsinv_ns.route("/recon/counts")
-class WorkspaceInventoryReconCounts(Resource):
+class WorkspaceInventoryReconCounts(ForgeResource):
     @token_required
     def get(self):
-        """
-        GET /workspace-inventory/recon/counts
-        headers:
-          - X-Workspace-Id
-        """
         try:
-            workspace_id = get_workspace_id_from_header()
-            counts = _recon_svc().counts_by_status(workspace_id=workspace_id)
+            workspace_id = extract_workspace_id()
+            counts = _recon_service().counts_by_status(workspace_id=workspace_id)
             return {"counts": counts}, 200
-
-        except ServiceError as e:
-            return _handle_service_error(e)
+        except ForgeError as exc:
+            return _handle_service_error(exc)
         except Exception:
             logger.exception("Recon counts failed")
             return {"error": "Recon counts failed"}, 500

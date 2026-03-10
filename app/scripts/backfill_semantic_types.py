@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ def infer_semantic_type(column_name: str) -> Optional[str]:
 
 
 def backfill_semantic_types(*, batch_size: int = BATCH_SIZE) -> Dict[str, int]:
-    sql = MySQLSQLExecutor()
+    sql = ForgeMetaSQL()
     last_id = 0
     scanned = 0
     updated = 0

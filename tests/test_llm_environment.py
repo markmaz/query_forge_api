@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.llm_environment_service import LLMEnvironmentService
 
 
@@ -125,7 +125,7 @@ def test_get_instance_status_uses_cache_window() -> None:
 
 def test_missing_instance_id_raises_service_error() -> None:
     fake = FakeEC2Client()
-    with pytest.raises(ServiceError, match="LLM_INSTANCE_ID is required") as exc:
+    with pytest.raises(ForgeError, match="LLM_INSTANCE_ID is required") as exc:
         LLMEnvironmentService(
             instance_id="",
             region="us-east-1",
@@ -137,7 +137,7 @@ def test_missing_instance_id_raises_service_error() -> None:
 
 def test_missing_aws_credentials_raises_service_error_without_client() -> None:
     with pytest.raises(
-        ServiceError, match="AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required"
+        ForgeError, match="AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required"
     ) as exc:
         LLMEnvironmentService(
             instance_id="i-abc",

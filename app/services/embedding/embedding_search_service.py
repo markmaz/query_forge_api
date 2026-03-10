@@ -6,17 +6,17 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from qdrant_client.http import models as qdrant_models
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import (
     QDRANT_COLUMN_COLLECTION,
     QDRANT_COLUMN_COLLECTION_V2,
     QDRANT_DOMAIN_COLLECTION,
     QDRANT_TABLE_COLLECTION,
 )
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.infra.embedding_model import EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper, build_payload_filter
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 from app.services.embedding.domain_embedding_service import build_domain_point_id
 
 logger = logging.getLogger(__name__)
@@ -115,13 +115,13 @@ class EmbeddingSearchService:
         table_qdrant: Optional[QdrantClientWrapper] = None,
         column_qdrant: Optional[QdrantClientWrapper] = None,
         domain_qdrant: Optional[QdrantClientWrapper] = None,
-        sql: Optional[SQLExecutor] = None,
+        sql: Optional[ForgeQueryPort] = None,
         model: Optional[EmbeddingModel] = None,
     ) -> None:
         self._table_qdrant = table_qdrant or QdrantClientWrapper(collection_name=TABLE_COLLECTION_NAME)
         self._column_qdrant = column_qdrant or QdrantClientWrapper(collection_name=COLUMN_COLLECTION_NAME)
         self._domain_qdrant = domain_qdrant or QdrantClientWrapper(collection_name=DOMAIN_COLLECTION_NAME)
-        self._sql = sql or MySQLSQLExecutor()
+        self._sql = sql or ForgeMetaSQL()
         self._model = model or EmbeddingModel()
 
     def search(
@@ -139,7 +139,7 @@ class EmbeddingSearchService:
     ) -> Dict[str, Any]:
         query_text = (query or "").strip()
         if not query_text:
-            raise ServiceError("query is required", status_code=400)
+            raise ForgeError("query is required", status_code=400)
 
         limit_val = _clamp_limit(limit)
         kinds_list = _normalize_kinds(kinds)
@@ -157,7 +157,7 @@ class EmbeddingSearchService:
         workspace_table_ids: Optional[List[int]] = None
         if domain_id is not None:
             if not workspace_id:
-                raise ServiceError("workspace_id is required when domain_id is provided", status_code=400)
+                raise ForgeError("workspace_id is required when domain_id is provided", status_code=400)
             workspace_table_ids = self._resolve_domain_workspace_table_ids(workspace_id, int(domain_id))
 
         table_hits: List[Dict[str, Any]] = []
@@ -365,22 +365,22 @@ def _normalize_kinds(kinds: Optional[Sequence[str]]) -> List[str]:
         return ["column", "table", "domain"]
 
     if not isinstance(kinds, (list, tuple)):
-        raise ServiceError("kinds must be an array", status_code=400)
+        raise ForgeError("kinds must be an array", status_code=400)
 
     normalized = []
     for kind in kinds:
         if not isinstance(kind, str):
-            raise ServiceError("kinds must be an array of strings", status_code=400)
+            raise ForgeError("kinds must be an array of strings", status_code=400)
         value = kind.strip().lower()
         if value:
             normalized.append(value)
 
     if not normalized:
-        raise ServiceError("kinds cannot be empty", status_code=400)
+        raise ForgeError("kinds cannot be empty", status_code=400)
 
     invalid = [k for k in normalized if k not in ALLOWED_KINDS]
     if invalid:
-        raise ServiceError(f"invalid kinds: {', '.join(invalid)}", status_code=400)
+        raise ForgeError(f"invalid kinds: {', '.join(invalid)}", status_code=400)
 
     return list(dict.fromkeys(normalized))
 

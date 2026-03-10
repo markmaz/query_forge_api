@@ -2,86 +2,74 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
-from app.services.shared.jsonify import jsonify_dict
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
+from app.services.shared.jsonify import serialize_record
+
+_ALLOWED_POLICIES = frozenset({"DEDUP_PRIMARY_FIRST", "SHOW_ALL_QUALIFIED"})
 
 
-class DomainAdminWriteService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+class _DomainAdminStore:
+    def __init__(self, *, sql: ForgeQueryPort) -> None:
+        self._sql = sql
 
-    # ---------- permission helpers (unchanged) ----------
-    def _can_edit_any(self, *, workspace_id: str, user_id: str) -> bool:
-        sql_any_domain_exists = """
+    def _exists(self, query: str, params: Dict[str, Any]) -> bool:
+        return bool(self._sql.execute_query(query, params))
+
+    def any_domain_exists(self, *, workspace_id: str) -> bool:
+        return self._exists(
+            """
             SELECT 1
             FROM domain d
             WHERE d.workspace_id=:ws
             LIMIT 1
+            """,
+            {"ws": workspace_id},
+        )
+
+    def user_has_any_edit(self, *, workspace_id: str, user_id: str) -> bool:
+        return self._exists(
             """
-        sql_has_any_edit = """
             SELECT 1
             FROM user_domain_mapping udm
             JOIN domain d ON d.id = udm.domain_id
             WHERE d.workspace_id=:ws
-            AND d.is_active=1
-            AND udm.user_id=:uid
-            AND udm.can_edit=1
+              AND d.is_active=1
+              AND udm.user_id=:uid
+              AND udm.can_edit=1
             LIMIT 1
+            """,
+            {"ws": workspace_id, "uid": user_id},
+        )
+
+    def user_can_edit_domain(self, *, workspace_id: str, user_id: str, domain_id: int) -> bool:
+        return self._exists(
             """
-        any_domain = self._sql.execute_query(sql_any_domain_exists, {"ws": workspace_id})
-        if not any_domain:
-            return True
-        row = self._sql.execute_query(sql_has_any_edit, {"ws": workspace_id, "uid": user_id})
-        return bool(row)
-
-    def _assert_can_edit_any(self, *, workspace_id: str, user_id: str) -> None:
-        if not self._can_edit_any(workspace_id=workspace_id, user_id=user_id):
-            raise ServiceError("You do not have permission to create domains.", status_code=403)
-
-    def _assert_can_edit_domain(self, *, workspace_id: str, user_id: str, domain_id: int) -> None:
-        sql = """
             SELECT 1
             FROM user_domain_mapping udm
             JOIN domain d ON d.id = udm.domain_id
             WHERE d.workspace_id=:ws
-            AND d.id=:did
-            AND d.is_active=1
-            AND udm.user_id=:uid
-            AND udm.can_edit=1
+              AND d.id=:did
+              AND d.is_active=1
+              AND udm.user_id=:uid
+              AND udm.can_edit=1
             LIMIT 1
-"""
-        row = self._sql.execute_query(sql, {"ws": workspace_id, "did": int(domain_id), "uid": user_id})
-        if not row:
-            raise ServiceError("You do not have edit permission for this domain.", status_code=403)
+            """,
+            {"ws": workspace_id, "did": int(domain_id), "uid": user_id},
+        )
 
-    # ---------- CRUD ----------
-
-    def create_domain(
+    def create_domain_with_owner(
         self,
         *,
         workspace_id: str,
         user_id: str,
         name: str,
-        kind: Optional[str] = None,
-        description: Optional[str] = None,
-        model_table_id: Optional[int] = None,  # ✅ NEW
-        column_name_policy: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        self._assert_can_edit_any(workspace_id=workspace_id, user_id=user_id)
-
-        name = (name or "").strip()
-        if not name:
-            raise ServiceError("name is required", status_code=400)
-
-        kind = (kind or "").strip() or None
-        description = (description or "").strip() or None
-        mtid = int(model_table_id) if model_table_id is not None else None
-        policy = (column_name_policy or "").strip().upper() or None
-        if policy and policy not in {"DEDUP_PRIMARY_FIRST", "SHOW_ALL_QUALIFIED"}:
-            raise ServiceError("Invalid column_name_policy", status_code=400)
-
+        kind: Optional[str],
+        description: Optional[str],
+        model_table_id: Optional[int],
+        column_name_policy: Optional[str],
+    ) -> int:
         with self._sql.transaction() as tx:
             tx.execute_write(
                 """
@@ -92,54 +80,160 @@ class DomainAdminWriteService:
                 {"id": workspace_id, "display_name": None},
             )
 
-            res = tx.execute_insert(
+            result = tx.execute_insert(
                 """
-                    INSERT INTO domain (
-                        workspace_id, name, kind, description, model_table_id,
-                        column_name_policy, is_active, created_at
-                    )
-                    VALUES (:ws, :name, :kind, :desc, :mtid, :policy, 1, CURRENT_TIMESTAMP)
-                    """,
+                INSERT INTO domain (
+                    workspace_id, name, kind, description, model_table_id,
+                    column_name_policy, is_active, created_at
+                )
+                VALUES (:ws, :name, :kind, :desc, :mtid, :policy, 1, CURRENT_TIMESTAMP)
+                """,
                 {
                     "ws": workspace_id,
                     "name": name,
                     "kind": kind,
                     "desc": description,
-                    "mtid": mtid,
-                    "policy": policy,
+                    "mtid": model_table_id,
+                    "policy": column_name_policy,
                 },
             )
-            domain_id = int(res.lastrowid or 0)
+            domain_id = int(result.lastrowid or 0)
 
             tx.execute_write(
                 """
-                    INSERT INTO user_domain_mapping (user_id, domain_id, can_read, can_edit, created_at)
-                    VALUES (:uid, :did, 1, 1, CURRENT_TIMESTAMP)
-                    ON DUPLICATE KEY UPDATE can_read=1, can_edit=1
-                    """,
+                INSERT INTO user_domain_mapping (user_id, domain_id, can_read, can_edit, created_at)
+                VALUES (:uid, :did, 1, 1, CURRENT_TIMESTAMP)
+                ON DUPLICATE KEY UPDATE can_read=1, can_edit=1
+                """,
                 {"uid": user_id, "did": domain_id},
             )
 
-            rows = tx.execute_query_mappings(
-                """
-                    SELECT
-                    d.id, d.name, d.kind, d.description, d.model_table_id, d.column_name_policy,
-                    mt.name AS model_table_name,
-                    d.is_active, d.created_at, d.updated_at
-                    FROM domain d
-                    LEFT JOIN model_table mt ON mt.id = d.model_table_id
-                    WHERE d.workspace_id=:ws AND d.id=:did
-                    """,
-                {"ws": workspace_id, "did": domain_id},
-            )
-            row = rows[0] if rows else None
+        return domain_id
 
-        return jsonify_dict(dict(row)) if row else {
+    def update_domain(
+        self,
+        *,
+        workspace_id: str,
+        domain_id: int,
+        set_clauses: List[str],
+        params: Dict[str, Any],
+    ) -> None:
+        with self._sql.transaction() as tx:
+            tx.execute_write(
+                f"""
+                UPDATE domain
+                SET {", ".join(set_clauses)}, updated_at=CURRENT_TIMESTAMP
+                WHERE workspace_id=:ws AND id=:did
+                """,
+                params,
+            )
+
+    def fetch_domain_row(self, *, workspace_id: str, domain_id: int) -> Optional[Dict[str, Any]]:
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT
+              d.id,
+              d.name,
+              d.kind,
+              d.description,
+              d.model_table_id,
+              d.column_name_policy,
+              mt.name AS model_table_name,
+              d.is_active,
+              d.created_at,
+              d.updated_at
+            FROM domain d
+            LEFT JOIN model_table mt ON mt.id = d.model_table_id
+            WHERE d.workspace_id=:ws AND d.id=:did
+            """,
+            {"ws": workspace_id, "did": int(domain_id)},
+        )
+        return dict(rows[0]) if rows else None
+
+    def delete_domain(self, *, workspace_id: str, domain_id: int) -> int:
+        with self._sql.transaction() as tx:
+            return tx.execute_write(
+                "DELETE FROM domain WHERE workspace_id=:ws AND id=:did",
+                {"ws": workspace_id, "did": int(domain_id)},
+            )
+
+
+class DomainAdminWriteService:
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
+        self._store = _DomainAdminStore(sql=self._sql)
+
+    @staticmethod
+    def _normalize_policy(value: Optional[str]) -> Optional[str]:
+        policy = (value or "").strip().upper() or None
+        if policy and policy not in _ALLOWED_POLICIES:
+            raise ForgeError("Invalid column_name_policy", status_code=400)
+        return policy
+
+    @staticmethod
+    def _clean_required_name(name: str) -> str:
+        clean_name = (name or "").strip()
+        if not clean_name:
+            raise ForgeError("name is required", status_code=400)
+        return clean_name
+
+    @staticmethod
+    def _clean_optional_text(value: Optional[str]) -> Optional[str]:
+        return (value or "").strip() or None
+
+    def _can_edit_any(self, *, workspace_id: str, user_id: str) -> bool:
+        # First domain in a workspace can be created without an existing mapping.
+        if not self._store.any_domain_exists(workspace_id=workspace_id):
+            return True
+        return self._store.user_has_any_edit(workspace_id=workspace_id, user_id=user_id)
+
+    def _assert_can_edit_any(self, *, workspace_id: str, user_id: str) -> None:
+        if not self._can_edit_any(workspace_id=workspace_id, user_id=user_id):
+            raise ForgeError("You do not have permission to create domains.", status_code=403)
+
+    def _assert_can_edit_domain(self, *, workspace_id: str, user_id: str, domain_id: int) -> None:
+        if not self._store.user_can_edit_domain(workspace_id=workspace_id, user_id=user_id, domain_id=domain_id):
+            raise ForgeError("You do not have edit permission for this domain.", status_code=403)
+
+    def create_domain(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        name: str,
+        kind: Optional[str] = None,
+        description: Optional[str] = None,
+        model_table_id: Optional[int] = None,
+        column_name_policy: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        self._assert_can_edit_any(workspace_id=workspace_id, user_id=user_id)
+
+        clean_name = self._clean_required_name(name)
+        clean_kind = self._clean_optional_text(kind)
+        clean_description = self._clean_optional_text(description)
+        normalized_policy = self._normalize_policy(column_name_policy)
+        clean_model_table_id = int(model_table_id) if model_table_id is not None else None
+
+        domain_id = self._store.create_domain_with_owner(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            name=clean_name,
+            kind=clean_kind,
+            description=clean_description,
+            model_table_id=clean_model_table_id,
+            column_name_policy=normalized_policy,
+        )
+
+        row = self._store.fetch_domain_row(workspace_id=workspace_id, domain_id=domain_id)
+        if row:
+            return serialize_record(row)
+
+        return {
             "id": domain_id,
-            "name": name,
-            "kind": kind,
-            "description": description,
-            "modelTableId": mtid,
+            "name": clean_name,
+            "kind": clean_kind,
+            "description": clean_description,
+            "modelTableId": clean_model_table_id,
             "modelTableName": None,
         }
 
@@ -153,85 +247,61 @@ class DomainAdminWriteService:
         kind: Optional[str] = None,
         description: Optional[str] = None,
         is_active: Optional[bool] = None,
-        model_table_id: Optional[int] = None,  # ✅ NEW
+        model_table_id: Optional[int] = None,
         column_name_policy: Optional[str] = None,
     ) -> Dict[str, Any]:
         self._assert_can_edit_domain(workspace_id=workspace_id, user_id=user_id, domain_id=domain_id)
 
-        updates: Dict[str, Any] = {"ws": workspace_id, "did": int(domain_id)}
-        sets: List[str] = []
+        params: Dict[str, Any] = {"ws": workspace_id, "did": int(domain_id)}
+        set_clauses: List[str] = []
 
         if name is not None:
-            n = name.strip()
-            if not n:
-                raise ServiceError("name cannot be empty", status_code=400)
-            updates["name"] = n
-            sets.append("name=:name")
+            clean_name = name.strip()
+            if not clean_name:
+                raise ForgeError("name cannot be empty", status_code=400)
+            params["name"] = clean_name
+            set_clauses.append("name=:name")
 
         if kind is not None:
-            updates["kind"] = kind.strip() or None
-            sets.append("kind=:kind")
+            params["kind"] = self._clean_optional_text(kind)
+            set_clauses.append("kind=:kind")
 
         if description is not None:
-            updates["description"] = description.strip() or None
-            sets.append("description=:description")
+            params["description"] = self._clean_optional_text(description)
+            set_clauses.append("description=:description")
 
         if is_active is not None:
-            updates["is_active"] = 1 if is_active else 0
-            sets.append("is_active=:is_active")
+            params["is_active"] = 1 if is_active else 0
+            set_clauses.append("is_active=:is_active")
 
         if model_table_id is not None:
-            updates["model_table_id"] = int(model_table_id)
-            sets.append("model_table_id=:model_table_id")
+            params["model_table_id"] = int(model_table_id)
+            set_clauses.append("model_table_id=:model_table_id")
 
         if column_name_policy is not None:
-            policy = column_name_policy.strip().upper()
-            if policy not in {"DEDUP_PRIMARY_FIRST", "SHOW_ALL_QUALIFIED"}:
-                raise ServiceError("Invalid column_name_policy", status_code=400)
-            updates["column_name_policy"] = policy
-            sets.append("column_name_policy=:column_name_policy")
+            params["column_name_policy"] = self._normalize_policy(column_name_policy)
+            set_clauses.append("column_name_policy=:column_name_policy")
 
-        if not sets:
-            raise ServiceError("No fields to update", status_code=400)
+        if not set_clauses:
+            raise ForgeError("No fields to update", status_code=400)
 
-        with self._sql.transaction() as tx:
-            tx.execute_write(
-                f"""
-                    UPDATE domain
-                    SET {", ".join(sets)}, updated_at=CURRENT_TIMESTAMP
-                    WHERE workspace_id=:ws AND id=:did
-                    """,
-                updates,
-            )
+        self._store.update_domain(
+            workspace_id=workspace_id,
+            domain_id=int(domain_id),
+            set_clauses=set_clauses,
+            params=params,
+        )
 
-            rows = tx.execute_query_mappings(
-                """
-                    SELECT
-                    d.id, d.name, d.kind, d.description, d.model_table_id, d.column_name_policy,
-                    mt.name AS model_table_name,
-                    d.is_active, d.created_at, d.updated_at
-                    FROM domain d
-                    LEFT JOIN model_table mt ON mt.id = d.model_table_id
-                    WHERE d.workspace_id=:ws AND d.id=:did
-                    """,
-                {"ws": workspace_id, "did": int(domain_id)},
-            )
-            row = rows[0] if rows else None
-
+        row = self._store.fetch_domain_row(workspace_id=workspace_id, domain_id=int(domain_id))
         if not row:
-            raise ServiceError("Domain not found", status_code=404)
-
-        return jsonify_dict(dict(row))
+            raise ForgeError("Domain not found", status_code=404)
+        return serialize_record(row)
 
     def delete_domain(self, *, workspace_id: str, user_id: str, domain_id: int) -> Dict[str, Any]:
         self._assert_can_edit_domain(workspace_id=workspace_id, user_id=user_id, domain_id=domain_id)
 
-        with self._sql.transaction() as tx:
-            res = tx.execute_write(
-                "DELETE FROM domain WHERE workspace_id=:ws AND id=:did",
-                {"ws": workspace_id, "did": int(domain_id)},
-            )
-            if res == 0:
-                raise ServiceError("Domain not found", status_code=404)
+        deleted = self._store.delete_domain(workspace_id=workspace_id, domain_id=int(domain_id))
+        if deleted == 0:
+            raise ForgeError("Domain not found", status_code=404)
 
         return {"ok": True, "deleted_id": int(domain_id)}

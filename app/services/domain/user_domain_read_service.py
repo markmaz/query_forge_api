@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.ports.sql_executor import SQLExecutor
-from app.services.shared.jsonify import jsonify_rows
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.ports.sql_executor import ForgeQueryPort
+from app.services.shared.jsonify import serialize_result_rows
 
 
 class UserDomainReadService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def list_user_domains(self, *, workspace_id: str, user_id: str) -> List[Dict[str, Any]]:
         sql = """
@@ -31,4 +31,4 @@ class UserDomainReadService:
           ORDER BY d.name
           """
         rows = self._sql.execute_query_mappings(sql, {"ws": workspace_id, "user_id": user_id})
-        return jsonify_rows([dict(r) for r in rows])
+        return serialize_result_rows([dict(r) for r in rows])

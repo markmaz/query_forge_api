@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.ports.sql_executor import ExecuteResult
+from app.ports.sql_executor import ForgeExecResult
 from app.services.chat.forge_insights_conversation_store import ForgeInsightsConversationStore
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_save_conversation_upserts_and_rewrites_messages() -> None:
-    sql = FakeSQLExecutor()
-    sql.insert_responses = [ExecuteResult(rowcount=1, lastrowid=101)]
+    sql = FakeForgeQueryPort()
+    sql.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=101)]
     store = ForgeInsightsConversationStore(sql=sql)
 
     store.save_conversation(
@@ -24,7 +24,7 @@ def test_save_conversation_upserts_and_rewrites_messages() -> None:
                 {"role": "assistant", "content": "Here are staff"},
             ],
         },
-        ttl_seconds=999,
+        qf_ttl_seconds=999,
     )
 
     assert len(sql.insert_calls) == 1
@@ -40,7 +40,7 @@ def test_save_conversation_upserts_and_rewrites_messages() -> None:
 
 
 def test_get_conversation_returns_messages_and_metadata() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -73,7 +73,7 @@ def test_get_conversation_returns_messages_and_metadata() -> None:
 
 
 def test_list_conversations_reads_from_db_and_includes_last_user_message() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {
@@ -111,7 +111,7 @@ def test_list_conversations_reads_from_db_and_includes_last_user_message() -> No
 
 
 def test_delete_conversation_returns_false_when_missing() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [[]]
     store = ForgeInsightsConversationStore(sql=sql)
 

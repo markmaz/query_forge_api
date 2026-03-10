@@ -3,16 +3,16 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from app.models.value_override import ColumnSpec, SectionKey
+from app.models.value_override import ColumnSpec, ForgeSectionKey
 
-TABLE_BY_TYPE: Dict[SectionKey, str] = {
+TABLE_BY_TYPE: Dict[ForgeSectionKey, str] = {
     "regions": "workboard.custom_regions_lists",
     "npiCategories": "workboard.custom_npi_categories_lists",
     "serviceLines": "workboard.custom_service_lines_lists",
 }
 
 # Columns users care about in preview (exclude system/meta columns)
-DATA_COLUMNS_BY_TYPE: Dict[SectionKey, List[ColumnSpec]] = {
+DATA_COLUMNS_BY_TYPE: Dict[ForgeSectionKey, List[ColumnSpec]] = {
     "regions": [
         ColumnSpec(name="zipcode", type="string", comment="primary geographic key"),
         ColumnSpec(name="subregion", type="string", comment="custom subregion tied to zipcode"),

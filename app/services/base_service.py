@@ -1,36 +1,44 @@
+from __future__ import annotations
+
 import logging
-from typing import Any, Dict, Union
+from typing import Any
 
 from requests import Response
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 
 logger = logging.getLogger(__name__)
 
-# TODO Need to break out individual errors and raise them with an appropriate message to make this production quality.
-def process_response(response: Response) -> Union[Dict[str, Any], list]:
-    """
-    Processes HTTP responses and raises errors if needed.
-    
-    :param response: The response from an HTTP request
-    :type response: Response
+_SUCCESS_CODES = {200, 201}
 
-    :return: The JSON-decoded response data, which could be a dictionary or a list
-    :raises ServiceError: When the response status_code is not 200 or 201
-    """
-    if response.status_code in [200, 201]:
+
+def process_response(response: Response) -> dict[str, Any] | list[Any]:
+    """Return decoded JSON for successful responses or raise ForgeError."""
+    if int(response.status_code) in _SUCCESS_CODES:
         return response.json()
-    
-    logger.error(f"API Error: {response.status_code} - {response.text}")
-    raise ServiceError(response.json(), response.status_code)
 
-def build_url(*parms: str) -> str:
-    """
-    Constructs a URL by joining parameters with "/".
-    
-    :param parms: Variable number of string arguments representing URL segments
-    :return: A formatted URL string
-    """
-    url =  "/".join(str(parm) for parm in parms)
-    logger.info(url)
+    payload = _safe_json(response)
+    logger.error("API error status=%s body=%s", response.status_code, response.text)
+    raise ForgeError(payload, status_code=int(response.status_code))
+
+
+def build_url(*parts: str) -> str:
+    """Join URL/path fragments with exactly one slash separator."""
+    if not parts:
+        return ""
+
+    normalized = [str(parts[0]).rstrip("/")]
+    normalized.extend(str(part).strip("/") for part in parts[1:])
+    url = "/".join(normalized)
+    logger.debug("Built URL: %s", url)
     return url
+
+
+def _safe_json(response: Response) -> dict[str, Any]:
+    try:
+        decoded = response.json()
+        if isinstance(decoded, dict):
+            return decoded
+        return {"error": decoded}
+    except Exception:
+        return {"error": response.text or "Unknown API error"}

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import app.routes.chat_minimal as chat_route
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 
 
 def _headers(monkeypatch):
     from app import factory
     from app.decorators import security
-    from app.routes import _route_utils
+    from app.routes import request_helpers as _route_utils
     from app.services.workspace_inventory import workspace_context
 
     def _verify_token(_token):
@@ -110,7 +110,7 @@ def test_minimal_chat_route_provider_error_maps_to_502(client, monkeypatch):
 
         def chat(self, body, *, workspace_id, user_id):
             del body, workspace_id, user_id
-            raise ServiceError("Chat provider request failed", status_code=502)
+            raise ForgeError("Chat provider request failed", status_code=502)
 
     monkeypatch.setattr(chat_route, "MinimalChatService", _Svc)
     resp = client.post(

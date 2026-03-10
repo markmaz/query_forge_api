@@ -6,45 +6,45 @@ from typing import List, Optional
 
 import pyarrow as pa
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.models.value_override import (
     ValueOverrideDetails,
     ValueOverrideListIndex,
     ValueOverrideMeta,
-    SectionKey,
+    ForgeSectionKey,
 )
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 from app.services.value_overrides.list_schema import DATA_COLUMNS_BY_TYPE, TABLE_BY_TYPE
 
 logger = logging.getLogger(__name__)
 
-class ListReadService:
-    def __init__(self, *, mysql: SQLExecutor, dbx: SQLExecutor, workspace_id: str, user_id: Optional[str] = None):
+class ForgeListReadService:
+    def __init__(self, *, mysql: ForgeQueryPort, dbx: ForgeQueryPort, workspace_id: str, user_id: Optional[str] = None):
         self._mysql = mysql
         self._dbx = dbx
         self._workspace_id = workspace_id
         self._user_id = (user_id or "").strip() or None
 
-    def get_index(self, *, include_expired: bool = False) -> ValueOverrideListIndex:
+    def get_index(self, *, qf_include_expired: bool = False) -> ValueOverrideListIndex:
         return ValueOverrideListIndex(
-            regions=self._fetch_index_for_type("regions", include_expired=include_expired),
-            npiCategories=self._fetch_index_for_type("npiCategories", include_expired=include_expired),
-            serviceLines=self._fetch_index_for_type("serviceLines", include_expired=include_expired),
+            regions=self._fetch_index_for_type("regions", qf_include_expired=qf_include_expired),
+            npiCategories=self._fetch_index_for_type("npiCategories", qf_include_expired=qf_include_expired),
+            serviceLines=self._fetch_index_for_type("serviceLines", qf_include_expired=qf_include_expired),
         )
 
     def get_preview_by_id(
         self,
         *,
-        list_type: SectionKey,
+        list_type: ForgeSectionKey,
         list_id: str,
         limit: int = 100,
         offset: int = 0,
-        include_expired: bool = False,
+        qf_include_expired: bool = False,
     ) -> ValueOverrideDetails:
         list_name, owner = self._resolve_meta_by_id(
             list_type=list_type,
             list_id=list_id,
-            include_expired=include_expired,
+            qf_include_expired=qf_include_expired,
         )
 
         table = TABLE_BY_TYPE[list_type]
@@ -76,13 +76,13 @@ class ListReadService:
             "offset": int(offset),
         }
 
-        rows_resp = self._dbx.submit_statement(sql_rows, parameters=params, result_format="ARROW_STREAM")
+        rows_resp = self._dbx.submit_statement(sql_rows, parameters=params, qf_result_fmt="ARROW_STREAM")
         rows = _rows_from_resp(rows_resp)
 
         count_resp = self._dbx.submit_statement(
             sql_count,
             parameters={"list_id": list_id},
-            result_format="ARROW_STREAM",
+            qf_result_fmt="ARROW_STREAM",
         )
         total_rows = 0
         count_rows = _rows_from_resp(count_resp)
@@ -100,9 +100,9 @@ class ListReadService:
             offset=int(offset),
         )
     
-    def delete_list(self, *, list_type: SectionKey, list_id: str) -> None:
+    def delete_list(self, *, list_type: ForgeSectionKey, list_id: str) -> None:
         if list_type not in TABLE_BY_TYPE:
-            raise ServiceError("Invalid value_override_type", status_code=400)
+            raise ForgeError("Invalid value_override_type", status_code=400)
         if self._user_id:
             self.assert_owner(list_type=list_type, list_id=list_id)
 
@@ -120,12 +120,12 @@ class ListReadService:
             parameters={
                 "list_id": list_id,
             },
-            result_format="JSON_ARRAY",
+            qf_result_fmt="JSON_ARRAY",
         )
 
         if (resp.get("status") or {}).get("state") != "SUCCEEDED":
             logger.error("Delete failed list_id=%s resp=%s", list_id, resp)
-            raise ServiceError("Delete failed", status_code=500)
+            raise ForgeError("Delete failed", status_code=500)
 
         self._mysql.execute_write(
             """
@@ -139,9 +139,9 @@ class ListReadService:
 
     # ---------------- internals ----------------
 
-    def assert_owner(self, *, list_type: SectionKey, list_id: str) -> None:
+    def assert_owner(self, *, list_type: ForgeSectionKey, list_id: str) -> None:
         if not self._user_id:
-            raise ServiceError("Missing user context", status_code=401)
+            raise ForgeError("Missing user context", status_code=401)
 
         sql = """
         SELECT 1
@@ -162,10 +162,10 @@ class ListReadService:
             },
         )
         if not rows:
-            raise ServiceError("You do not have permission to modify this list", status_code=403)
+            raise ForgeError("You do not have permission to modify this list", status_code=403)
 
-    def _fetch_index_for_type(self, list_type: SectionKey, *, include_expired: bool) -> List[ValueOverrideMeta]:
-        del include_expired
+    def _fetch_index_for_type(self, list_type: ForgeSectionKey, *, qf_include_expired: bool) -> List[ValueOverrideMeta]:
+        del qf_include_expired
         sql = """
                 SELECT
                 list_id AS list_id,
@@ -216,8 +216,8 @@ class ListReadService:
 
         return out
 
-    def _resolve_meta_by_id(self, *, list_type: SectionKey, list_id: str, include_expired: bool) -> tuple[str, str]:
-        del include_expired
+    def _resolve_meta_by_id(self, *, list_type: ForgeSectionKey, list_id: str, qf_include_expired: bool) -> tuple[str, str]:
+        del qf_include_expired
         sql = """
         SELECT list_name AS list_name, user_name AS owner
         FROM crosswalk_list_meta
@@ -239,13 +239,13 @@ class ListReadService:
             },
         )
         if not rows:
-            raise ServiceError("List not found", status_code=404)
+            raise ForgeError("List not found", status_code=404)
 
         row = rows[0]
         list_name = (row.get("list_name") or "").strip()
         owner = (row.get("owner") or "").strip()
         if not list_name or not owner:
-            raise ServiceError("List not found", status_code=404)
+            raise ForgeError("List not found", status_code=404)
 
         return list_name, owner
 

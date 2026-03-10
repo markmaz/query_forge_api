@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.llm.llm_client import LLMClient
 
 
@@ -59,7 +59,7 @@ def test_chat_json_invalid_response_includes_attempt_details() -> None:
         ]
     )
 
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         client.chat_json(
             system_prompt="sys",
             user_prompt="usr",
@@ -92,7 +92,7 @@ def test_chat_json_with_trace_connect_error_returns_actionable_service_error(mon
     monkeypatch.setattr(httpx, "Client", _BrokenClient)
     client = LLMClient(endpoint="http://localhost:8000", model="qwen25-7b", timeout_seconds=1)
 
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         client.chat_json_with_trace(system_prompt="sys", user_prompt="usr", response_format=True)
 
     assert exc.value.message == "LLM provider unavailable"
@@ -120,9 +120,14 @@ def test_chat_json_with_trace_timeout_returns_gateway_timeout(monkeypatch) -> No
     monkeypatch.setattr(httpx, "Client", _TimeoutClient)
     client = LLMClient(endpoint="http://localhost:8000", model="qwen25-7b", timeout_seconds=1)
 
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         client.chat_json_with_trace(system_prompt="sys", user_prompt="usr", response_format=True)
 
     assert exc.value.message == "LLM request timed out"
     assert exc.value.status_code == 504
     assert exc.value.details["timeout_seconds"] == 1
+
+
+def test_llm_client_normalizes_endpoint_with_leading_equals() -> None:
+    client = LLMClient(endpoint="==http://localhost:8000", model="qwen25-7b", timeout_seconds=1)
+    assert client._chat_url() == "http://localhost:8000/v1/chat/completions"

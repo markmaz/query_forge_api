@@ -4,14 +4,15 @@ import logging
 from typing import Any, Dict
 
 from flask import request
-from flask_restx import Namespace, Resource, fields
+from flask_restx import Namespace, fields
+from app.routes.forge_resource import ForgeResource
 from pydantic import ValidationError
 
 from app.config import QF_PROMPT_FEEDBACK_MAX_PAYLOAD_BYTES
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.models.prompt_feedback_schema import PromptFeedbackRequest, PromptFeedbackResponse
-from app.routes._route_utils import get_user_id, get_workspace_id_from_header
+from app.routes.request_helpers import require_user_id, extract_workspace_id
 from app.services.prompt_feedback_service import PromptFeedbackService
 
 logger = logging.getLogger(__name__)
@@ -44,30 +45,30 @@ _prompt_feedback_request_model = prompt_feedback_ns.model(
 
 
 @prompt_feedback_ns.route("")
-class PromptFeedback(Resource):
+class PromptFeedback(ForgeResource):
     @token_required
     @prompt_feedback_ns.expect(_prompt_feedback_request_model, validate=False)
     def post(self):
         try:
             body: Dict[str, Any] = request.get_json(silent=True) or {}
             if not isinstance(body, dict):
-                raise ServiceError("Invalid JSON body", status_code=400)
+                raise ForgeError("Invalid JSON body", status_code=400)
 
             if int(request.content_length or 0) > int(QF_PROMPT_FEEDBACK_MAX_PAYLOAD_BYTES):
-                raise ServiceError(
+                raise ForgeError(
                     f"request body exceeds max size of {int(QF_PROMPT_FEEDBACK_MAX_PAYLOAD_BYTES)} bytes",
                     status_code=413,
                 )
 
-            header_workspace_id = get_workspace_id_from_header()
+            header_workspace_id = extract_workspace_id()
             payload_workspace_id = str(body.get("workspace_id") or "").strip()
             if not payload_workspace_id:
-                raise ServiceError("workspace_id is required", status_code=400)
+                raise ForgeError("workspace_id is required", status_code=400)
             if payload_workspace_id != header_workspace_id:
-                raise ServiceError("workspace_id must match X-Workspace-Id header", status_code=400)
+                raise ForgeError("workspace_id must match X-Workspace-Id header", status_code=400)
 
             parsed = PromptFeedbackRequest.model_validate(body)
-            user_id = get_user_id()
+            user_id = require_user_id()
 
             service = PromptFeedbackService(
                 max_payload_bytes=int(QF_PROMPT_FEEDBACK_MAX_PAYLOAD_BYTES),
@@ -102,7 +103,7 @@ class PromptFeedback(Resource):
                 "error": "Invalid request",
                 "details": exc.errors(include_url=False, include_context=False, include_input=False),
             }, 400
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("prompt feedback failed")

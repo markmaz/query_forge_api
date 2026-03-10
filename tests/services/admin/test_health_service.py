@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import patch
 
-import pytest
 
 from app.services.admin.health_service import AdminHealthService
 

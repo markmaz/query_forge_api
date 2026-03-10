@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import ExecuteResult
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeExecResult
 from app.services.semantic.semantic_relationship_service import SemanticRelationshipService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_relationship_create_success_with_same_vertical() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {"id": 1, "vertical_norm": "education"},
@@ -30,7 +30,7 @@ def test_relationship_create_success_with_same_vertical() -> None:
             }
         ],
     ]
-    sql.insert_responses = [ExecuteResult(rowcount=1, lastrowid=9)]
+    sql.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=9)]
 
     svc = SemanticRelationshipService(sql=sql)
     row = svc.create_relationship(
@@ -46,7 +46,7 @@ def test_relationship_create_success_with_same_vertical() -> None:
 
 
 def test_relationship_rejects_cross_vertical() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {"id": 1, "vertical_norm": "education"},
@@ -55,7 +55,7 @@ def test_relationship_rejects_cross_vertical() -> None:
     ]
 
     svc = SemanticRelationshipService(sql=sql)
-    with pytest.raises(ServiceError, match="Cross-vertical relationships"):
+    with pytest.raises(ForgeError, match="Cross-vertical relationships"):
         svc.create_relationship(
             {
                 "parent_concept_id": 1,
@@ -66,9 +66,9 @@ def test_relationship_rejects_cross_vertical() -> None:
 
 
 def test_relationship_rejects_self_reference() -> None:
-    svc = SemanticRelationshipService(sql=FakeSQLExecutor())
+    svc = SemanticRelationshipService(sql=FakeForgeQueryPort())
 
-    with pytest.raises(ServiceError, match="must differ"):
+    with pytest.raises(ForgeError, match="must differ"):
         svc.create_relationship(
             {
                 "parent_concept_id": 3,
@@ -79,7 +79,7 @@ def test_relationship_rejects_self_reference() -> None:
 
 
 def test_relationship_rejects_cycle() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {"id": 3, "vertical_norm": "education"},
@@ -91,7 +91,7 @@ def test_relationship_rejects_cycle() -> None:
 
     svc = SemanticRelationshipService(sql=sql)
 
-    with pytest.raises(ServiceError, match="cycle"):
+    with pytest.raises(ForgeError, match="cycle"):
         svc.create_relationship(
             {
                 "parent_concept_id": 3,

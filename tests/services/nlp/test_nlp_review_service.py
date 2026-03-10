@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 
-from app.ports.sql_executor import ExecuteResult
+from app.ports.sql_executor import ForgeExecResult
 from app.services.nlp_review_service import NLPReviewService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_review_queue_round_trip() -> None:
-    sql = FakeSQLExecutor()
-    sql.insert_responses = [ExecuteResult(rowcount=1, lastrowid=100)]
+    sql = FakeForgeQueryPort()
+    sql.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=100)]
     sql.query_mappings_responses = [
         [
             {

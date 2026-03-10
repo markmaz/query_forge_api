@@ -2,29 +2,29 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Mapping, Optional, Protocol, Sequence, Set, Tuple
 
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 
 # ---------------------------
 # Shared types
 # ---------------------------
 
-SectionKey = Literal["regions", "npiCategories", "serviceLines"]
+ForgeSectionKey = Literal["regions", "npiCategories", "serviceLines"]
 
-TABLE_BY_TYPE_DBX: dict[SectionKey, str] = {
+TABLE_BY_TYPE_DBX: dict[ForgeSectionKey, str] = {
     "regions": "workboard.custom_regions_lists",
     "npiCategories": "workboard.custom_npi_categories_lists",
     "serviceLines": "workboard.custom_service_lines_lists",
 }
 
 # ✅ MySQL physical tables (I prefer underscores; change if you want to keep exact names)
-TABLE_BY_TYPE_MYSQL: dict[SectionKey, str] = {
+TABLE_BY_TYPE_MYSQL: dict[ForgeSectionKey, str] = {
     "regions": "workboard.custom_regions_lists",
     "npiCategories": "workboard.custom_npi_categories_lists",
     "serviceLines": "workboard.custom_service_lines_lists",
 }
 
 # Columns for inserts (Databricks keeps current shape).
-COLUMNS_BY_TYPE_DBX: dict[SectionKey, List[str]] = {
+COLUMNS_BY_TYPE_DBX: dict[ForgeSectionKey, List[str]] = {
     "regions": [
         "list_id", "workspace_id",
         "list_name", "user_name", "create_date", "expiration_date",
@@ -43,7 +43,7 @@ COLUMNS_BY_TYPE_DBX: dict[SectionKey, List[str]] = {
 }
 
 # MySQL includes user metadata + share flag for visibility.
-COLUMNS_BY_TYPE_MYSQL: dict[SectionKey, List[str]] = {
+COLUMNS_BY_TYPE_MYSQL: dict[ForgeSectionKey, List[str]] = {
     "regions": [
         "workspace_id",
         "list_name", "user_name", "user_id", "is_shared", "create_date", "expiration_date",
@@ -65,7 +65,7 @@ COLUMNS_BY_TYPE_MYSQL: dict[SectionKey, List[str]] = {
 # Databricks DDL
 # ---------------------------
 
-DDL_BY_TYPE_DBX: dict[SectionKey, str] = {
+DDL_BY_TYPE_DBX: dict[ForgeSectionKey, str] = {
     "regions": """
 CREATE TABLE IF NOT EXISTS workboard.custom_regions_lists (
   list_id STRING COMMENT 'stable list UUID',
@@ -115,7 +115,7 @@ USING DELTA
 # MySQL DDL (workspace_id + user_id + is_shared)
 # ---------------------------
 
-DDL_BY_TYPE_MYSQL: dict[SectionKey, str] = {
+DDL_BY_TYPE_MYSQL: dict[ForgeSectionKey, str] = {
     "regions": """
 CREATE TABLE IF NOT EXISTS workboard.custom_regions_lists (
   workspace_id VARCHAR(64) NOT NULL,
@@ -187,13 +187,13 @@ def _chunks(items: List[Any], n: int):
     for i in range(0, len(items), n):
         yield items[i : i + n]
 
-def _quote_dbx_table(table: str) -> str:
+def _forge_quote_dbx_table(table: str) -> str:
     return ".".join(f"`{p}`" for p in table.split("."))
 
-def _cols_sig(cols: Sequence[str]) -> set[str]:
+def _forge_cols_sig(cols: Sequence[str]) -> set[str]:
     return {c.lower() for c in cols}
 
-def _column_type_dbx(name: str) -> str:
+def _forge_column_type_dbx(name: str) -> str:
     if name in {"create_date", "expiration_date"}:
         return "DATE"
     return "STRING"
@@ -202,29 +202,29 @@ def _column_type_dbx(name: str) -> str:
 # Port / Protocol
 # ---------------------------
 
-class ListWriterPort(Protocol):
+class ForgeListWriterPort(Protocol):
     def ensure_tables(self) -> None: ...
-    def insert_rows(self, list_type: SectionKey, rows: List[Dict[str, Any]]) -> int: ...
+    def insert_rows(self, list_type: ForgeSectionKey, rows: List[Dict[str, Any]]) -> int: ...
 
-class DatabricksListWriter(ListWriterPort):
+class ForgeDatabricksListWriter(ForgeListWriterPort):
     """
     Databricks SQL Statements API writer (chunked VALUES).
     Ensures tables exist and validates schema.
     """
 
-    def __init__(self, sql: SQLExecutor, *, max_rows_per_chunk: int = 500):
+    def __init__(self, sql: ForgeQueryPort, *, max_rows_per_chunk: int = 500):
         self._sql = sql
         self._chunk_size = max_rows_per_chunk
-        self._ensured: Set[SectionKey] = set()
+        self._ensured: Set[ForgeSectionKey] = set()
 
     def ensure_tables(self) -> None:
         for k in TABLE_BY_TYPE_DBX.keys():
             self._ensure_table(k)
 
-    def ensure_table(self, list_type: SectionKey) -> None:
+    def ensure_table(self, list_type: ForgeSectionKey) -> None:
         self._ensure_table(list_type)
 
-    def insert_rows(self, list_type: SectionKey, rows: List[Dict[str, Any]]) -> int:
+    def insert_rows(self, list_type: ForgeSectionKey, rows: List[Dict[str, Any]]) -> int:
         if not rows:
             return 0
 
@@ -235,8 +235,8 @@ class DatabricksListWriter(ListWriterPort):
 
         total_inserted = 0
         for chunk in _chunks(rows, self._chunk_size):
-            sql_text, params = self._build_insert_values_dbx(table, cols, chunk)
-            resp = self._sql.submit_statement(sql_text, parameters=params, result_format="JSON_ARRAY")
+            sql_text, params = self._forge_build_insert_dbx(table, cols, chunk)
+            resp = self._sql.submit_statement(sql_text, parameters=params, qf_result_fmt="JSON_ARRAY")
 
             state = (resp.get("status") or {}).get("state")
             if state != "SUCCEEDED":
@@ -246,12 +246,12 @@ class DatabricksListWriter(ListWriterPort):
 
         return total_inserted
 
-    def _ensure_table(self, list_type: SectionKey) -> None:
+    def _ensure_table(self, list_type: ForgeSectionKey) -> None:
         if list_type in self._ensured:
             return
 
         ddl = DDL_BY_TYPE_DBX[list_type]
-        resp = self._sql.submit_statement(ddl, result_format="JSON_ARRAY")
+        resp = self._sql.submit_statement(ddl, qf_result_fmt="JSON_ARRAY")
         state = (resp.get("status") or {}).get("state")
         if state != "SUCCEEDED":
             raise RuntimeError(f"Databricks CREATE TABLE failed: {resp}")
@@ -259,24 +259,24 @@ class DatabricksListWriter(ListWriterPort):
         self._validate_table_schema(list_type)
         self._ensured.add(list_type)
 
-    def _validate_table_schema(self, list_type: SectionKey) -> None:
+    def _validate_table_schema(self, list_type: ForgeSectionKey) -> None:
         table = TABLE_BY_TYPE_DBX[list_type]
-        expected = _cols_sig(COLUMNS_BY_TYPE_DBX[list_type])
-        actual = self._fetch_table_columns_dbx(table)
+        expected = _forge_cols_sig(COLUMNS_BY_TYPE_DBX[list_type])
+        actual = self._forge_fetch_cols_dbx(table)
 
         missing = [c for c in expected if c not in actual]
         if missing:
-            self._add_missing_columns_dbx(table, missing)
-            actual = self._fetch_table_columns_dbx(table)
+            self._forge_add_missing_cols_dbx(table, missing)
+            actual = self._forge_fetch_cols_dbx(table)
             missing = [c for c in expected if c not in actual]
             if missing:
                 raise RuntimeError(
                     f"Table {table} missing required cols: {missing}. Actual: {sorted(actual)}"
                 )
 
-    def _fetch_table_columns_dbx(self, table: str) -> set[str]:
-        table_sql = _quote_dbx_table(table)
-        resp = self._sql.submit_statement(f"DESCRIBE TABLE {table_sql}", result_format="JSON_ARRAY")
+    def _forge_fetch_cols_dbx(self, table: str) -> set[str]:
+        table_sql = _forge_quote_dbx_table(table)
+        resp = self._sql.submit_statement(f"DESCRIBE TABLE {table_sql}", qf_result_fmt="JSON_ARRAY")
 
         state = (resp.get("status") or {}).get("state")
         if state != "SUCCEEDED":
@@ -302,16 +302,16 @@ class DatabricksListWriter(ListWriterPort):
 
         return cols
 
-    def _add_missing_columns_dbx(self, table: str, missing: List[str]) -> None:
-        table_sql = _quote_dbx_table(table)
-        cols_sql = ", ".join(f"`{c}` {_column_type_dbx(c)}" for c in missing)
+    def _forge_add_missing_cols_dbx(self, table: str, missing: List[str]) -> None:
+        table_sql = _forge_quote_dbx_table(table)
+        cols_sql = ", ".join(f"`{c}` {_forge_column_type_dbx(c)}" for c in missing)
         sql = f"ALTER TABLE {table_sql} ADD COLUMNS ({cols_sql})"
-        resp = self._sql.submit_statement(sql, result_format="JSON_ARRAY")
+        resp = self._sql.submit_statement(sql, qf_result_fmt="JSON_ARRAY")
         state = (resp.get("status") or {}).get("state")
         if state != "SUCCEEDED":
             raise RuntimeError(f"ALTER TABLE failed: {resp}")
 
-    def _build_insert_values_dbx(
+    def _forge_build_insert_dbx(
         self,
         table: str,
         cols: Sequence[str],
@@ -334,7 +334,7 @@ class DatabricksListWriter(ListWriterPort):
             values_sql_parts.append("(" + ", ".join(ph) + ")")
 
         cols_sql = ", ".join(f"`{c}`" for c in cols)
-        table_sql = _quote_dbx_table(table)
+        table_sql = _forge_quote_dbx_table(table)
         values_sql = ",\n  ".join(values_sql_parts)
 
         sql_text = f"""
@@ -347,23 +347,23 @@ class DatabricksListWriter(ListWriterPort):
         return sql_text, params
 
 
-class MySQLListWriter(ListWriterPort):
+class ForgeMySQLListWriter(ForgeListWriterPort):
     """
     MySQL writer (chunked multi-row VALUES).
-    Uses your SQLAlchemy transaction pattern via SQLExecutor.
+    Uses your SQLAlchemy transaction pattern via ForgeQueryPort.
     Ensures tables exist and validates schema via information_schema.
     """
 
-    def __init__(self, mysql: SQLExecutor, *, max_rows_per_chunk: int = 1000):
+    def __init__(self, mysql: ForgeQueryPort, *, max_rows_per_chunk: int = 1000):
         self._mysql = mysql
         self._chunk_size = max_rows_per_chunk
-        self._ensured: Set[SectionKey] = set()
+        self._ensured: Set[ForgeSectionKey] = set()
 
     def ensure_tables(self) -> None:
         for k in TABLE_BY_TYPE_MYSQL.keys():
             self._ensure_table(k)
 
-    def insert_rows(self, list_type: SectionKey, rows: List[Dict[str, Any]]) -> int:
+    def insert_rows(self, list_type: ForgeSectionKey, rows: List[Dict[str, Any]]) -> int:
         if not rows:
             return 0
 
@@ -374,13 +374,13 @@ class MySQLListWriter(ListWriterPort):
 
         total = 0
         for chunk in _chunks(rows, self._chunk_size):
-            sql_text, params = self._build_insert_values_mysql(table, cols, chunk)
+            sql_text, params = self._forge_build_insert_mysql(table, cols, chunk)
             self._mysql.execute_write(sql_text, params)
             # For INSERT, affected == inserted rows typically; but drivers vary with duplicates.
             total += len(chunk)
         return total
 
-    def _ensure_table(self, list_type: SectionKey) -> None:
+    def _ensure_table(self, list_type: ForgeSectionKey) -> None:
         if list_type in self._ensured:
             return
 
@@ -389,12 +389,12 @@ class MySQLListWriter(ListWriterPort):
         self._validate_table_schema(list_type)
         self._ensured.add(list_type)
 
-    def _validate_table_schema(self, list_type: SectionKey) -> None:
+    def _validate_table_schema(self, list_type: ForgeSectionKey) -> None:
         table_fq = TABLE_BY_TYPE_MYSQL[list_type]
-        schema, table = self._split_schema_table(table_fq)
+        schema, table = self._forge_split_schema_table(table_fq)
 
-        expected = _cols_sig(COLUMNS_BY_TYPE_MYSQL[list_type])
-        actual = self._fetch_table_columns_mysql(schema, table)
+        expected = _forge_cols_sig(COLUMNS_BY_TYPE_MYSQL[list_type])
+        actual = self._forge_fetch_cols_mysql(schema, table)
 
         missing = [c for c in expected if c not in actual]
         if missing:
@@ -402,14 +402,14 @@ class MySQLListWriter(ListWriterPort):
                 f"MySQL table {schema}.{table} missing required cols: {missing}. Actual: {sorted(actual)}"
             )
 
-    def _split_schema_table(self, fq: str) -> Tuple[str, str]:
+    def _forge_split_schema_table(self, fq: str) -> Tuple[str, str]:
         parts = fq.split(".")
         if len(parts) != 2:
             # default schema if user passes "table" only
             return ("workboard", fq)
         return (parts[0], parts[1])
 
-    def _fetch_table_columns_mysql(self, schema: str, table: str) -> set[str]:
+    def _forge_fetch_cols_mysql(self, schema: str, table: str) -> set[str]:
         rows = self._mysql.execute_query_mappings(
             """
             SELECT COLUMN_NAME
@@ -420,7 +420,7 @@ class MySQLListWriter(ListWriterPort):
         )
         return {str(r["COLUMN_NAME"]).lower() for r in rows}
 
-    def _build_insert_values_mysql(
+    def _forge_build_insert_mysql(
         self,
         table_fq: str,
         cols: Sequence[str],
@@ -446,7 +446,7 @@ class MySQLListWriter(ListWriterPort):
         values_sql = ", ".join(values_sql_parts)
 
         # table_fq like "workboard.custom_regions_lists"
-        schema, table = self._split_schema_table(table_fq)
+        schema, table = self._forge_split_schema_table(table_fq)
         table_sql = f"`{schema}`.`{table}`"
 
         sql_text = f"""
@@ -457,7 +457,7 @@ class MySQLListWriter(ListWriterPort):
         return sql_text, params
 
 
-class DualWriteListWriter(ListWriterPort):
+class ForgeDualListWriter(ForgeListWriterPort):
     """
     Writes to MySQL first (fast UI source of truth), then best-effort to Databricks.
     You can choose whether Databricks failures should raise.
@@ -465,8 +465,8 @@ class DualWriteListWriter(ListWriterPort):
 
     def __init__(
         self,
-        mysql_writer: MySQLListWriter,
-        dbx_writer: DatabricksListWriter,
+        mysql_writer: ForgeMySQLListWriter,
+        dbx_writer: ForgeDatabricksListWriter,
         *,
         fail_if_dbx_fails: bool = False,
         on_dbx_error: Optional[callable] = None,
@@ -480,7 +480,7 @@ class DualWriteListWriter(ListWriterPort):
         self._mysql.ensure_tables()
         self._dbx.ensure_tables()
 
-    def insert_rows(self, list_type: SectionKey, rows: List[Dict[str, Any]]) -> int:
+    def insert_rows(self, list_type: ForgeSectionKey, rows: List[Dict[str, Any]]) -> int:
         inserted = self._mysql.insert_rows(list_type, rows)
 
         try:

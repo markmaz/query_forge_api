@@ -1,23 +1,23 @@
 from celery import shared_task
 from sqlalchemy import create_engine
 
-from app.adapters.databricks_sql_executor import DatabricksSQLExecutor
+from app.adapters.databricks_sql_executor import DatabricksForgeQueryPort
 from app.config import MYSQL_URL  # e.g. mysql+pymysql://user:pass@host/db
 from app.services.catalog.catalog_sync import reconcile_columns, sync_dbx_catalog_snapshot
 from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
 
 
-def build_executor_for_workspace(workspace_id: str) -> DatabricksSQLExecutor:
+def build_forge_executor(workspace_id: str) -> DatabricksForgeQueryPort:
     ctx = WorkspaceContextBuilder().build(workspace_id)
     return ctx.sql_exec
 
 
-@shared_task(bind=True, name="catalog.sync_workspace")
+@shared_task(bind=True, name="qf.catalog.sync_workspace")
 def sync_workspace_catalog(self, workspace_id: str, schema_name: str = "asset"):
     engine = create_engine(MYSQL_URL, pool_pre_ping=True)
 
     # however you build your executor (token manager already in your app)
-    executor: DatabricksSQLExecutor = build_executor_for_workspace(workspace_id)
+    executor: DatabricksForgeQueryPort = build_forge_executor(workspace_id)
 
     snap = sync_dbx_catalog_snapshot(
         engine=engine,

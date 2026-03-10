@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.decorators.validate import validate_params
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 
 
 class _Dummy:
@@ -18,7 +18,7 @@ def _validate_password(password=None):
 
 
 def test_validate_params_missing() -> None:
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         _Dummy().func(a="1")
 
 
@@ -31,5 +31,5 @@ def test_validate_params_plain_function_positional_success() -> None:
 
 
 def test_validate_params_plain_function_missing() -> None:
-    with pytest.raises(ServiceError):
+    with pytest.raises(ForgeError):
         _validate_password()

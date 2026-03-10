@@ -4,7 +4,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Protocol, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Protocol, Sequence
 
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
@@ -23,7 +23,7 @@ from app.config import (
     VLLM_MODEL,
     VLLM_TIMEOUT,
 )
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.llm.io_logging import (
     log_llm_exception,
     log_llm_request,
@@ -140,7 +140,7 @@ class ConversationStore(Protocol):
         user_id: str,
         conversation_id: str,
         messages: Sequence[Mapping[str, Any]],
-        ttl_seconds: int,
+        qf_ttl_seconds: int,
     ) -> None:
         ...
 
@@ -162,7 +162,7 @@ class HybridConversationStore:
         user_id: str,
         conversation_id: str,
         messages: Sequence[Mapping[str, Any]],
-        ttl_seconds: int,
+        qf_ttl_seconds: int,
     ) -> None:
         now_iso = _utc_now_iso()
         existing = self.get_conversation(workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id) or {}
@@ -182,7 +182,7 @@ class HybridConversationStore:
             user_id=user_id,
             conversation_id=conversation_id,
             conversation=convo,
-            ttl_seconds=ttl_seconds,
+            qf_ttl_seconds=qf_ttl_seconds,
         )
 
     def get_conversation(self, *, workspace_id: str, user_id: str, conversation_id: str) -> Optional[Dict[str, Any]]:
@@ -213,7 +213,7 @@ class HybridConversationStore:
         user_id: str,
         conversation_id: str,
         conversation: Mapping[str, Any],
-        ttl_seconds: int,
+        qf_ttl_seconds: int,
     ) -> None:
         key = _conversation_store_key(
             namespace=self._namespace,
@@ -223,7 +223,7 @@ class HybridConversationStore:
         )
         convo = _normalize_conversation_record(conversation, conversation_id=conversation_id)
         payload = json.dumps(convo, separators=(",", ":"))
-        self._write(key, payload, ttl_seconds)
+        self._write(key, payload, qf_ttl_seconds)
 
     def list_conversations(
         self,
@@ -301,11 +301,11 @@ class HybridConversationStore:
                 logger.debug("forge insights valkey read failed", exc_info=True)
         return _IN_MEMORY_CONV_STORE.get(key)
 
-    def _write(self, key: str, value: str, ttl_seconds: int) -> None:
+    def _write(self, key: str, value: str, qf_ttl_seconds: int) -> None:
         client = _get_valkey_client()
         if client is not None:
             try:
-                client.setex(key, int(ttl_seconds), value)
+                client.setex(key, int(qf_ttl_seconds), value)
                 return
             except Exception:
                 logger.debug("forge insights valkey write failed", exc_info=True)
@@ -367,13 +367,13 @@ class MinimalChatService:
         try:
             req = MinimalChatRequest.model_validate(dict(body or {}))
         except ValidationError as exc:
-            raise ServiceError(
+            raise ForgeError(
                 "Invalid chat request",
                 status_code=400,
                 details={"errors": _safe_validation_errors(exc)},
             ) from exc
         except ValueError as exc:
-            raise ServiceError("Invalid chat request", status_code=400, details={"message": str(exc)}) from exc
+            raise ForgeError("Invalid chat request", status_code=400, details={"message": str(exc)}) from exc
 
         conversation_id = req.conversation_id or _new_conversation_id(prefix=self._conversation_prefix)
         prior_conversation = self._get_conversation(
@@ -382,7 +382,7 @@ class MinimalChatService:
             conversation_id=conversation_id,
         )
         if req.conversation_id and prior_conversation is None and self._require_existing_conversation:
-            raise ServiceError("Conversation not found", status_code=404, details={"conversation_id": conversation_id})
+            raise ForgeError("Conversation not found", status_code=404, details={"conversation_id": conversation_id})
 
         conversation = prior_conversation or _new_conversation_record(conversation_id=conversation_id)
         history = list(conversation.get("messages") or [])
@@ -406,7 +406,7 @@ class MinimalChatService:
         trace = self._call_provider(provider_payload)
         assistant_content = _extract_assistant_content(trace["body"])
         if assistant_content is None:
-            raise ServiceError(
+            raise ForgeError(
                 "Malformed provider response",
                 status_code=502,
                 details={"message": "missing assistant message content"},
@@ -452,7 +452,7 @@ class MinimalChatService:
             user_id=user_id,
             conversation_id=conversation_id,
             conversation=updated_conversation,
-            ttl_seconds=self._conversation_ttl_seconds,
+            qf_ttl_seconds=self._conversation_ttl_seconds,
         )
 
         if req.debug:
@@ -477,10 +477,10 @@ class MinimalChatService:
     def get_conversation(self, *, workspace_id: str, user_id: str, conversation_id: str) -> Dict[str, Any]:
         token = str(conversation_id or "").strip()
         if token == "":
-            raise ServiceError("conversation_id is required", status_code=400)
+            raise ForgeError("conversation_id is required", status_code=400)
         convo = self._get_conversation(workspace_id=workspace_id, user_id=user_id, conversation_id=token)
         if convo is None:
-            raise ServiceError("Conversation not found", status_code=404, details={"conversation_id": token})
+            raise ForgeError("Conversation not found", status_code=404, details={"conversation_id": token})
         out = dict(convo)
         out["feature"] = self._feature_name
         return out
@@ -488,10 +488,10 @@ class MinimalChatService:
     def reset_conversation(self, *, workspace_id: str, user_id: str, conversation_id: str) -> Dict[str, Any]:
         token = str(conversation_id or "").strip()
         if token == "":
-            raise ServiceError("conversation_id is required", status_code=400)
+            raise ForgeError("conversation_id is required", status_code=400)
         deleted = self._delete_store_conversation(workspace_id=workspace_id, user_id=user_id, conversation_id=token)
         if not deleted:
-            raise ServiceError("Conversation not found", status_code=404, details={"conversation_id": token})
+            raise ForgeError("Conversation not found", status_code=404, details={"conversation_id": token})
         return {"feature": self._feature_name, "conversation_id": token, "deleted": True}
 
     def _call_provider(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
@@ -518,7 +518,7 @@ class MinimalChatService:
                 url=chat_url,
                 message=str(exc),
             )
-            raise ServiceError("Chat provider request failed", status_code=502, details={"message": str(exc)}) from exc
+            raise ForgeError("Chat provider request failed", status_code=502, details={"message": str(exc)}) from exc
 
         raw_text = resp.text
         log_llm_response(
@@ -530,7 +530,7 @@ class MinimalChatService:
         )
         if resp.status_code >= 400:
             logger.warning("forge insights provider http_error status=%s", resp.status_code)
-            raise ServiceError(
+            raise ForgeError(
                 "Chat provider request failed",
                 status_code=502,
                 details={
@@ -542,13 +542,13 @@ class MinimalChatService:
         try:
             body = resp.json()
         except Exception as exc:
-            raise ServiceError(
+            raise ForgeError(
                 "Malformed provider response",
                 status_code=502,
                 details={"message": f"response_json_parse_error:{str(exc)}"},
             ) from exc
         if not isinstance(body, dict):
-            raise ServiceError("Malformed provider response", status_code=502, details={"message": "response must be object"})
+            raise ForgeError("Malformed provider response", status_code=502, details={"message": "response must be object"})
         return {"status_code": resp.status_code, "body": body, "raw_text": raw_text}
 
     def _chat_url(self) -> str:
@@ -580,7 +580,7 @@ class MinimalChatService:
         user_id: str,
         conversation_id: str,
         conversation: Mapping[str, Any],
-        ttl_seconds: int,
+        qf_ttl_seconds: int,
     ) -> None:
         save_conv = getattr(self._conversation_store, "save_conversation", None)
         if callable(save_conv):
@@ -589,7 +589,7 @@ class MinimalChatService:
                 user_id=user_id,
                 conversation_id=conversation_id,
                 conversation=conversation,
-                ttl_seconds=ttl_seconds,
+                qf_ttl_seconds=qf_ttl_seconds,
             )
             return
         save_messages = getattr(self._conversation_store, "save_messages", None)
@@ -599,10 +599,10 @@ class MinimalChatService:
                 user_id=user_id,
                 conversation_id=conversation_id,
                 messages=list(conversation.get("messages") or []),
-                ttl_seconds=ttl_seconds,
+                qf_ttl_seconds=qf_ttl_seconds,
             )
             return
-        raise ServiceError("Conversation store does not support saving", status_code=500)
+        raise ForgeError("Conversation store does not support saving", status_code=500)
 
     def _list_store_conversations(self, *, workspace_id: str, user_id: str, limit: int) -> List[Dict[str, Any]]:
         list_fn = getattr(self._conversation_store, "list_conversations", None)

@@ -27,33 +27,3 @@ def test_query_tree_missing_workspace(client, auth_headers):
 def test_query_tree_requires_auth(client):
     resp = client.get("/api/v1/query-tree/?view=my")
     assert resp.status_code == 403
-
-
-def test_visible_cohorts_success(client, auth_headers, monkeypatch):
-    class _Svc:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def list_visible(self):
-            return {
-                "cohorts": [
-                    {
-                        "queryId": "q1",
-                        "workspaceId": "ws-1",
-                        "ownerUserId": "user-1",
-                        "title": "My Cohort",
-                        "prompt": None,
-                        "updatedAt": None,
-                        "accessVia": "owner",
-                        "canEdit": True,
-                    }
-                ],
-                "hasShared": True,
-            }
-
-    monkeypatch.setattr(query_tree_routes, "CohortVisibilityService", _Svc)
-
-    resp = client.get("/api/v1/saved-queries/cohorts/visible", headers=auth_headers)
-    assert resp.status_code == 200
-    assert resp.json["hasShared"] is True
-    assert resp.json["cohorts"][0]["queryId"] == "q1"

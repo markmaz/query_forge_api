@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
-
-logger = logging.getLogger(__name__)
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 
 
 @dataclass(frozen=True)
@@ -18,21 +15,16 @@ class SavedQueryReadResult:
     query_id: str
     workspace_id: Optional[str]
     scope: str
-
     owner_user_id: Optional[str]
     folder_id: Optional[str]
-
     title: str
     description: Optional[str]
-
     sql_json: Dict[str, Any]
-
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
-
-    # access metadata
     can_edit: bool
-    access_via: str  # "owner" | "share" | "admin" | "library"
+    access_via: str
+
 
 @dataclass(frozen=True)
 class RecentQueryItem:
@@ -42,131 +34,20 @@ class RecentQueryItem:
     scope: str
     folder_id: Optional[str]
 
-class SavedQueryReadService:
-    def _tool_from_sql_json(self, sql_json: Optional[str]) -> Optional[str]:
-        if not sql_json:
-            return None
-        try:
-            data = json.loads(sql_json) if isinstance(sql_json, str) else sql_json
-        except Exception:
-            return None
-        if not isinstance(data, dict):
-            return None
-        meta = data.get("meta") if isinstance(data, dict) else None
-        tool = meta.get("tool") if isinstance(meta, dict) else None
-        if tool:
-            return str(tool)
-        return None
+
+@dataclass(frozen=True)
+class _ReadContext:
+    workspace_id: str
+    user_id: str
+    is_admin: bool
 
 
-    """Read (hydrate) a saved query, enforcing access rules.
+class _SavedQueryReadRepository:
+    def __init__(self, *, ctx: _ReadContext, sql: ForgeQueryPort):
+        self._ctx = ctx
+        self._sql = sql
 
-    Access rules:
-      - Library queries (scope='LIBRARY' AND workspace_id IS NULL): readable by any caller; can_edit only if admin.
-      - Non-library queries: workspace_id must match caller workspace_id
-      - A user can read if:
-          * they are the owner
-          * or the query is shared to them (workspace share or user share) via saved_query_acl
-      - can_edit is true if:
-          * owner, or
-          * share row has permission WRITE, or
-          * admin reading library
-
-    Notes:
-      - This service returns sql_json to rehydrate the query builder.
-      - It does NOT execute SQL.
-    """
-
-    def __init__(self, *, workspace_id: str, user_id: str, is_admin: bool = False, sql: Optional[SQLExecutor] = None):
-        if not user_id:
-            raise ServiceError("user_id is required", status_code=400)
-        # workspace_id may be unused when reading LIBRARY, but keep validation consistent
-        if workspace_id is None:
-            raise ServiceError("workspace_id is required", status_code=400)
-
-        self._workspace_id = workspace_id
-        self._user_id = user_id
-        self._is_admin = bool(is_admin)
-        self._sql = sql or MySQLSQLExecutor()
-
-    def get_query(self, query_id: str) -> Dict[str, Any]:
-        q = self._fetch_query(query_id)
-
-        # Determine if this is a LIBRARY query
-        is_library = (q["scope"] == "LIBRARY" and q["workspace_id"] is None)
-
-        if is_library:
-            result = SavedQueryReadResult(
-                query_id=str(q["query_id"]),
-                workspace_id=None,
-                scope=str(q["scope"]),
-                owner_user_id=str(q["owner_user_id"]) if q["owner_user_id"] else None,
-                folder_id=str(q["folder_id"]) if q["folder_id"] else None,
-                title=str(q["title"]),
-                description=str(q["description"]) if q["description"] else None,
-                sql_json=q["sql_json"],
-                created_at=q.get("created_at"),
-                updated_at=q.get("updated_at"),
-                can_edit=bool(self._is_admin),
-                access_via=("admin" if self._is_admin else "library"),
-            )
-            return _to_payload(result)
-
-        # Non-library must be in caller's workspace
-        if not self._workspace_id:
-            raise ServiceError("workspace_id is required", status_code=400)
-
-        if str(q["workspace_id"]) != str(self._workspace_id):
-            raise ServiceError("Query not found in this workspace", status_code=404)
-
-        # Owner access
-        owner_user_id = str(q["owner_user_id"]) if q["owner_user_id"] else None
-        if owner_user_id and owner_user_id == self._user_id:
-            result = SavedQueryReadResult(
-                query_id=str(q["query_id"]),
-                workspace_id=str(q["workspace_id"]),
-                scope=str(q["scope"]),
-                owner_user_id=owner_user_id,
-                folder_id=str(q["folder_id"]) if q["folder_id"] else None,
-                title=str(q["title"]),
-                description=str(q["description"]) if q["description"] else None,
-                sql_json=q["sql_json"],
-                created_at=q.get("created_at"),
-                updated_at=q.get("updated_at"),
-                can_edit=True,
-                access_via="owner",
-            )
-            return _to_payload(result)
-
-        # Shared access
-        share = self._fetch_share_access(query_id=str(q["query_id"]))
-        if not share["has_access"]:
-            # Hide existence across users
-            raise ServiceError("Saved query not found", status_code=404)
-
-        result = SavedQueryReadResult(
-            query_id=str(q["query_id"]),
-            workspace_id=str(q["workspace_id"]),
-            scope=str(q["scope"]),
-            owner_user_id=owner_user_id,
-            folder_id=str(q["folder_id"]) if q["folder_id"] else None,
-            title=str(q["title"]),
-            description=str(q["description"]) if q["description"] else None,
-            sql_json=q["sql_json"],
-            created_at=q.get("created_at"),
-            updated_at=q.get("updated_at"),
-            can_edit=bool(share["can_edit"]),
-            access_via="share",
-        )
-        return _to_payload(result)
-
-    # -------------------------
-    # DB
-    # -------------------------
-    def _fetch_query(self, query_id: str) -> Dict[str, Any]:
-        if not query_id or not isinstance(query_id, str):
-            raise ServiceError("Invalid query_id", status_code=400)
-
+    def fetch_query_row(self, *, query_id: str) -> Optional[Dict[str, Any]]:
         rows = self._sql.execute_query_mappings(
             """
             SELECT
@@ -187,29 +68,9 @@ class SavedQueryReadService:
             """,
             {"qid": query_id},
         )
-        row = rows[0] if rows else None
+        return dict(rows[0]) if rows else None
 
-        if not row:
-            raise ServiceError("Saved query not found", status_code=404)
-
-        # sql_json should be a dict already via SQLAlchemy JSON -> Python, but guard anyway
-        sj = row["sql_json"]
-        if sj is None:
-            raise ServiceError("Saved query is missing sql_json", status_code=500)
-        if isinstance(sj, str):
-            try:
-                sj = json.loads(sj)
-            except json.JSONDecodeError as exc:
-                raise ServiceError("Saved query sql_json is invalid JSON", status_code=500) from exc
-        if not isinstance(sj, dict):
-            raise ServiceError("Saved query sql_json is not an object", status_code=500)
-
-        out = dict(row)
-        out["sql_json"] = sj
-        return out
-
-    def _fetch_share_access(self, *, query_id: str) -> Dict[str, Any]:
-        # Determine whether user has access to the query via ACL rows in this workspace.
+    def fetch_share_access(self, *, query_id: str) -> Dict[str, bool]:
         rows = self._sql.execute_query_mappings(
             """
             SELECT
@@ -224,104 +85,203 @@ class SavedQueryReadService:
                 (a.principal_type = 'USER' AND a.principal_id = :uid)
               )
             """,
-            {"qid": query_id, "ws": self._workspace_id, "uid": self._user_id},
+            {"qid": query_id, "ws": self._ctx.workspace_id, "uid": self._ctx.user_id},
         )
-        row = rows[0] if rows else None
 
-        if not row:
-            return {"has_access": False, "can_edit": False}
+        row = rows[0] if rows else {}
+        has_access = int((row or {}).get("n") or 0) > 0
+        can_edit = int((row or {}).get("can_edit") or 0) > 0
+        return {"has_access": has_access, "can_edit": can_edit}
 
-        n = int(row.get("n") or 0)
-        can_edit = bool(int(row.get("can_edit") or 0))
-        return {"has_access": n > 0, "can_edit": can_edit}
-
-    def fetch_recent_queries(self, *, limit: int = 20) -> Dict[str, Any]:
-        """
-        Returns a "recent" list for the left drawer.
-        Includes queries the user can READ:
-            - library (scope=LIBRARY, workspace_id IS NULL)
-            - mine (owner in this workspace)
-            - shared (ACL row for workspace or user in this workspace)
-
-        Excludes deleted queries (is_deleted=0).
-        Ordered by updated_at desc (fallback created_at).
-        """
-        try:
-            lim = int(limit)
-        except Exception:  # noqa: BLE001
-            lim = 20
-        if lim <= 0:
-            lim = 20
-        lim = min(lim, 200)
-
-        # If workspace_id is None that's invalid per your ctor; but keep safe.
-        ws = self._workspace_id
-        uid = self._user_id
-
-        rows = self._sql.execute_query_mappings(
+    def fetch_recent(self, *, limit: int) -> List[Dict[str, Any]]:
+        return self._sql.execute_query_mappings(
             """
             SELECT
-                q.id AS id,
-                q.title AS title,
-                q.updated_at AS updated_at,
-                q.created_at AS created_at,
-                q.scope AS scope,
-                q.sql_json AS sql_json,
-                q.folder_id AS folder_id
+              q.id AS id,
+              q.title AS title,
+              q.updated_at AS updated_at,
+              q.created_at AS created_at,
+              q.scope AS scope,
+              q.sql_json AS sql_json,
+              q.folder_id AS folder_id
             FROM saved_query q
             WHERE q.is_deleted = 0
-                AND (
-                -- 1) Library (global)
+              AND (
                 (q.scope = 'LIBRARY' AND q.workspace_id IS NULL)
-
                 OR
-
-                -- 2) Owner in this workspace (MINE)
                 (q.workspace_id = :ws AND q.owner_user_id = :uid)
-
                 OR
-
-                -- 3) Shared to workspace or user in this workspace (via ACL)
                 (
-                    q.workspace_id = :ws
-                    AND EXISTS (
+                  q.workspace_id = :ws
+                  AND EXISTS (
                     SELECT 1
                     FROM saved_query_acl a
                     WHERE a.saved_query_id = q.id
-                        AND a.workspace_id = :ws
-                        AND (
+                      AND a.workspace_id = :ws
+                      AND (
                         (a.principal_type = 'WORKSPACE' AND a.principal_id = :ws)
                         OR
                         (a.principal_type = 'USER' AND a.principal_id = :uid)
-                        )
-                    )
+                      )
+                  )
                 )
-                )
+              )
             ORDER BY COALESCE(q.updated_at, q.created_at) DESC
             LIMIT :lim
             """,
-            {"ws": ws, "uid": uid, "lim": lim},
+            {"ws": self._ctx.workspace_id, "uid": self._ctx.user_id, "lim": limit},
         )
 
-        def _iso(dt: Optional[datetime]) -> Optional[str]:
-            return dt.isoformat() if dt else None
 
-        # Shape matches your frontend RecentItem
-        items: List[Dict[str, Any]] = []
-        for r in rows:
-            updated = r.get("updated_at") or r.get("created_at")
-            items.append(
+class SavedQueryReadService:
+    def __init__(self, *, workspace_id: str, user_id: str, is_admin: bool = False, sql: Optional[ForgeQueryPort] = None):
+        if not user_id:
+            raise ForgeError("user_id is required", status_code=400)
+        if workspace_id is None:
+            raise ForgeError("workspace_id is required", status_code=400)
+
+        self._ctx = _ReadContext(workspace_id=workspace_id, user_id=user_id, is_admin=bool(is_admin))
+        self._sql = sql or ForgeMetaSQL()
+        self._repo = _SavedQueryReadRepository(ctx=self._ctx, sql=self._sql)
+
+    def _tool_from_sql_json(self, sql_json: Optional[Any]) -> Optional[str]:
+        if sql_json is None:
+            return None
+        payload = sql_json
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                return None
+        if not isinstance(payload, dict):
+            return None
+        meta = payload.get("meta")
+        if not isinstance(meta, dict):
+            return None
+        tool = meta.get("tool")
+        return str(tool) if tool else None
+
+    def get_query(self, query_id: str) -> Dict[str, Any]:
+        query = self._fetch_query(query_id)
+        is_library = query["scope"] == "LIBRARY" and query["workspace_id"] is None
+
+        if is_library:
+            return _to_payload(
+                SavedQueryReadResult(
+                    query_id=str(query["query_id"]),
+                    workspace_id=None,
+                    scope=str(query["scope"]),
+                    owner_user_id=(str(query["owner_user_id"]) if query.get("owner_user_id") else None),
+                    folder_id=(str(query["folder_id"]) if query.get("folder_id") else None),
+                    title=str(query["title"]),
+                    description=(str(query["description"]) if query.get("description") else None),
+                    sql_json=query["sql_json"],
+                    created_at=query.get("created_at"),
+                    updated_at=query.get("updated_at"),
+                    can_edit=self._ctx.is_admin,
+                    access_via=("admin" if self._ctx.is_admin else "library"),
+                )
+            )
+
+        if not self._ctx.workspace_id:
+            raise ForgeError("workspace_id is required", status_code=400)
+        if str(query["workspace_id"]) != str(self._ctx.workspace_id):
+            raise ForgeError("Query not found in this workspace", status_code=404)
+
+        owner_user_id = str(query["owner_user_id"]) if query.get("owner_user_id") else None
+        if owner_user_id == self._ctx.user_id:
+            return _to_payload(
+                SavedQueryReadResult(
+                    query_id=str(query["query_id"]),
+                    workspace_id=str(query["workspace_id"]),
+                    scope=str(query["scope"]),
+                    owner_user_id=owner_user_id,
+                    folder_id=(str(query["folder_id"]) if query.get("folder_id") else None),
+                    title=str(query["title"]),
+                    description=(str(query["description"]) if query.get("description") else None),
+                    sql_json=query["sql_json"],
+                    created_at=query.get("created_at"),
+                    updated_at=query.get("updated_at"),
+                    can_edit=True,
+                    access_via="owner",
+                )
+            )
+
+        share_access = self._fetch_share_access(query_id=str(query["query_id"]))
+        if not share_access["has_access"]:
+            raise ForgeError("Saved query not found", status_code=404)
+
+        return _to_payload(
+            SavedQueryReadResult(
+                query_id=str(query["query_id"]),
+                workspace_id=str(query["workspace_id"]),
+                scope=str(query["scope"]),
+                owner_user_id=owner_user_id,
+                folder_id=(str(query["folder_id"]) if query.get("folder_id") else None),
+                title=str(query["title"]),
+                description=(str(query["description"]) if query.get("description") else None),
+                sql_json=query["sql_json"],
+                created_at=query.get("created_at"),
+                updated_at=query.get("updated_at"),
+                can_edit=bool(share_access["can_edit"]),
+                access_via="share",
+            )
+        )
+
+    def _fetch_query(self, query_id: str) -> Dict[str, Any]:
+        if not query_id or not isinstance(query_id, str):
+            raise ForgeError("Invalid query_id", status_code=400)
+
+        row = self._repo.fetch_query_row(query_id=query_id)
+        if not row:
+            raise ForgeError("Saved query not found", status_code=404)
+
+        raw_sql_json = row.get("sql_json")
+        if raw_sql_json is None:
+            raise ForgeError("Saved query is missing sql_json", status_code=500)
+
+        parsed = raw_sql_json
+        if isinstance(parsed, str):
+            try:
+                parsed = json.loads(parsed)
+            except json.JSONDecodeError as exc:
+                raise ForgeError("Saved query sql_json is invalid JSON", status_code=500) from exc
+
+        if not isinstance(parsed, dict):
+            raise ForgeError("Saved query sql_json is not an object", status_code=500)
+
+        row["sql_json"] = parsed
+        return row
+
+    def _fetch_share_access(self, *, query_id: str) -> Dict[str, Any]:
+        return self._repo.fetch_share_access(query_id=query_id)
+
+    def fetch_recent_queries(self, *, limit: int = 20) -> Dict[str, Any]:
+        try:
+            candidate = int(limit)
+        except Exception:  # noqa: BLE001
+            candidate = 20
+
+        if candidate <= 0:
+            candidate = 20
+        candidate = min(candidate, 200)
+
+        rows = self._repo.fetch_recent(limit=candidate)
+        payload_rows: List[Dict[str, Any]] = []
+        for row in rows:
+            updated = row.get("updated_at") or row.get("created_at")
+            payload_rows.append(
                 {
-                    "id": str(r["id"]),
-                    "title": str(r["title"] or "Untitled"),
-                    "updatedAt": _iso(updated),
-                    "scope": str(r["scope"] or ""),
-                    "queryType": self._tool_from_sql_json(r.get("sql_json")),
-                    "folderId": (str(r["folder_id"]) if r.get("folder_id") else None),
+                    "id": str(row["id"]),
+                    "title": str(row.get("title") or "Untitled"),
+                    "updatedAt": updated.isoformat() if updated else None,
+                    "scope": str(row.get("scope") or ""),
+                    "queryType": self._tool_from_sql_json(row.get("sql_json")),
+                    "folderId": (str(row["folder_id"]) if row.get("folder_id") else None),
                 }
             )
 
-        return {"rows": items}
+        return {"rows": payload_rows}
 
 
 def _to_payload(r: SavedQueryReadResult) -> Dict[str, Any]:

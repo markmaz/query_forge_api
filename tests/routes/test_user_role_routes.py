@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Dict
 
 import app.decorators.security as security
 import app.routes.user_routes as user_routes

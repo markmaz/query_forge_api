@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.chat.forge_insights_router_service import ForgeInsightsRouterService
 
 
@@ -160,7 +160,7 @@ def test_router_education_path_requires_sql_json() -> None:
         fewshot_service=_FakeFewshots(),
         route_domain_vector_enabled=False,
     )
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         svc.ask(_body("students by school"), workspace_id="ws-1", user_id="u1", query_args={})
     assert exc.value.status_code == 422
 
@@ -180,7 +180,7 @@ def test_router_falls_back_to_heuristic_when_llm_fails() -> None:
         chat_service=_FakeChat(),
         planner_domain_service=planner,
         execution_service=execution,
-        llm_client=_FakeLLM(exc=ServiceError("llm down", status_code=502)),
+        llm_client=_FakeLLM(exc=ForgeError("llm down", status_code=502)),
         fewshot_service=_FakeFewshots(["Count students by school"]),
         route_domain_vector_enabled=False,
     )
@@ -264,7 +264,7 @@ def test_router_invalid_request_returns_json_safe_validation_details() -> None:
         fewshot_service=_FakeFewshots(),
         route_domain_vector_enabled=False,
     )
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         svc.ask({"messages": []}, workspace_id="ws-1", user_id="u1", query_args={})
     assert exc.value.status_code == 400
     details = exc.value.details or {}

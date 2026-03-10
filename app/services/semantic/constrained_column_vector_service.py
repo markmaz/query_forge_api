@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 from qdrant_client.http import models as qdrant_models
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import QDRANT_COLUMN_COLLECTION, QDRANT_COLUMN_COLLECTION_V2
 from app.infra.embedding_model import EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 
 COLUMN_COLLECTION_NAME = QDRANT_COLUMN_COLLECTION_V2 or QDRANT_COLUMN_COLLECTION or "column_catalog_v2"
 
@@ -19,11 +19,11 @@ class ConstrainedColumnVectorService:
         *,
         qdrant: Optional[QdrantClientWrapper] = None,
         model: Optional[EmbeddingModel] = None,
-        sql: Optional[SQLExecutor] = None,
+        sql: Optional[ForgeQueryPort] = None,
     ) -> None:
         self._qdrant = qdrant or QdrantClientWrapper(collection_name=COLUMN_COLLECTION_NAME)
         self._model = model or EmbeddingModel()
-        self._sql = sql or MySQLSQLExecutor()
+        self._sql = sql or ForgeMetaSQL()
 
     def search(
         self,

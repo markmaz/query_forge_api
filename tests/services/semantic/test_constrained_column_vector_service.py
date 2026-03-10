@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from app.services.semantic.constrained_column_vector_service import ConstrainedColumnVectorService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 @dataclass
@@ -72,7 +72,7 @@ def test_constrained_vector_search_applies_domain_workspace_table_filter() -> No
             _Hit(0.75, {"model_column_id": 102, "table_name": "dim_student", "column_name": "race"}),
         ]
     )
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [[{"workspace_table_id": 42}]]
     svc = ConstrainedColumnVectorService(qdrant=qdrant, model=_FakeModel(), sql=sql)
 

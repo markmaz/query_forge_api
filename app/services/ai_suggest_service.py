@@ -11,7 +11,7 @@ from uuid import uuid4
 import requests
 from pydantic import ValidationError
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import VLLM_BASE_URL, VLLM_MODEL, VLLM_TIMEOUT
 from app.models.ai_suggest import (
     AddAggregateEdit,
@@ -24,7 +24,7 @@ from app.models.ai_suggest import (
     SuggestModelResponse,
     SuggestRequest,
 )
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 from app.services.llm.io_logging import (
     log_llm_exception,
     log_llm_request,
@@ -620,7 +620,7 @@ def _placeholders(prefix: str, count: int) -> str:
 def infer_domain_from_columns(
     workspace_id: str,
     edits: list[dict],
-    sql_executor: SQLExecutor,
+    sql_executor: ForgeQueryPort,
 ) -> Optional[int]:
     table_ids = _workspace_table_ids_from_edits(edits)
     if not table_ids:
@@ -671,7 +671,7 @@ class AISuggestService:
         temperature: float = DEFAULT_TEMPERATURE,
         top_p: float = DEFAULT_TOP_P,
         max_tokens: int = DEFAULT_MAX_TOKENS,
-        sql_executor: Optional[SQLExecutor] = None,
+        sql_executor: Optional[ForgeQueryPort] = None,
     ) -> None:
         self.base_url = (base_url or VLLM_BASE_URL).rstrip("/")
         self.model = model or VLLM_MODEL
@@ -680,7 +680,7 @@ class AISuggestService:
         self.temperature = temperature
         self.top_p = top_p
         self.max_tokens = max(600, min(800, int(max_tokens)))
-        self._sql = sql_executor or MySQLSQLExecutor()
+        self._sql = sql_executor or ForgeMetaSQL()
 
     def suggest(
         self,

@@ -3,14 +3,14 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 
 
 class ModelColumnSampleReadService:
-    def __init__(self, *, sql: SQLExecutor | None = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: ForgeQueryPort | None = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def sample_column_values(
         self,
@@ -28,11 +28,11 @@ class ModelColumnSampleReadService:
         col = (column_name or "").strip()
 
         if did <= 0:
-            raise ServiceError("domain_id is required", status_code=400)
+            raise ForgeError("domain_id is required", status_code=400)
         if wtid <= 0:
-            raise ServiceError("workspace_table_id is required", status_code=400)
+            raise ForgeError("workspace_table_id is required", status_code=400)
         if not col:
-            raise ServiceError("column_name is required", status_code=400)
+            raise ForgeError("column_name is required", status_code=400)
 
         # 1) Validate: user can read this domain in this workspace
         # 2) Validate: workspace_table is mapped to this domain
@@ -60,11 +60,11 @@ class ModelColumnSampleReadService:
         drow = drows[0] if drows else None
 
         if not drow:
-            raise ServiceError("Domain/table not accessible", status_code=403)
+            raise ForgeError("Domain/table not accessible", status_code=403)
 
         mtid = drow.get("model_table_id")
         if not mtid:
-            raise ServiceError("Domain is missing model_table_id", status_code=400)
+            raise ForgeError("Domain is missing model_table_id", status_code=400)
 
             # 4) Read sample from model_column
             sql_col = """
@@ -90,7 +90,7 @@ class ModelColumnSampleReadService:
         row = rows[0] if rows else None
 
         if not row:
-            raise ServiceError("Model column not found", status_code=404)
+            raise ForgeError("Model column not found", status_code=404)
 
         sample_values: List[Any] = []
         raw = row.get("sample_values_json") or "[]"
@@ -109,6 +109,6 @@ class ModelColumnSampleReadService:
             "columnName": row.get("column_name"),
             "values": sample_values,
             "sampleStatsJson": row.get("sample_stats_json"),
-            "sampleRanAt": row.get("sample_ran_at"),  # jsonify_dict will isoformat it
+            "sampleRanAt": row.get("sample_ran_at"),  # serialize_record will isoformat it
             "error": row.get("sample_error"),
         }

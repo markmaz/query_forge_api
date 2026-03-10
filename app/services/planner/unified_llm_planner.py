@@ -4,7 +4,7 @@ import json
 from typing import Any, Dict, Mapping, Optional
 
 from app.config import SEMANTIC_PLAN_LLM_MAX_TOKENS, SEMANTIC_PLAN_LLM_MODEL
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.llm.llm_client import LLMClient
 from app.services.llm.prompts_plan_v2 import SLOT_JSON_SCHEMA, build_system_prompt
 from app.services.planner_domain.schema_v2 import plan_v2_json_schema
@@ -84,7 +84,7 @@ def build_plan_and_slots(
         parsed, raw_payload = _parse_unified_trace(second_trace)
         second_finish_reason = str(second_trace.get("finish_reason") or "").strip().lower()
         if parsed is None:
-            raise ServiceError(
+            raise ForgeError(
                 "plan_domain unified invalid model JSON",
                 status_code=502,
                 details={

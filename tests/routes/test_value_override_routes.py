@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import app.routes.value_override_routes as value_override_routes
 import app.decorators.security as security
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.models.value_override import ValueOverrideListIndex, ValueOverrideMeta
 
 
@@ -23,7 +23,7 @@ def _headers_with_auth(monkeypatch):
 
 
 def test_value_override_visibility_success(client, monkeypatch):
-    calls = {"include_expired": None}
+    calls = {"qf_include_expired": None}
 
     class _Result:
         def __init__(self):
@@ -48,27 +48,27 @@ def test_value_override_visibility_success(client, monkeypatch):
         def __init__(self, *args, **kwargs):
             pass
 
-        def get_index(self, *, include_expired: bool = False):
-            calls["include_expired"] = include_expired
+        def get_index(self, *, qf_include_expired: bool = False):
+            calls["qf_include_expired"] = qf_include_expired
             return _Result()
 
     monkeypatch.setattr(value_override_routes, "ValueOverrideVisibilityService", _Svc)
 
     resp = client.get(
-        "/api/v1/value_overrides/visibility?include_expired=1",
+        "/api/v1/value_overrides/visibility?qf_include_expired=1",
         headers=_headers_with_auth(monkeypatch),
     )
     assert resp.status_code == 200
     assert resp.json["hasShared"] is True
     assert resp.json["index"]["regions"][0]["listName"] == "List A"
     assert resp.json["index"]["regions"][0]["listType"] == "regions"
-    assert calls["include_expired"] is True
+    assert calls["qf_include_expired"] is True
 
 
 def test_value_override_patch_forbidden_when_not_owner(client, monkeypatch):
     class _Reader:
         def assert_owner(self, **_kwargs):
-            raise ServiceError("You do not have permission to modify this list", status_code=403)
+            raise ForgeError("You do not have permission to modify this list", status_code=403)
 
     class _MetaWriter:
         def set_shared(self, **_kwargs):
@@ -76,7 +76,7 @@ def test_value_override_patch_forbidden_when_not_owner(client, monkeypatch):
 
     class _Ctx:
         workspace_id = "ws-1"
-        list_reader = _Reader()
+        qf_list_reader = _Reader()
         meta_writer = _MetaWriter()
 
     monkeypatch.setattr(value_override_routes, "_build_databricks_context", lambda: _Ctx())
@@ -92,7 +92,7 @@ def test_value_override_patch_forbidden_when_not_owner(client, monkeypatch):
 def test_value_override_delete_forbidden_when_not_owner(client, monkeypatch):
     class _Reader:
         def assert_owner(self, **_kwargs):
-            raise ServiceError("You do not have permission to modify this list", status_code=403)
+            raise ForgeError("You do not have permission to modify this list", status_code=403)
 
         def delete_list(self, **_kwargs):
             raise AssertionError("delete_list should not run when unauthorized")
@@ -103,7 +103,7 @@ def test_value_override_delete_forbidden_when_not_owner(client, monkeypatch):
 
     class _Ctx:
         workspace_id = "ws-1"
-        list_reader = _Reader()
+        qf_list_reader = _Reader()
         meta_writer = _MetaWriter()
 
     monkeypatch.setattr(value_override_routes, "_build_databricks_context", lambda: _Ctx())

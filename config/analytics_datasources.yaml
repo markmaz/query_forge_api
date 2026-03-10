@@ -1,0 +1,44 @@
+# analytics_datasources.yaml
+#
+# SECURITY: All values that are credentials or internal identifiers MUST be
+# referenced as ${ENV_VAR} placeholders only.  Literal secret values (passwords,
+# tokens, API keys, hostnames, account IDs) must NEVER be committed to this file.
+# This is enforced by the detect-secrets pre-commit hook.
+
+analytics_datasources:
+  primary:
+    type: snowflake
+    account: ${SNOWFLAKE_ACCOUNT}
+    user: ${SNOWFLAKE_USER}
+    password: ${SNOWFLAKE_PASSWORD}
+    private_key_path: ${SNOWFLAKE_PRIVATE_KEY_PATH}
+    private_key_passphrase: ${SNOWFLAKE_PRIVATE_KEY_PASSPHRASE}
+    database: ${SNOWFLAKE_DATABASE}
+    schema: ${SNOWFLAKE_SCHEMA}
+    # Optional. Leave empty to use Snowflake/account defaults.
+    warehouse: ${SNOWFLAKE_WAREHOUSE}
+    role: ${SNOWFLAKE_ROLE}
+
+  databricks:
+    type: databricks
+    # platform: azure or aws.  Auto-detected from host when omitted.
+    # Azure host format:  https://adb-<workspace-id>.<region>.azuredatabricks.net
+    # AWS host format:    https://<workspace-id>.cloud.databricks.com
+    platform: ${DATABRICKS_PLATFORM}
+    host: ${DATABRICKS_HOST}
+    # Optional when the app-level DATABRICKS_TOKEN_MANAGER is configured.
+    token: ${DATABRICKS_TOKEN}
+    # Accepts either the full JDBC HTTP path (/sql/1.0/warehouses/<id>) or
+    # the bare warehouse ID.  The warehouse ID is extracted automatically.
+    http_path: ${DATABRICKS_HTTP_PATH}
+
+  legacy:
+    type: mysql
+    host: ${MYSQL_ANALYTICS_HOST}
+    port: 3306
+    database: ${MYSQL_ANALYTICS_DB}
+    user: ${MYSQL_ANALYTICS_USER}
+    password: ${MYSQL_ANALYTICS_PASSWORD}
+    # FIND-022: ssl_ca is required — path to PEM CA certificate for server
+    # certificate verification.  Set to the path inside the deployment container.
+    ssl_ca: ${MYSQL_ANALYTICS_SSL_CA}

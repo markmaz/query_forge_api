@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 from app.services.semantic.semantic_registry_service import _coerce_positive_int, _normalize_vertical
 
 
 class SemanticMappingService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def list_mappings(
         self,
@@ -132,7 +132,7 @@ class SemanticMappingService:
             {"id": row_id},
         )
         if not rows:
-            raise ServiceError("semantic_column_map entry not found", status_code=404)
+            raise ForgeError("semantic_column_map entry not found", status_code=404)
         return self._normalize_row(rows[0])
 
     def create_mapping(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -167,7 +167,7 @@ class SemanticMappingService:
 
         if result.lastrowid:
             return self.get_mapping(int(result.lastrowid))
-        raise ServiceError("Failed to create semantic_column_map entry", status_code=500)
+        raise ForgeError("Failed to create semantic_column_map entry", status_code=500)
 
     def delete_mapping(self, mapping_id: int) -> None:
         row_id = _coerce_positive_int(mapping_id, field="id")
@@ -179,7 +179,7 @@ class SemanticMappingService:
             {"id": row_id},
         )
         if int(affected or 0) <= 0:
-            raise ServiceError("semantic_column_map entry not found", status_code=404)
+            raise ForgeError("semantic_column_map entry not found", status_code=404)
 
     def resolve_best_column_for_concept(
         self,
@@ -189,7 +189,7 @@ class SemanticMappingService:
     ) -> Optional[Dict[str, Any]]:
         key = str(concept_key or "").strip().lower()
         if not key:
-            raise ServiceError("concept_key is required", status_code=400)
+            raise ForgeError("concept_key is required", status_code=400)
 
         vertical_norm = _normalize_vertical(vertical) or "__global__"
         workspace_norm = _normalize_workspace(workspace_id) or "__global__"
@@ -259,7 +259,7 @@ class SemanticMappingService:
         has_table_col = bool(str(table_name or "").strip()) and bool(str(column_name or "").strip())
 
         if not has_model and not has_table_col:
-            raise ServiceError("model_column_id or table_name+column_name is required", status_code=400)
+            raise ForgeError("model_column_id or table_name+column_name is required", status_code=400)
 
         if has_model:
             where.append("scm.model_column_id = :model_column_id")
@@ -300,10 +300,10 @@ class SemanticMappingService:
 
     def _normalize_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(payload, dict):
-            raise ServiceError("Invalid JSON body", status_code=400)
+            raise ForgeError("Invalid JSON body", status_code=400)
 
         if "semantic_registry_id" not in payload:
-            raise ServiceError("semantic_registry_id is required", status_code=400)
+            raise ForgeError("semantic_registry_id is required", status_code=400)
 
         semantic_registry_id = _coerce_positive_int(payload.get("semantic_registry_id"), field="semantic_registry_id")
 
@@ -311,7 +311,7 @@ class SemanticMappingService:
         if workspace_id is not None:
             workspace_id = str(workspace_id).strip() or None
             if workspace_id is not None and len(workspace_id) > 100:
-                raise ServiceError("workspace_id exceeds 100 characters", status_code=400)
+                raise ForgeError("workspace_id exceeds 100 characters", status_code=400)
 
         model_column_id_raw = payload.get("model_column_id")
         model_column_id = None
@@ -326,15 +326,15 @@ class SemanticMappingService:
         column_name = column_name or None
 
         if table_name is not None and len(table_name) > 200:
-            raise ServiceError("table_name exceeds 200 characters", status_code=400)
+            raise ForgeError("table_name exceeds 200 characters", status_code=400)
         if column_name is not None and len(column_name) > 200:
-            raise ServiceError("column_name exceeds 200 characters", status_code=400)
+            raise ForgeError("column_name exceeds 200 characters", status_code=400)
 
         has_model = model_column_id is not None
         has_table_col = table_name is not None and column_name is not None
 
         if not has_model and not has_table_col:
-            raise ServiceError(
+            raise ForgeError(
                 "mapping requires model_column_id or table_name+column_name",
                 status_code=400,
             )
@@ -352,9 +352,9 @@ class SemanticMappingService:
             try:
                 confidence_score = float(confidence_score)
             except Exception as exc:
-                raise ServiceError("confidence_score must be numeric", status_code=400) from exc
+                raise ForgeError("confidence_score must be numeric", status_code=400) from exc
             if confidence_score < 0.0 or confidence_score > 1.0:
-                raise ServiceError("confidence_score must be between 0 and 1", status_code=400)
+                raise ForgeError("confidence_score must be between 0 and 1", status_code=400)
 
         return {
             "semantic_registry_id": semantic_registry_id,
@@ -377,7 +377,7 @@ class SemanticMappingService:
             {"id": semantic_registry_id},
         )
         if not rows:
-            raise ServiceError("semantic_registry entry not found", status_code=404)
+            raise ForgeError("semantic_registry entry not found", status_code=404)
 
     @staticmethod
     def _normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -404,5 +404,5 @@ def _normalize_workspace(value: Optional[str]) -> Optional[str]:
 def _raise_write_error(exc: Exception) -> None:
     msg = str(exc)
     if "Duplicate entry" in msg:
-        raise ServiceError("Duplicate semantic_column_map entry", status_code=409) from exc
-    raise ServiceError("semantic_column_map write failed", status_code=500, details={"message": msg}) from exc
+        raise ForgeError("Duplicate semantic_column_map entry", status_code=409) from exc
+    raise ForgeError("semantic_column_map write failed", status_code=500, details={"message": msg}) from exc

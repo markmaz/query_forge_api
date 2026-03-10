@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any, Dict
-from unittest.mock import patch
 
 import app.routes.admin_routes as admin_routes
 
@@ -9,7 +7,7 @@ import app.routes.admin_routes as admin_routes
 def _headers(monkeypatch):
     from app import factory
     from app.decorators import security
-    from app.routes import _route_utils
+    from app.routes import request_helpers as _route_utils
     from app.services.workspace_inventory import workspace_context
 
     def _verify_token(_token):
@@ -104,6 +102,52 @@ def test_pipeline_profiles_list(client, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Prompt feedback admin
+# ---------------------------------------------------------------------------
+
+def test_admin_prompt_feedback_list(client, monkeypatch):
+    class _FakeSvc:
+        def list_feedback(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["limit"] == 25
+            assert kwargs["offset"] == 10
+            assert kwargs["include_payload"] is True
+            return {
+                "rows": [{"id": 1, "vote": "up"}],
+                "count": 1,
+                "total": 1,
+                "limit": 25,
+                "offset": 10,
+            }
+
+    monkeypatch.setattr(admin_routes, "PromptFeedbackService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/prompt-feedback?limit=25&offset=10&include_payload=true",
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["count"] == 1
+    assert resp.json["rows"][0]["id"] == 1
+
+
+def test_admin_prompt_feedback_delete(client, monkeypatch):
+    class _FakeSvc:
+        def delete_feedback(self, *, workspace_id, feedback_id):
+            assert workspace_id == "ws-1"
+            assert feedback_id == 22
+            return type("DeleteResult", (), {"id": 22, "deleted": True})()
+
+    monkeypatch.setattr(admin_routes, "PromptFeedbackService", _FakeSvc)
+    resp = client.delete(
+        "/api/v1/admin/prompt-feedback/22",
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["deleted"] is True
+    assert resp.json["id"] == 22
+
+
+# ---------------------------------------------------------------------------
 # Domain profiles CRUD
 # ---------------------------------------------------------------------------
 
@@ -169,6 +213,60 @@ def test_domain_profile_delete(client, monkeypatch):
     assert resp.json["deleted"] is True
 
 
+def test_domain_profile_generate_one(client, monkeypatch):
+    class _FakeSvc:
+        def generate_one(self, *, workspace_id, domain_id, force=False):
+            assert workspace_id == "ws-1"
+            assert domain_id == 4
+            assert force is True
+            return {"domain_id": 4, "status": "generated"}
+
+    monkeypatch.setattr(admin_routes, "DomainProfileEmbeddingService", _FakeSvc)
+    resp = client.post(
+        "/api/v1/admin/domain-profiles/4/generate",
+        json={"force": True},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["result"]["status"] == "generated"
+
+
+def test_domain_profile_generate_batch(client, monkeypatch):
+    class _FakeSvc:
+        def generate_many(self, *, workspace_id, domain_ids, force=False):
+            assert workspace_id == "ws-1"
+            assert domain_ids == [4, 7]
+            assert force is False
+            return {"total": 2, "generated": 2, "failed": 0, "results": []}
+
+    monkeypatch.setattr(admin_routes, "DomainProfileEmbeddingService", _FakeSvc)
+    resp = client.post(
+        "/api/v1/admin/domain-profiles/generate",
+        json={"domain_ids": [4, 7]},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["total"] == 2
+
+
+def test_domain_profile_generate_all(client, monkeypatch):
+    class _FakeSvc:
+        def generate_all(self, *, workspace_id, force=False, include_inactive=False):
+            assert workspace_id == "ws-1"
+            assert force is True
+            assert include_inactive is True
+            return {"total": 3, "generated": 2, "failed": 1, "results": []}
+
+    monkeypatch.setattr(admin_routes, "DomainProfileEmbeddingService", _FakeSvc)
+    resp = client.post(
+        "/api/v1/admin/domain-profiles/generate-all",
+        json={"force": True, "include_inactive": True},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["total"] == 3
+
+
 # ---------------------------------------------------------------------------
 # Vector rebuild
 # ---------------------------------------------------------------------------
@@ -226,7 +324,7 @@ def test_vector_embeddings_rebuild(client, monkeypatch):
 def test_detailed_health_requires_admin(client, monkeypatch):
     from app import factory
     from app.decorators import security
-    from app.routes import _route_utils
+    from app.routes import request_helpers as _route_utils
     from app.services.workspace_inventory import workspace_context
 
     def _verify_token(_token):
@@ -247,6 +345,35 @@ def test_detailed_health_requires_admin(client, monkeypatch):
 
     resp = client.get(
         "/api/v1/admin/health/detailed",
+        headers={"Authorization": "Bearer test-token", "X-Workspace-Id": "ws-1"},
+    )
+    assert resp.status_code == 403
+
+
+def test_prompt_feedback_list_requires_admin(client, monkeypatch):
+    from app import factory
+    from app.decorators import security
+    from app.routes import request_helpers as _route_utils
+    from app.services.workspace_inventory import workspace_context
+
+    def _verify_token(_token):
+        return {"sub": "user-1", "username": "user-1", "is_admin": False}
+
+    def _allow_workspace_access(*, user_id, workspace_id):
+        return workspace_id
+
+    monkeypatch.setattr(security.auth_service, "verify_token", _verify_token)
+    monkeypatch.setattr(factory.auth_service, "verify_token", _verify_token)
+    monkeypatch.setattr(security.workspace_access_service, "assert_workspace_access", _allow_workspace_access)
+    monkeypatch.setattr(_route_utils.workspace_access_service, "assert_workspace_access", _allow_workspace_access)
+    monkeypatch.setattr(
+        workspace_context.WorkspaceAccessService,
+        "assert_workspace_access",
+        lambda self, *, user_id, workspace_id: workspace_id,
+    )
+
+    resp = client.get(
+        "/api/v1/admin/prompt-feedback",
         headers={"Authorization": "Bearer test-token", "X-Workspace-Id": "ws-1"},
     )
     assert resp.status_code == 403

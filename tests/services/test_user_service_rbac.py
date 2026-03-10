@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.models.user import User
 from app.services.user_service import UserService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_get_user_effective_role_names_merges_and_dedupes() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {"product_role_id": "pr1", "role_id": "viewer", "role_name": "Viewer"},
@@ -27,7 +27,7 @@ def test_get_user_effective_role_names_merges_and_dedupes() -> None:
 
 
 def test_sync_user_direct_roles_insert_and_delete() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {"role_id": "viewer"},
@@ -44,7 +44,7 @@ def test_sync_user_direct_roles_insert_and_delete() -> None:
 
 
 def test_add_user_direct_role_success() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [{"user_id": "u1"}],
         [{"role_id": "admin"}],
@@ -60,19 +60,19 @@ def test_add_user_direct_role_success() -> None:
 
 
 def test_remove_user_direct_role_not_found() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [{"user_id": "u1"}],
     ]
     sql.write_responses = [0]
     svc = UserService(sql=sql)
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         svc.remove_user_direct_role("u1", "admin")
     assert exc.value.status_code == 404
 
 
 def test_update_user_syncs_rbac_role_ids() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [],
     ]

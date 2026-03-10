@@ -4,13 +4,19 @@ from typing import Any, Dict
 
 import app.routes.auth_routes as auth_routes
 from app.decorators import security
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.models.user import User
 
 
 def test_login_success(client, monkeypatch):
     def _auth(self, username: str, password: str) -> Dict[str, Any]:
-        return {"user_id": "u1", "requires_otp": True, "email": "u1@example.com"}
+        return {
+            "user_id": "u1",
+            "requires_otp": True,
+            "email": "u1@example.com",
+            "workspace_id": "ws-1",
+            "workspaceId": "ws-1",
+        }
 
     monkeypatch.setattr(auth_routes.AuthService, "authenticate", _auth)
     monkeypatch.setattr(auth_routes.TotpService, "is_totp_enabled", lambda self, _uid: False)
@@ -20,6 +26,8 @@ def test_login_success(client, monkeypatch):
     assert resp.status_code == 200
     assert resp.json["requires_otp"] is True
     assert resp.json["challenge_id"] == "ch-123"
+    assert resp.json["workspace_id"] == "ws-1"
+    assert resp.json["workspaceId"] == "ws-1"
     assert "access_token" not in resp.json
 
 
@@ -63,7 +71,7 @@ def test_totp_verify_success(client, monkeypatch):
             "expires_in": 900,
         },
     )
-    monkeypatch.setattr(auth_routes.AuthService, "refresh_ttl_seconds", 1209600, raising=False)
+    monkeypatch.setattr(auth_routes.AuthService, "qf_refresh_ttl", 1209600, raising=False)
 
     resp = client.post(
         "/api/v1/auth/mfa/totp/verify",
@@ -137,7 +145,7 @@ def test_invite_validate_returns_generic_error_when_user_missing(client, monkeyp
     monkeypatch.setattr(auth_routes, "validate_token", lambda _token: "u-missing")
 
     def _raise_not_found(self, _user_id: str):
-        raise ServiceError("User not found", 404)
+        raise ForgeError("User not found", 404)
 
     monkeypatch.setattr(auth_routes.UserService, "get_user", _raise_not_found)
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pyarrow as pa
 
 import app.routes.export_routes as export_routes
-from app.services.exports.export_policy import EXCEL_MAX_ROWS, clear_rowcount_cache
+from app.services.exports.export_policy import QF_EXCEL_MAX_ROWS, clear_qf_rowcount_cache
 
 
 class _DummyValkey:
@@ -25,8 +25,8 @@ class _SqlExec:
         self.total = total
         self._table = pa.Table.from_pylist(rows)
 
-    def submit_statement(self, sql: str, parameters=None, result_format=None):
-        if result_format == "ARROW_STREAM":
+    def submit_statement(self, sql: str, parameters=None, qf_result_fmt=None):
+        if qf_result_fmt == "ARROW_STREAM":
             return {"table": self._table, "rows": self._table.to_pylist()}
         return {"rows": [{"total": self.total}]}
 
@@ -45,14 +45,14 @@ class _Builder:
         return _Ctx(self._total, self._rows)
 
 
-def _install_nocode_compile(monkeypatch, *, sql="SELECT 1", params=None, count_sql="SELECT COUNT(*) AS total FROM t"):
+def _install_nocode_compile(monkeypatch, *, sql="SELECT 1", params=None, qf_count_sql="SELECT COUNT(*) AS total FROM t"):
     class _Compiled:
         pass
 
     compiled = _Compiled()
     compiled.sql = sql
     compiled.params = params or {}
-    compiled.count_sql = count_sql
+    compiled.qf_count_sql = qf_count_sql
 
     class _NoCodeService:
         def __init__(self, executor, domain_resolver):
@@ -65,19 +65,19 @@ def _install_nocode_compile(monkeypatch, *, sql="SELECT 1", params=None, count_s
         def compile(self, normalized, mode="export", limit=0, offset=0):
             return compiled
 
-    monkeypatch.setattr(export_routes, "NoCodeQueryService", _NoCodeService)
+    monkeypatch.setattr(export_routes, "QueryForgeService", _NoCodeService)
     monkeypatch.setattr(export_routes, "DomainResolver", lambda workspace_id: object())
 
 
 def test_excel_export_blocks_over_limit(client, auth_headers, monkeypatch):
-    clear_rowcount_cache()
+    clear_qf_rowcount_cache()
     export_routes._valkey_client = None
     monkeypatch.setattr(export_routes.valkey, "StrictValkey", _DummyValkey)
     _install_nocode_compile(monkeypatch)
     monkeypatch.setattr(
         export_routes,
         "WorkspaceContextBuilder",
-        lambda: _Builder(EXCEL_MAX_ROWS + 5, [{"a": 1}]),
+        lambda: _Builder(QF_EXCEL_MAX_ROWS + 5, [{"a": 1}]),
     )
 
     resp = client.post(
@@ -88,12 +88,12 @@ def test_excel_export_blocks_over_limit(client, auth_headers, monkeypatch):
 
     assert resp.status_code == 409
     assert resp.json["error"] == "EXCEL_ROW_LIMIT"
-    assert resp.json["rowCount"] == EXCEL_MAX_ROWS + 5
-    assert resp.json["maxRows"] == EXCEL_MAX_ROWS
+    assert resp.json["rowCount"] == QF_EXCEL_MAX_ROWS + 5
+    assert resp.json["maxRows"] == QF_EXCEL_MAX_ROWS
 
 
 def test_excel_export_allows_under_limit(client, auth_headers, monkeypatch):
-    clear_rowcount_cache()
+    clear_qf_rowcount_cache()
     export_routes._valkey_client = None
     monkeypatch.setattr(export_routes.valkey, "StrictValkey", _DummyValkey)
     _install_nocode_compile(monkeypatch)
@@ -124,7 +124,7 @@ def test_excel_export_allows_under_limit(client, auth_headers, monkeypatch):
 
 
 def test_excel_export_download_requires_auth(client, auth_headers, monkeypatch):
-    clear_rowcount_cache()
+    clear_qf_rowcount_cache()
     export_routes._valkey_client = None
     monkeypatch.setattr(export_routes.valkey, "StrictValkey", _DummyValkey)
     _install_nocode_compile(monkeypatch)
@@ -146,7 +146,7 @@ def test_excel_export_download_requires_auth(client, auth_headers, monkeypatch):
 
 
 def test_excel_export_download_wrong_workspace(client, auth_headers, monkeypatch):
-    clear_rowcount_cache()
+    clear_qf_rowcount_cache()
     export_routes._valkey_client = None
     monkeypatch.setattr(export_routes.valkey, "StrictValkey", _DummyValkey)
     _install_nocode_compile(monkeypatch)
@@ -170,7 +170,7 @@ def test_excel_export_download_wrong_workspace(client, auth_headers, monkeypatch
 
 
 def test_excel_export_rejects_raw_sql_fields(client, auth_headers, monkeypatch):
-    clear_rowcount_cache()
+    clear_qf_rowcount_cache()
     export_routes._valkey_client = None
     monkeypatch.setattr(export_routes.valkey, "StrictValkey", _DummyValkey)
     _install_nocode_compile(monkeypatch)

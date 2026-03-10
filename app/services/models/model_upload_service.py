@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Literal, Optional
 import pandas as pd
 from werkzeug.datastructures import FileStorage
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.services.models.model_write_service import ModelWriteService  # <-- confirm this path is correct
 
 REQUIRED_COLUMNS = {"table_name", "column_name", "data_type", "description"}
@@ -55,15 +55,15 @@ class ModelUploadService:
         user_name: Optional[str] = None,  # preferred if you have it
     ) -> Dict[str, Any]:
         if file_storage is None:
-            raise ServiceError("Missing file", status_code=400)
+            raise ForgeError("Missing file", status_code=400)
 
         filename = (file_storage.filename or "").strip()
         if not filename:
-            raise ServiceError("Missing filename", status_code=400)
+            raise ForgeError("Missing filename", status_code=400)
 
         file_bytes = file_storage.read()
         if not file_bytes:
-            raise ServiceError("Empty file", status_code=400)
+            raise ForgeError("Empty file", status_code=400)
 
         # if caller doesn't pass a username, fall back to user_id or "unknown"
         uname = (user_name or user_id or "unknown").strip()
@@ -91,7 +91,7 @@ class ModelUploadService:
         try:
             df = self._read_file(file_bytes=file_bytes, filename=filename)
         except ValueError as e:
-            raise ServiceError(str(e), status_code=400)
+            raise ForgeError(str(e), status_code=400)
 
         df.columns = [self._norm_col(c) for c in df.columns]
 

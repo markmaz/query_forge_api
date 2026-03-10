@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from app.services.domain.domain_summary_read_service import DomainSummaryReadService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_list_domain_summaries() -> None:
-    sql = FakeSQLExecutor()
+    sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
             {"domain_id": 1, "table_count": 2, "sample_table_name": "a"},

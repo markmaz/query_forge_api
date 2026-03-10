@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import (
     NLP_TIER2_ENABLED,
     SEMANTIC_PLAN_LLM_MAX_TOKENS,
@@ -16,11 +16,11 @@ from app.config import (
     SEMANTIC_PLAN_LLM_TIMEOUT_SECONDS,
     VLLM_BASE_URL,
 )
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.models.ai_suggest import AddSelectEdit, SetDomainEdit, SqlColumnKey
 from app.nlp.normalization import normalize_prompt
 from app.nlp.time_normalizer import CanonicalTime, normalize_time_terms
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 from app.services.llm.llm_client import LLMClient
 from app.services.planner.semantic_extract_service import SemanticExtractService
 from app.services.sqljson_apply_service import apply_edits
@@ -121,7 +121,7 @@ class PlanService:
     def __init__(
         self,
         *,
-        sql: Optional[SQLExecutor] = None,
+        sql: Optional[ForgeQueryPort] = None,
         deterministic: Optional[DeterministicMatcher] = None,
         concept_retrieval: Optional[ConceptRetrievalService] = None,
         concept_to_column: Optional[ConceptToColumnService] = None,
@@ -132,7 +132,7 @@ class PlanService:
         tier2_runner: Optional[Any] = None,
         semantic_extractor: Optional[SemanticExtractService] = None,
     ) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+        self._sql = sql or ForgeMetaSQL()
         self._deterministic = deterministic or DeterministicMatcher()
         self._concept_retrieval = concept_retrieval or ConceptRetrievalService()
         self._concept_to_column = concept_to_column or ConceptToColumnService(sql=self._sql)
@@ -151,13 +151,13 @@ class PlanService:
         try:
             req = PlanningRequest.model_validate(payload or {})
         except ValidationError as exc:
-            raise ServiceError("Invalid planning request", status_code=400, details={"errors": exc.errors()}) from exc
+            raise ForgeError("Invalid planning request", status_code=400, details={"errors": exc.errors()}) from exc
 
         workspace_id = str(req.workspace_id or "").strip()
         vertical_norm = str(req.vertical_norm or "generic").strip().lower() or "generic"
         prompt = str(req.prompt or "").strip()
         if workspace_id == "" or prompt == "":
-            raise ServiceError("workspace_id and prompt are required", status_code=400)
+            raise ForgeError("workspace_id and prompt are required", status_code=400)
         normalized_prompt = normalize_prompt(prompt)
         prompt = normalized_prompt or prompt
         intent_entity = _infer_intent_entity(prompt)
@@ -677,7 +677,7 @@ class PlanService:
         try:
             parsed = LLMPlanPayload.model_validate(payload)
         except ValidationError as exc:
-            raise ServiceError(
+            raise ForgeError(
                 "Invalid LLM planning response",
                 status_code=502,
                 details={"errors": exc.errors(), "payload": payload},
@@ -716,7 +716,7 @@ class PlanService:
                 sql_json=grounded.get("sql_json"),
                 allowed_model_column_ids=allowed_model_column_ids,
             )
-        except ServiceError:
+        except ForgeError:
             fallback = self._fallback_skeleton_plan(
                 prompt=prompt,
                 domain_id=domain_id,
@@ -1447,7 +1447,7 @@ class PlanService:
             return
         illegal = self._collect_illegal_model_column_ids(sql_json=sql_json, allowed_model_column_ids=allowed_model_column_ids)
         if illegal:
-            raise ServiceError(
+            raise ForgeError(
                 "Planner used disallowed columns",
                 status_code=502,
                 details={"illegal_model_column_ids": sorted(illegal)},

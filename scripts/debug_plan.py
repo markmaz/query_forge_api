@@ -11,8 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.exceptions.service_error import ServiceError
-from app.services.semantic.plan_service import PlanService
+from app.exceptions.forge_error import ForgeError  # noqa: E402
+from app.services.semantic.plan_service import PlanService  # noqa: E402
 
 
 def _field_key(field: Dict[str, Any]) -> str:
@@ -83,7 +83,7 @@ def main() -> int:
 
     try:
         out = svc.plan(payload, include_llm=not bool(args.no_llm))
-    except ServiceError as exc:
+    except ForgeError as exc:
         print(f"error: {exc}", file=sys.stderr)
         if getattr(exc, "details", None):
             print(json.dumps(exc.details, indent=2, ensure_ascii=True), file=sys.stderr)

@@ -4,22 +4,22 @@ from typing import Optional
 
 from flask import g, has_request_context
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 
 
 class WorkspaceAccessService:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def user_has_workspace_access(self, *, user_id: str, workspace_id: str) -> bool:
         uid = str(user_id or "").strip()
         ws = str(workspace_id or "").strip()
         if not uid:
-            raise ServiceError("Missing user identity", status_code=401)
+            raise ForgeError("Missing user identity", status_code=401)
         if not ws:
-            raise ServiceError("Missing X-Workspace-Id header", status_code=400)
+            raise ForgeError("Missing X-Workspace-Id header", status_code=400)
 
         rows = self._sql.execute_query(
             """
@@ -36,9 +36,9 @@ class WorkspaceAccessService:
         uid = str(user_id or "").strip()
         ws = str(workspace_id or "").strip()
         if not uid:
-            raise ServiceError("Missing user identity", status_code=401)
+            raise ForgeError("Missing user identity", status_code=401)
         if not ws:
-            raise ServiceError("Missing X-Workspace-Id header", status_code=400)
+            raise ForgeError("Missing X-Workspace-Id header", status_code=400)
 
         cache_key = (uid, ws)
         if has_request_context():
@@ -50,7 +50,7 @@ class WorkspaceAccessService:
                 return ws
 
         if not self.user_has_workspace_access(user_id=uid, workspace_id=ws):
-            raise ServiceError("You do not have access to this workspace", status_code=403)
+            raise ForgeError("You do not have access to this workspace", status_code=403)
 
         if has_request_context():
             cache = getattr(g, "_workspace_access_cache", None)

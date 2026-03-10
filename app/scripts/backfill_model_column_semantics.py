@@ -5,7 +5,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ def backfill_model_column_semantics(
     force: bool = False,
     source: str = DEFAULT_SOURCE,
 ) -> Dict[str, Any]:
-    sql = MySQLSQLExecutor()
+    sql = ForgeMetaSQL()
 
     vertical = _normalize_vertical(vertical_norm)
     source_value = str(source or DEFAULT_SOURCE).strip().lower() or DEFAULT_SOURCE
@@ -116,7 +116,7 @@ def backfill_model_column_semantics(
 
 def _load_best_rows(
     *,
-    sql: MySQLSQLExecutor,
+    sql: ForgeMetaSQL,
     last_id: int,
     limit: int,
     vertical_norm: Optional[str],

@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.exceptions.service_error import ServiceError
-from app.models.value_override import ValueOverrideListIndex, ValueOverrideMeta, SectionKey
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from app.models.value_override import ValueOverrideListIndex, ValueOverrideMeta, ForgeSectionKey
+from app.ports.sql_executor import ForgeQueryPort
 
 
 @dataclass(frozen=True)
@@ -16,19 +16,19 @@ class ValueOverrideVisibilityResult:
 
 
 class ValueOverrideVisibilityService:
-    def __init__(self, *, workspace_id: str, user_id: str, sql: Optional[SQLExecutor] = None) -> None:
+    def __init__(self, *, workspace_id: str, user_id: str, sql: Optional[ForgeQueryPort] = None) -> None:
         if not workspace_id:
-            raise ServiceError("workspace_id is required", status_code=400)
+            raise ForgeError("workspace_id is required", status_code=400)
         if not user_id:
-            raise ServiceError("user_id is required", status_code=400)
+            raise ForgeError("user_id is required", status_code=400)
         self._workspace_id = workspace_id
         self._user_id = user_id
-        self._sql = sql or MySQLSQLExecutor()
+        self._sql = sql or ForgeMetaSQL()
 
     def get_index(self, *, include_expired: bool = False) -> ValueOverrideVisibilityResult:
         rows = self._fetch_visible_rows(include_expired=include_expired)
 
-        buckets: Dict[SectionKey, List[ValueOverrideMeta]] = {
+        buckets: Dict[ForgeSectionKey, List[ValueOverrideMeta]] = {
             "regions": [],
             "npiCategories": [],
             "serviceLines": [],

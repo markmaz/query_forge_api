@@ -11,19 +11,19 @@ import pandas as pd
 
 from app.services.value_overrides.value_override_meta_writer import ValueOverrideMetaWriter
 
-SectionKey = Literal["regions", "npiCategories", "serviceLines"]
+ForgeSectionKey = Literal["regions", "npiCategories", "serviceLines"]
 
 ZIP_RE = re.compile(r"^\d{5}(-\d{4})?$")
 DIGITS_RE = re.compile(r"^\d+$")
 
-REQUIRED_COLUMNS: Dict[SectionKey, set[str]] = {
+REQUIRED_COLUMNS: Dict[ForgeSectionKey, set[str]] = {
     "regions": {"zipcode", "subregion", "region"},
     "npiCategories": {"npi_type_code", "npi", "customer_npi_category_1", "customer_npi_category_2"},
     "serviceLines": {"procedure_code", "customer_service_line", "customer_sub_service_line"},
 }
 
 @dataclass
-class UploadError:
+class ForgeUploadError:
     rowNumber: int
     column: Optional[str]
     code: str
@@ -33,7 +33,7 @@ class UploadError:
 @dataclass
 class UploadResult:
     uploadId: str
-    inferredType: SectionKey
+    inferredType: ForgeSectionKey
     status: Literal["SUCCESS", "FAILED"]
     insertedCount: int
     totalCount: int
@@ -47,7 +47,7 @@ class UploadResult:
     errors: Optional[List[Dict[str, Any]]] = None
 
 
-class ListUploadService:
+class ForgeListUploadService:
     def __init__(self, db_writer: Any, meta_writer: Optional[ValueOverrideMetaWriter] = None):
         """
         db_writer: your adapter that can write rows to Databricks (Delta table insert, COPY INTO, etc.)
@@ -65,7 +65,7 @@ class ListUploadService:
         workspace_id: str,
         user_id: str,
         is_shared: bool = False,
-        expected_type: Optional[SectionKey] = None,   # ✅ NEW
+        expected_type: Optional[ForgeSectionKey] = None,   # ✅ NEW
     ) -> UploadResult:
         # 1) parse
         df = self._read_file(file_bytes=file_bytes, filename=filename)
@@ -74,20 +74,20 @@ class ListUploadService:
         df.columns = [self._norm_col(c) for c in df.columns]
 
         # 3) infer type
-        inferred = self._infer_type(set(df.columns))
+        qf_inferred = self._infer_type(set(df.columns))
 
         # ✅ 3b) enforce type (if provided)
-        if expected_type and inferred != expected_type:
+        if expected_type and qf_inferred != expected_type:
             return self._fail(
-                inferred,  # keep inferred in payload so UI can show what it detected
+                qf_inferred,  # keep qf_inferred in payload so UI can show what it detected
                 total=len(df),
                 errors=[
-                    UploadError(
+                    ForgeUploadError(
                         rowNumber=0,
                         column=None,
                         code="TYPE_MISMATCH",
                         message=(
-                            f"Upload target type '{expected_type}' does not match detected type '{inferred}'. "
+                            f"Upload target type '{expected_type}' does not match detected type '{qf_inferred}'. "
                             "Please download the correct template or upload to the correct section."
                         ),
                     )
@@ -95,10 +95,10 @@ class ListUploadService:
             )
 
         # 4) validate columns
-        missing = REQUIRED_COLUMNS[inferred] - set(df.columns)
+        missing = REQUIRED_COLUMNS[qf_inferred] - set(df.columns)
         if missing:
-            return self._fail(inferred, total=len(df), errors=[
-                UploadError(
+            return self._fail(qf_inferred, total=len(df), errors=[
+                ForgeUploadError(
                     rowNumber=0,
                     column=None,
                     code="MISSING_COLUMNS",
@@ -107,24 +107,24 @@ class ListUploadService:
             ])
 
         # 5) validate rows
-        errors: List[UploadError] = []
+        errors: List[ForgeUploadError] = []
         total = len(df)
 
         # Keep values as strings where appropriate
-        df = self._coerce_types(df, inferred)
+        df = self._coerce_types(df, qf_inferred)
 
         for idx, row in df.iterrows():
-            row_num = int(idx) + 2
-            errors.extend(self._validate_row(inferred, row_num, row.to_dict()))
+            qf_row_num = int(idx) + 2
+            errors.extend(self._validate_row(qf_inferred, qf_row_num, row.to_dict()))
             if len(errors) >= 2000:
                 break
 
         if errors:
-            return self._fail(inferred, total=total, errors=errors)
+            return self._fail(qf_inferred, total=total, errors=errors)
 
         # 6) enrich + insert (ALL-OR-NOTHING)
-        create_date = date.today()
-        expiration_date = create_date + timedelta(days=90)
+        qf_create_date = date.today()
+        expiration_date = qf_create_date + timedelta(days=90)
         list_id = str(uuid4())
 
         enriched_rows = []
@@ -134,19 +134,19 @@ class ListUploadService:
             r["workspace_id"] = workspace_id
             r["list_name"] = list_name.strip()
             r["user_name"] = user_name
-            r["create_date"] = create_date.isoformat()
+            r["qf_create_date"] = qf_create_date.isoformat()
             r["expiration_date"] = expiration_date.isoformat()
             enriched_rows.append(r)
 
         ensure_table = getattr(self._db, "ensure_table", None)
         if callable(ensure_table):
-            ensure_table(inferred)
-        inserted = self._db.insert_rows(inferred, enriched_rows)
+            ensure_table(qf_inferred)
+        inserted = self._db.insert_rows(qf_inferred, enriched_rows)
 
         if self._meta:
             self._meta.upsert_meta(
                 workspace_id=workspace_id,
-                list_type=inferred,
+                list_type=qf_inferred,
                 list_id=list_id,
                 list_name=list_name.strip(),
                 user_id=user_id,
@@ -156,14 +156,14 @@ class ListUploadService:
 
         return UploadResult(
             uploadId=self._new_id(),
-            inferredType=inferred,
+            inferredType=qf_inferred,
             status="SUCCESS",
             insertedCount=inserted,
             totalCount=total,
             listId=list_id,
             listName=list_name.strip(),
-            createdAt=create_date.isoformat(),
-            updatedAt=create_date.isoformat(),
+            createdAt=qf_create_date.isoformat(),
+            updatedAt=qf_create_date.isoformat(),
             owner=user_name,
             userId=user_id,
             isShared=bool(is_shared),
@@ -191,7 +191,7 @@ class ListUploadService:
         c = re.sub(r"_+", "_", c).strip("_")
         return c
 
-    def _infer_type(self, cols: set[str]) -> SectionKey:
+    def _infer_type(self, cols: set[str]) -> ForgeSectionKey:
         matches = [t for t, req in REQUIRED_COLUMNS.items() if req.issubset(cols)]
         if len(matches) == 1:
             return matches[0]
@@ -199,46 +199,46 @@ class ListUploadService:
             raise ValueError(f"Could not infer list type from columns: {sorted(cols)}")
         raise ValueError(f"Ambiguous list type; matches: {matches}")
 
-    def _coerce_types(self, df: pd.DataFrame, inferred: SectionKey) -> pd.DataFrame:
+    def _coerce_types(self, df: pd.DataFrame, qf_inferred: ForgeSectionKey) -> pd.DataFrame:
         # ensure string trims
-        for col in REQUIRED_COLUMNS[inferred]:
+        for col in REQUIRED_COLUMNS[qf_inferred]:
             df[col] = df[col].astype(str).map(lambda x: x.strip())
         return df
 
-    def _validate_row(self, inferred: SectionKey, row_num: int, r: Dict[str, Any]) -> List[UploadError]:
-        errs: List[UploadError] = []
+    def _validate_row(self, qf_inferred: ForgeSectionKey, qf_row_num: int, r: Dict[str, Any]) -> List[ForgeUploadError]:
+        errs: List[ForgeUploadError] = []
 
         def req(col: str) -> str:
             v = (r.get(col) or "").strip()
             if v == "":
-                errs.append(UploadError(rowNumber=row_num, column=col, code="REQUIRED", message=f"{col} is required"))
+                errs.append(ForgeUploadError(rowNumber=qf_row_num, column=col, code="REQUIRED", message=f"{col} is required"))
             return v
 
-        if inferred == "regions":
+        if qf_inferred == "regions":
             z = req("zipcode")
             if z and not ZIP_RE.match(z):
-                errs.append(UploadError(rowNumber=row_num, column="zipcode", code="INVALID_ZIP", message="Invalid ZIP code", value=z))
+                errs.append(ForgeUploadError(rowNumber=qf_row_num, column="zipcode", code="INVALID_ZIP", message="Invalid ZIP code", value=z))
 
             req("subregion")
             req("region")
 
-        elif inferred == "npiCategories":
+        elif qf_inferred == "npiCategories":
             t = req("npi_type_code")
             if t and t not in ("1", "2"):
-                errs.append(UploadError(rowNumber=row_num, column="npi_type_code", code="INVALID_TYPE", message="Must be 1 or 2", value=t))
+                errs.append(ForgeUploadError(rowNumber=qf_row_num, column="npi_type_code", code="INVALID_TYPE", message="Must be 1 or 2", value=t))
 
             npi = req("npi")
             if npi:
                 if not (len(npi) == 10 and DIGITS_RE.match(npi)):
-                    errs.append(UploadError(rowNumber=row_num, column="npi", code="INVALID_NPI", message="NPI must be 10 digits", value=npi))
+                    errs.append(ForgeUploadError(rowNumber=qf_row_num, column="npi", code="INVALID_NPI", message="NPI must be 10 digits", value=npi))
                 elif not self._luhn_ok(npi):
-                    errs.append(UploadError(rowNumber=row_num, column="npi", code="INVALID_NPI_LUHN", message="NPI failed checksum", value=npi))
+                    errs.append(ForgeUploadError(rowNumber=qf_row_num, column="npi", code="INVALID_NPI_LUHN", message="NPI failed checksum", value=npi))
 
             # categories: decide your rule; here we allow blanks but require at least one
             c1 = (r.get("customer_npi_category_1") or "").strip()
             c2 = (r.get("customer_npi_category_2") or "").strip()
             if not c1 and not c2:
-                errs.append(UploadError(rowNumber=row_num, column=None, code="CATEGORY_REQUIRED", message="At least one customer_npi_category must be provided"))
+                errs.append(ForgeUploadError(rowNumber=qf_row_num, column=None, code="CATEGORY_REQUIRED", message="At least one customer_npi_category must be provided"))
 
         else:  # serviceLines
             req("procedure_code")
@@ -261,10 +261,10 @@ class ListUploadService:
             checksum += d
         return checksum % 10 == 0
 
-    def _fail(self, inferred: SectionKey, *, total: int, errors: List[UploadError]) -> UploadResult:
+    def _fail(self, qf_inferred: ForgeSectionKey, *, total: int, errors: List[ForgeUploadError]) -> UploadResult:
         return UploadResult(
             uploadId=self._new_id(),
-            inferredType=inferred,
+            inferredType=qf_inferred,
             status="FAILED",
             insertedCount=0,
             totalCount=total,

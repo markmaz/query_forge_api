@@ -4,12 +4,13 @@ import logging
 from typing import Any, Dict
 
 from flask import current_app, request
-from flask_restx import Namespace, Resource, fields
+from flask_restx import Namespace, fields
+from app.routes.forge_resource import ForgeResource
 
 from app.config import QF_FORGE_INSIGHTS_ENABLED, QF_MINIMAL_CHAT_ENABLED
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
-from app.routes._route_utils import get_user_id, get_workspace_id_from_header, int_arg
+from app.exceptions.forge_error import ForgeError
+from app.routes.request_helpers import require_user_id, extract_workspace_id, int_arg
 from app.services.chat import ForgeInsightsChatService, ForgeInsightsRouterService, MinimalChatService
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ _chat_request_model = chat_ns.model(
 
 
 @chat_ns.route("/minimal")
-class MinimalChatRoute(Resource):
+class MinimalChatRoute(ForgeResource):
     @token_required
     @chat_ns.expect(_chat_request_model, validate=False)
     def post(self):
@@ -47,9 +48,9 @@ class MinimalChatRoute(Resource):
                 return {"error": "minimal chat route disabled"}, 404
 
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            header_workspace_id = get_workspace_id_from_header()
+            header_workspace_id = extract_workspace_id()
             if str(body.get("workspace_id") or "").strip():
-                raise ServiceError(
+                raise ForgeError(
                     "workspace_id must be provided via X-Workspace-Id header only",
                     status_code=400,
                 )
@@ -59,9 +60,9 @@ class MinimalChatRoute(Resource):
                 model=current_app.config.get("VLLM_MODEL"),
                 timeout_seconds=current_app.config.get("VLLM_TIMEOUT"),
             )
-            result = service.chat(body, workspace_id=header_workspace_id, user_id=get_user_id())
+            result = service.chat(body, workspace_id=header_workspace_id, user_id=require_user_id())
             return result, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("minimal chat failed")
@@ -122,20 +123,20 @@ def _new_forge_insights_router_service() -> ForgeInsightsRouterService:
 
 def _validate_forge_insights_enabled() -> None:
     if not current_app.config.get("QF_FORGE_INSIGHTS_ENABLED", QF_FORGE_INSIGHTS_ENABLED):
-        raise ServiceError("forge insights route disabled", status_code=404)
+        raise ForgeError("forge insights route disabled", status_code=404)
 
 
 @chat_ns.route("/forge-insights")
-class ForgeInsightsChatRoute(Resource):
+class ForgeInsightsChatRoute(ForgeResource):
     @token_required
     @chat_ns.expect(_chat_request_model, validate=False)
     def post(self):
         try:
             _validate_forge_insights_enabled()
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            header_workspace_id = get_workspace_id_from_header()
+            header_workspace_id = extract_workspace_id()
             if str(body.get("workspace_id") or "").strip():
-                raise ServiceError(
+                raise ForgeError(
                     "workspace_id must be provided via X-Workspace-Id header only",
                     status_code=400,
                 )
@@ -143,11 +144,11 @@ class ForgeInsightsChatRoute(Resource):
             result, status_code = _new_forge_insights_router_service().ask(
                 body,
                 workspace_id=header_workspace_id,
-                user_id=get_user_id(),
+                user_id=require_user_id(),
                 query_args=dict(request.args or {}),
             )
             return result, status_code
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("forge insights chat failed")
@@ -155,13 +156,13 @@ class ForgeInsightsChatRoute(Resource):
 
 
 @chat_ns.route("/forge-insights/conversations")
-class ForgeInsightsConversationListRoute(Resource):
+class ForgeInsightsConversationListRoute(ForgeResource):
     @token_required
     def get(self):
         try:
             _validate_forge_insights_enabled()
-            workspace_id = get_workspace_id_from_header()
-            user_id = get_user_id()
+            workspace_id = extract_workspace_id()
+            user_id = require_user_id()
             limit = int_arg("limit", 50)
             result = _new_forge_insights_service().list_conversations(
                 workspace_id=workspace_id,
@@ -169,7 +170,7 @@ class ForgeInsightsConversationListRoute(Resource):
                 limit=limit,
             )
             return result, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("forge insights list conversations failed")
@@ -177,20 +178,20 @@ class ForgeInsightsConversationListRoute(Resource):
 
 
 @chat_ns.route("/forge-insights/conversations/<string:conversation_id>")
-class ForgeInsightsConversationDetailRoute(Resource):
+class ForgeInsightsConversationDetailRoute(ForgeResource):
     @token_required
     def get(self, conversation_id: str):
         try:
             _validate_forge_insights_enabled()
-            workspace_id = get_workspace_id_from_header()
-            user_id = get_user_id()
+            workspace_id = extract_workspace_id()
+            user_id = require_user_id()
             result = _new_forge_insights_service().get_conversation(
                 workspace_id=workspace_id,
                 user_id=user_id,
                 conversation_id=conversation_id,
             )
             return result, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("forge insights get conversation failed")
@@ -200,15 +201,15 @@ class ForgeInsightsConversationDetailRoute(Resource):
     def delete(self, conversation_id: str):
         try:
             _validate_forge_insights_enabled()
-            workspace_id = get_workspace_id_from_header()
-            user_id = get_user_id()
+            workspace_id = extract_workspace_id()
+            user_id = require_user_id()
             result = _new_forge_insights_service().reset_conversation(
                 workspace_id=workspace_id,
                 user_id=user_id,
                 conversation_id=conversation_id,
             )
             return result, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("forge insights delete conversation failed")

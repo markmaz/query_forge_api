@@ -4,11 +4,12 @@ import logging
 from typing import Any, Dict, Optional
 
 from flask import request
-from flask_restx import Namespace, Resource, fields
+from flask_restx import Namespace, fields
+from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
-from app.exceptions.service_error import ServiceError
-from app.routes._route_utils import int_arg
+from app.exceptions.forge_error import ForgeError
+from app.routes.request_helpers import int_arg
 from app.services.semantic.semantic_mapping_service import SemanticMappingService
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ semantic_mapping_model = semantic_mappings_ns.model(
 
 
 @semantic_mappings_ns.route("")
-class SemanticMappingsCollection(Resource):
+class SemanticMappingsCollection(ForgeResource):
     @token_required
     @semantic_mappings_ns.doc(
         params={
@@ -65,7 +66,7 @@ class SemanticMappingsCollection(Resource):
                 page_size=int_arg("page_size", 25),
             )
             return result, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("semantic mappings list failed")
@@ -78,7 +79,7 @@ class SemanticMappingsCollection(Resource):
             body: Dict[str, Any] = request.get_json(silent=True) or {}
             row = SemanticMappingService().create_mapping(body)
             return {"row": row}, 201
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("semantic mapping create failed")
@@ -86,13 +87,13 @@ class SemanticMappingsCollection(Resource):
 
 
 @semantic_mappings_ns.route("/<int:mapping_id>")
-class SemanticMappingsById(Resource):
+class SemanticMappingsById(ForgeResource):
     @token_required
     def delete(self, mapping_id: int):
         try:
             SemanticMappingService().delete_mapping(mapping_id)
             return {"deleted": True, "id": mapping_id}, 200
-        except ServiceError as exc:
+        except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("semantic mapping delete failed")
@@ -105,4 +106,4 @@ def _optional_int(value: Optional[str], field: str) -> Optional[int]:
     try:
         return int(value)
     except Exception as exc:
-        raise ServiceError(f"{field} must be an integer", status_code=400) from exc
+        raise ForgeError(f"{field} must be an integer", status_code=400) from exc

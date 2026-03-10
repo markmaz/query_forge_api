@@ -1,0 +1,121 @@
+from __future__ import annotations
+
+import logging
+
+from flask import g, request
+from flask_restx import Namespace, fields
+from app.routes.forge_resource import ForgeResource
+
+from app.decorators.security import token_required
+from app.exceptions.forge_error import ForgeError
+from app.models.domain_profile_embedding import (
+    DomainProfileGenerateAllRequest,
+    DomainProfileGenerateOneRequest,
+    DomainProfileGenerateRequest,
+)
+from app.routes.request_helpers import extract_workspace_id
+from app.services.admin.domain_profile_embedding_service import DomainProfileEmbeddingService
+
+logger = logging.getLogger(__name__)
+
+domain_profile_embeddings_ns = Namespace(
+    "domain-profiles",
+    description="LLM domain profile embedding generation",
+)
+
+_generate_one_model = domain_profile_embeddings_ns.model(
+    "DomainProfileGenerateOneRequestPublic",
+    {
+        "force": fields.Boolean(required=False, default=False),
+    },
+)
+
+_generate_batch_model = domain_profile_embeddings_ns.model(
+    "DomainProfileGenerateBatchRequestPublic",
+    {
+        "domain_ids": fields.List(fields.Integer, required=True),
+        "force": fields.Boolean(required=False, default=False),
+    },
+)
+
+_generate_all_model = domain_profile_embeddings_ns.model(
+    "DomainProfileGenerateAllRequestPublic",
+    {
+        "force": fields.Boolean(required=False, default=False),
+        "include_inactive": fields.Boolean(required=False, default=False),
+    },
+)
+
+
+@domain_profile_embeddings_ns.route("/<int:domain_id>/generate")
+class DomainProfileGenerateOne(ForgeResource):
+    @token_required
+    @domain_profile_embeddings_ns.expect(_generate_one_model, validate=False)
+    def post(self, domain_id: int):
+        try:
+            _require_admin()
+            body = request.get_json(silent=True) or {}
+            req = DomainProfileGenerateOneRequest(**body)
+            workspace_id = extract_workspace_id()
+            result = DomainProfileEmbeddingService().generate_one(
+                workspace_id=workspace_id,
+                domain_id=domain_id,
+                force=req.force,
+            )
+            return {"result": result}, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("domain profile generate one failed")
+            return {"error": "domain profile generate one failed"}, 500
+
+
+@domain_profile_embeddings_ns.route("/generate")
+class DomainProfileGenerateBatch(ForgeResource):
+    @token_required
+    @domain_profile_embeddings_ns.expect(_generate_batch_model, validate=False)
+    def post(self):
+        try:
+            _require_admin()
+            body = request.get_json(silent=True) or {}
+            req = DomainProfileGenerateRequest(**body)
+            workspace_id = extract_workspace_id()
+            result = DomainProfileEmbeddingService().generate_many(
+                workspace_id=workspace_id,
+                domain_ids=req.domain_ids,
+                force=req.force,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("domain profile generate batch failed")
+            return {"error": "domain profile generate batch failed"}, 500
+
+
+@domain_profile_embeddings_ns.route("/generate-all")
+class DomainProfileGenerateAll(ForgeResource):
+    @token_required
+    @domain_profile_embeddings_ns.expect(_generate_all_model, validate=False)
+    def post(self):
+        try:
+            _require_admin()
+            body = request.get_json(silent=True) or {}
+            req = DomainProfileGenerateAllRequest(**body)
+            workspace_id = extract_workspace_id()
+            result = DomainProfileEmbeddingService().generate_all(
+                workspace_id=workspace_id,
+                force=req.force,
+                include_inactive=req.include_inactive,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("domain profile generate all failed")
+            return {"error": "domain profile generate all failed"}, 500
+
+
+def _require_admin() -> None:
+    if not bool(getattr(g, "is_admin", False)):
+        raise ForgeError("Admin access required", status_code=403)

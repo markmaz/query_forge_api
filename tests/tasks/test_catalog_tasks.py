@@ -19,7 +19,7 @@ def _load_catalog_tasks(monkeypatch):
     return importlib.reload(mod)
 
 
-def test_build_executor_for_workspace(monkeypatch):
+def test_build_forge_executor(monkeypatch):
     catalog_tasks = _load_catalog_tasks(monkeypatch)
 
     class _Ctx:
@@ -31,14 +31,14 @@ def test_build_executor_for_workspace(monkeypatch):
             return _Ctx()
 
     monkeypatch.setattr(catalog_tasks, "WorkspaceContextBuilder", _Builder)
-    exec = catalog_tasks.build_executor_for_workspace("ws1")
+    exec = catalog_tasks.build_forge_executor("ws1")
     assert exec == "exec"
 
 
 def test_sync_workspace_catalog(monkeypatch):
     catalog_tasks = _load_catalog_tasks(monkeypatch)
     monkeypatch.setattr(catalog_tasks, "create_engine", lambda *a, **k: "engine")
-    monkeypatch.setattr(catalog_tasks, "build_executor_for_workspace", lambda ws: "exec")
+    monkeypatch.setattr(catalog_tasks, "build_forge_executor", lambda ws: "exec")
 
     res = catalog_tasks.sync_workspace_catalog.run("ws1", schema_name="asset")
     assert res["snapshot"]["snap"] is True

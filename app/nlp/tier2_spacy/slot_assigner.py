@@ -11,6 +11,7 @@ from app.nlp.tier2_spacy.schema import (
     Tier2DisciplineSlot,
     Tier2GradesSlot,
     Tier2NameSlot,
+    Tier2SectionSlot,
     Tier2Slots,
     Tier2ValueSlot,
 )

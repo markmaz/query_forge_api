@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
-from app.ports.sql_executor import SQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.ports.sql_executor import ForgeQueryPort
 
 
 @dataclass(frozen=True)
@@ -15,8 +15,8 @@ class _Hit:
 
 
 class DomainResolverService:
-    def __init__(self, db_session: Optional[SQLExecutor] = None, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or db_session or MySQLSQLExecutor()
+    def __init__(self, db_session: Optional[ForgeQueryPort] = None, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or db_session or ForgeMetaSQL()
 
     def resolve_from_table_hits(
         self,

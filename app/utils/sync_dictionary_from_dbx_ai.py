@@ -8,18 +8,18 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
 # Your existing executors (as provided)
-from app.adapters.databricks_sql_executor import DatabricksSQLExecutor
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.databricks_sql_executor import DatabricksForgeQueryPort
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
 # ----------------------------
-# Token provider for DatabricksSQLExecutor
+# Token provider for DatabricksForgeQueryPort
 # ----------------------------
 class StaticTokenProvider:
-    """Minimal token provider compatible with DatabricksSQLExecutor._resolve_token()."""
+    """Minimal token provider compatible with DatabricksForgeQueryPort._resolve_token()."""
 
     def __init__(self, token: str):
         self.token = token
@@ -62,11 +62,11 @@ def clamp_prompt(s: str, max_chars: int) -> str:
 # ----------------------------
 # Databricks SQL helpers
 # ----------------------------
-def dbx_query_rows(dbx: DatabricksSQLExecutor, sql: str, *, timeout_s: int = 600) -> List[Dict[str, Any]]:
+def dbx_query_rows(dbx: DatabricksForgeQueryPort, sql: str, *, timeout_s: int = 600) -> List[Dict[str, Any]]:
     """
     Uses ARROW_STREAM so result rows come back as dicts via pyarrow.Table.to_pylist().
     """
-    res = dbx.submit_statement(sql, wait=True, timeout_s=timeout_s, result_format="ARROW_STREAM")
+    res = dbx.submit_statement(sql, wait=True, qf_timeout_s=timeout_s, qf_result_fmt="ARROW_STREAM")
     state = (res.get("status") or {}).get("state")
     if state != "SUCCEEDED":
         raise RuntimeError(f"Databricks statement failed. state={state} res={res}")
@@ -78,14 +78,14 @@ def sql_string_literal(s: str) -> str:
     return "'" + s.replace("\\", "\\\\").replace("'", "''") + "'"
 
 
-def get_current_catalog(dbx: DatabricksSQLExecutor) -> str:
+def get_current_catalog(dbx: DatabricksForgeQueryPort) -> str:
     rows = dbx_query_rows(dbx, "SELECT current_catalog() AS catalog")
     if not rows or not rows[0].get("catalog"):
         raise RuntimeError("Could not determine current_catalog() from Databricks session.")
     return str(rows[0]["catalog"])
 
 
-def dbx_ai_query(dbx: DatabricksSQLExecutor, endpoint_or_model: str, prompt: str) -> str:
+def dbx_ai_query(dbx: DatabricksForgeQueryPort, endpoint_or_model: str, prompt: str) -> str:
     """
     Calls Databricks ai_query() once and returns a string.
     """
@@ -97,7 +97,7 @@ def dbx_ai_query(dbx: DatabricksSQLExecutor, endpoint_or_model: str, prompt: str
         {sql_string_literal(prompt)}
       ) AS generated_text
     """
-    rows = dbx_query_rows(dbx, sql, timeout_s=1200)
+    rows = dbx_query_rows(dbx, sql, qf_timeout_s=1200)
     if not rows:
         return ""
     return (rows[0].get("generated_text") or "").strip()
@@ -143,12 +143,12 @@ def parse_source_table_name(
 # ----------------------------
 # MySQL helpers via your executor
 # ----------------------------
-def mysql_select(mysql: MySQLSQLExecutor, sql: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+def mysql_select(mysql: ForgeMetaSQL, sql: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     res = mysql.submit_statement(sql, parameters=params or {})
     return res.get("rows") or []
 
 
-def mysql_write(mysql: MySQLSQLExecutor, sql: str, params: Optional[Dict[str, Any]] = None) -> int:
+def mysql_write(mysql: ForgeMetaSQL, sql: str, params: Optional[Dict[str, Any]] = None) -> int:
     res = mysql.submit_statement(sql, parameters=params or {})
     return int(res.get("rowcount") or 0)
 
@@ -156,7 +156,7 @@ def mysql_write(mysql: MySQLSQLExecutor, sql: str, params: Optional[Dict[str, An
 # ----------------------------
 # Unity Catalog metadata fetch
 # ----------------------------
-def fetch_uc_columns(dbx: DatabricksSQLExecutor, tref: TableRef) -> List[Dict[str, Any]]:
+def fetch_uc_columns(dbx: DatabricksForgeQueryPort, tref: TableRef) -> List[Dict[str, Any]]:
     sql = f"""
     SELECT
       column_name,
@@ -220,8 +220,8 @@ Return only the description text.
 # ----------------------------
 def sync_dictionary(
     *,
-    dbx: DatabricksSQLExecutor,
-    mysql: MySQLSQLExecutor,
+    dbx: DatabricksForgeQueryPort,
+    mysql: ForgeMetaSQL,
     ai_model_or_endpoint: str,
     default_catalog: str,
     default_schema: Optional[str],
@@ -461,8 +461,8 @@ def main() -> None:
         only_ids = {int(x.strip()) for x in args.only_table_ids.split(",") if x.strip()}
 
     # Instantiate executors
-    mysql = MySQLSQLExecutor()
-    dbx = DatabricksSQLExecutor(
+    mysql = ForgeMetaSQL()
+    dbx = DatabricksForgeQueryPort(
         base_url=args.dbx_host,
         token_provider=StaticTokenProvider(args.dbx_token),
         default_warehouse_id=args.warehouse_id,

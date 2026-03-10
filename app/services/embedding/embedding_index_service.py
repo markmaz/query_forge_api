@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from typing import Any, Dict, Iterable, List, Optional
 
 from qdrant_client.http import models as qdrant_models
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import QDRANT_COLUMN_COLLECTION, QDRANT_COLUMN_COLLECTION_V2, QDRANT_TABLE_COLLECTION
 from app.infra.embedding_model import DEFAULT_VECTOR_SIZE, EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +24,12 @@ class EmbeddingIndexService:
     def __init__(
         self,
         *,
-        sql: Optional[SQLExecutor] = None,
+        sql: Optional[ForgeQueryPort] = None,
         table_qdrant: Optional[QdrantClientWrapper] = None,
         column_qdrant: Optional[QdrantClientWrapper] = None,
         model: Optional[EmbeddingModel] = None,
     ) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+        self._sql = sql or ForgeMetaSQL()
         self._table_qdrant = table_qdrant or QdrantClientWrapper(collection_name=TABLE_COLLECTION_NAME)
         self._column_qdrant = column_qdrant or QdrantClientWrapper(collection_name=COLUMN_COLLECTION_NAME)
         self._model = model or EmbeddingModel()
@@ -80,8 +81,7 @@ class EmbeddingIndexService:
           description,
           origin
         FROM model_table
-        WHERE origin = 'DBX'
-          AND is_missing_in_source = 0
+        WHERE is_missing_in_source = 0
         ORDER BY id
         """
         params: Dict[str, Any] = {}
@@ -114,6 +114,10 @@ class EmbeddingIndexService:
           mc.data_type AS model_data_type,
           mc.description AS column_description,
           mc.semantic_type AS semantic_type,
+          mc.semantic_entity AS semantic_entity,
+          mc.semantic_sub_type AS semantic_sub_type,
+          mc.semantic_confidence AS semantic_confidence,
+          mc.semantic_reasons_json AS semantic_reasons_json,
           mc.is_active AS model_is_active
         FROM workspace_table wt
         JOIN workspace_column wc ON wc.workspace_table_id = wt.id
@@ -216,6 +220,10 @@ class EmbeddingIndexService:
         column = (row.get("column_name") or "").strip()
         data_type = (row.get("model_data_type") or row.get("workspace_data_type") or "").strip()
         description = (row.get("column_description") or "").strip()
+        semantic_type = (row.get("semantic_type") or "").strip()
+        semantic_entity = (row.get("semantic_entity") or "").strip()
+        semantic_sub_type = (row.get("semantic_sub_type") or "").strip()
+        semantic_confidence = row.get("semantic_confidence")
         source_alias = (row.get("source_table_name") or "").strip()
 
         lines = [
@@ -225,6 +233,17 @@ class EmbeddingIndexService:
             f"Type: {data_type}",
             f"Description: {description}",
         ]
+        if semantic_type:
+            lines.append(f"Semantic type: {semantic_type}")
+        if semantic_entity:
+            lines.append(f"Semantic entity: {semantic_entity}")
+        if semantic_sub_type:
+            lines.append(f"Semantic sub-type: {semantic_sub_type}")
+        if semantic_confidence is not None:
+            lines.append(f"Semantic confidence: {semantic_confidence}")
+        semantic_reasons = _parse_json_list(row.get("semantic_reasons_json"))
+        if semantic_reasons:
+            lines.append(f"Semantic reasoning: {', '.join(semantic_reasons[:5])}")
         if source_alias:
             lines.append(f"Also known as: {source_alias}")
         return "\n".join(lines)
@@ -258,6 +277,10 @@ def build_workspace_column_payload(row: Dict[str, Any]) -> Dict[str, Any]:
         "data_type": data_type,
         "description": description,
         "semantic_type": row.get("semantic_type"),
+        "semantic_entity": row.get("semantic_entity"),
+        "semantic_sub_type": row.get("semantic_sub_type"),
+        "semantic_confidence": _to_float_or_none(row.get("semantic_confidence")),
+        "semantic_reasons": _parse_json_list(row.get("semantic_reasons_json")),
         "origin": row.get("model_origin"),
         "is_active": _coerce_bool(row.get("model_is_active"), default=True),
     }
@@ -278,6 +301,34 @@ def _to_int_or_none(value: Any) -> Optional[int]:
         return int(value)
     except Exception:
         return None
+
+
+def _to_float_or_none(value: Any) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _parse_json_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if not isinstance(value, str):
+        return []
+    text = value.strip()
+    if text == "":
+        return []
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item).strip() for item in parsed if str(item).strip()]
 
 
 def _coerce_bool(value: Any, *, default: bool = False) -> bool:

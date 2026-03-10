@@ -4,9 +4,9 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from app.adapters.mysql_sql_executor import MySQLSQLExecutor
+from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.nlp.tier2_spacy.training.dataset import DatasetEntity, DatasetExample, write_jsonl
-from app.ports.sql_executor import SQLExecutor
+from app.ports.sql_executor import ForgeQueryPort
 
 
 @dataclass
@@ -16,8 +16,8 @@ class SeedBuildResult:
 
 
 class RegistrySeedBuilder:
-    def __init__(self, *, sql: Optional[SQLExecutor] = None) -> None:
-        self._sql = sql or MySQLSQLExecutor()
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+        self._sql = sql or ForgeMetaSQL()
 
     def build(self, *, output_path: str, vertical_norm: str = "generic", limit: int = 500) -> SeedBuildResult:
         concepts = self._load_concepts(vertical_norm=vertical_norm, limit=limit)

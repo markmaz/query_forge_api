@@ -3,8 +3,9 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.exc import OperationalError
 
-from app.exceptions.service_error import ServiceError
+from app.exceptions.forge_error import ForgeError
 from app.models.user import User
+from app.models.user_workspace import Workspace
 from app.services import auth_service
 from app.services.auth_service import AuthService
 
@@ -12,7 +13,14 @@ from app.services.auth_service import AuthService
 def test_authenticate_success(monkeypatch) -> None:
     class DummyUserService:
         def find_user_by_username(self, _username: str) -> User:
-            return User(user_id="u1", user_name="u1", password="hashed", status="active", email="a@b.com")
+            return User(
+                user_id="u1",
+                user_name="u1",
+                password="hashed",
+                status="active",
+                email="a@b.com",
+                workspaces=[Workspace(workspace_id="ws-1", is_default=True)],
+            )
 
         def update_last_login(self, _user_id: str) -> None:
             return None
@@ -23,6 +31,8 @@ def test_authenticate_success(monkeypatch) -> None:
     svc = AuthService()
     res = svc.authenticate("u1", "pw")
     assert res["user_id"] == "u1"
+    assert res["workspace_id"] == "ws-1"
+    assert res["workspaceId"] == "ws-1"
 
 
 def test_authenticate_inactive_user(monkeypatch) -> None:
@@ -34,7 +44,7 @@ def test_authenticate_inactive_user(monkeypatch) -> None:
     monkeypatch.setattr(auth_service, "check_password_hash", lambda *_args, **_kwargs: True)
 
     svc = AuthService()
-    with pytest.raises(ServiceError, match="Invalid credentials") as exc:
+    with pytest.raises(ForgeError, match="Invalid credentials") as exc:
         svc.authenticate("u1", "pw")
     assert exc.value.status_code == 401
 
@@ -48,7 +58,7 @@ def test_authenticate_invalid_password(monkeypatch) -> None:
     monkeypatch.setattr(auth_service, "check_password_hash", lambda *_args, **_kwargs: False)
 
     svc = AuthService()
-    with pytest.raises(ServiceError, match="Invalid credentials") as exc:
+    with pytest.raises(ForgeError, match="Invalid credentials") as exc:
         svc.authenticate("u1", "pw")
     assert exc.value.status_code == 401
 
@@ -62,7 +72,7 @@ def test_authenticate_missing_user(monkeypatch) -> None:
     monkeypatch.setattr(auth_service, "check_password_hash", lambda *_args, **_kwargs: False)
 
     svc = AuthService()
-    with pytest.raises(ServiceError, match="Invalid credentials") as exc:
+    with pytest.raises(ForgeError, match="Invalid credentials") as exc:
         svc.authenticate("missing", "pw")
     assert exc.value.status_code == 401
 
@@ -91,7 +101,7 @@ def test_non_interactive_authentication_operational_error(monkeypatch) -> None:
     monkeypatch.setattr(auth_service, "UserService", DummyUserService)
 
     svc = AuthService()
-    with pytest.raises(ServiceError, match="Connection failure"):
+    with pytest.raises(ForgeError, match="Connection failure"):
         svc.non_interactive_authentication("u1", "pw")
 
 
@@ -242,12 +252,12 @@ def test_reset_password_enforces_password_policy(monkeypatch) -> None:
 
     class DummyUserService:
         def update_user(self, _user_id: str, _user: User):
-            raise ServiceError("Password violates policy rules.", 422)
+            raise ForgeError("Password violates policy rules.", 422)
 
     monkeypatch.setattr(auth_service, "cache", FakeCache())
     monkeypatch.setattr(auth_service, "UserService", DummyUserService)
 
     svc = AuthService()
-    with pytest.raises(ServiceError) as exc:
+    with pytest.raises(ForgeError) as exc:
         svc.reset_password("weak", "hashed")
     assert exc.value.status_code == 422

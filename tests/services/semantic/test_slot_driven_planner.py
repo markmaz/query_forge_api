@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.services.semantic.plan_service import PlanService
-from tests._support.fakes import FakeSQLExecutor
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_slot_driven_planner_enrollment_by_grade_current_school_year() -> None:
@@ -94,7 +94,7 @@ def test_slot_driven_planner_enrollment_by_grade_current_school_year() -> None:
             }
 
     svc = PlanService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         deterministic=_Deterministic(),
         concept_retrieval=_ConceptRetrieval(),
         concept_to_column=_ConceptToColumn(),
@@ -201,7 +201,7 @@ def test_slot_driven_planner_list_student_ids_keeps_identifiers_without_agg() ->
             }
 
     svc = PlanService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         deterministic=_Deterministic(),
         concept_retrieval=_ConceptRetrieval(),
         concept_to_column=_ConceptToColumn(),
@@ -301,7 +301,7 @@ def test_slot_driven_planner_listing_prompt_does_not_force_count() -> None:
             }
 
     svc = PlanService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         deterministic=_Deterministic(),
         concept_retrieval=_ConceptRetrieval(),
         concept_to_column=_ConceptToColumn(),
@@ -424,7 +424,7 @@ def test_slot_driven_planner_grounds_org_district_and_race_filters() -> None:
             }
 
     svc = PlanService(
-        sql=FakeSQLExecutor(),
+        sql=FakeForgeQueryPort(),
         deterministic=_Deterministic(),
         concept_retrieval=_ConceptRetrieval(),
         concept_to_column=_ConceptToColumn(),

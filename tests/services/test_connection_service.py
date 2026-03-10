@@ -20,7 +20,7 @@ def test_convert_to_conn() -> None:
 
 
 def test_get_connections(monkeypatch) -> None:
-    monkeypatch.setattr("app.services.connection_service.get_headers", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("app.services.connection_service.forge_auth_headers", lambda *_args, **_kwargs: {})
     monkeypatch.setattr("app.services.connection_service.requests.get", lambda *_args, **_kwargs: _Resp(200))
     monkeypatch.setattr(
         "app.services.connection_service.process_response",
@@ -46,7 +46,7 @@ def test_get_connection_by_filters(monkeypatch) -> None:
 
 
 def test_get_connection_by_id(monkeypatch) -> None:
-    monkeypatch.setattr("app.services.connection_service.get_headers", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("app.services.connection_service.forge_auth_headers", lambda *_args, **_kwargs: {})
     monkeypatch.setattr("app.services.connection_service.requests.get", lambda *_args, **_kwargs: _Resp(200))
     monkeypatch.setattr(
         "app.services.connection_service.process_response",
