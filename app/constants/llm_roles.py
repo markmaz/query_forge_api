@@ -8,7 +8,7 @@ class LLMRole:
     QUERY_GENERATOR = "query_generator"
     ENRICHMENT = "enrichment"
 
-    ALL = [PLANNER, NER, SUMMARIZER, QUERY_GENERATOR, ENRICHMENT]
+    ALL = (PLANNER, NER, SUMMARIZER, QUERY_GENERATOR, ENRICHMENT)
 
     DISPLAY_NAMES = {
         PLANNER: "Planner",
@@ -26,7 +26,7 @@ class LLMProvider:
     OLLAMA = "ollama"
     GENERIC = "generic"
 
-    ALL = [OPENAI, ANTHROPIC, AZURE_OPENAI, OLLAMA, GENERIC]
+    ALL = (OPENAI, ANTHROPIC, AZURE_OPENAI, OLLAMA, GENERIC)
 
     DISPLAY_NAMES = {
         OPENAI: "OpenAI",
