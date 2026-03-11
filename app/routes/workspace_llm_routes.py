@@ -101,6 +101,9 @@ class WorkspaceLLMDetail(ForgeResource):
         body = request.get_json(silent=True) or {}
         try:
             svc = WorkspaceLLMService()
+            existing = svc.get_by_id(llm_id)
+            if existing is None or existing.get("workspace_id") != workspace_id:
+                return {"error": "Not found"}, 404
             result = svc.update_llm(llm_id, body)
             return result, 200
         except ValueError as exc:
@@ -113,6 +116,9 @@ class WorkspaceLLMDetail(ForgeResource):
     def delete(self, workspace_id: str, llm_id: int):
         try:
             svc = WorkspaceLLMService()
+            existing = svc.get_by_id(llm_id)
+            if existing is None or existing.get("workspace_id") != workspace_id:
+                return {"error": "Not found"}, 404
             svc.delete_llm(llm_id)
             return {"deleted": True}, 200
         except ValueError as exc:
@@ -128,8 +134,13 @@ class WorkspaceLLMTest(ForgeResource):
     def post(self, workspace_id: str, llm_id: int):
         try:
             svc = WorkspaceLLMService()
+            existing = svc.get_by_id(llm_id)
+            if existing is None or existing.get("workspace_id") != workspace_id:
+                return {"error": "Not found"}, 404
             result = svc.test_connection(llm_id)
             return result, 200
+        except ValueError as exc:
+            return {"error": str(exc)}, 404
         except Exception:
             logger.exception("POST workspace llm test failed ws=%s id=%s", workspace_id, llm_id)
             return {"error": "Connection test failed"}, 500

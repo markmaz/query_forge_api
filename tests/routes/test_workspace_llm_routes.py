@@ -20,10 +20,10 @@ def auth_headers(monkeypatch):
     return {"Authorization": "Bearer test-token"}
 
 
-def _make_llm_row(role="planner"):
+def _make_llm_row(role="planner", workspace_id="ws1"):
     return {
         "id": 1,
-        "workspace_id": "ws1",
+        "workspace_id": workspace_id,
         "name": "Test LLM",
         "provider": "openai",
         "model_name": "gpt-4o",
@@ -89,6 +89,7 @@ def test_create_workspace_llm_validates_role(client, auth_headers):
 
 def test_test_connection_endpoint(client, auth_headers):
     mock_svc = MagicMock()
+    mock_svc.get_by_id.return_value = _make_llm_row()
     mock_svc.test_connection.return_value = {"success": True, "message": "Connected"}
     with patch("app.routes.workspace_llm_routes.WorkspaceLLMService", return_value=mock_svc):
         resp = client.post(
@@ -101,8 +102,20 @@ def test_test_connection_endpoint(client, auth_headers):
     assert "message" in data
 
 
+def test_test_connection_cross_workspace_returns_404(client, auth_headers):
+    mock_svc = MagicMock()
+    mock_svc.get_by_id.return_value = _make_llm_row(workspace_id="other-ws")
+    with patch("app.routes.workspace_llm_routes.WorkspaceLLMService", return_value=mock_svc):
+        resp = client.post(
+            "/api/v1/workspaces/ws1/llms/1/test",
+            headers=auth_headers,
+        )
+    assert resp.status_code == 404
+
+
 def test_delete_workspace_llm(client, auth_headers):
     mock_svc = MagicMock()
+    mock_svc.get_by_id.return_value = _make_llm_row()
     mock_svc.delete_llm.return_value = None
     with patch("app.routes.workspace_llm_routes.WorkspaceLLMService", return_value=mock_svc):
         resp = client.delete(
@@ -110,6 +123,56 @@ def test_delete_workspace_llm(client, auth_headers):
             headers=auth_headers,
         )
     assert resp.status_code == 200
+
+
+def test_delete_cross_workspace_returns_404(client, auth_headers):
+    mock_svc = MagicMock()
+    mock_svc.get_by_id.return_value = _make_llm_row(workspace_id="other-ws")
+    with patch("app.routes.workspace_llm_routes.WorkspaceLLMService", return_value=mock_svc):
+        resp = client.delete(
+            "/api/v1/workspaces/ws1/llms/1",
+            headers=auth_headers,
+        )
+    assert resp.status_code == 404
+
+
+def test_put_workspace_llm(client, auth_headers):
+    mock_svc = MagicMock()
+    mock_svc.get_by_id.return_value = _make_llm_row()
+    mock_svc.update_llm.return_value = {**_make_llm_row(), "name": "Updated"}
+    with patch("app.routes.workspace_llm_routes.WorkspaceLLMService", return_value=mock_svc):
+        resp = client.put(
+            "/api/v1/workspaces/ws1/llms/1",
+            headers={**auth_headers, "Content-Type": "application/json"},
+            data=json.dumps({"name": "Updated"}),
+        )
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["name"] == "Updated"
+
+
+def test_put_cross_workspace_returns_404(client, auth_headers):
+    mock_svc = MagicMock()
+    mock_svc.get_by_id.return_value = _make_llm_row(workspace_id="other-ws")
+    with patch("app.routes.workspace_llm_routes.WorkspaceLLMService", return_value=mock_svc):
+        resp = client.put(
+            "/api/v1/workspaces/ws1/llms/1",
+            headers={**auth_headers, "Content-Type": "application/json"},
+            data=json.dumps({"name": "Hacked"}),
+        )
+    assert resp.status_code == 404
+
+
+def test_put_not_found_returns_404(client, auth_headers):
+    mock_svc = MagicMock()
+    mock_svc.get_by_id.return_value = None
+    with patch("app.routes.workspace_llm_routes.WorkspaceLLMService", return_value=mock_svc):
+        resp = client.put(
+            "/api/v1/workspaces/ws1/llms/999",
+            headers={**auth_headers, "Content-Type": "application/json"},
+            data=json.dumps({"name": "Ghost"}),
+        )
+    assert resp.status_code == 404
 
 
 def test_list_workspace_llms_requires_auth(client):
