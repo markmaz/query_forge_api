@@ -84,6 +84,7 @@ from app.routes.user_workspace_routes import user_workspace_ns
 from app.routes.value_override_routes import value_override_ns
 from app.routes.vector_domains import vector_ns
 from app.routes.workspace_inventory_routes import wsinv_ns
+from app.routes.workspace_llm_routes import llm_providers_ns, llm_roles_ns, workspace_llm_ns
 from app.routes.workspace_routes import workspace_ns
 from app.routes.workspace_table_routes import workspace_tables_ns
 from app.services.analytics.config_loader import load_analytics_config
@@ -328,6 +329,9 @@ def create_app():
     api.add_namespace(data_environment_ns, path=f"/{NAME}/{VERSION}/data-environment")
     api.add_namespace(datasource_ns, path=build_url("/", NAME, VERSION, "datasources"))
     api.add_namespace(ingestion_ns, path=build_url("/", NAME, VERSION, "ingestion"))
+    api.add_namespace(llm_roles_ns, path=build_url("/", NAME, VERSION, "llm-roles"))
+    api.add_namespace(llm_providers_ns, path=build_url("/", NAME, VERSION, "llm-providers"))
+    api.add_namespace(workspace_llm_ns, path=build_url("/", NAME, VERSION))
 
     configure_logging()
     logger = logging.getLogger(__name__)
