@@ -100,7 +100,7 @@ class MetadataGateway:
         else:
             legacy_result = {
                 "tables_upserted": len(names),
-                "name_to_id": self._legacy.resolve_table_ids_by_names(names=names),
+                "name_to_id": self._workspace.resolve_table_ids_by_names(names=names),
             }
 
         self._safe_workspace_write(
@@ -163,6 +163,15 @@ class MetadataGateway:
         return legacy_result
 
     def mark_columns_missing(self, *, cols_by_table_id: Mapping[int, Iterable[str]], origin: str) -> int:
+        return self.mark_columns_missing_v2(cols_by_table_id=cols_by_table_id, cols_by_table_name={}, origin=origin)
+
+    def mark_columns_missing_v2(
+        self,
+        *,
+        cols_by_table_id: Mapping[int, Iterable[str]],
+        cols_by_table_name: Mapping[str, Iterable[str]],
+        origin: str,
+    ) -> int:
         legacy_affected = 0
         if self._legacy_enabled():
             legacy_affected = self._legacy.mark_columns_missing(cols_by_table_id=cols_by_table_id, origin=origin)
@@ -170,6 +179,7 @@ class MetadataGateway:
             action="mark_columns_missing",
             fn=self._workspace.mark_columns_missing,
             cols_by_table_id=cols_by_table_id,
+            cols_by_table_name=cols_by_table_name,
             origin=origin,
         )
         return legacy_affected

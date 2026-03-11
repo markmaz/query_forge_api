@@ -45,7 +45,7 @@ class WorkspaceReconService:
 WITH
 dbx AS (
   SELECT
-    COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS logical_table_name,
+    COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS logical_table_name,
     wc.column_name,
     MIN(wc.data_type) AS dbx_data_type,
     MIN(wc.id) AS dbx_column_id
@@ -55,11 +55,11 @@ dbx AS (
   WHERE wt.workspace_id = :ws
     AND wt.exists_in_dbx = 1
     AND wc.exists_in_dbx = 1
-  GROUP BY COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name), wc.column_name
+  GROUP BY COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name), wc.column_name
 ),
 dic AS (
   SELECT
-    COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS logical_table_name,
+    COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS logical_table_name,
     wc.column_name,
     MIN(wc.data_type) AS dict_data_type,
     MIN(wc.id) AS dict_column_id,
@@ -74,7 +74,7 @@ dic AS (
       OR COALESCE(wc.description, '') <> ''
       OR COALESCE(wc.semantic_concept_key, '') <> ''
     )
-  GROUP BY COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name), wc.column_name
+  GROUP BY COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name), wc.column_name
 ),
 kset AS (
   SELECT logical_table_name, column_name FROM dbx

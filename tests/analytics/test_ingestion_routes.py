@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 
@@ -214,6 +215,225 @@ def test_get_status_404_when_not_found(client, monkeypatch):
     resp = client.get("/api/v1/ingestion/status/no-such-id", headers=_VALID_HEADERS)
 
     assert resp.status_code == 404
+
+
+def test_get_status_auto_fails_stale_orphaned_run(client, monkeypatch):
+    _mock_token(monkeypatch)
+
+    started_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    first_row = {
+        "id": "test-id",
+        "datasource": "primary",
+        "schema_name": "sales",
+        "catalog": None,
+        "status": "running",
+        "tables_total": 3,
+        "tables_done": 3,
+        "columns_total": 10,
+        "columns_done": 4,
+        "started_at": started_at,
+        "completed_at": None,
+        "error": None,
+    }
+    second_row = dict(first_row)
+    second_row["status"] = "failed"
+    second_row["current_phase"] = "failed"
+    second_row["completed_at"] = datetime.now(timezone.utc)
+    second_row["error"] = "auto-failed"
+
+    mock_tx = MagicMock()
+    mock_tx.execute_query_mappings.side_effect = [[first_row], [second_row]]
+    mock_tx.execute_write.return_value = 1
+    mock_mysql = MagicMock()
+    mock_mysql.transaction.return_value.__enter__ = MagicMock(return_value=mock_tx)
+    mock_mysql.transaction.return_value.__exit__ = MagicMock(return_value=False)
+
+    monkeypatch.setattr(ingestion_routes_module, "ForgeMetaSQL", lambda: mock_mysql)
+    monkeypatch.setattr(ingestion_routes_module, "QF_INGESTION_STALE_GUARD_ENABLED", True)
+    monkeypatch.setattr(ingestion_routes_module, "QF_INGESTION_STALE_SECONDS", 30)
+    monkeypatch.setattr(ingestion_routes_module, "_get_celery_task_state", lambda _task_id: "PENDING")
+    monkeypatch.setattr(ingestion_routes_module, "_task_id_in_worker_queues", lambda _task_id: False)
+
+    resp = client.get("/api/v1/ingestion/status/test-id", headers=_VALID_HEADERS)
+
+    assert resp.status_code == 200
+    assert resp.json["status"] == "failed"
+    assert mock_tx.execute_write.call_count == 1
+
+
+def test_get_status_does_not_auto_fail_when_task_visible_in_worker_queue(client, monkeypatch):
+    _mock_token(monkeypatch)
+
+    started_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    row = {
+        "id": "test-id",
+        "datasource": "primary",
+        "schema_name": "sales",
+        "catalog": None,
+        "status": "running",
+        "tables_total": 3,
+        "tables_done": 3,
+        "columns_total": 10,
+        "columns_done": 4,
+        "started_at": started_at,
+        "completed_at": None,
+        "error": None,
+    }
+
+    mock_tx = MagicMock()
+    mock_tx.execute_query_mappings.return_value = [row]
+    mock_tx.execute_write.return_value = 1
+    mock_mysql = MagicMock()
+    mock_mysql.transaction.return_value.__enter__ = MagicMock(return_value=mock_tx)
+    mock_mysql.transaction.return_value.__exit__ = MagicMock(return_value=False)
+
+    monkeypatch.setattr(ingestion_routes_module, "ForgeMetaSQL", lambda: mock_mysql)
+    monkeypatch.setattr(ingestion_routes_module, "QF_INGESTION_STALE_GUARD_ENABLED", True)
+    monkeypatch.setattr(ingestion_routes_module, "QF_INGESTION_STALE_SECONDS", 30)
+    monkeypatch.setattr(ingestion_routes_module, "_get_celery_task_state", lambda _task_id: "PENDING")
+    monkeypatch.setattr(ingestion_routes_module, "_task_id_in_worker_queues", lambda _task_id: True)
+
+    resp = client.get("/api/v1/ingestion/status/test-id", headers=_VALID_HEADERS)
+
+    assert resp.status_code == 200
+    assert resp.json["status"] == "running"
+    assert mock_tx.execute_write.call_count == 0
+
+
+def test_get_diagnostics_returns_run_snapshot(client, monkeypatch):
+    _mock_token(monkeypatch)
+
+    started_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    row = {
+        "id": "test-id",
+        "datasource": "primary",
+        "schema_name": "sales",
+        "catalog": None,
+        "status": "running",
+        "tables_total": 3,
+        "tables_done": 2,
+        "columns_total": 10,
+        "columns_done": 6,
+        "started_at": started_at,
+        "completed_at": None,
+        "error": None,
+    }
+
+    mock_tx = MagicMock()
+    mock_tx.execute_query_mappings.return_value = [row]
+    mock_tx.execute_write.return_value = 0
+    mock_mysql = MagicMock()
+    mock_mysql.transaction.return_value.__enter__ = MagicMock(return_value=mock_tx)
+    mock_mysql.transaction.return_value.__exit__ = MagicMock(return_value=False)
+
+    monkeypatch.setattr(ingestion_routes_module, "ForgeMetaSQL", lambda: mock_mysql)
+    monkeypatch.setattr(ingestion_routes_module, "_get_celery_task_state", lambda _task_id: "STARTED")
+    monkeypatch.setattr(ingestion_routes_module, "_task_id_in_worker_queues", lambda _task_id: True)
+
+    resp = client.get("/api/v1/ingestion/diagnostics/test-id", headers=_VALID_HEADERS)
+
+    assert resp.status_code == 200
+    assert resp.json["id"] == "test-id"
+    assert resp.json["celery_state"] == "STARTED"
+    assert resp.json["in_worker_queues"] is True
+    assert "run" in resp.json
+
+
+def test_get_diagnostics_requires_admin(client, monkeypatch):
+    _mock_token(monkeypatch, is_admin=False)
+    resp = client.get("/api/v1/ingestion/diagnostics/test-id", headers=_VALID_HEADERS)
+    assert resp.status_code == 403
+
+
+def test_cancel_run_marks_running_as_canceled(client, monkeypatch):
+    _mock_token(monkeypatch)
+
+    row_running = {
+        "id": "test-id",
+        "datasource": "primary",
+        "schema_name": "sales",
+        "catalog": None,
+        "status": "running",
+        "tables_total": 3,
+        "tables_done": 2,
+        "columns_total": 10,
+        "columns_done": 6,
+        "started_at": datetime.now(timezone.utc) - timedelta(minutes=2),
+        "completed_at": None,
+        "error": None,
+    }
+    row_canceled = dict(row_running)
+    row_canceled["status"] = "canceled"
+    row_canceled["current_phase"] = "canceled"
+    row_canceled["completed_at"] = datetime.now(timezone.utc)
+    row_canceled["error"] = "Canceled by operator"
+
+    mock_tx = MagicMock()
+    mock_tx.execute_query_mappings.side_effect = [[row_running], [row_canceled]]
+    mock_tx.execute_write.return_value = 1
+    mock_mysql = MagicMock()
+    mock_mysql.transaction.return_value.__enter__ = MagicMock(return_value=mock_tx)
+    mock_mysql.transaction.return_value.__exit__ = MagicMock(return_value=False)
+    monkeypatch.setattr(ingestion_routes_module, "ForgeMetaSQL", lambda: mock_mysql)
+
+    revoke_called = {"called": False}
+
+    class _FakeAsyncResult:
+        def revoke(self, terminate=False, signal=None):
+            revoke_called["called"] = True
+            assert terminate is True
+            assert signal == "SIGTERM"
+
+    monkeypatch.setattr(
+        ingestion_routes_module.sync_metadata_task,
+        "AsyncResult",
+        lambda _task_id: _FakeAsyncResult(),
+    )
+    monkeypatch.setattr(ingestion_routes_module, "_get_celery_task_state", lambda _task_id: "REVOKED")
+    monkeypatch.setattr(ingestion_routes_module, "_task_id_in_worker_queues", lambda _task_id: False)
+
+    resp = client.post("/api/v1/ingestion/cancel/test-id", headers=_VALID_HEADERS)
+
+    assert resp.status_code == 200
+    assert resp.json["canceled"] is True
+    assert resp.json["status"] == "canceled"
+    assert revoke_called["called"] is True
+    assert mock_tx.execute_write.call_count == 1
+
+
+def test_cancel_run_is_noop_for_terminal_status(client, monkeypatch):
+    _mock_token(monkeypatch)
+
+    row = {
+        "id": "test-id",
+        "datasource": "primary",
+        "schema_name": "sales",
+        "catalog": None,
+        "status": "completed",
+        "tables_total": 3,
+        "tables_done": 3,
+        "columns_total": 10,
+        "columns_done": 10,
+        "started_at": datetime.now(timezone.utc) - timedelta(minutes=4),
+        "completed_at": datetime.now(timezone.utc),
+        "error": None,
+    }
+    mock_tx = MagicMock()
+    mock_tx.execute_query_mappings.return_value = [row]
+    mock_tx.execute_write.return_value = 0
+    mock_mysql = MagicMock()
+    mock_mysql.transaction.return_value.__enter__ = MagicMock(return_value=mock_tx)
+    mock_mysql.transaction.return_value.__exit__ = MagicMock(return_value=False)
+    monkeypatch.setattr(ingestion_routes_module, "ForgeMetaSQL", lambda: mock_mysql)
+    monkeypatch.setattr(ingestion_routes_module, "_get_celery_task_state", lambda _task_id: "SUCCESS")
+    monkeypatch.setattr(ingestion_routes_module, "_task_id_in_worker_queues", lambda _task_id: False)
+
+    resp = client.post("/api/v1/ingestion/cancel/test-id", headers=_VALID_HEADERS)
+
+    assert resp.status_code == 200
+    assert resp.json["canceled"] is False
+    assert resp.json["status"] == "completed"
+    assert mock_tx.execute_write.call_count == 0
 
 
 def test_get_history_returns_list(client, monkeypatch):

@@ -14,6 +14,7 @@ class ResolvedWorkspaceDatasource:
     workspace_id: str
     workspace_name: Optional[str]
     organization_id: Optional[str]
+    organization_is_active: bool
     workspace_is_active: bool
     datasource_id: int
     datasource_name: str
@@ -46,6 +47,7 @@ class WorkspaceDatasourceResolverService:
               w.id AS workspace_id,
               w.name AS workspace_name,
               w.organization_id AS workspace_organization_id,
+              COALESCE(o.is_active, 1) AS organization_is_active,
               COALESCE(w.is_active, 1) AS workspace_is_active,
               w.datasource_id,
               w.default_catalog,
@@ -59,6 +61,8 @@ class WorkspaceDatasourceResolverService:
               d.config_json,
               d.secret_ref
             FROM workspace w
+            LEFT JOIN organization o
+              ON o.id = w.organization_id
             LEFT JOIN datasource d
               ON d.id = w.datasource_id
             WHERE w.id = :ws
@@ -70,7 +74,11 @@ class WorkspaceDatasourceResolverService:
             raise ForgeError("Workspace not found", status_code=404)
 
         row = dict(rows[0])
+        org_active_raw = row.get("organization_is_active")
+        organization_active = True if org_active_raw is None else bool(int(org_active_raw or 0))
         workspace_active = bool(int(row.get("workspace_is_active") or 0))
+        if require_active and row.get("workspace_organization_id") is not None and not organization_active:
+            raise ForgeError("Organization is inactive", status_code=403)
         if require_active and not workspace_active:
             raise ForgeError("Workspace is inactive", status_code=403)
 
@@ -93,6 +101,7 @@ class WorkspaceDatasourceResolverService:
             workspace_id=str(row.get("workspace_id") or ws),
             workspace_name=(str(row.get("workspace_name")) if row.get("workspace_name") is not None else None),
             organization_id=(str(ws_org) if ws_org is not None else None),
+            organization_is_active=organization_active,
             workspace_is_active=workspace_active,
             datasource_id=int(datasource_id),
             datasource_name=str(row.get("datasource_name") or f"datasource-{datasource_id}"),

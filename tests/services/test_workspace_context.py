@@ -107,6 +107,7 @@ def test_build_context_uses_workspace_datasource_databricks(monkeypatch: pytest.
             workspace_id="ws-1",
             workspace_name="WS",
             organization_id="org-1",
+            organization_is_active=True,
             workspace_is_active=True,
             datasource_id=10,
             datasource_name="DBX",
@@ -151,6 +152,7 @@ def test_build_context_uses_workspace_datasource_non_databricks(monkeypatch: pyt
             workspace_id="ws-1",
             workspace_name="WS",
             organization_id="org-1",
+            organization_is_active=True,
             workspace_is_active=True,
             datasource_id=11,
             datasource_name="SF",
@@ -184,6 +186,7 @@ def test_build_context_rejects_unsupported_datasource_type(monkeypatch: pytest.M
             workspace_id="ws-1",
             workspace_name="WS",
             organization_id="org-1",
+            organization_is_active=True,
             workspace_is_active=True,
             datasource_id=12,
             datasource_name="Other",
@@ -199,3 +202,51 @@ def test_build_context_rejects_unsupported_datasource_type(monkeypatch: pytest.M
     with pytest.raises(ForgeError) as exc:
         WorkspaceContextBuilder().build("ws-1")
     assert exc.value.status_code == 400
+
+
+def test_build_context_injects_secret_for_mysql_datasource(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _DummyAnalyticsExecutor:
+        def execute(self, _sql: str, _params=None):
+            return []
+
+        def test_connection(self):
+            return None
+
+        def get_dialect(self):
+            return "mysql"
+
+    captured = {}
+
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.resolve_request_username",
+        lambda: "user-1",
+    )
+    monkeypatch.setenv("QF_TEST_MYSQL_PASSWORD", "pw-123")
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.WorkspaceDatasourceResolverService.resolve_for_workspace",
+        lambda *_args, **_kwargs: ResolvedWorkspaceDatasource(
+            workspace_id="ws-1",
+            workspace_name="WS",
+            organization_id="org-1",
+            organization_is_active=True,
+            workspace_is_active=True,
+            datasource_id=13,
+            datasource_name="MySQL",
+            datasource_slug="mysql",
+            datasource_type="mysql",
+            datasource_is_active=True,
+            config_json={"host": "localhost", "port": 3306, "database": "qf", "user": "root"},
+            secret_ref="env:QF_TEST_MYSQL_PASSWORD",
+            default_catalog=None,
+            default_schema=None,
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.ExecutorFactory.create",
+        lambda ds_type, cfg: captured.update({"type": ds_type, "cfg": dict(cfg)}) or _DummyAnalyticsExecutor(),
+    )
+
+    ctx = WorkspaceContextBuilder().build("ws-1")
+    assert ctx.workspace_id == "ws-1"
+    assert captured["type"] == "mysql"
+    assert captured["cfg"]["password"] == "pw-123"

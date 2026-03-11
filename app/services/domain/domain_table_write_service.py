@@ -135,8 +135,8 @@ class _DomainTableStore:
             """
             SELECT
               wt.id               AS workspace_table_id,
-              d.model_table_id    AS model_table_id,
-              mt.name             AS model_table_name,
+              NULL                AS model_table_id,
+              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
               dwt.relation_kind   AS relation_kind,
               dwt.is_primary      AS is_primary,
               dwt.sort_order      AS sort_order,
@@ -153,7 +153,6 @@ class _DomainTableStore:
             FROM domain_workspace_table dwt
             JOIN domain d ON d.id = dwt.domain_id
             JOIN workspace_table wt ON wt.id = dwt.workspace_table_id
-            LEFT JOIN model_table mt ON mt.id = d.model_table_id
             WHERE d.workspace_id = :ws
               AND d.id = :did
               AND dwt.workspace_table_id = :wtid

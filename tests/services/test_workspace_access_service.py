@@ -40,9 +40,10 @@ def test_assert_workspace_access_caches_within_request(app):
     assert sql.calls == 1
 
 
-def test_workspace_access_falls_back_to_legacy_query_on_schema_error():
+def test_workspace_access_does_not_fallback_to_legacy_query_on_schema_error():
     sql = _StubSQL(rows=[{"ok": 1}])
     sql.raise_once = True
     svc = WorkspaceAccessService(sql=sql)
-    assert svc.assert_workspace_access(user_id="user-1", workspace_id="ws-1") == "ws-1"
-    assert sql.calls == 2
+    with pytest.raises(RuntimeError):
+        svc.assert_workspace_access(user_id="user-1", workspace_id="ws-1")
+    assert sql.calls == 1

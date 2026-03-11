@@ -103,6 +103,7 @@ class MetadataSyncService:
 
         name_to_id: dict[str, int] = {}
         cols_by_table_id: dict[int, set] = {}
+        cols_by_table_name: dict[str, set] = {}
         for table_batch in _chunk(tables):
             table_result = self._writer.upsert_tables(
                 tables=table_batch,
@@ -133,6 +134,8 @@ class MetadataSyncService:
             )
             for table_id, col_names in col_result.get("cols_by_table_id", {}).items():
                 cols_by_table_id.setdefault(int(table_id), set()).update(col_names)
+            for table_name, col_names in col_result.get("cols_by_table_name", {}).items():
+                cols_by_table_name.setdefault(str(table_name), set()).update(col_names)
 
             tables_done += len(table_batch)
             tables_upserted += int(table_result.get("tables_upserted", 0) or 0)
@@ -152,6 +155,7 @@ class MetadataSyncService:
         self._writer.mark_columns_missing(
             cols_by_table_id=cols_by_table_id,
             origin=executor.get_dialect(),
+            cols_by_table_name=cols_by_table_name,
         )
 
         # 5. Optional profiling

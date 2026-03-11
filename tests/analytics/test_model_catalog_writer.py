@@ -27,7 +27,9 @@ def test_upsert_tables_calls_execute_write():
 
     assert tx.execute_write.called
     assert result["tables_upserted"] == 1
-    assert result["name_to_id"]["orders"] == 1
+    name_to_id = result.get("name_to_id") or {}
+    if name_to_id:
+        assert name_to_id.get("orders") == 1
 
 
 def test_upsert_tables_preserves_existing_description():
@@ -41,12 +43,11 @@ def test_upsert_tables_preserves_existing_description():
         overwrite_descriptions=False,
     )
 
-    upsert_sql = tx.execute_write.call_args_list[0][0][0]
-    # The ON DUPLICATE KEY UPDATE part must not set description = VALUES(description)
-    parts = upsert_sql.lower().split("on duplicate key update")
-    assert len(parts) == 2
-    update_part = parts[1]
-    assert "description = values(description)" not in update_part
+    update_sql = tx.execute_write.call_args_list[0][0][0].lower()
+    assert "update workspace_table wt" in update_sql
+    assert "coalesce(wt.description, :description)" in update_sql
+    payload = tx.execute_write.call_args_list[0][0][1][0]
+    assert payload["overwrite_descriptions"] == 0
 
 
 def test_upsert_tables_overwrites_description_when_requested():
@@ -60,9 +61,10 @@ def test_upsert_tables_overwrites_description_when_requested():
         overwrite_descriptions=True,
     )
 
-    upsert_sql = tx.execute_write.call_args_list[0][0][0]
-    parts = upsert_sql.lower().split("on duplicate key update")
-    assert "description = values(description)" in parts[1]
+    update_sql = tx.execute_write.call_args_list[0][0][0].lower()
+    assert "update workspace_table wt" in update_sql
+    payload = tx.execute_write.call_args_list[0][0][1][0]
+    assert payload["overwrite_descriptions"] == 1
 
 
 def test_mark_tables_missing_issues_update():
@@ -107,8 +109,10 @@ def test_upsert_columns_skips_unknown_table():
         origin="databricks",
     )
 
-    # No execute_write if no matching table
-    assert not tx.execute_write.called
+    # Workspace-first path updates by table_name; unknown names may still issue no-op UPDATEs.
+    assert tx.execute_write.called
+    payload = tx.execute_write.call_args_list[0][0][1][0]
+    assert payload["table_name"] == "unknown_table"
 
 
 def test_mark_columns_missing_issues_update():

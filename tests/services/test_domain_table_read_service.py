@@ -87,7 +87,6 @@ def test_sync_workspace_inventory_uses_factory_registry(monkeypatch) -> None:
     app = Flask(__name__)
     sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
-        [],
         [{"id": 11, "table_name": "orders"}],
     ]
     service = DomainTableReadService(sql=sql, metadata_mode="legacy")

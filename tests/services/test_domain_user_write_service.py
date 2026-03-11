@@ -16,7 +16,7 @@ def test_norm_add_remove() -> None:
 
 def test_upsert_user_success(monkeypatch) -> None:
     sql = FakeForgeQueryPort()
-    sql.query_mappings_responses = [[{"ok_domain": 1, "ok_user": 1}]]
+    sql.query_mappings_responses = [[{"ok_domain": 1, "ok_user": 1, "ok_workspace_member": 1}]]
     service = DomainUserWriteService(sql=sql)
     monkeypatch.setattr(service, "_assert_can_edit_domain", lambda **_kwargs: None)
 

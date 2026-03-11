@@ -77,13 +77,13 @@ class EmbeddingIndexService:
         sql = """
         SELECT
           MIN(wt.id) AS id,
-          COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS table_name,
+          COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS table_name,
           MIN(wt.source_table_name) AS source_table_name,
           MIN(wt.description) AS description,
           MIN(wt.origin) AS origin
         FROM workspace_table wt
         WHERE wt.exists_in_dbx = 1
-        GROUP BY COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)
+        GROUP BY COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name)
         ORDER BY table_name
         """
         params: Dict[str, Any] = {}
@@ -105,7 +105,7 @@ class EmbeddingIndexService:
           wt.id AS workspace_table_id,
           wc.id AS workspace_column_id,
           wt.model_table_id,
-          COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS model_table_name,
+          COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
           wt.full_name AS source_table_name,
           wt.origin AS model_origin,
           wt.table_name,

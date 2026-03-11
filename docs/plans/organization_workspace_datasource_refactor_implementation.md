@@ -126,3 +126,86 @@ Validated locally:
 2. Implement vault/kms secret providers in `SecretResolver`.
 3. Add explicit health-test endpoint per datasource updating `last_test_*` fields.
 4. After rollout stabilization, retire legacy-only fallback branches.
+
+## Phase 7 Progress Update (API / Service)
+Implemented admin tenancy management endpoints under `/api/v1/admin`:
+
+- `GET/POST /organizations`
+- `GET/PATCH/DELETE /organizations/{organization_id}`
+- `GET/POST /organizations/{organization_id}/memberships`
+- `PATCH/DELETE /organizations/{organization_id}/memberships/{membership_id}`
+- `GET/POST /organizations/{organization_id}/datasources`
+- `GET/PATCH/DELETE /datasources/{datasource_id}`
+- `POST /datasources/{datasource_id}/test`
+- `GET/POST /workspaces/{workspace_id}/memberships`
+- `PATCH/DELETE /workspaces/{workspace_id}/memberships/{membership_id}`
+
+Service implementation:
+- `/Users/mmaslak/Local Documents/projects/query-forge-api/app/services/tenancy/tenancy_admin_service.py`
+
+Request validation models:
+- `/Users/mmaslak/Local Documents/projects/query-forge-api/app/models/tenancy_admin.py`
+
+Behavior notes:
+- Endpoints are admin-only (`_require_admin` + `token_required`).
+- Delete operations support soft-disable by default (`is_active=0`) and hard delete via `?hard=true`.
+- Datasource connection test updates `last_tested_at`, `last_test_status`, and `last_test_message`.
+
+## Phase 8 Progress Update (Frontend Compatibility Support)
+Implemented workspace-first compatibility APIs so frontend can remain scoped by `workspace_id` while still managing datasource routing in admin:
+
+- `GET /api/v1/admin/workspaces` (workspace binding list with org/datasource summary)
+- `GET /api/v1/admin/workspaces/{workspace_id}/binding`
+- `PATCH /api/v1/admin/workspaces/{workspace_id}/binding`
+
+Backend additions:
+- Request schema updates in `/Users/mmaslak/Local Documents/projects/query-forge-api/app/models/tenancy_admin.py`
+- Service methods in `/Users/mmaslak/Local Documents/projects/query-forge-api/app/services/tenancy/tenancy_admin_service.py`
+- Route wiring in `/Users/mmaslak/Local Documents/projects/query-forge-api/app/routes/admin_routes.py`
+
+Frontend implementation prompt for the UI repo:
+- `/Users/mmaslak/Local Documents/projects/query-forge-api/docs/phase8_frontend_workspace_first_prompt.md`
+
+## Phase 9 Progress Update (Testing + Hardening)
+Additional hardening and coverage added:
+
+- Inactive organization enforcement during workspace->datasource resolution.
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/services/tenancy/datasource_resolver_service.py`
+- Organization active-state enforced in org-membership workspace access checks.
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/services/workspace_access_service.py`
+- Added workspace-context test for secret-ref password injection (`env:`) in MySQL executor path.
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/services/test_workspace_context.py`
+- Added resolver coverage for inactive organization path.
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/services/tenancy/test_datasource_resolver_service.py`
+- Added tenancy admin service and route coverage for new binding/CRUD endpoints.
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/services/tenancy/test_tenancy_admin_service.py`
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/routes/test_admin_routes.py`
+
+## Bootstrap Automation Added
+Added idempotent bootstrap service + script for first-run tenancy setup:
+
+- Service:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/services/tenancy/tenancy_bootstrap_service.py`
+- CLI script:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/scripts/bootstrap_tenancy.py`
+- Tests:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/services/tenancy/test_tenancy_bootstrap_service.py`
+- Runbook:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/docs/plans/tenancy_bootstrap_runbook.md`
+
+Also added admin API wrapper endpoint:
+- `POST /api/v1/admin/tenancy/bootstrap`
+- Route: `/Users/mmaslak/Local Documents/projects/query-forge-api/app/routes/admin_routes.py`
+
+## Dynamic External Links Support (Workspace-first)
+Added workspace-aware external links endpoint so UI can render `External Links` dynamically from datasource binding:
+
+- `GET /api/v1/workspaces/{workspace_id}/external-links`
+- Route: `/Users/mmaslak/Local Documents/projects/query-forge-api/app/routes/workspace_routes.py`
+- Service: `/Users/mmaslak/Local Documents/projects/query-forge-api/app/services/tenancy/workspace_external_link_service.py`
+- Tests:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/services/tenancy/test_workspace_external_link_service.py`
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/routes/test_misc_routes.py`
+
+Frontend prompt:
+- `/Users/mmaslak/Local Documents/projects/query-forge-api/docs/phase8_external_links_dynamic_menu_prompt.md`

@@ -4,7 +4,7 @@ import logging
 import re
 from typing import Any
 
-from flask import request
+from flask import g, request
 from flask_restx import Namespace, fields
 from app.routes.forge_resource import ForgeResource
 from sqlalchemy import text
@@ -18,8 +18,10 @@ from app.models.warehouse import Warehouse
 from app.routes.user_routes import user_model
 from app.services.warehouse_service import WarehouseService
 from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
+from app.services.workspace_access_service import WorkspaceAccessService
 from app.services.workspace_service import WorkspaceService
 from app.services.workspace_user_read_service import WorkspaceUserReadService
+from app.services.tenancy.workspace_external_link_service import WorkspaceExternalLinkService
 
 logger = logging.getLogger(__name__)
 
@@ -235,3 +237,31 @@ class GetWorkspaceUsersFromSystem(ForgeResource):
         except Exception:
             logger.exception("Workspace users fetch failed")
             return {"error": "Workspace users fetch failed"}, 500
+
+
+@workspace_ns.route("/<string:workspace_id>/external-links")
+class WorkspaceExternalLinks(ForgeResource):
+    @token_required
+    def get(self, workspace_id: str):
+        try:
+            user_id = str(getattr(g, "user_id", "") or "").strip()
+            if user_id:
+                WorkspaceAccessService().assert_workspace_access(user_id=user_id, workspace_id=workspace_id)
+            allow_legacy_fallback = str(request.args.get("legacy_fallback") or "").strip().lower() in {
+                "",
+                "1",
+                "true",
+                "yes",
+                "y",
+                "on",
+            }
+            result = WorkspaceExternalLinkService().list_links(
+                workspace_id=workspace_id,
+                allow_legacy_fallback=allow_legacy_fallback,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("workspace external links fetch failed")
+            return {"error": "workspace external links fetch failed"}, 500

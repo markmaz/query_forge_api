@@ -326,6 +326,12 @@ def test_get_users_with_products_and_workspaces() -> None:
                 "role_name": "Role",
             }
         ],
+        [
+            {
+                "workspace_id": "ws1",
+                "is_default": 1,
+            }
+        ],
         [],
         [{"count": 1}],
     ]
@@ -361,6 +367,7 @@ def test_get_users_prev_cursor() -> None:
                 "last_log_in": None,
             }
         ],
+        [],
         [],
         [],
         [{"user_id": "u1"}],

@@ -234,16 +234,6 @@ class ModelColumns(ForgeResource):
 
             table_name = body.get("tableName")
             column_name = body.get("columnName")
-            model_table_id = body.get("model_table_id") or body.get("modelTableId")
-
-            if not table_name and model_table_id:
-                rows = _RouteServices.mysql().execute_query_mappings(
-                    "SELECT name FROM model_table WHERE id = :id LIMIT 1",
-                    {"id": model_table_id},
-                )
-                table_name = rows[0]["name"] if rows else None
-                if not table_name:
-                    raise ForgeError("model_table_id not found", status_code=404)
 
             if not table_name or not column_name:
                 raise ForgeError("tableName and columnName are required", status_code=400)

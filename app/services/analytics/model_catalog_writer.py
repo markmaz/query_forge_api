@@ -51,5 +51,14 @@ class ModelCatalogWriter:
             overwrite_descriptions=overwrite_descriptions,
         )
 
-    def mark_columns_missing(self, cols_by_table_id: dict[int, set], origin: str) -> int:
-        return self._gateway.mark_columns_missing(cols_by_table_id=cols_by_table_id, origin=origin)
+    def mark_columns_missing(
+        self,
+        cols_by_table_id: dict[int, set],
+        origin: str,
+        cols_by_table_name: dict[str, set] | None = None,
+    ) -> int:
+        return self._gateway.mark_columns_missing_v2(
+            cols_by_table_id=cols_by_table_id,
+            cols_by_table_name=cols_by_table_name or {},
+            origin=origin,
+        )

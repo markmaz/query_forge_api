@@ -330,7 +330,7 @@ def _load_domain_columns(workspace_id: str, domain_id: int) -> Tuple[ColumnInfo,
     SELECT DISTINCT
       wc.column_name,
       wc.description,
-      COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS table_name,
+      COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS table_name,
       wt.full_name AS source_table_name
     FROM domain_workspace_table dwt
     JOIN workspace_table wt

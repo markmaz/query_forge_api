@@ -38,17 +38,14 @@ SELECT
   wt.schema_name,
   wt.variant_code,
   wt.exists_in_dbx,
-  wt.model_table_id,
-  mt.source_table_name,
-  mt.description AS table_description
+  wt.source_table_name,
+  wt.description AS table_description
 FROM domain_workspace_table dwt
 JOIN domain d
   ON d.id = dwt.domain_id
  AND d.workspace_id = :workspace_id
 JOIN workspace_table wt
   ON wt.id = dwt.workspace_table_id
-LEFT JOIN model_table mt
-  ON mt.id = wt.model_table_id
 WHERE dwt.domain_id = :domain_id
 ORDER BY dwt.is_primary DESC, dwt.sort_order ASC, dwt.workspace_table_id ASC
 """
@@ -60,8 +57,8 @@ SELECT
   wc.data_type,
   wc.nullable,
   wc.ordinal_position,
-  mc.semantic_type,
-  COALESCE(mc.description, '') AS description
+  wc.semantic_type,
+  COALESCE(wc.description, '') AS description
 FROM domain_workspace_table dwt
 JOIN domain d
   ON d.id = dwt.domain_id
@@ -70,11 +67,6 @@ JOIN workspace_table wt
   ON wt.id = dwt.workspace_table_id
 JOIN workspace_column wc
   ON wc.workspace_table_id = wt.id
-LEFT JOIN model_column mc
-  ON mc.model_table_id = wt.model_table_id
- AND mc.column_name = wc.column_name
- AND mc.is_active = 1
- AND mc.is_missing_in_source = 0
 WHERE dwt.domain_id = :domain_id
 ORDER BY wc.workspace_table_id ASC, wc.ordinal_position ASC, wc.column_name ASC
 """

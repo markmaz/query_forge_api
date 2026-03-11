@@ -22,6 +22,7 @@ def test_resolve_workspace_datasource_success():
                     "workspace_id": "ws-1",
                     "workspace_name": "Main",
                     "workspace_organization_id": "org-1",
+                    "organization_is_active": 1,
                     "workspace_is_active": 1,
                     "datasource_id": 10,
                     "default_catalog": "analytics",
@@ -53,6 +54,7 @@ def test_resolve_workspace_datasource_none_when_unbound():
                     "workspace_id": "ws-1",
                     "workspace_name": "Main",
                     "workspace_organization_id": "org-1",
+                    "organization_is_active": 1,
                     "workspace_is_active": 1,
                     "datasource_id": None,
                     "default_catalog": None,
@@ -86,6 +88,7 @@ def test_resolve_workspace_datasource_rejects_inactive_workspace():
                     "workspace_id": "ws-1",
                     "workspace_name": "Main",
                     "workspace_organization_id": "org-1",
+                    "organization_is_active": 1,
                     "workspace_is_active": 0,
                     "datasource_id": 10,
                     "default_catalog": None,
@@ -114,6 +117,7 @@ def test_resolve_workspace_datasource_rejects_inactive_datasource():
                     "workspace_id": "ws-1",
                     "workspace_name": "Main",
                     "workspace_organization_id": "org-1",
+                    "organization_is_active": 1,
                     "workspace_is_active": 1,
                     "datasource_id": 10,
                     "default_catalog": None,
@@ -142,6 +146,7 @@ def test_resolve_workspace_datasource_rejects_org_mismatch():
                     "workspace_id": "ws-1",
                     "workspace_name": "Main",
                     "workspace_organization_id": "org-1",
+                    "organization_is_active": 1,
                     "workspace_is_active": 1,
                     "datasource_id": 10,
                     "default_catalog": None,
@@ -160,3 +165,32 @@ def test_resolve_workspace_datasource_rejects_org_mismatch():
     with pytest.raises(ForgeError) as exc:
         service.resolve_for_workspace(workspace_id="ws-1")
     assert exc.value.status_code == 500
+
+
+def test_resolve_workspace_datasource_rejects_inactive_organization():
+    service = WorkspaceDatasourceResolverService(
+        sql=_StubSQL(
+            [
+                {
+                    "workspace_id": "ws-1",
+                    "workspace_name": "Main",
+                    "workspace_organization_id": "org-1",
+                    "organization_is_active": 0,
+                    "workspace_is_active": 1,
+                    "datasource_id": 10,
+                    "default_catalog": None,
+                    "default_schema": None,
+                    "datasource_organization_id": "org-1",
+                    "datasource_name": "Primary",
+                    "datasource_slug": "primary",
+                    "datasource_type": "snowflake",
+                    "datasource_is_active": 1,
+                    "config_json": {},
+                    "secret_ref": None,
+                }
+            ]
+        )
+    )
+    with pytest.raises(ForgeError) as exc:
+        service.resolve_for_workspace(workspace_id="ws-1")
+    assert exc.value.status_code == 403

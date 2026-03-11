@@ -98,7 +98,6 @@ class DomainsRoot(ForgeResource):
                 name=(body.get("name") or "").strip(),
                 kind=body.get("kind"),
                 description=body.get("description"),
-                model_table_id=body.get("model_table_id"),
                 column_name_policy=body.get("column_name_policy"),
             )
             return {"row": row}, 201
@@ -120,7 +119,6 @@ class DomainById(ForgeResource):
                 kind=body.get("kind") if "kind" in body else None,
                 description=body.get("description") if "description" in body else None,
                 is_active=body.get("is_active") if "is_active" in body else None,
-                model_table_id=body.get("model_table_id") if "model_table_id" in body else None,
                 column_name_policy=body.get("column_name_policy") if "column_name_policy" in body else None,
             )
             return {"row": row}, 200

@@ -303,15 +303,22 @@ class UserService:
         """
         new_ws: [{"workspace_id": "...", "is_default": bool}, ...]
         """
-        # Normalize desired map: id -> is_default
+        # Normalize desired map: workspace_id -> is_default
         desired = {
             str(w["workspace_id"]): bool(w.get("is_default", False))
             for w in (new_ws or [])
         }
+        if desired and not any(desired.values()):
+            first_key = next(iter(desired.keys()))
+            desired[first_key] = True
 
-        # Load existing
+        # Load existing explicit workspace memberships for this user.
         rows = tx.execute_query_mappings(
-            "SELECT workspace_id, is_default FROM user_workspace_map WHERE user_id = :uid",
+            """
+            SELECT workspace_id, COALESCE(is_default, 0) AS is_default
+            FROM workspace_membership
+            WHERE user_id = :uid
+            """,
             {"uid": user_id},
         )
         existing = {str(r["workspace_id"]): bool(r["is_default"]) for r in rows}
@@ -326,28 +333,32 @@ class UserService:
             placeholders = ",".join([f":id{i}" for i in range(len(ids_list))])
             params = {"uid": user_id, **{f"id{i}": wid for i, wid in enumerate(ids_list)}}
             tx.execute_write(
-                f"DELETE FROM user_workspace_map WHERE user_id = :uid AND workspace_id IN ({placeholders})",
+                f"DELETE FROM workspace_membership WHERE user_id = :uid AND workspace_id IN ({placeholders})",
                 params,
             )
 
         # Insert new
         if to_insert:
-            tx.execute_write(
-                "INSERT INTO user_workspace_map (user_id, workspace_id, is_default) "
-                "VALUES (:uid, :workspace_id, :is_default)",
-                [
-                    {"uid": user_id, "workspace_id": wid, "is_default": desired[wid]}
-                    for wid in to_insert
-                ],
-            )
+            for wid in to_insert:
+                tx.execute_write(
+                    """
+                    INSERT INTO workspace_membership (workspace_id, user_id, role, is_active, is_default)
+                    VALUES (:workspace_id, :uid, 'member', 1, :is_default)
+                    ON DUPLICATE KEY UPDATE
+                      is_active = 1,
+                      is_default = VALUES(is_default),
+                      updated_at = CURRENT_TIMESTAMP
+                    """,
+                    {"uid": user_id, "workspace_id": wid, "is_default": 1 if desired[wid] else 0},
+                )
 
         # Update flags where changed
         for wid in to_update:
             tx.execute_write(
-                "UPDATE user_workspace_map "
+                "UPDATE workspace_membership "
                 "SET is_default = :is_default "
                 "WHERE user_id = :uid AND workspace_id = :workspace_id",
-                {"uid": user_id, "workspace_id": wid, "is_default": desired[wid]},
+                {"uid": user_id, "workspace_id": wid, "is_default": 1 if desired[wid] else 0},
             )
         if any(desired.values()):
             # keep only the first True as default
@@ -355,7 +366,7 @@ class UserService:
             keep = true_ids[0]
             if len(true_ids) > 1:
                 tx.execute_write(
-                    "UPDATE user_workspace_map SET is_default = 0 "
+                    "UPDATE workspace_membership SET is_default = 0 "
                     "WHERE user_id = :uid AND workspace_id != :keep",
                     {"uid": user_id, "keep": keep},
                 )
@@ -444,7 +455,8 @@ class UserService:
             ForgeError 404 (User not found), 500 (database error)
         """
         delete_user = "DELETE FROM users WHERE user_id = :user_id"
-        delete_user_workspace = "DELETE FROM user_workspace_map WHERE user_id = :user_id"
+        delete_user_workspace = "DELETE FROM workspace_membership WHERE user_id = :user_id"
+        delete_user_org_membership = "DELETE FROM organization_membership WHERE user_id = :user_id"
         delete_user_roles = "DELETE FROM user_roles WHERE user_id = :user_id"
         delete_user_global_roles = "DELETE FROM user_global_roles WHERE user_id = :user_id"
         delete_user_domain_mapping = "DELETE FROM user_domain_mapping WHERE user_id = :user_id"
@@ -456,6 +468,7 @@ class UserService:
                 tx.execute_write(delete_user_global_roles, {"user_id": user_id})
                 tx.execute_write(delete_user_domain_mapping, {"user_id": user_id})
                 tx.execute_write(delete_user_workspace, {"user_id": user_id})
+                tx.execute_write(delete_user_org_membership, {"user_id": user_id})
                 result = tx.execute_write(delete_user, {"user_id": user_id})
                 if (result or 0) == 0:
                     logger.error(f"User not found: {user_id}")
@@ -480,21 +493,21 @@ class UserService:
         """
         sql = """
             SELECT u.user_id, u.username, u.password, u.email, u.first_name, u.last_name, u.tos_accepted, u.eula_accepted, u.status as user_status,
-                u.otp_secret, u.last_log_in, u.two_factor_preference, orgs.workspace_id, orgs.is_default, p.product_name, p.status as product_status, p.last_update,
+                u.otp_secret, u.last_log_in, u.two_factor_preference, p.product_name, p.status as product_status, p.last_update,
                 ur.product_role_id, r.role_name, r.role_id
             FROM users u
-            LEFT JOIN user_workspace_map orgs on orgs.user_id = u.user_id
             LEFT JOIN user_roles ur on ur.user_id = u.user_id
             LEFT JOIN product_roles pr on pr.product_role_id = ur.product_role_id
             LEFT JOIN products p on p.product_id = pr.product_id
             LEFT JOIN roles r on r.role_id = pr.role_id
-            WHERE u.username = :username AND p.status not in ('Inactive');
+            WHERE u.username = :username AND (p.status not in ('Inactive') OR p.product_id IS NULL);
         """
         try:
             result = self._sql.execute_query_mappings(sql, {"username": username})
             if not result:
                 return None
             user = self.map_user_with_products(result)
+            user.workspaces = [Workspace(**row) for row in self.get_user_workspaces(str(user.user_id))]
             direct_roles = self._to_role_models(self.get_user_direct_roles(str(user.user_id)))
             user.rbac_roles = direct_roles
             user.rbac_role_ids = [role.role_id for role in direct_roles]
@@ -537,15 +550,14 @@ class UserService:
         """
         sql = """
             SELECT u.user_id, u.username, u.password, u.email, u.first_name, u.last_name, u.tos_accepted, u.eula_accepted, u.status as user_status,
-                u.otp_secret, u.last_log_in, u.two_factor_preference, orgs.workspace_id, orgs.is_default, p.product_name, p.product_id,
+                u.otp_secret, u.last_log_in, u.two_factor_preference, p.product_name, p.product_id,
                 p.status as product_status, p.last_update, ur.product_role_id, r.role_name, r.role_id
             FROM users u
-            LEFT JOIN user_workspace_map orgs on orgs.user_id = u.user_id
             LEFT JOIN user_roles ur on ur.user_id = u.user_id
             LEFT JOIN product_roles pr on pr.product_role_id = ur.product_role_id
             LEFT JOIN products p on p.product_id = pr.product_id
             LEFT JOIN roles r on r.role_id = pr.role_id
-            WHERE u.user_id = :user_id AND p.status not in ('Inactive');
+            WHERE u.user_id = :user_id AND (p.status not in ('Inactive') OR p.product_id IS NULL);
         """
         try:
             result = self._sql.execute_query_mappings(sql, {"user_id": user_id})
@@ -553,6 +565,7 @@ class UserService:
                 logger.error(f"User not found {user_id}")
                 raise ForgeError("User not found", 404)
             user = self.map_user_with_products(result)
+            user.workspaces = [Workspace(**row) for row in self.get_user_workspaces(str(user.user_id))]
             direct_roles = self._to_role_models(self.get_user_direct_roles(str(user.user_id)))
             user.rbac_roles = direct_roles
             user.rbac_role_ids = [role.role_id for role in direct_roles]
@@ -600,18 +613,18 @@ class UserService:
         trimmed = base_rows[:limit]
         user_ids = [row["user_id"] for row in trimmed]
 
-        # Get product and workspace data for all users in this page
+        # Get product data for all users in this page
         user_ids_placeholders = ",".join([f":uid{i}" for i in range(len(user_ids))])
         extended_query = """
-            SELECT u.user_id, orgs.workspace_id, orgs.is_default, p.product_id, p.product_name, p.product_id, p.status, p.last_update,
+            SELECT u.user_id, p.product_id, p.product_name, p.product_id, p.status, p.last_update,
                 ur.product_role_id, r.role_id, r.role_name
             FROM users u
-            LEFT JOIN user_workspace_map orgs ON orgs.user_id = u.user_id
             LEFT JOIN user_roles ur ON ur.user_id = u.user_id
             LEFT JOIN product_roles pr ON pr.product_role_id = ur.product_role_id
             LEFT JOIN products p ON p.product_id = pr.product_id
             LEFT JOIN roles r ON r.role_id = pr.role_id
-            WHERE p.status not in ('Inactive') AND u.user_id IN ({user_ids_placeholders})
+            WHERE (p.status not in ('Inactive') OR p.product_id IS NULL)
+              AND u.user_id IN ({user_ids_placeholders})
         """
 
         extended_rows = self._sql.execute_query_mappings(
@@ -620,24 +633,17 @@ class UserService:
         )
 
         # Group extended rows by user_id
-        user_map = defaultdict(lambda: {"products": defaultdict(list), "workspaces": []})
+        user_map = defaultdict(lambda: {"products": defaultdict(list)})
         for row in extended_rows:
             uid = row["user_id"]
-
-            # Workspaces
-            if row["workspace_id"]:
-                workspace = Workspace(
-                    workspace_id=row["workspace_id"],
-                    is_default=row.get("is_default", False)
-                )
-                if workspace not in user_map[uid]["workspaces"]:
-                    user_map[uid]["workspaces"].append(workspace)
 
             # Products
             if row["product_id"] and row["product_role_id"] and row["role_id"]:
                 role = Role(role_id=row["role_id"], role_name=row["role_name"])
                 product_role = ProductRole(product_role_id=row["product_role_id"], role=role)
                 user_map[uid]["products"][row["product_id"], row["product_name"], row["status"], row["last_update"]].append(product_role)
+
+        workspace_map = self._get_user_workspaces_bulk(user_ids)
 
         # Build full user models
         users = []
@@ -660,7 +666,10 @@ class UserService:
             ]
 
             # Workspaces
-            workspaces = list(user_map[uid]["workspaces"])
+            workspaces = [
+                Workspace(workspace_id=row.get("workspace_id"), is_default=bool(row.get("is_default")))
+                for row in workspace_map.get(str(uid), [])
+            ]
 
             users.append(User(**row_dict, products=products, workspaces=workspaces))
 
@@ -727,7 +736,7 @@ class UserService:
         """
         mapping = self.get_user_workspaces(user_id)
 
-        if any(w['workspace_id'] == workspace_id for w in mapping):
+        if any(str(w.get('workspace_id')) == str(workspace_id) for w in mapping):
             logger.error(f"User: {user_id} already mapped to workspace {workspace_id}")
             raise ForgeError("Mapping already exists for user", 409)
 
@@ -742,22 +751,26 @@ class UserService:
             elif is_default:
                 # Remove existing default
                 update_sql = """
-                    UPDATE user_workspace_map
+                    UPDATE workspace_membership
                     SET is_default = false
                     WHERE user_id = :user_id AND is_default = true
                 """
                 tx.execute_write(update_sql, {"user_id": user_id})
 
             insert_sql = """
-                INSERT INTO user_workspace_map (user_id, workspace_id, is_default)
-                VALUES (:user_id, :workspace_id, :is_default)
+                INSERT INTO workspace_membership (workspace_id, user_id, role, is_active, is_default)
+                VALUES (:workspace_id, :user_id, 'member', 1, :is_default)
+                ON DUPLICATE KEY UPDATE
+                  is_active = 1,
+                  is_default = VALUES(is_default),
+                  updated_at = CURRENT_TIMESTAMP
             """
             tx.execute_write(
                 insert_sql,
                 {
                     "user_id": user_id,
                     "workspace_id": workspace_id,
-                    "is_default": is_default,
+                    "is_default": 1 if is_default else 0,
                 },
             )
 
@@ -1186,27 +1199,36 @@ class UserService:
         if current_mapping['is_default'] and not is_default:
             raise ForgeError("User must always have a default workspace", 409)
 
-        sql = """
-            UPDATE user_workspace_map 
-            SET is_default = :is_default 
-            WHERE user_id = :user_id AND workspace_id = :workspace_id
-        """
-
         try:
             with self._sql.transaction() as tx:
                 if is_default:
                     # Unset previous default
                     unset_sql = """
-                        UPDATE user_workspace_map
+                        UPDATE workspace_membership
                         SET is_default = false
-                        WHERE user_id = :user_id AND is_default = true
+                        WHERE user_id = :user_id
                     """
                     tx.execute_write(unset_sql, {"user_id": user_id})
-
-                tx.execute_write(
-                    sql,
-                    {"user_id": user_id, "workspace_id": workspace_id, "is_default": is_default},
-                )
+                    tx.execute_write(
+                        """
+                        INSERT INTO workspace_membership (workspace_id, user_id, role, is_active, is_default)
+                        VALUES (:workspace_id, :user_id, 'member', 1, 1)
+                        ON DUPLICATE KEY UPDATE
+                          is_active = 1,
+                          is_default = 1,
+                          updated_at = CURRENT_TIMESTAMP
+                        """,
+                        {"user_id": user_id, "workspace_id": workspace_id},
+                    )
+                else:
+                    tx.execute_write(
+                        """
+                        UPDATE workspace_membership
+                        SET is_default = 0
+                        WHERE user_id = :user_id AND workspace_id = :workspace_id
+                        """,
+                        {"user_id": user_id, "workspace_id": workspace_id},
+                    )
 
             return {
                 "message": "Workspace default updated successfully",
@@ -1236,16 +1258,64 @@ class UserService:
 
         """
         sql = """
-            SELECT workspace_id, is_default
-            FROM user_workspace_map uwm
-            WHERE user_id = :user_id
+            SELECT workspace_id, MAX(is_default) AS is_default
+            FROM (
+                SELECT
+                    wm.workspace_id AS workspace_id,
+                    COALESCE(wm.is_default, 0) AS is_default
+                FROM workspace_membership wm
+                JOIN workspace w
+                  ON w.id = wm.workspace_id
+                 AND COALESCE(w.is_active, 1) = 1
+                WHERE wm.user_id = :user_id
+                  AND COALESCE(wm.is_active, 1) = 1
+
+                UNION ALL
+
+                SELECT
+                    w.id AS workspace_id,
+                    0 AS is_default
+                FROM organization_membership om
+                JOIN organization o
+                  ON o.id = om.organization_id
+                 AND COALESCE(o.is_active, 1) = 1
+                JOIN workspace w
+                  ON w.organization_id = om.organization_id
+                 AND COALESCE(w.is_active, 1) = 1
+                WHERE om.user_id = :user_id
+                  AND COALESCE(om.is_active, 1) = 1
+            ) access_rows
+            GROUP BY workspace_id
+            ORDER BY is_default DESC, workspace_id ASC
         """
         try:
             result = self._sql.execute_query_mappings(sql, {"user_id": user_id})
-            return [dict(row) for row in result]
+            rows = [dict(row) for row in result]
+            if not rows:
+                return []
+            has_default = any(bool(row.get("is_default")) for row in rows)
+            if not has_default:
+                rows[0]["is_default"] = True
+                for row in rows[1:]:
+                    row["is_default"] = False
+            else:
+                seen_default = False
+                for row in rows:
+                    if bool(row.get("is_default")) and not seen_default:
+                        row["is_default"] = True
+                        seen_default = True
+                    else:
+                        row["is_default"] = False
+            return rows
         except exc.SQLAlchemyError as e:
             logger.error(f"{sql} - {str(e)}")
             raise ForgeError(f"Failed to retrieve user workspaces: {str(e)}", 500)
+
+    def _get_user_workspaces_bulk(self, user_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for uid in user_ids or []:
+            out[str(uid)] = self.get_user_workspaces(str(uid))
+        return out
     
     validate_params("user_id", "workspace_id")
     def delete_user_workspace(self, user_id: str, workspace_id: str) -> Dict[str, str]:
@@ -1263,7 +1333,7 @@ class UserService:
             ForgeError 500 (database error)
         """
 
-        sql = "DELETE FROM user_workspace_map WHERE user_id = :user_id AND workspace_id = :workspace_id"
+        sql = "DELETE FROM workspace_membership WHERE user_id = :user_id AND workspace_id = :workspace_id"
         try:
             with self._sql.transaction() as tx:
                 tx.execute_write(sql, {"user_id": user_id, "workspace_id": workspace_id})

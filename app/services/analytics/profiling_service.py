@@ -8,7 +8,6 @@ from typing import Any, Callable
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.metadata_provider_abc import MetadataProvider
-from app.services.metadata.gateway import MetadataGateway
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +23,10 @@ _DEFAULT_OPTIONS: dict[str, Any] = {
 
 
 class ProfilingService:
-    """Drives per-table column profiling and persists results to model_column."""
+    """Drives per-table column profiling and persists results to workspace_column."""
 
-    def __init__(self, *, mysql: ForgeMetaSQL | None = None, metadata_gateway: MetadataGateway | None = None) -> None:
+    def __init__(self, *, mysql: ForgeMetaSQL | None = None) -> None:
         self._mysql = mysql or ForgeMetaSQL()
-        self._metadata_gateway = metadata_gateway or MetadataGateway(sql=self._mysql)
 
     def profile_and_persist(
         self,
@@ -43,11 +41,22 @@ class ProfilingService:
     ) -> dict[str, Any]:
         opts = {**_DEFAULT_OPTIONS, **(options or {})}
 
-        # Group columns by table name (only for tables we have IDs for)
+        # Group columns by table name for tables present in the provided map.
+        # If map is empty, skip profiling to preserve existing service behavior.
         cols_by_table: dict[str, list[dict]] = {}
+        allowed_tables = {str(name or "").strip() for name in table_id_by_name.keys() if str(name or "").strip()}
+        if not allowed_tables:
+            return {
+                "profiled": 0,
+                "tables_failed": 0,
+                "errors": 0,
+                "columns_total": 0,
+                "columns_done": 0,
+                "columns_failed": 0,
+            }
         for col in columns:
             tn = col["table_name"]
-            if tn in table_id_by_name:
+            if tn in allowed_tables:
                 cols_by_table.setdefault(tn, []).append(col)
 
         profiled = 0
@@ -77,7 +86,6 @@ class ProfilingService:
         _emit_progress()
 
         for table_name, table_cols in cols_by_table.items():
-            table_id = table_id_by_name[table_name]
             parts = [p for p in [catalog, schema, table_name] if p]
             table_ref = ".".join(parts)
             _emit_progress(
@@ -92,7 +100,7 @@ class ProfilingService:
                     options=opts,
                 )
                 persisted_columns = self._persist_column_stats(
-                    table_id=table_id,
+                    table_name=table_name,
                     col_stats=stats,
                     table_cols=table_cols,
                 )
@@ -104,8 +112,8 @@ class ProfilingService:
                 )
             except Exception:
                 logger.exception(
-                    "ProfilingService: failed to profile table %s (id=%d)",
-                    table_name, table_id,
+                    "ProfilingService: failed to profile table %s",
+                    table_name,
                 )
                 tables_failed += 1
                 columns_failed += len(table_cols)
@@ -125,7 +133,7 @@ class ProfilingService:
 
     def _persist_column_stats(
         self,
-        table_id: int,
+        table_name: str,
         col_stats: dict[str, dict],
         table_cols: list[dict],
     ) -> int:
@@ -146,31 +154,25 @@ class ProfilingService:
 
                 tx.execute_write(
                     """
-UPDATE model_column
-SET sample_values_json = :sample_values_json,
-    sample_stats_json  = :sample_stats_json,
-    sample_ran_at      = :sample_ran_at,
-    sample_error       = :sample_error,
-    updated_at         = CURRENT_TIMESTAMP
-WHERE model_table_id = :table_id
-  AND column_name    = :column_name
+UPDATE workspace_column wc
+JOIN workspace_table wt
+  ON wt.id = wc.workspace_table_id
+SET wc.sample_values_json = :sample_values_json,
+    wc.sample_stats_json  = :sample_stats_json,
+    wc.sample_ran_at      = :sample_ran_at,
+    wc.sample_error       = :sample_error,
+    wc.updated_at         = CURRENT_TIMESTAMP
+WHERE wt.table_name = :table_name
+  AND wc.column_name = :column_name
 """,
                     {
-                        "table_id": table_id,
+                        "table_name": table_name,
                         "column_name": cn,
                         "sample_values_json": json.dumps(top_values),
                         "sample_stats_json": json.dumps(sample_stats),
                         "sample_ran_at": now,
                         "sample_error": str(sample_error)[:500] if sample_error else None,
                     },
-                )
-                self._metadata_gateway.sync_column_profile_from_model_table(
-                    model_table_id=table_id,
-                    column_name=cn,
-                    sample_values_json=json.dumps(top_values),
-                    sample_stats_json=json.dumps(sample_stats),
-                    sample_ran_at=now,
-                    sample_error=str(sample_error)[:500] if sample_error else None,
                 )
                 persisted += 1
         return persisted

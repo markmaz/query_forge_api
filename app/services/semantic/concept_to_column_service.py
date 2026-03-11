@@ -154,18 +154,18 @@ class ConceptToColumnService:
               SELECT
                 COALESCE(wc.model_column_id, wc.id) AS model_column_id,
                 wt.id AS workspace_table_id,
-                COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS table_name,
+                COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS table_name,
                 wc.column_name,
-                COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS model_table_name,
+                COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
                 sc.concept_key,
                 wc.semantic_concept_key AS authoritative_concept_key,
                 sc.entity,
                 sc.semantic_type,
                 m.weight AS base_weight,
-                CASE WHEN LOWER(COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)) = 'dim_student' AND LOWER(COALESCE(sc.entity, '')) = 'student' THEN 2.0 ELSE 0.0 END AS entity_bonus,
-                CASE WHEN LOWER(COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)) LIKE 'dim\\_%' ESCAPE '\\\\' THEN 1.0 ELSE 0.0 END AS dim_bonus,
+                CASE WHEN LOWER(COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name)) = 'dim_student' AND LOWER(COALESCE(sc.entity, '')) = 'student' THEN 2.0 ELSE 0.0 END AS entity_bonus,
+                CASE WHEN LOWER(COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name)) LIKE 'dim\\_%' ESCAPE '\\\\' THEN 1.0 ELSE 0.0 END AS dim_bonus,
                 CASE
-                  WHEN LOWER(COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)) LIKE 'fct\\_%' ESCAPE '\\\\'
+                  WHEN LOWER(COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name)) LIKE 'fct\\_%' ESCAPE '\\\\'
                    AND LOWER(COALESCE(sc.semantic_type, '')) IN ('attribute', 'flag')
                   THEN -0.5
                   ELSE 0.0
@@ -343,18 +343,18 @@ class ConceptToColumnService:
               SELECT
                 COALESCE(wc.model_column_id, wc.id) AS model_column_id,
                 wt.id AS workspace_table_id,
-                COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS table_name,
+                COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS table_name,
                 wc.column_name,
-                COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS model_table_name,
+                COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
                 cr.concept_key,
                 cr.entity,
                 cr.semantic_type,
                 wc.semantic_concept_key AS authoritative_concept_key,
                 1.0 AS base_weight,
-                CASE WHEN LOWER(COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)) = 'dim_student' AND LOWER(COALESCE(cr.entity, '')) = 'student' THEN 2.0 ELSE 0.0 END AS entity_bonus,
-                CASE WHEN LOWER(COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)) LIKE 'dim\\_%' ESCAPE '\\\\' THEN 1.0 ELSE 0.0 END AS dim_bonus,
+                CASE WHEN LOWER(COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name)) = 'dim_student' AND LOWER(COALESCE(cr.entity, '')) = 'student' THEN 2.0 ELSE 0.0 END AS entity_bonus,
+                CASE WHEN LOWER(COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name)) LIKE 'dim\\_%' ESCAPE '\\\\' THEN 1.0 ELSE 0.0 END AS dim_bonus,
                 CASE
-                  WHEN LOWER(COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)) LIKE 'fct\\_%' ESCAPE '\\\\'
+                  WHEN LOWER(COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name)) LIKE 'fct\\_%' ESCAPE '\\\\'
                    AND LOWER(COALESCE(cr.semantic_type, '')) IN ('attribute', 'flag')
                   THEN -0.5
                   ELSE 0.0

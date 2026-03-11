@@ -444,7 +444,7 @@ class SemanticMappingService:
               COALESCE(wc.model_column_id, wc.id) AS model_column_id,
               wc.column_name,
               wt.workspace_id,
-              COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name) AS table_name
+              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS table_name
             FROM workspace_column wc
             JOIN workspace_table wt
               ON wt.id = wc.workspace_table_id

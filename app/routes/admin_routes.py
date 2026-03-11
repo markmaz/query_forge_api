@@ -17,6 +17,19 @@ from app.models.domain_profile_embedding import (
     DomainProfileGenerateOneRequest,
     DomainProfileGenerateRequest,
 )
+from app.models.tenancy_admin import (
+    DatasourceCreateRequest,
+    DatasourceUpdateRequest,
+    OrganizationCreateRequest,
+    OrganizationMembershipCreateRequest,
+    OrganizationMembershipUpdateRequest,
+    OrganizationUpdateRequest,
+    TenancyBootstrapRequest,
+    WorkspaceCreateRequest,
+    WorkspaceBindingUpdateRequest,
+    WorkspaceMembershipCreateRequest,
+    WorkspaceMembershipUpdateRequest,
+)
 from app.routes.request_helpers import extract_workspace_id
 from app.services.admin.domain_profile_embedding_service import DomainProfileEmbeddingService
 from app.services.admin.domain_profile_service import DomainProfileService
@@ -24,6 +37,8 @@ from app.services.admin.health_service import AdminHealthService
 from app.services.embedding.embedding_index_service import EmbeddingIndexService
 from app.services.embedding.semantic_concept_embedding_service import SemanticConceptEmbeddingService
 from app.services.prompt_feedback_service import PromptFeedbackService
+from app.services.tenancy.tenancy_admin_service import TenancyAdminService
+from app.services.tenancy.tenancy_bootstrap_service import BootstrapInput, TenancyBootstrapService
 from app.services.vector import DomainVectorIndexService
 
 admin_ns = Namespace("admin", description="Admin operations")
@@ -70,6 +85,136 @@ domain_profile_generate_one_model = admin_ns.model(
     "DomainProfileGenerateOneRequest",
     {
         "force": fields.Boolean(required=False, default=False),
+    },
+)
+
+organization_create_model = admin_ns.model(
+    "OrganizationCreateRequest",
+    {
+        "id": fields.String(required=False),
+        "name": fields.String(required=True),
+        "slug": fields.String(required=False),
+        "description": fields.String(required=False),
+        "is_active": fields.Boolean(required=False),
+    },
+)
+
+organization_update_model = admin_ns.model(
+    "OrganizationUpdateRequest",
+    {
+        "name": fields.String(required=False),
+        "slug": fields.String(required=False),
+        "description": fields.String(required=False),
+        "is_active": fields.Boolean(required=False),
+    },
+)
+
+organization_membership_create_model = admin_ns.model(
+    "OrganizationMembershipCreateRequest",
+    {
+        "user_id": fields.String(required=True),
+        "role": fields.String(required=False),
+        "is_active": fields.Boolean(required=False),
+    },
+)
+
+organization_membership_update_model = admin_ns.model(
+    "OrganizationMembershipUpdateRequest",
+    {
+        "role": fields.String(required=False),
+        "is_active": fields.Boolean(required=False),
+    },
+)
+
+datasource_create_model = admin_ns.model(
+    "DatasourceCreateRequest",
+    {
+        "name": fields.String(required=True),
+        "slug": fields.String(required=False),
+        "type": fields.String(required=True),
+        "description": fields.String(required=False),
+        "is_active": fields.Boolean(required=False),
+        "secret_ref": fields.String(required=False),
+        "config_json": fields.Raw(required=False),
+    },
+)
+
+datasource_update_model = admin_ns.model(
+    "DatasourceUpdateRequest",
+    {
+        "name": fields.String(required=False),
+        "slug": fields.String(required=False),
+        "type": fields.String(required=False),
+        "description": fields.String(required=False),
+        "is_active": fields.Boolean(required=False),
+        "secret_ref": fields.String(required=False),
+        "config_json": fields.Raw(required=False),
+    },
+)
+
+workspace_membership_create_model = admin_ns.model(
+    "WorkspaceMembershipCreateRequest",
+    {
+        "user_id": fields.String(required=True),
+        "role": fields.String(required=False),
+        "is_active": fields.Boolean(required=False),
+        "is_default": fields.Boolean(required=False),
+    },
+)
+
+workspace_membership_update_model = admin_ns.model(
+    "WorkspaceMembershipUpdateRequest",
+    {
+        "role": fields.String(required=False),
+        "is_active": fields.Boolean(required=False),
+        "is_default": fields.Boolean(required=False),
+    },
+)
+
+workspace_binding_update_model = admin_ns.model(
+    "WorkspaceBindingUpdateRequest",
+    {
+        "organization_id": fields.String(required=False),
+        "datasource_id": fields.Integer(required=False),
+        "name": fields.String(required=False),
+        "description": fields.String(required=False),
+        "is_active": fields.Boolean(required=False),
+        "default_catalog": fields.String(required=False),
+        "default_schema": fields.String(required=False),
+    },
+)
+
+workspace_create_model = admin_ns.model(
+    "WorkspaceCreateRequest",
+    {
+        "workspace_id": fields.String(required=False),
+        "organization_id": fields.String(required=True),
+        "datasource_id": fields.Integer(required=False),
+        "name": fields.String(required=False),
+        "description": fields.String(required=False),
+        "is_active": fields.Boolean(required=False),
+        "default_catalog": fields.String(required=False),
+        "default_schema": fields.String(required=False),
+    },
+)
+
+tenancy_bootstrap_model = admin_ns.model(
+    "TenancyBootstrapRequest",
+    {
+        "workspace_id": fields.String(required=True),
+        "organization_name": fields.String(required=True),
+        "organization_id": fields.String(required=False),
+        "organization_slug": fields.String(required=False),
+        "organization_description": fields.String(required=False),
+        "datasource_name": fields.String(required=True),
+        "datasource_type": fields.String(required=True, enum=["databricks", "snowflake", "mysql", "postgres", "bigquery"]),
+        "datasource_slug": fields.String(required=False),
+        "datasource_description": fields.String(required=False),
+        "datasource_secret_ref": fields.String(required=False),
+        "datasource_config_json": fields.Raw(required=False),
+        "default_catalog": fields.String(required=False),
+        "default_schema": fields.String(required=False),
+        "admin_user_id": fields.String(required=False),
     },
 )
 
@@ -474,9 +619,444 @@ class DomainProfileGenerateAll(ForgeResource):
 
 
 # ---------------------------------------------------------------------------
+# Tenancy admin CRUD (organization / membership / datasource / workspace membership)
+# ---------------------------------------------------------------------------
+
+@admin_ns.route("/tenancy/bootstrap")
+class TenancyBootstrap(ForgeResource):
+    @token_required
+    @admin_ns.expect(tenancy_bootstrap_model, validate=False)
+    def post(self):
+        try:
+            _require_admin()
+            req = TenancyBootstrapRequest(**(request.get_json(silent=True) or {}))
+            result = TenancyBootstrapService().bootstrap(
+                BootstrapInput(
+                    workspace_id=req.workspace_id,
+                    organization_name=req.organization_name,
+                    organization_id=req.organization_id,
+                    organization_slug=req.organization_slug,
+                    organization_description=req.organization_description,
+                    datasource_name=req.datasource_name,
+                    datasource_type=req.datasource_type,
+                    datasource_slug=req.datasource_slug,
+                    datasource_description=req.datasource_description,
+                    datasource_secret_ref=req.datasource_secret_ref,
+                    datasource_config_json=req.datasource_config_json,
+                    default_catalog=req.default_catalog,
+                    default_schema=req.default_schema,
+                    admin_user_id=req.admin_user_id,
+                )
+            )
+            return {"result": result}, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("tenancy bootstrap failed")
+            return {"error": "tenancy bootstrap failed"}, 500
+
+
+@admin_ns.route("/organizations")
+class OrganizationListCreate(ForgeResource):
+    @token_required
+    def get(self):
+        try:
+            _require_admin()
+            include_inactive = _as_bool(request.args.get("include_inactive"), default=False)
+            q = str(request.args.get("q") or "").strip() or None
+            limit = request.args.get("limit", default=100, type=int) or 100
+            offset = request.args.get("offset", default=0, type=int) or 0
+            return TenancyAdminService().list_organizations(
+                include_inactive=include_inactive,
+                q=q,
+                limit=limit,
+                offset=offset,
+            ), 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("organization list failed")
+            return {"error": "organization list failed"}, 500
+
+    @token_required
+    @admin_ns.expect(organization_create_model, validate=False)
+    def post(self):
+        try:
+            _require_admin()
+            req = OrganizationCreateRequest(**(request.get_json(silent=True) or {}))
+            result = TenancyAdminService().create_organization(req)
+            return result, 201
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("organization create failed")
+            return {"error": "organization create failed"}, 500
+
+
+@admin_ns.route("/organizations/<string:organization_id>")
+class OrganizationDetail(ForgeResource):
+    @token_required
+    def get(self, organization_id: str):
+        try:
+            _require_admin()
+            return TenancyAdminService().get_organization(organization_id), 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("organization get failed")
+            return {"error": "organization get failed"}, 500
+
+    @token_required
+    @admin_ns.expect(organization_update_model, validate=False)
+    def patch(self, organization_id: str):
+        try:
+            _require_admin()
+            req = OrganizationUpdateRequest(**(request.get_json(silent=True) or {}))
+            result = TenancyAdminService().update_organization(organization_id, req)
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("organization update failed")
+            return {"error": "organization update failed"}, 500
+
+    @token_required
+    def delete(self, organization_id: str):
+        try:
+            _require_admin()
+            hard = _as_bool(request.args.get("hard"), default=False)
+            result = TenancyAdminService().delete_organization(organization_id, hard=hard)
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("organization delete failed")
+            return {"error": "organization delete failed"}, 500
+
+
+@admin_ns.route("/organizations/<string:organization_id>/memberships")
+class OrganizationMembershipListCreate(ForgeResource):
+    @token_required
+    def get(self, organization_id: str):
+        try:
+            _require_admin()
+            include_inactive = _as_bool(request.args.get("include_inactive"), default=False)
+            limit = request.args.get("limit", default=200, type=int) or 200
+            offset = request.args.get("offset", default=0, type=int) or 0
+            result = TenancyAdminService().list_organization_memberships(
+                organization_id=organization_id,
+                include_inactive=include_inactive,
+                limit=limit,
+                offset=offset,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("organization membership list failed")
+            return {"error": "organization membership list failed"}, 500
+
+    @token_required
+    @admin_ns.expect(organization_membership_create_model, validate=False)
+    def post(self, organization_id: str):
+        try:
+            _require_admin()
+            req = OrganizationMembershipCreateRequest(**(request.get_json(silent=True) or {}))
+            result = TenancyAdminService().upsert_organization_membership(
+                organization_id=organization_id,
+                req=req,
+            )
+            return result, 201
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("organization membership create failed")
+            return {"error": "organization membership create failed"}, 500
+
+
+@admin_ns.route("/organizations/<string:organization_id>/memberships/<int:membership_id>")
+class OrganizationMembershipDetail(ForgeResource):
+    @token_required
+    @admin_ns.expect(organization_membership_update_model, validate=False)
+    def patch(self, organization_id: str, membership_id: int):
+        try:
+            _require_admin()
+            req = OrganizationMembershipUpdateRequest(**(request.get_json(silent=True) or {}))
+            result = TenancyAdminService().update_organization_membership(
+                organization_id=organization_id,
+                membership_id=membership_id,
+                req=req,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("organization membership update failed")
+            return {"error": "organization membership update failed"}, 500
+
+    @token_required
+    def delete(self, organization_id: str, membership_id: int):
+        try:
+            _require_admin()
+            result = TenancyAdminService().delete_organization_membership(
+                organization_id=organization_id,
+                membership_id=membership_id,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("organization membership delete failed")
+            return {"error": "organization membership delete failed"}, 500
+
+
+@admin_ns.route("/organizations/<string:organization_id>/datasources")
+class OrganizationDatasourceListCreate(ForgeResource):
+    @token_required
+    def get(self, organization_id: str):
+        try:
+            _require_admin()
+            include_inactive = _as_bool(request.args.get("include_inactive"), default=False)
+            limit = request.args.get("limit", default=100, type=int) or 100
+            offset = request.args.get("offset", default=0, type=int) or 0
+            result = TenancyAdminService().list_datasources(
+                organization_id=organization_id,
+                include_inactive=include_inactive,
+                limit=limit,
+                offset=offset,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("organization datasource list failed")
+            return {"error": "organization datasource list failed"}, 500
+
+    @token_required
+    @admin_ns.expect(datasource_create_model, validate=False)
+    def post(self, organization_id: str):
+        try:
+            _require_admin()
+            req = DatasourceCreateRequest(**(request.get_json(silent=True) or {}))
+            result = TenancyAdminService().create_datasource(organization_id=organization_id, req=req)
+            return result, 201
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("organization datasource create failed")
+            return {"error": "organization datasource create failed"}, 500
+
+
+@admin_ns.route("/datasources/<int:datasource_id>")
+class DatasourceDetail(ForgeResource):
+    @token_required
+    def get(self, datasource_id: int):
+        try:
+            _require_admin()
+            return TenancyAdminService().get_datasource(datasource_id), 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("datasource get failed")
+            return {"error": "datasource get failed"}, 500
+
+    @token_required
+    @admin_ns.expect(datasource_update_model, validate=False)
+    def patch(self, datasource_id: int):
+        try:
+            _require_admin()
+            req = DatasourceUpdateRequest(**(request.get_json(silent=True) or {}))
+            result = TenancyAdminService().update_datasource(datasource_id=datasource_id, req=req)
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("datasource update failed")
+            return {"error": "datasource update failed"}, 500
+
+    @token_required
+    def delete(self, datasource_id: int):
+        try:
+            _require_admin()
+            hard = _as_bool(request.args.get("hard"), default=False)
+            result = TenancyAdminService().delete_datasource(datasource_id=datasource_id, hard=hard)
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("datasource delete failed")
+            return {"error": "datasource delete failed"}, 500
+
+
+@admin_ns.route("/datasources/<int:datasource_id>/test")
+class DatasourceConnectionTest(ForgeResource):
+    @token_required
+    def post(self, datasource_id: int):
+        try:
+            _require_admin()
+            result = TenancyAdminService().test_datasource(datasource_id=datasource_id)
+            return {"result": result}, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("datasource test failed")
+            return {"error": "datasource test failed"}, 500
+
+
+@admin_ns.route("/workspaces")
+class WorkspaceBindingList(ForgeResource):
+    @token_required
+    def get(self):
+        try:
+            _require_admin()
+            include_inactive = _as_bool(request.args.get("include_inactive"), default=False)
+            organization_id = str(request.args.get("organization_id") or "").strip() or None
+            limit = request.args.get("limit", default=200, type=int) or 200
+            offset = request.args.get("offset", default=0, type=int) or 0
+            result = TenancyAdminService().list_workspace_bindings(
+                organization_id=organization_id,
+                include_inactive=include_inactive,
+                limit=limit,
+                offset=offset,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("workspace binding list failed")
+            return {"error": "workspace binding list failed"}, 500
+
+    @token_required
+    @admin_ns.expect(workspace_create_model, validate=False)
+    def post(self):
+        try:
+            _require_admin()
+            req = WorkspaceCreateRequest(**(request.get_json(silent=True) or {}))
+            result = TenancyAdminService().create_workspace(req)
+            return result, 201
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("workspace create failed")
+            return {"error": "workspace create failed"}, 500
+
+
+@admin_ns.route("/workspaces/<string:workspace_id>/binding")
+class WorkspaceBindingDetail(ForgeResource):
+    @token_required
+    def get(self, workspace_id: str):
+        try:
+            _require_admin()
+            return TenancyAdminService().get_workspace_binding(workspace_id), 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("workspace binding get failed")
+            return {"error": "workspace binding get failed"}, 500
+
+    @token_required
+    @admin_ns.expect(workspace_binding_update_model, validate=False)
+    def patch(self, workspace_id: str):
+        try:
+            _require_admin()
+            req = WorkspaceBindingUpdateRequest(**(request.get_json(silent=True) or {}))
+            result = TenancyAdminService().update_workspace_binding(workspace_id=workspace_id, req=req)
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("workspace binding update failed")
+            return {"error": "workspace binding update failed"}, 500
+
+
+@admin_ns.route("/workspaces/<string:workspace_id>/memberships")
+class WorkspaceMembershipListCreate(ForgeResource):
+    @token_required
+    def get(self, workspace_id: str):
+        try:
+            _require_admin()
+            include_inactive = _as_bool(request.args.get("include_inactive"), default=False)
+            limit = request.args.get("limit", default=200, type=int) or 200
+            offset = request.args.get("offset", default=0, type=int) or 0
+            result = TenancyAdminService().list_workspace_memberships(
+                workspace_id=workspace_id,
+                include_inactive=include_inactive,
+                limit=limit,
+                offset=offset,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("workspace membership list failed")
+            return {"error": "workspace membership list failed"}, 500
+
+    @token_required
+    @admin_ns.expect(workspace_membership_create_model, validate=False)
+    def post(self, workspace_id: str):
+        try:
+            _require_admin()
+            req = WorkspaceMembershipCreateRequest(**(request.get_json(silent=True) or {}))
+            result = TenancyAdminService().upsert_workspace_membership(workspace_id=workspace_id, req=req)
+            return result, 201
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("workspace membership create failed")
+            return {"error": "workspace membership create failed"}, 500
+
+
+@admin_ns.route("/workspaces/<string:workspace_id>/memberships/<int:membership_id>")
+class WorkspaceMembershipDetail(ForgeResource):
+    @token_required
+    @admin_ns.expect(workspace_membership_update_model, validate=False)
+    def patch(self, workspace_id: str, membership_id: int):
+        try:
+            _require_admin()
+            req = WorkspaceMembershipUpdateRequest(**(request.get_json(silent=True) or {}))
+            result = TenancyAdminService().update_workspace_membership(
+                workspace_id=workspace_id,
+                membership_id=membership_id,
+                req=req,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("workspace membership update failed")
+            return {"error": "workspace membership update failed"}, 500
+
+    @token_required
+    def delete(self, workspace_id: str, membership_id: int):
+        try:
+            _require_admin()
+            result = TenancyAdminService().delete_workspace_membership(
+                workspace_id=workspace_id,
+                membership_id=membership_id,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("workspace membership delete failed")
+            return {"error": "workspace membership delete failed"}, 500
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def _require_admin() -> None:
     if not bool(getattr(g, "is_admin", False)):
         raise ForgeError("Admin access required", status_code=403)
+
+
+def _as_bool(value, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    return default

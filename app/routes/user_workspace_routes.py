@@ -58,7 +58,7 @@ class UserWorkspaceMap(ForgeResource):
         if not user_id or not workspace_id:
             return {"error": "user_id and workspace_id are required"}, 400
 
-        return _user_service().map_user_organization(user_id, workspace_id, is_default)
+        return _user_service().map_user_workspace(user_id, workspace_id, is_default)
 
     @token_required
     @user_workspace_ns.expect(_parser)

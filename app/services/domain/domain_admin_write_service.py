@@ -70,6 +70,7 @@ class _DomainAdminStore:
         model_table_id: Optional[int],
         column_name_policy: Optional[str],
     ) -> int:
+        del model_table_id
         with self._sql.transaction() as tx:
             tx.execute_write(
                 """
@@ -86,14 +87,13 @@ class _DomainAdminStore:
                     workspace_id, name, kind, description, model_table_id,
                     column_name_policy, is_active, created_at
                 )
-                VALUES (:ws, :name, :kind, :desc, :mtid, :policy, 1, CURRENT_TIMESTAMP)
+                VALUES (:ws, :name, :kind, :desc, NULL, :policy, 1, CURRENT_TIMESTAMP)
                 """,
                 {
                     "ws": workspace_id,
                     "name": name,
                     "kind": kind,
                     "desc": description,
-                    "mtid": model_table_id,
                     "policy": column_name_policy,
                 },
             )
@@ -136,14 +136,20 @@ class _DomainAdminStore:
               d.name,
               d.kind,
               d.description,
-              d.model_table_id,
+              NULL AS model_table_id,
               d.column_name_policy,
-              mt.name AS model_table_name,
+              (
+                SELECT COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name)
+                FROM domain_workspace_table dwt2
+                JOIN workspace_table wt ON wt.id = dwt2.workspace_table_id
+                WHERE dwt2.domain_id = d.id
+                ORDER BY dwt2.is_primary DESC, dwt2.sort_order ASC, wt.id ASC
+                LIMIT 1
+              ) AS model_table_name,
               d.is_active,
               d.created_at,
               d.updated_at
             FROM domain d
-            LEFT JOIN model_table mt ON mt.id = d.model_table_id
             WHERE d.workspace_id=:ws AND d.id=:did
             """,
             {"ws": workspace_id, "did": int(domain_id)},
@@ -212,7 +218,8 @@ class DomainAdminWriteService:
         clean_kind = self._clean_optional_text(kind)
         clean_description = self._clean_optional_text(description)
         normalized_policy = self._normalize_policy(column_name_policy)
-        clean_model_table_id = int(model_table_id) if model_table_id is not None else None
+        # model_table_id is intentionally ignored in workspace-first mode.
+        clean_model_table_id = None
 
         domain_id = self._store.create_domain_with_owner(
             workspace_id=workspace_id,
@@ -275,8 +282,8 @@ class DomainAdminWriteService:
             set_clauses.append("is_active=:is_active")
 
         if model_table_id is not None:
-            params["model_table_id"] = int(model_table_id)
-            set_clauses.append("model_table_id=:model_table_id")
+            # Ignore legacy model_table_id field in workspace-first mode.
+            pass
 
         if column_name_policy is not None:
             params["column_name_policy"] = self._normalize_policy(column_name_policy)

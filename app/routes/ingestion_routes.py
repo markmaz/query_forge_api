@@ -4,12 +4,14 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Any
 
 from flask import current_app, g, request
 from flask_restx import Namespace, fields
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.config import QF_INGESTION_STALE_GUARD_ENABLED, QF_INGESTION_STALE_SECONDS
 from app.decorators.security import token_required
 from app.routes.forge_resource import ForgeResource
 from app.services.analytics.metadata_provider_factory import MetadataProviderFactory
@@ -76,6 +78,166 @@ _schemas_response = ingestion_ns.model(
     "SchemasResponse",
     {"schemas": fields.List(fields.String, description="Available schema names")},
 )
+
+_cancel_response = ingestion_ns.model(
+    "CancelResponse",
+    {
+        "id": fields.String(),
+        "canceled": fields.Boolean(),
+        "status": fields.String(),
+        "message": fields.String(),
+    },
+)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _to_utc(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    if isinstance(value, str) and value.strip():
+        text = value.strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
+def _get_celery_task_state(task_id: str) -> str:
+    try:
+        return str(sync_metadata_task.AsyncResult(task_id).state or "").upper()
+    except Exception:
+        logger.exception("Failed to fetch celery state for ingestion run %s", task_id)
+        return "UNKNOWN"
+
+
+def _task_id_in_worker_queues(task_id: str) -> bool:
+    """Best-effort worker queue check for brokers without a results backend."""
+    try:
+        inspector = sync_metadata_task.app.control.inspect(timeout=0.8)
+        snapshots = (
+            inspector.active() or {},
+            inspector.reserved() or {},
+            inspector.scheduled() or {},
+        )
+    except Exception:
+        logger.exception("Failed to inspect celery worker queues for ingestion run %s", task_id)
+        return True
+
+    for snapshot in snapshots:
+        for entries in snapshot.values():
+            for entry in entries or []:
+                if not isinstance(entry, dict):
+                    continue
+                candidate_ids = [
+                    entry.get("id"),
+                    entry.get("uuid"),
+                ]
+                request_payload = entry.get("request")
+                if isinstance(request_payload, dict):
+                    candidate_ids.extend(
+                        [
+                            request_payload.get("id"),
+                            request_payload.get("uuid"),
+                            request_payload.get("task_id"),
+                        ]
+                    )
+                if any(str(candidate or "") == task_id for candidate in candidate_ids):
+                    return True
+    return False
+
+
+def _maybe_mark_stale_run_failed(mysql: ForgeMetaSQL, row: dict[str, Any]) -> dict[str, Any]:
+    run_id = str(row.get("id") or "").strip()
+    status = str(row.get("status") or "").strip().lower()
+    if not run_id or status != "running" or not QF_INGESTION_STALE_GUARD_ENABLED:
+        return row
+
+    started_at = _to_utc(row.get("started_at"))
+    if not started_at:
+        return row
+
+    age_seconds = int((_utcnow() - started_at).total_seconds())
+    if age_seconds < int(QF_INGESTION_STALE_SECONDS):
+        return row
+
+    task_state = _get_celery_task_state(run_id)
+    if task_state in {"STARTED", "RETRY"}:
+        return row
+    if _task_id_in_worker_queues(run_id):
+        return row
+
+    error = (
+        "Marked failed automatically: stale ingestion run with no active Celery task "
+        f"(state={task_state or 'UNKNOWN'}, age_seconds={age_seconds})"
+    )
+    with mysql.transaction() as tx:
+        tx.execute_write(
+            """
+UPDATE ingestion_run
+SET status = 'failed',
+    current_phase = 'failed',
+    error = :error,
+    completed_at = :completed_at
+WHERE id = :run_id
+  AND status = 'running'
+""",
+                {
+                    "run_id": run_id,
+                    "error": error[:2000],
+                    "completed_at": _utcnow(),
+                },
+            )
+        refreshed = tx.execute_query_mappings(
+            "SELECT * FROM ingestion_run WHERE id = :id",
+            {"id": run_id},
+        )
+    if refreshed:
+        logger.warning("Auto-failed stale ingestion run id=%s state=%s age_seconds=%s", run_id, task_state, age_seconds)
+        return refreshed[0]
+    return row
+
+
+def _build_run_diagnostics(row: dict[str, Any]) -> dict[str, Any]:
+    run_id = str(row.get("id") or "").strip()
+    status = str(row.get("status") or "").strip().lower()
+    started_at = _to_utc(row.get("started_at"))
+    age_seconds = int((_utcnow() - started_at).total_seconds()) if started_at else None
+    task_state = _get_celery_task_state(run_id) if run_id else "UNKNOWN"
+    in_worker_queues = _task_id_in_worker_queues(run_id) if run_id else False
+    stale_candidate = bool(
+        QF_INGESTION_STALE_GUARD_ENABLED
+        and status == "running"
+        and age_seconds is not None
+        and age_seconds >= int(QF_INGESTION_STALE_SECONDS)
+        and task_state not in {"STARTED", "RETRY"}
+        and not in_worker_queues
+    )
+    return {
+        "id": run_id,
+        "status": status,
+        "celery_state": task_state,
+        "in_worker_queues": in_worker_queues,
+        "age_seconds": age_seconds,
+        "stale_guard_enabled": bool(QF_INGESTION_STALE_GUARD_ENABLED),
+        "stale_threshold_seconds": int(QF_INGESTION_STALE_SECONDS),
+        "stale_candidate": stale_candidate,
+        "run": _serialize_run(row),
+    }
+
+
+def _is_terminal_status(status: str) -> bool:
+    return (status or "").strip().lower() in {"completed", "failed", "canceled", "cancelled"}
 
 
 def _serialize_run(row: dict) -> dict:
@@ -245,7 +407,104 @@ class IngestionStatus(ForgeResource):
             )
         if not rows:
             return {"error": "Ingestion run not found"}, 404
-        return _serialize_run(rows[0]), 200
+        row = _maybe_mark_stale_run_failed(mysql, rows[0])
+        return _serialize_run(row), 200
+
+
+@ingestion_ns.route("/diagnostics/<string:job_id>")
+class IngestionDiagnostics(ForgeResource):
+
+    @ingestion_ns.doc("get_diagnostics")
+    @ingestion_ns.response(200, "Ingestion run diagnostics")
+    @ingestion_ns.response(403, "Forbidden — admin role required")
+    @ingestion_ns.response(404, "Not found")
+    @token_required
+    def get(self, job_id: str):
+        if not bool(getattr(g, "is_admin", False)):
+            return {"error": "Admin role required"}, 403
+
+        mysql = ForgeMetaSQL()
+        with mysql.transaction() as tx:
+            rows = tx.execute_query_mappings(
+                "SELECT * FROM ingestion_run WHERE id = :id",
+                {"id": job_id},
+            )
+        if not rows:
+            return {"error": "Ingestion run not found"}, 404
+
+        row = _maybe_mark_stale_run_failed(mysql, rows[0])
+        return _build_run_diagnostics(row), 200
+
+
+@ingestion_ns.route("/cancel/<string:job_id>")
+class IngestionCancel(ForgeResource):
+
+    @ingestion_ns.doc("cancel_run")
+    @ingestion_ns.response(200, "Run canceled", _cancel_response)
+    @ingestion_ns.response(403, "Forbidden — admin role required")
+    @ingestion_ns.response(404, "Not found")
+    @token_required
+    def post(self, job_id: str):
+        if not bool(getattr(g, "is_admin", False)):
+            return {"error": "Admin role required"}, 403
+
+        mysql = ForgeMetaSQL()
+        with mysql.transaction() as tx:
+            rows = tx.execute_query_mappings(
+                "SELECT * FROM ingestion_run WHERE id = :id",
+                {"id": job_id},
+            )
+        if not rows:
+            return {"error": "Ingestion run not found"}, 404
+
+        row = rows[0]
+        status = str(row.get("status") or "")
+        if _is_terminal_status(status):
+            return {
+                "id": str(row.get("id") or job_id),
+                "canceled": False,
+                "status": status.lower(),
+                "message": "Run already in terminal status",
+                "diagnostics": _build_run_diagnostics(row),
+            }, 200
+
+        revoke_ok = True
+        try:
+            sync_metadata_task.AsyncResult(job_id).revoke(terminate=True, signal="SIGTERM")
+        except Exception:
+            revoke_ok = False
+            logger.exception("Failed to revoke ingestion Celery task id=%s", job_id)
+
+        with mysql.transaction() as tx:
+            tx.execute_write(
+                """
+UPDATE ingestion_run
+SET status = 'canceled',
+    current_phase = 'canceled',
+    error = :error,
+    completed_at = :completed_at
+WHERE id = :run_id
+  AND status NOT IN ('completed', 'failed', 'canceled', 'cancelled')
+""",
+                {
+                    "run_id": job_id,
+                    "error": "Canceled by operator",
+                    "completed_at": _utcnow(),
+                },
+            )
+            refreshed = tx.execute_query_mappings(
+                "SELECT * FROM ingestion_run WHERE id = :id",
+                {"id": job_id},
+            )
+
+        final_row = refreshed[0] if refreshed else row
+        return {
+            "id": str(final_row.get("id") or job_id),
+            "canceled": True,
+            "status": str(final_row.get("status") or "").lower(),
+            "message": "Cancellation requested" if revoke_ok else "Canceled in DB; Celery revoke call failed",
+            "diagnostics": _build_run_diagnostics(final_row),
+        }, 200
 
 
 @ingestion_ns.route("/history")

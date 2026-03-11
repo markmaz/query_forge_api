@@ -516,7 +516,7 @@ class SemanticConceptService:
             params["concept_key"] = f"%{str(concept_key).strip().lower()}%"
         column_ref = "wc.column_name" if self._metadata_mode == "workspace" else "mc.column_name"
         table_ref = (
-            "COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)"
+            "COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name)"
             if self._metadata_mode == "workspace"
             else "COALESCE(mt.name, '')"
         )
@@ -902,7 +902,7 @@ class SemanticConceptService:
 
     def _concept_column_table_select_expr(self) -> str:
         if self._metadata_mode == "workspace":
-            return "COALESCE(NULLIF(wt.qf_table_name, ''), wt.table_name)"
+            return "COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name)"
         return "mt.name"
 
     def _concept_column_workspace_select_expr(self) -> str:

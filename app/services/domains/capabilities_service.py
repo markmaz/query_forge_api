@@ -6,7 +6,6 @@ import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
-from app.config import METADATA_SOURCE_MODE
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
 
@@ -28,7 +27,7 @@ _OVERLAY_CATALOG: List[Dict[str, Any]] = [
 class DomainCapabilitiesService:
     def __init__(self, *, sql: Optional[ForgeQueryPort] = None, metadata_mode: Optional[str] = None) -> None:
         self._sql = sql or ForgeMetaSQL()
-        self._metadata_mode = str(metadata_mode or METADATA_SOURCE_MODE or "legacy").strip().lower() or "legacy"
+        del metadata_mode
 
     def get_domain_capabilities(
         self,
@@ -114,32 +113,6 @@ class DomainCapabilitiesService:
         return dict(rows[0])
 
     def _load_domain_columns(self, *, workspace_id: str, domain_id: int) -> List[Dict[str, Any]]:
-        if self._metadata_mode == "workspace":
-            rows = self._sql.execute_query_mappings(
-                """
-                SELECT
-                  wt.id AS workspace_table_id,
-                  wt.table_name,
-                  wc.column_name,
-                  wc.data_type,
-                  wc.nullable,
-                  wc.model_column_id AS model_column_id,
-                  wc.semantic_type,
-                  wc.description
-                FROM domain_workspace_table dwt
-                JOIN workspace_table wt
-                  ON wt.id = dwt.workspace_table_id
-                 AND wt.workspace_id = :workspace_id
-                 AND wt.exists_in_dbx = 1
-                JOIN workspace_column wc
-                  ON wc.workspace_table_id = wt.id
-                WHERE dwt.domain_id = :domain_id
-                ORDER BY wt.id ASC, COALESCE(wc.qf_ordinal_position, wc.ordinal_position, 0) ASC
-                """,
-                {"workspace_id": str(workspace_id), "domain_id": int(domain_id)},
-            )
-            return [dict(row) for row in rows]
-
         rows = self._sql.execute_query_mappings(
             """
             SELECT
@@ -148,9 +121,9 @@ class DomainCapabilitiesService:
               wc.column_name,
               wc.data_type,
               wc.nullable,
-              mc.id AS model_column_id,
-              mc.semantic_type,
-              mc.description
+              wc.id AS workspace_column_id,
+              wc.semantic_type,
+              wc.description
             FROM domain_workspace_table dwt
             JOIN workspace_table wt
               ON wt.id = dwt.workspace_table_id
@@ -158,11 +131,6 @@ class DomainCapabilitiesService:
              AND wt.exists_in_dbx = 1
             JOIN workspace_column wc
               ON wc.workspace_table_id = wt.id
-            LEFT JOIN model_column mc
-              ON mc.model_table_id = wt.model_table_id
-             AND mc.column_name = wc.column_name
-             AND mc.is_active = 1
-             AND mc.is_missing_in_source = 0
             WHERE dwt.domain_id = :domain_id
             ORDER BY wt.id ASC, wc.ordinal_position ASC
             """,
@@ -192,7 +160,9 @@ class DomainCapabilitiesService:
                     "data_type": data_type or "unknown",
                     "filterable": data_type not in {"array", "map", "struct", "json"},
                     "workspace_table_id": workspace_table_id,
-                    "model_column_id": _to_int(row.get("model_column_id")),
+                    "workspace_column_id": _to_int(row.get("workspace_column_id")),
+                    # Compatibility field consumed by planner/sqljson paths.
+                    "model_column_id": _to_int(row.get("workspace_column_id")),
                     "column_name": column_name,
                     "table_name": str(row.get("table_name") or ""),
                     "semantic_type": semantic_type or "unknown",

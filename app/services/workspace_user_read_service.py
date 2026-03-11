@@ -45,11 +45,30 @@ SELECT
   u.first_name                                        AS first_name,
   u.last_name                                         AS last_name,
   u.status                                            AS status,
-  uwm.is_default                                      AS is_default,
+  COALESCE(wm_def.is_default, 0)                      AS is_default,
   CONCAT_WS(' ', NULLIF(u.first_name,''), NULLIF(u.last_name,'')) AS display_name
-FROM user_workspace_map uwm
-JOIN users u ON u.user_id = uwm.user_id
-WHERE uwm.workspace_id = :ws
+FROM (
+  SELECT wm.user_id
+  FROM workspace_membership wm
+  WHERE wm.workspace_id = :ws
+    AND COALESCE(wm.is_active, 1) = 1
+
+  UNION
+
+  SELECT om.user_id
+  FROM workspace w
+  JOIN organization_membership om
+    ON om.organization_id = w.organization_id
+   AND COALESCE(om.is_active, 1) = 1
+  WHERE w.id = :ws
+    AND COALESCE(w.is_active, 1) = 1
+) members
+JOIN users u ON u.user_id = members.user_id
+LEFT JOIN workspace_membership wm_def
+  ON wm_def.user_id = u.user_id
+ AND wm_def.workspace_id = :ws
+ AND COALESCE(wm_def.is_active, 1) = 1
+WHERE 1 = 1
   AND (
     :include_inactive = 1
     OR u.status IN ('Active', 'Invited')

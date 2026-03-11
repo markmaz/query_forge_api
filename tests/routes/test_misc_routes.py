@@ -118,3 +118,33 @@ def test_workspace_inventory_unmapped_success(client, auth_headers, monkeypatch)
     resp = client.get("/api/v1/workspace-inventory/unmapped-tables", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json["total"] == 0
+
+
+def test_workspace_external_links_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def list_links(self, *, workspace_id, allow_legacy_fallback=True):
+            assert workspace_id == "ws-1"
+            assert allow_legacy_fallback is True
+            return {
+                "workspace_id": workspace_id,
+                "datasource_type": "snowflake",
+                "links": [
+                    {
+                        "key": "snowflake_console",
+                        "label": "Snowflake",
+                        "url": "https://xy12345.snowflakecomputing.com",
+                        "provider": "snowflake",
+                        "is_default": True,
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(
+        workspace_routes.WorkspaceAccessService,
+        "assert_workspace_access",
+        lambda self, *, user_id, workspace_id: workspace_id,
+    )
+    monkeypatch.setattr(workspace_routes, "WorkspaceExternalLinkService", _Svc)
+    resp = client.get("/api/v1/workspaces/ws-1/external-links", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json["links"][0]["label"] == "Snowflake"

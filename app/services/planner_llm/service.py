@@ -356,7 +356,7 @@ class PlannerLLMCandidateRetriever:
         rows = self._sql.execute_query_mappings(
             f"""
             SELECT id, sample_values_json
-            FROM model_column
+            FROM workspace_column
             WHERE id IN ({in_sql})
             """,
             params,
