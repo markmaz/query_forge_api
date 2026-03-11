@@ -3,10 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
-# Conditional import: do not rebind WorkspaceLLMService if it has already been
-# set in this module's namespace (e.g. by unittest.mock.patch during a reload).
-if "WorkspaceLLMService" not in globals():
-    from app.services.tenancy.workspace_llm_service import WorkspaceLLMService
+from app.services.tenancy.workspace_llm_service import WorkspaceLLMService
 
 logger = logging.getLogger(__name__)
 
