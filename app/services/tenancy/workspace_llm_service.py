@@ -188,6 +188,12 @@ class WorkspaceLLMService:
         return self._to_public_dict(updated[0])
 
     def delete_llm(self, llm_id: int) -> None:
+        rows = self._sql.execute_query_mappings(
+            "SELECT id FROM workspace_llm WHERE id = :id LIMIT 1",
+            {"id": llm_id},
+        )
+        if not rows:
+            raise ValueError(f"workspace_llm id={llm_id} not found")
         self._sql.execute_write(
             "DELETE FROM workspace_llm WHERE id = :id",
             {"id": llm_id},
@@ -283,17 +289,14 @@ class WorkspaceLLMService:
         }
 
     def _env_fallback(self, role: str) -> Optional[Dict[str, Any]]:
-        vllm_url = os.getenv("VLLM_BASE_URL", "").strip()
-        vllm_model = os.getenv("VLLM_MODEL", "").strip()
         if role in (LLMRole.PLANNER, LLMRole.QUERY_GENERATOR, LLMRole.ENRICHMENT):
-            endpoint = vllm_url
-            model = os.getenv("SEMANTIC_PLAN_LLM_MODEL", vllm_model).strip() or vllm_model
+            endpoint = os.getenv("VLLM_BASE_URL", "").strip()
+            model = os.getenv("SEMANTIC_PLAN_LLM_MODEL", "").strip()
         elif role in (LLMRole.NER, LLMRole.SUMMARIZER):
-            endpoint = os.getenv("SEMANTIC_LLM_ENDPOINT", vllm_url).strip()
-            model = os.getenv("SEMANTIC_LLM_MODEL", vllm_model).strip() or vllm_model
+            endpoint = os.getenv("SEMANTIC_LLM_ENDPOINT", "").strip()
+            model = os.getenv("SEMANTIC_LLM_MODEL", "").strip()
         else:
-            endpoint = vllm_url
-            model = vllm_model
+            return None
         if not endpoint or not model:
             return None
         return {

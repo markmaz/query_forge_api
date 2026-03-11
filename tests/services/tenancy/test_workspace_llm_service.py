@@ -67,7 +67,7 @@ def test_get_llm_for_role_returns_db_config(service, mock_sql):
 def test_get_llm_for_role_falls_back_to_env(service, mock_sql, monkeypatch):
     mock_sql.execute_query_mappings.return_value = []
     monkeypatch.setenv("VLLM_BASE_URL", "http://localhost:8000")
-    monkeypatch.setenv("VLLM_MODEL", "qwen25-7b")
+    monkeypatch.setenv("SEMANTIC_PLAN_LLM_MODEL", "qwen25-7b")
     result = service.get_llm_for_role("ws1", "planner")
     assert result is not None
     assert result["provider"] == "generic"
@@ -135,7 +135,62 @@ def test_masked_api_key_in_response(service, mock_sql):
 # ── delete ────────────────────────────────────────────────────────────────────
 
 def test_delete_llm_calls_execute_write(service, mock_sql):
+    mock_sql.execute_query_mappings.return_value = [{"id": 42}]
     service.delete_llm(42)
     mock_sql.execute_write.assert_called_once()
     call_args = mock_sql.execute_write.call_args
     assert "DELETE" in call_args[0][0].upper()
+
+
+def test_delete_llm_raises_on_missing(service, mock_sql):
+    mock_sql.execute_query_mappings.return_value = []
+    with pytest.raises(ValueError, match="not found"):
+        service.delete_llm(999)
+
+
+# ── _env_fallback ─────────────────────────────────────────────────────────────
+
+def test_env_fallback_ner_role(service, mock_sql, monkeypatch):
+    mock_sql.execute_query_mappings.return_value = []
+    monkeypatch.setenv("SEMANTIC_LLM_ENDPOINT", "http://nlp-server:8000")
+    monkeypatch.setenv("SEMANTIC_LLM_MODEL", "ner-model")
+    result = service.get_llm_for_role("ws1", "ner")
+    assert result is not None
+    assert result["endpoint_url"] == "http://nlp-server:8000"
+    assert result["model_name"] == "ner-model"
+
+
+def test_env_fallback_returns_none_if_model_missing(service, mock_sql, monkeypatch):
+    mock_sql.execute_query_mappings.return_value = []
+    monkeypatch.setenv("VLLM_BASE_URL", "http://localhost:8000")
+    monkeypatch.delenv("SEMANTIC_PLAN_LLM_MODEL", raising=False)
+    result = service.get_llm_for_role("ws1", "planner")
+    assert result is None
+
+
+def test_update_llm_preserves_existing_api_key_when_not_provided(service, mock_sql):
+    existing = {
+        "id": 5,
+        "workspace_id": "ws1",
+        "name": "Old Name",
+        "provider": "openai",
+        "model_name": "gpt-4o",
+        "role": "planner",
+        "api_key_encrypted": "existing_encrypted_value",
+        "endpoint_url": None,
+        "is_active": 1,
+        "config_json": None,
+        "created_at": None,
+        "updated_at": None,
+    }
+    # Calls: fetch existing, check active constraint, fetch updated
+    mock_sql.execute_query_mappings.side_effect = [
+        [existing],   # fetch existing
+        [],           # no conflicting active record
+        [existing],   # fetch updated (after write)
+    ]
+    mock_sql.execute_write.return_value = None
+    service.update_llm(5, {"name": "New Name"})  # no api_key provided
+    write_call = mock_sql.execute_write.call_args
+    # The encrypted value must be preserved in the UPDATE
+    assert "existing_encrypted_value" in str(write_call)
