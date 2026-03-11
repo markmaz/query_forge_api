@@ -200,6 +200,96 @@ def test_validator_drops_invalid_filter_column_with_repair() -> None:
     assert "dropped_invalid_filter:wt999.unknown" in result.repairs_applied
 
 
+def test_validator_drops_self_referential_filter_value() -> None:
+    plan = {
+        "schema_version": 2,
+        "trace_id": "t1",
+        "workspace_id": "ws-1",
+        "vertical_norm": "education",
+        "base_domain_id": 6,
+        "intent": "list",
+        "selects": {
+            "dimensions": [{"column_key": "wt20.county_fips_code"}],
+            "metrics": [],
+        },
+        "filters": [
+            {"column_key": "wt20.county_fips_code", "op": "=", "value": "wt20.county_fips_code"},
+        ],
+        "time": {},
+        "grouping": {"group_by": ["wt20.county_fips_code"], "order_by": []},
+    }
+
+    result = validate_and_repair_plan_v2(
+        plan_json=plan,
+        capabilities=_capabilities(),
+        prompt="students by county",
+        expected_base_domain_id=6,
+    )
+    assert result.is_valid is True
+    assert result.plan_json["filters"] == []
+    assert "removed_self_referential_filter" in result.repairs_applied
+
+
+def test_validator_drops_column_token_literal_filter_value() -> None:
+    plan = {
+        "schema_version": 2,
+        "trace_id": "t1",
+        "workspace_id": "ws-1",
+        "vertical_norm": "education",
+        "base_domain_id": 6,
+        "intent": "list",
+        "selects": {
+            "dimensions": [{"column_key": "wt20.county_fips_code"}],
+            "metrics": [],
+        },
+        "filters": [
+            {"column_key": "wt20.county_fips_code", "op": "=", "value": "wt999.unknown"},
+        ],
+        "time": {},
+        "grouping": {"group_by": ["wt20.county_fips_code"], "order_by": []},
+    }
+
+    result = validate_and_repair_plan_v2(
+        plan_json=plan,
+        capabilities=_capabilities(),
+        prompt="students by county",
+        expected_base_domain_id=6,
+    )
+    assert result.is_valid is True
+    assert result.plan_json["filters"] == []
+    assert "removed_column_token_filter_value" in result.repairs_applied
+
+
+def test_validator_drops_missing_filter_value_for_comparison_ops() -> None:
+    plan = {
+        "schema_version": 2,
+        "trace_id": "t1",
+        "workspace_id": "ws-1",
+        "vertical_norm": "education",
+        "base_domain_id": 6,
+        "intent": "list",
+        "selects": {
+            "dimensions": [{"column_key": "wt20.county_fips_code"}],
+            "metrics": [],
+        },
+        "filters": [
+            {"column_key": "wt20.county_fips_code", "op": "lt", "value": None},
+        ],
+        "time": {},
+        "grouping": {"group_by": ["wt20.county_fips_code"], "order_by": []},
+    }
+
+    result = validate_and_repair_plan_v2(
+        plan_json=plan,
+        capabilities=_capabilities(),
+        prompt="students by county",
+        expected_base_domain_id=6,
+    )
+    assert result.is_valid is True
+    assert result.plan_json["filters"] == []
+    assert "removed_missing_filter_value" in result.repairs_applied
+
+
 def test_validator_keeps_valid_filter_when_same_column_invalid_in_selects() -> None:
     capabilities = _capabilities()
     capabilities["filter_columns"] = [

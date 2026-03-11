@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from urllib.parse import urlparse
 from typing import Optional
 
@@ -59,6 +60,32 @@ def _load_private_key(private_key_path: str, private_key_passphrase: Optional[st
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
+
+
+def _rewrite_named_params_for_snowflake(sql: str, params: Optional[dict]) -> str:
+    """Convert SQLAlchemy-style ``:name`` placeholders to Snowflake ``%(name)s``.
+
+    Query Forge compiles SQL using ``:p1`` style bind names. Snowflake's Python
+    connector expects pyformat placeholders when binding a dict.
+    """
+    text = str(sql or "")
+    if text == "" or not isinstance(params, dict) or not params:
+        return text
+    out = text
+    for name in params.keys():
+        token = str(name or "").strip()
+        if token == "":
+            continue
+        out = re.sub(rf":{re.escape(token)}\b", f"%({token})s", out)
+    return out
+
+
+def _is_missing_warehouse_error(exc: Exception) -> bool:
+    err_no = getattr(exc, "errno", None)
+    if err_no in {606, "606"}:
+        return True
+    text = str(exc or "").lower()
+    return "no active warehouse selected" in text or "use warehouse" in text
 
 
 class SnowflakeSQLExecutor(SQLExecutor):
@@ -185,7 +212,8 @@ class SnowflakeSQLExecutor(SQLExecutor):
 
             # Snowflake connector accepts params as a sequence for ``%s`` or a dict for ``%(name)s``
             if params:
-                cursor.execute(sql, params)
+                rewritten_sql = _rewrite_named_params_for_snowflake(sql, params)
+                cursor.execute(rewritten_sql, params)
             else:
                 cursor.execute(sql)
 
@@ -208,6 +236,11 @@ class SnowflakeSQLExecutor(SQLExecutor):
                     "Verify SNOWFLAKE_PRIVATE_KEY_PATH/SNOWFLAKE_PRIVATE_KEY_PASSPHRASE and "
                     "that the matching RSA public key is configured for the Snowflake user."
                 ) from exc
+            if _is_missing_warehouse_error(exc):
+                raise RuntimeError(
+                    "Analytics execution failed: no active Snowflake warehouse selected. "
+                    "Set datasource config_json.warehouse (or issue USE WAREHOUSE before queries)."
+                ) from exc
             raise RuntimeError("Analytics query execution failed") from exc
         finally:
             if cursor is not None:
@@ -225,6 +258,9 @@ class SnowflakeSQLExecutor(SQLExecutor):
         """Verify connectivity by running ``SELECT CURRENT_VERSION()``."""
         try:
             self.execute("SELECT CURRENT_VERSION() AS _ping")
+        except RuntimeError:
+            # Preserve specific connection/warehouse/auth diagnostics from execute().
+            raise
         except Exception as exc:
             # FIND-021: sanitized message — no account identifier or hostname.
             logger.exception("SnowflakeSQLExecutor.test_connection failed")

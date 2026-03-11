@@ -81,7 +81,6 @@ class BuilderColumnFeedService:
             JOIN workspace_table wt
               ON wt.id = dwt.workspace_table_id
              AND wt.workspace_id = :ws
-             AND wt.exists_in_dbx = 1
             ORDER BY COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name), wt.full_name
             """,
             {
@@ -135,7 +134,6 @@ class BuilderColumnFeedService:
               wt.catalog_name,
               wt.variant_code,
               wt.is_qe,
-              wt.exists_in_dbx,
               wt.last_seen_at,
               dwt.table_alias,
               dwt.is_primary,
@@ -148,7 +146,7 @@ class BuilderColumnFeedService:
               wc.data_type,
               wc.nullable,
               wc.ordinal_position,
-              COALESCE(wc.model_column_id, wc.id) AS model_column_id,
+              wc.id                    AS model_column_id,
               wc.description             AS description,
               wc.sample_values_json      AS sample_values_json,
               wc.sample_stats_json       AS sample_stats_json,
@@ -167,7 +165,6 @@ class BuilderColumnFeedService:
             JOIN workspace_table wt
               ON wt.id = dwt.workspace_table_id
              AND wt.workspace_id = :ws
-             AND wt.exists_in_dbx = 1
              AND (:variant_code IS NULL OR wt.variant_code = :variant_code)
              AND (:only_qe IS NULL OR wt.is_qe = :only_qe)
             JOIN workspace_column wc

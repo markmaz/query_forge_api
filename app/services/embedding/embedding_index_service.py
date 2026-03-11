@@ -82,7 +82,6 @@ class EmbeddingIndexService:
           MIN(wt.description) AS description,
           MIN(wt.origin) AS origin
         FROM workspace_table wt
-        WHERE wt.exists_in_dbx = 1
         GROUP BY COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name)
         ORDER BY table_name
         """
@@ -104,7 +103,7 @@ class EmbeddingIndexService:
           wt.workspace_id,
           wt.id AS workspace_table_id,
           wc.id AS workspace_column_id,
-          wt.model_table_id,
+          wt.id AS model_table_id,
           COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
           wt.full_name AS source_table_name,
           wt.origin AS model_origin,
@@ -112,7 +111,7 @@ class EmbeddingIndexService:
           wt.full_name,
           wc.column_name,
           wc.data_type AS workspace_data_type,
-          COALESCE(wc.model_column_id, wc.id) AS model_column_id,
+          wc.id AS model_column_id,
           wc.data_type AS model_data_type,
           wc.description AS column_description,
           wc.semantic_type AS semantic_type,
@@ -123,9 +122,7 @@ class EmbeddingIndexService:
           wc.is_active AS model_is_active
         FROM workspace_table wt
         JOIN workspace_column wc ON wc.workspace_table_id = wt.id
-        WHERE wt.exists_in_dbx = 1
-          AND wc.exists_in_dbx = 1
-          AND (wc.is_missing_in_source = 0 OR wc.is_missing_in_source IS NULL)
+        WHERE (wc.is_missing_in_source = 0 OR wc.is_missing_in_source IS NULL)
           AND (wc.is_active = 1 OR wc.is_active IS NULL)
         """
         params: Dict[str, Any] = {}

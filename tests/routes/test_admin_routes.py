@@ -268,6 +268,71 @@ def test_domain_profile_generate_all(client, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Semantic catalog build
+# ---------------------------------------------------------------------------
+
+def test_semantic_catalog_build_dry_run(client, monkeypatch):
+    class _FakeBuilder:
+        def build_catalog(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["domain_id"] == 3
+            assert kwargs["vertical_norm"] == "generic"
+            assert kwargs["dry_run"] is True
+            return {
+                "workspace_id": "ws-1",
+                "domain_id": 3,
+                "vertical_norm": "generic",
+                "dry_run": True,
+                "profile_count": 12,
+            }
+
+    monkeypatch.setattr(admin_routes, "SemanticCatalogBuilder", _FakeBuilder)
+    resp = client.post(
+        "/api/v1/admin/semantic-catalog/build",
+        json={"domain_id": 3},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["result"]["dry_run"] is True
+    assert resp.json["result"]["domain_id"] == 3
+
+
+def test_semantic_catalog_build_write_mode(client, monkeypatch):
+    class _FakeBuilder:
+        def build_catalog(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["domain_id"] == 9
+            assert kwargs["vertical_norm"] == "sales"
+            assert kwargs["domain_name"] == "Sales Performance"
+            assert kwargs["dry_run"] is False
+            assert kwargs["table_limit"] == 1200
+            return {
+                "workspace_id": "ws-1",
+                "domain_id": 9,
+                "vertical_norm": "sales",
+                "dry_run": False,
+                "concepts_upserted": 24,
+            }
+
+    monkeypatch.setattr(admin_routes, "SemanticCatalogBuilder", _FakeBuilder)
+    resp = client.post(
+        "/api/v1/admin/semantic-catalog/build",
+        json={
+            "workspace_id": "ws-1",
+            "domain_id": 9,
+            "vertical_norm": "sales",
+            "domain_name": "Sales Performance",
+            "dry_run": False,
+            "table_limit": 1200,
+        },
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["result"]["dry_run"] is False
+    assert resp.json["result"]["concepts_upserted"] == 24
+
+
+# ---------------------------------------------------------------------------
 # Vector rebuild
 # ---------------------------------------------------------------------------
 

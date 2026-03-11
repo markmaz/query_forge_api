@@ -4,6 +4,7 @@ import logging
 
 from flask import g, request
 from flask_restx import Namespace, fields
+from pydantic import ValidationError
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
@@ -17,6 +18,7 @@ from app.models.domain_profile_embedding import (
     DomainProfileGenerateOneRequest,
     DomainProfileGenerateRequest,
 )
+from app.models.semantic_catalog_admin import SemanticCatalogBuildRequest
 from app.models.tenancy_admin import (
     DatasourceCreateRequest,
     DatasourceUpdateRequest,
@@ -37,6 +39,7 @@ from app.services.admin.health_service import AdminHealthService
 from app.services.embedding.embedding_index_service import EmbeddingIndexService
 from app.services.embedding.semantic_concept_embedding_service import SemanticConceptEmbeddingService
 from app.services.prompt_feedback_service import PromptFeedbackService
+from app.services.semantic.catalog.semantic_catalog_builder import SemanticCatalogBuilder
 from app.services.tenancy.tenancy_admin_service import TenancyAdminService
 from app.services.tenancy.tenancy_bootstrap_service import BootstrapInput, TenancyBootstrapService
 from app.services.vector import DomainVectorIndexService
@@ -85,6 +88,18 @@ domain_profile_generate_one_model = admin_ns.model(
     "DomainProfileGenerateOneRequest",
     {
         "force": fields.Boolean(required=False, default=False),
+    },
+)
+
+semantic_catalog_build_model = admin_ns.model(
+    "SemanticCatalogBuildRequest",
+    {
+        "workspace_id": fields.String(required=False),
+        "domain_id": fields.Integer(required=True),
+        "vertical_norm": fields.String(required=False, default="generic"),
+        "domain_name": fields.String(required=False),
+        "dry_run": fields.Boolean(required=False, default=True),
+        "table_limit": fields.Integer(required=False, default=5000),
     },
 )
 
@@ -616,6 +631,47 @@ class DomainProfileGenerateAll(ForgeResource):
         except Exception:
             logger.exception("domain profile generate all failed")
             return {"error": "domain profile generate all failed"}, 500
+
+
+# ---------------------------------------------------------------------------
+# Semantic catalog build
+# ---------------------------------------------------------------------------
+
+@admin_ns.route("/semantic-catalog/build")
+class SemanticCatalogBuild(ForgeResource):
+    @token_required
+    @admin_ns.expect(semantic_catalog_build_model, validate=False)
+    def post(self):
+        try:
+            _require_admin()
+            req = SemanticCatalogBuildRequest(**(request.get_json(silent=True) or {}))
+            header_workspace_id = extract_workspace_id()
+            if req.workspace_id and req.workspace_id != header_workspace_id:
+                raise ForgeError(
+                    "workspace_id in body must match X-Workspace-Id header",
+                    status_code=400,
+                )
+            workspace_id = req.workspace_id or header_workspace_id
+            result = SemanticCatalogBuilder().build_catalog(
+                workspace_id=workspace_id,
+                domain_id=req.domain_id,
+                vertical_norm=req.vertical_norm,
+                domain_name=req.domain_name,
+                dry_run=req.dry_run,
+                table_limit=req.table_limit,
+            )
+            payload = result.model_dump(mode="json") if hasattr(result, "model_dump") else result
+            return {"result": payload}, 200
+        except ValidationError as exc:
+            return {
+                "error": "Invalid semantic catalog build request",
+                "details": {"errors": exc.errors()},
+            }, 400
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("semantic catalog build failed")
+            return {"error": "semantic catalog build failed"}, 500
 
 
 # ---------------------------------------------------------------------------

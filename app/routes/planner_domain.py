@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
-from flask import request
+from flask import g, request
 from flask_restx import fields
 from app.routes.forge_resource import ForgeResource
 
@@ -27,6 +27,7 @@ plan_domain_request_model = planner_ns.model(
         "base_domain_id": fields.Integer(required=False),
         "debug": fields.Boolean(required=False, default=False),
         "profile_pipeline": fields.Boolean(required=False, default=False),
+        "profile_pipeline_data": fields.Boolean(required=False, default=False),
         "fast_mode": fields.Boolean(required=False),
         "next_actions_async": fields.Boolean(required=False),
     },
@@ -51,8 +52,10 @@ class PlannerPlanDomain(ForgeResource):
     @token_required
     @planner_ns.expect(plan_domain_request_model, validate=False)
     def post(self):
+        body: Dict[str, Any] = {}
+        planner_service = PlannerDomainService()
         try:
-            body: Dict[str, Any] = request.get_json(silent=True) or {}
+            body = request.get_json(silent=True) or {}
             header_workspace_id = extract_workspace_id()
             payload_workspace_id = str(body.get("workspace_id") or "").strip()
             if payload_workspace_id and payload_workspace_id != header_workspace_id:
@@ -60,13 +63,33 @@ class PlannerPlanDomain(ForgeResource):
 
             body["workspace_id"] = header_workspace_id
             user_id = require_user_id()
-            result = PlannerDomainService().plan(body, user_id=user_id)
+            result = planner_service.plan(body, user_id=user_id)
             return result, 200
         except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
+            trace_id = planner_service.emit_failed_plan_trace(
+                payload=body,
+                user_id=str(getattr(g, "user_id", "") or ""),
+                error=exc,
+            )
+            response = exc.to_dict()
+            if trace_id:
+                details = response.get("details")
+                if not isinstance(details, dict):
+                    details = {}
+                details.setdefault("trace_id", trace_id)
+                response["details"] = details
+            return response, exc.status_code
+        except Exception as exc:
+            trace_id = planner_service.emit_failed_plan_trace(
+                payload=body,
+                user_id=str(getattr(g, "user_id", "") or ""),
+                error=exc,
+            )
             logger.exception("planner domain failed")
-            return {"error": "planner domain failed"}, 500
+            response: Dict[str, Any] = {"error": "planner domain failed"}
+            if trace_id:
+                response["details"] = {"trace_id": trace_id}
+            return response, 500
 
 
 @planner_ns.route("/plan_domain/profile/<string:trace_id>")

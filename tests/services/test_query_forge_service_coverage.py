@@ -453,6 +453,25 @@ def test_filter_and_sorting_table_ids() -> None:
     assert svc._qf_sorting_table_ids(sorting, plan) == {1}
     sorting = [{"col": {"columnName": "x", "workspaceTableId": "bad"}, "dir": "asc"}]
     assert svc._qf_sorting_table_ids(sorting, plan) == set()
+    sorting = [{"metricRef": "domain_metric:sales_revenue", "dir": "desc"}]
+    assert svc._qf_sorting_table_ids(sorting, plan) == {1}
+
+
+def test_compile_order_by_supports_metric_ref_alias() -> None:
+    plan = _single_table_plan()
+    svc = QueryForgeService(executor=FakeForgeQueryPort(), domain_resolver=FakeResolver(plan))
+    order_sql = svc._compile_order_by(
+        [{"metricRef": "domain_metric:sales_revenue", "dir": "desc"}],
+        derived_by_exprid={},
+        derived_by_name={},
+        rewrite_by_colname={},
+        rewrite_by_modelid={},
+        qf_using_prep=False,
+        qf_base_alias="t0",
+        alias_by_wt={1: "t0"},
+        metric_alias_by_ref={"domain_metric:sales_revenue": "sales_revenue"},
+    )
+    assert order_sql == "sales_revenue DESC"
 
 
 def test_safe_table_full_name_errors() -> None:

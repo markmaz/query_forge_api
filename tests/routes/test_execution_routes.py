@@ -325,3 +325,46 @@ def test_execution_start_rejects_raw_sql_fields(client, auth_headers, monkeypatc
     )
     assert resp.status_code == 400
     assert "Raw SQL fields are not allowed" in resp.json["error"]
+
+
+def test_execution_status_and_results_use_inline_snapshot_for_sync_adapter(client, auth_headers, monkeypatch):
+    _install_valkey(monkeypatch)
+    _install_nocode_prepare(monkeypatch, sql="SELECT 7 AS a", params={})
+
+    class _SqlExec:
+        def submit_statement_async(self, sql, parameters, **_kwargs):
+            return {"qf_statement_id": "stmt-inline", "status": {"state": "SUCCEEDED"}}
+
+        def fetch_all_json(self, qf_statement_id):
+            assert qf_statement_id == "stmt-inline"
+            return [[7]]
+
+        def get_statement_status(self, qf_statement_id):
+            # Simulate fresh process/instance where in-memory statements are gone.
+            return {"status": {"state": "FAILED", "error": "statement not found"}}
+
+    class _Ctx:
+        sql_exec = _SqlExec()
+
+    class _Builder:
+        def build(self, workspace_id: str):
+            return _Ctx()
+
+    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+    monkeypatch.setattr(execution_service, "AnalyticsExecutorForgeAdapter", _SqlExec)
+
+    start = client.post(
+        "/api/v1/executions/start",
+        headers=auth_headers,
+        json={"sqlJson": {"domainId": 1}, "kind": "query_builder"},
+    )
+    assert start.status_code == 200
+    job_id = start.json["jobId"]
+
+    status = client.get(f"/api/v1/executions/{job_id}/status", headers=auth_headers)
+    assert status.status_code == 200
+    assert status.json["status"] == "SUCCEEDED"
+
+    results = client.get(f"/api/v1/executions/{job_id}/results", headers=auth_headers)
+    assert results.status_code == 200
+    assert results.json["rows"] == [{"a": 7}]

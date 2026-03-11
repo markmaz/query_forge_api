@@ -842,7 +842,7 @@ class SemanticConceptService:
                 """
                 SELECT id
                 FROM workspace_column
-                WHERE COALESCE(model_column_id, id) = :id
+                WHERE id = :id
                 LIMIT 1
                 """,
                 {"id": model_column_id_val},
@@ -865,7 +865,7 @@ class SemanticConceptService:
     def _resolve_workspace_column_id(self, workspace_column_id: int) -> int:
         rows = self._sql.execute_query_mappings(
             """
-            SELECT COALESCE(model_column_id, id) AS model_column_id
+            SELECT id AS model_column_id
             FROM workspace_column
             WHERE id = :id
             LIMIT 1
@@ -884,11 +884,7 @@ class SemanticConceptService:
             return (
                 """
                 JOIN workspace_column wc
-                  ON wc.id = (
-                    SELECT MIN(wc2.id)
-                    FROM workspace_column wc2
-                    WHERE wc2.model_column_id = m.model_column_id
-                  )
+                  ON wc.id = m.model_column_id
                 JOIN workspace_table wt
                   ON wt.id = wc.workspace_table_id
                 """

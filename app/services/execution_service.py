@@ -11,6 +11,7 @@ import valkey
 from app.config import VALKEY_ADDRESS, VALKEY_PORT
 from app.exceptions.forge_error import ForgeError
 from app.services.domain_resolver import DomainResolver
+from app.services.analytics.executor_adapter import AnalyticsExecutorForgeAdapter
 from app.services.query_forge_service import QueryForgeService
 from app.services.sql_guard_service import assert_no_disallowed_client_sql_fields, assert_read_only_sql_statement
 from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
@@ -135,6 +136,20 @@ def _qf_exec_extract_total(count_rows: list[Any]) -> int:
     return 0
 
 
+def _normalize_status_dict(raw: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(raw, dict):
+        out = dict(raw)
+        if isinstance(out.get("status"), dict):
+            status = dict(out.get("status") or {})
+            if "state" in status or "error" in status:
+                return status
+        if "state" in out or "error" in out:
+            return out
+    if isinstance(raw, str) and raw.strip():
+        return {"state": raw.strip()}
+    return None
+
+
 def _truncate_cell_value(value: Any, *, max_len: int = 80) -> str:
     text = "" if value is None else str(value)
     text = " ".join(text.split())
@@ -248,6 +263,18 @@ class ExecutionService:
         if not statement_id:
             raise ForgeError("Databricks did not return statement_id", status_code=500)
 
+        inline_status: Optional[Dict[str, Any]] = None
+        inline_rows: Optional[List[Any]] = None
+        if isinstance(ctx.sql_exec, AnalyticsExecutorForgeAdapter):
+            inline_status = _normalize_status_dict(resp.get("status"))
+            if isinstance(inline_status, dict):
+                state = str(inline_status.get("state") or "").strip().upper()
+                if state == "SUCCEEDED":
+                    try:
+                        inline_rows = ctx.sql_exec.fetch_all_json(str(statement_id))
+                    except Exception:
+                        inline_rows = None
+
         job_id = uuid.uuid4().hex
         _put_job(
             job_id,
@@ -262,6 +289,8 @@ class ExecutionService:
                 "offset": offset,
                 "countSql": qf_count_sql,
                 "sqlJson": qf_sql_json,
+                "inline_status": inline_status,
+                "inline_rows": inline_rows,
             },
         )
 
@@ -271,6 +300,16 @@ class ExecutionService:
         job = _get_job(job_id)
         if not job or job.get("workspace_id") != workspace_id:
             raise ForgeError("Execution job not found", status_code=404)
+
+        inline_status = _normalize_status_dict(job.get("inline_status"))
+        if isinstance(inline_status, dict):
+            state = inline_status.get("state") or inline_status.get("status")
+            return {
+                "jobId": job_id,
+                "statementId": job["statement_id"],
+                "status": state,
+                "raw": {"status": inline_status},
+            }, 200
 
         ctx = self._builder.build(workspace_id)
         status = ctx.sql_exec.get_statement_status(job["statement_id"])
@@ -299,7 +338,11 @@ class ExecutionService:
             raise ForgeError("Execution job not found", status_code=404)
 
         ctx = self._builder.build(workspace_id)
-        status = ctx.sql_exec.get_statement_status(job["statement_id"])
+        inline_status = _normalize_status_dict(job.get("inline_status"))
+        if isinstance(inline_status, dict):
+            status = {"status": inline_status}
+        else:
+            status = ctx.sql_exec.get_statement_status(job["statement_id"])
         state = (status.get("status") or {}).get("state") or status.get("status")
         state = str(state or "").upper()
 
@@ -311,14 +354,22 @@ class ExecutionService:
                 "statementId": job["statement_id"],
             }, 409
         if state not in {"SUCCEEDED"}:
+            error_text = str((status.get("status") or {}).get("error") or "").strip()
+            error_message = f"Execution {state.lower() or 'failed'}"
+            if error_text:
+                error_message = f"{error_message}: {error_text}"
             return {
-                "error": f"Execution {state.lower() or 'failed'}",
+                "error": error_message,
                 "status": state or "FAILED",
                 "jobId": job_id,
                 "statementId": job["statement_id"],
             }, 500
 
-        qf_rows_any = ctx.sql_exec.fetch_all_json(job["statement_id"])
+        inline_rows = job.get("inline_rows")
+        if isinstance(inline_rows, list):
+            qf_rows_any = list(inline_rows)
+        else:
+            qf_rows_any = ctx.sql_exec.fetch_all_json(job["statement_id"])
         columns = _columns_from_manifest(status.get("manifest")) or _columns_from_rows(qf_rows_any)
         rows = _qf_exec_rows_to_dicts(qf_rows_any, columns)
 

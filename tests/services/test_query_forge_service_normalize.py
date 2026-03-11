@@ -308,6 +308,25 @@ def test_normalize_sorting_col_key() -> None:
     assert q["sorting"][0]["col"]["columnName"] == "id"
 
 
+def test_normalize_sorting_metric_ref() -> None:
+    svc = _svc()
+    q = svc.normalize(
+        {
+            "domainId": 1,
+            "columns": [{"columnName": "id"}],
+            "aggs": {
+                "enabled": True,
+                "groupBy": [{"columnName": "id"}],
+                "metrics": [
+                    {"fn": "count", "field": {"columnName": "id"}, "metric_ref": "domain_metric:count_rows"},
+                ],
+            },
+            "sorting": [{"metricRef": "domain_metric:count_rows", "dir": "desc"}],
+        }
+    )
+    assert q["sorting"][0]["metricRef"] == "domain_metric:count_rows"
+
+
 def test_normalize_requires_columns_or_aggs() -> None:
     svc = _svc()
     with pytest.raises(ForgeError):

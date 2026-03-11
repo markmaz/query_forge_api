@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 
 import httpx
 
@@ -35,22 +36,25 @@ class LLMClient:
         self._endpoint = normalized_endpoint
         self._model = (model or SEMANTIC_LLM_MODEL).strip()
         self._timeout_seconds = int(timeout_seconds or SEMANTIC_LLM_TIMEOUT_SECONDS)
+        self._headers = self._build_headers()
 
     def chat_json(
         self,
         *,
         system_prompt: str,
         user_prompt: str,
-        response_format: bool = True,
+        response_format: Any = True,
         retry_invalid_schema: bool = True,
         validator: Optional[Callable[[Dict[str, Any]], bool]] = None,
         max_tokens: Optional[int] = None,
+        extra_params: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         if max_tokens is None:
             first = self.chat_json_with_trace(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 response_format=response_format,
+                extra_params=extra_params,
             )
         else:
             first = self.chat_json_with_trace(
@@ -58,6 +62,7 @@ class LLMClient:
                 user_prompt=user_prompt,
                 response_format=response_format,
                 max_tokens=max_tokens,
+                extra_params=extra_params,
             )
         parsed = first.get("parsed") if isinstance(first.get("parsed"), dict) else None
         is_valid = parsed is not None and (validator(parsed) if validator is not None else True)
@@ -72,6 +77,7 @@ class LLMClient:
                     system_prompt=system_prompt,
                     user_prompt=repair_user,
                     response_format=response_format,
+                    extra_params=extra_params,
                 )
             else:
                 second = self.chat_json_with_trace(
@@ -79,6 +85,7 @@ class LLMClient:
                     user_prompt=repair_user,
                     response_format=response_format,
                     max_tokens=max_tokens,
+                    extra_params=extra_params,
                 )
             parsed = second.get("parsed") if isinstance(second.get("parsed"), dict) else None
             is_valid = parsed is not None and (validator(parsed) if validator is not None else True)
@@ -98,17 +105,19 @@ class LLMClient:
         *,
         system_prompt: str,
         user_prompt: str,
-        response_format: bool = True,
+        response_format: Any = True,
         max_tokens: Optional[int] = None,
+        extra_params: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         return self._chat_once_with_trace(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_format=response_format,
             max_tokens=max_tokens,
+            extra_params=extra_params,
         )
 
-    def _chat_once(self, *, system_prompt: str, user_prompt: str, response_format: bool) -> str:
+    def _chat_once(self, *, system_prompt: str, user_prompt: str, response_format: Any) -> str:
         trace = self._chat_once_with_trace(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -124,27 +133,38 @@ class LLMClient:
         *,
         system_prompt: str,
         user_prompt: str,
-        response_format: bool,
+        response_format: Any,
         max_tokens: Optional[int] = None,
+        extra_params: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         chat_url = self._chat_url()
+        token_param_name = self._completion_token_param_name()
+        temperature_value = self._temperature_value()
         payload = {
             "model": self._model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "temperature": 0,
         }
+        if temperature_value is not None:
+            payload["temperature"] = temperature_value
         if max_tokens is not None:
             try:
                 mt = int(max_tokens)
             except Exception:
                 mt = 0
             if mt > 0:
-                payload["max_tokens"] = mt
-        if response_format:
-            payload["response_format"] = {"type": "json_object"}
+                payload[token_param_name] = mt
+        normalized_response_format = self._normalize_response_format(response_format)
+        if normalized_response_format is not None:
+            payload["response_format"] = normalized_response_format
+        if isinstance(extra_params, Mapping):
+            for key, value in extra_params.items():
+                k = str(key or "").strip()
+                if k == "" or k in {"model", "messages", "prompt"} or value is None:
+                    continue
+                payload[k] = value
 
         request_id = new_llm_request_id()
         log_llm_request(
@@ -157,7 +177,7 @@ class LLMClient:
         )
         try:
             with httpx.Client(timeout=self._timeout_seconds) as client:
-                resp = client.post(chat_url, json=payload)
+                resp = client.post(chat_url, json=payload, headers=self._headers or None)
                 raw_text = resp.text
                 log_llm_response(
                     logger,
@@ -189,7 +209,14 @@ class LLMClient:
                             "finish_reason": finish_reason,
                             "error": error,
                         }
-                fallback = self._fallback_simple_with_trace(client=client, system_prompt=system_prompt, user_prompt=user_prompt)
+                fallback = self._fallback_simple_with_trace(
+                    client=client,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    max_tokens=max_tokens,
+                    response_format=response_format,
+                    extra_params=extra_params,
+                )
                 if fallback.get("error"):
                     return {
                         "raw_text": raw_text,
@@ -246,22 +273,64 @@ class LLMClient:
         client: httpx.Client,
         system_prompt: str,
         user_prompt: str,
+        max_tokens: Optional[int] = None,
+        response_format: Any = True,
+        extra_params: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
-        payload = {
-            "model": self._model,
-            "temperature": 0,
-            "prompt": f"{system_prompt}\n\n{user_prompt}",
-        }
+        target_url = self._endpoint
+        payload: Dict[str, Any]
+        if self._looks_like_chat_completions_url(target_url):
+            temperature_value = self._temperature_value()
+            payload = {
+                "model": self._model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            }
+            if temperature_value is not None:
+                payload["temperature"] = temperature_value
+            if max_tokens is not None:
+                try:
+                    mt = int(max_tokens)
+                except Exception:
+                    mt = 0
+                if mt > 0:
+                    payload[self._completion_token_param_name()] = mt
+            normalized_response_format = self._normalize_response_format(response_format)
+            if normalized_response_format is not None:
+                payload["response_format"] = normalized_response_format
+        else:
+            payload = {
+                "model": self._model,
+                "prompt": f"{system_prompt}\n\n{user_prompt}",
+            }
+            temperature_value = self._temperature_value()
+            if temperature_value is not None:
+                payload["temperature"] = temperature_value
+            if max_tokens is not None:
+                try:
+                    mt = int(max_tokens)
+                except Exception:
+                    mt = 0
+                if mt > 0:
+                    payload["max_tokens"] = mt
+        if isinstance(extra_params, Mapping):
+            for key, value in extra_params.items():
+                k = str(key or "").strip()
+                if k == "" or k in {"model", "messages", "prompt"} or value is None:
+                    continue
+                payload[k] = value
         request_id = new_llm_request_id()
         log_llm_request(
             logger,
             client_name="LLMClient.fallback",
             request_id=request_id,
             method="POST",
-            url=self._endpoint,
+            url=target_url,
             payload=payload,
         )
-        resp = client.post(self._endpoint, json=payload)
+        resp = client.post(target_url, json=payload, headers=self._headers or None)
         raw_text = resp.text
         log_llm_response(
             logger,
@@ -324,6 +393,40 @@ class LLMClient:
         if self._endpoint.endswith("/"):
             return f"{self._endpoint}v1/chat/completions"
         return f"{self._endpoint}/v1/chat/completions"
+
+    def _completion_token_param_name(self) -> str:
+        model = str(self._model or "").strip().lower()
+        if model.startswith("gpt-5"):
+            return "max_completion_tokens"
+        return "max_tokens"
+
+    def _temperature_value(self) -> Optional[int]:
+        model = str(self._model or "").strip().lower()
+        if model.startswith("gpt-5"):
+            return None
+        return 0
+
+    @staticmethod
+    def _normalize_response_format(value: Any) -> Optional[Dict[str, Any]]:
+        if value in (None, False):
+            return None
+        if value is True:
+            return {"type": "json_object"}
+        if isinstance(value, Mapping):
+            return dict(value)
+        return {"type": "json_object"}
+
+    @staticmethod
+    def _looks_like_chat_completions_url(url: str) -> bool:
+        token = str(url or "").strip().lower()
+        return token.endswith("/v1/chat/completions")
+
+    @staticmethod
+    def _build_headers() -> Dict[str, str]:
+        api_key = str(os.getenv("SEMANTIC_LLM_API_KEY", "")).strip()
+        if api_key == "":
+            return {}
+        return {"Authorization": f"Bearer {api_key}"}
 
     @staticmethod
     def _extract_chat_content(body: Dict[str, Any]) -> Optional[str]:

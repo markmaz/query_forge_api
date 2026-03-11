@@ -175,6 +175,8 @@ def _domain_metric_to_sql_metric(
     col_key = _norm_key(data.get("column_key"))
     if col_key:
         field = _to_sql_column_key(dim_lookup.get(col_key))
+    if field is None:
+        field = _infer_metric_field_from_key(metric_key=metric_key, metric=data, dim_lookup=dim_lookup)
 
     # Domain profiles often define count metrics without an explicit column_key.
     # Prefer a stable identifier-like column instead of COUNT(*) when possible.
@@ -190,6 +192,55 @@ def _domain_metric_to_sql_metric(
         "label": label or str(data.get("label") or metric_key),
         "metric_ref": f"domain_metric:{metric_key}",
     }
+
+
+def _infer_metric_field_from_key(
+    *,
+    metric_key: str,
+    metric: Mapping[str, Any],
+    dim_lookup: Mapping[str, Dict[str, Any]],
+) -> Optional[SqlColumnKey]:
+    key_norm = _norm_key(metric_key)
+    label_norm = _norm_key(metric.get("label"))
+    if key_norm == "" and label_norm == "":
+        return None
+
+    def _score_row(row: Mapping[str, Any]) -> int:
+        col_name = _norm_key(row.get("column_name"))
+        col_key = _norm_key(row.get("column_key"))
+        score = 0
+        if col_name == key_norm:
+            score += 200
+        if col_key.endswith(f".{key_norm}") or col_key == key_norm:
+            score += 160
+        if key_norm and key_norm in col_name:
+            score += 80
+        if label_norm and label_norm in col_name:
+            score += 40
+        if _looks_numeric_column(row):
+            score += 20
+        return score
+
+    best_row: Optional[Mapping[str, Any]] = None
+    best_score = -1
+    for row in dim_lookup.values():
+        if not isinstance(row, Mapping):
+            continue
+        score = _score_row(row)
+        if score <= 0:
+            continue
+        if score > best_score:
+            best_score = score
+            best_row = row
+    return _to_sql_column_key(best_row)
+
+
+def _looks_numeric_column(row: Mapping[str, Any]) -> bool:
+    data_type = _norm_key(row.get("data_type"))
+    col_name = _norm_key(row.get("column_name"))
+    if any(token in data_type for token in ("int", "number", "float", "double", "decimal", "numeric")):
+        return True
+    return any(token in col_name for token in ("amount", "revenue", "cost", "price", "qty", "quantity", "count"))
 
 
 def _pick_fallback_metric_field(
@@ -326,8 +377,16 @@ def _apply_plan_order_by_sorting(
         return sql_json
 
     sort_edits: List[Any] = []
+    metric_sorts: List[Dict[str, Any]] = []
     for item in order_items:
         if not isinstance(item, Mapping):
+            continue
+        direction = str(item.get("dir") or "asc").strip().lower()
+        if direction not in {"asc", "desc"}:
+            direction = "asc"
+        metric_ref = _order_by_metric_ref(item.get("by"))
+        if metric_ref:
+            metric_sorts.append({"metricRef": metric_ref, "dir": direction})
             continue
         key = _order_by_dimension_key(item.get("by"))
         if key == "":
@@ -335,14 +394,27 @@ def _apply_plan_order_by_sorting(
         col = _to_sql_column_key(dim_lookup.get(key))
         if col is None:
             continue
-        direction = str(item.get("dir") or "asc").strip().lower()
-        if direction not in {"asc", "desc"}:
-            direction = "asc"
         sort_edits.append(AddSortEdit(op="addSort", col=col, dir=direction))
 
-    if not sort_edits:
-        return sql_json
-    return apply_edits(sql_json, sort_edits, prompt=prompt)
+    out = sql_json
+    if sort_edits:
+        out = apply_edits(out, sort_edits, prompt=prompt)
+
+    if metric_sorts:
+        sorting = list(out.get("sorting") or []) if isinstance(out.get("sorting"), list) else []
+        seen = {
+            (str(item.get("metricRef") or "").strip().lower(), str(item.get("dir") or "asc").strip().lower())
+            for item in sorting
+            if isinstance(item, Mapping) and str(item.get("metricRef") or "").strip()
+        }
+        for item in metric_sorts:
+            key = (str(item.get("metricRef") or "").strip().lower(), str(item.get("dir") or "asc").strip().lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            sorting.append(item)
+        out["sorting"] = sorting
+    return out
 
 
 def _first_output_column(columns: Any) -> Optional[Dict[str, Any]]:
@@ -393,6 +465,13 @@ def _order_by_dimension_key(value: Any) -> str:
     if token.startswith("dimension:"):
         return token.split(":", 1)[1].strip()
     return token
+
+
+def _order_by_metric_ref(value: Any) -> str:
+    token = _norm_key(value)
+    if token.startswith("metric:"):
+        return token.split(":", 1)[1].strip()
+    return ""
 
 
 def _norm_filter_op(value: Any) -> Optional[str]:

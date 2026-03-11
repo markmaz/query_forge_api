@@ -65,3 +65,31 @@ def test_list_available_columns_show_all() -> None:
         BuilderFeedQuery(workspace_id="ws1", user_id="u1", domain_id=1, limit=1, offset=0)
     )
     assert res["columnNamePolicy"] == "SHOW_ALL_QUALIFIED"
+
+
+def test_list_available_columns_sql_does_not_reference_legacy_model_or_exists_columns() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_responses = [[(0,)]]
+    sql.query_mappings_responses = [[]]
+    service = BuilderColumnFeedService(sql=sql)
+    service.list_available_columns(BuilderFeedQuery(workspace_id="ws1", user_id="u1", limit=1, offset=0))
+
+    assert len(sql.query_calls) == 1
+    assert len(sql.query_mappings_calls) == 1
+    count_sql = sql.query_calls[0].query.lower()
+    rows_sql = sql.query_mappings_calls[0].query.lower()
+    assert "wt.exists_in_dbx" not in count_sql
+    assert "wt.exists_in_dbx" not in rows_sql
+    assert "wc.model_column_id" not in count_sql
+    assert "wc.model_column_id" not in rows_sql
+
+
+def test_list_domain_tables_sql_does_not_reference_exists_in_dbx() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[]]
+    service = BuilderColumnFeedService(sql=sql)
+    service.list_domain_tables(workspace_id="ws1", user_id="u1", domain_id=None)
+
+    assert len(sql.query_mappings_calls) == 1
+    query = sql.query_mappings_calls[0].query.lower()
+    assert "wt.exists_in_dbx" not in query

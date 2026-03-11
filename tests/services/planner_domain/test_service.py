@@ -1,19 +1,60 @@
 from __future__ import annotations
 
+from datetime import date
+import logging
+
 import pytest
 
+from app.exceptions.forge_error import ForgeError
 from app.services.planner_domain import service as planner_domain_service_module
 from app.services.planner_domain.service import (
     LLMPlanResult,
     PlannerDomainService,
     SlotExtractionResult,
+    _column_heuristic_boost,
     _district_county_retry_hint,
+    _normalize_relative_time_in_plan,
+    _normalize_top_bottom_ranking_in_plan,
+    _normalize_year_keyword_filters_in_plan,
+    _prompt_is_followup_edit,
+    _required_column_keys,
 )
 
 
 @pytest.fixture(autouse=True)
 def _disable_unified_llm(monkeypatch):
     monkeypatch.setattr(planner_domain_service_module, "PLANNER_UNIFIED_LLM", False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_pipeline_logs(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        planner_domain_service_module,
+        "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE",
+        str(tmp_path / "plan_domain_pipeline_timing.log"),
+    )
+    monkeypatch.setattr(
+        planner_domain_service_module,
+        "QF_PLAN_DOMAIN_PIPELINE_TRACE_LOG_FILE",
+        str(tmp_path / "plan_domain_pipeline_trace.jsonl"),
+    )
+
+    profile_logger = logging.getLogger(planner_domain_service_module._PROFILE_LOGGER_NAME)
+    for handler in list(profile_logger.handlers):
+        profile_logger.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:
+            pass
+    trace_logger = logging.getLogger(planner_domain_service_module._TRACE_LOGGER_NAME)
+    for handler in list(trace_logger.handlers):
+        trace_logger.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:
+            pass
+    monkeypatch.setattr(planner_domain_service_module, "_PROFILE_LOGGER_INITIALIZED", False)
+    monkeypatch.setattr(planner_domain_service_module, "_TRACE_LOGGER_INITIALIZED", False)
 
 
 class _FakeCapabilitiesService:
@@ -245,6 +286,32 @@ class _FakeLLMStudentIdentityPlan:
             "content": "{}",
             "raw_text": "{}",
         }
+
+
+def test_required_column_keys_prefers_account_and_territory_name_for_group_by_prompt() -> None:
+    rows = [
+        {"column_key": "wt178.account_id", "column_name": "account_id"},
+        {"column_key": "wt178.account_type", "column_name": "account_type"},
+        {"column_key": "wt178.account_name", "column_name": "account_name"},
+        {"column_key": "wt187.territory_id", "column_name": "territory_id"},
+        {"column_key": "wt187.territory_name", "column_name": "territory_name"},
+    ]
+    keys = _required_column_keys(prompt="Show total sales by account and territory", rows=rows)
+    assert "wt178.account_name" in keys
+    assert "wt187.territory_name" in keys
+
+
+def test_column_heuristic_boost_prefers_name_over_id_and_type_for_grouping() -> None:
+    prompt = "Show total sales by account and territory"
+    account_name = _column_heuristic_boost(prompt=prompt, row={"column_key": "wt178.account_name", "column_name": "account_name"})
+    account_type = _column_heuristic_boost(prompt=prompt, row={"column_key": "wt178.account_type", "column_name": "account_type"})
+    territory_name = _column_heuristic_boost(
+        prompt=prompt,
+        row={"column_key": "wt187.territory_name", "column_name": "territory_name"},
+    )
+    territory_id = _column_heuristic_boost(prompt=prompt, row={"column_key": "wt187.territory_id", "column_name": "territory_id"})
+    assert account_name > account_type
+    assert territory_name > territory_id
 
 
 class _FakeStaffCapabilitiesService:
@@ -649,7 +716,133 @@ def test_fast_mode_retries_when_first_plan_is_invalid(monkeypatch) -> None:
 
     assert out["validation"]["is_valid"] is True
     assert call_counter["plan_calls"] == 2
-    assert "llm_retry" in out["timings_ms"]
+
+
+def test_unified_llm_invalid_json_falls_back_to_legacy_path(monkeypatch) -> None:
+    monkeypatch.setattr(planner_domain_service_module, "PLANNER_UNIFIED_LLM", True)
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_ENABLED", False)
+    calls = {"slots": 0, "plan": 0}
+
+    def _fake_unified(
+        self,
+        *,
+        prompt,
+        normalized_prompt,
+        workspace_id,
+        vertical_norm,
+        base_domain_id,
+        domain_name,
+        capabilities,
+        conversation_context=None,
+        trace_id,
+        fast_mode=False,
+    ):
+        del (
+            self,
+            prompt,
+            normalized_prompt,
+            workspace_id,
+            vertical_norm,
+            base_domain_id,
+            domain_name,
+            capabilities,
+            conversation_context,
+            trace_id,
+            fast_mode,
+        )
+        raise ForgeError(
+            "plan_domain unified invalid model JSON",
+            status_code=502,
+            details={"finish_reason_second": "length"},
+        )
+
+    def _fake_slots(
+        self,
+        *,
+        normalized_prompt,
+        workspace_id,
+        vertical_norm,
+        base_domain_id,
+        conversation_context=None,
+        fast_mode=False,
+    ):
+        del self, normalized_prompt, workspace_id, vertical_norm, base_domain_id, conversation_context, fast_mode
+        calls["slots"] += 1
+        return SlotExtractionResult(
+            payload={"intent": "list", "entity": "students", "constraints": [], "time_phrases": []},
+            raw_content="{}",
+            attempts=1,
+            repaired=False,
+        )
+
+    def _fake_plan(
+        self,
+        *,
+        normalized_prompt,
+        workspace_id,
+        vertical_norm,
+        base_domain_id,
+        capabilities,
+        schema,
+        slot_hints,
+        validation_feedback="",
+        retry_hint="",
+        conversation_context=None,
+        fast_mode=False,
+    ):
+        del (
+            self,
+            normalized_prompt,
+            workspace_id,
+            vertical_norm,
+            base_domain_id,
+            capabilities,
+            schema,
+            slot_hints,
+            validation_feedback,
+            retry_hint,
+            conversation_context,
+            fast_mode,
+        )
+        calls["plan"] += 1
+        return LLMPlanResult(
+            plan_json={
+                "intent": "list",
+                "selects": {"dimensions": [{"column_key": "wt20.county_fips_code"}], "metrics": []},
+                "filters": [],
+                "time": {},
+                "grouping": {"group_by": ["wt20.county_fips_code"], "order_by": [], "limit": 200},
+            },
+            raw_content="{}",
+            attempts=1,
+            repaired=False,
+        )
+
+    monkeypatch.setattr(PlannerDomainService, "_call_llm_unified", _fake_unified)
+    monkeypatch.setattr(PlannerDomainService, "_call_llm_slots", _fake_slots)
+    monkeypatch.setattr(PlannerDomainService, "_call_llm_plan", _fake_plan)
+
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+    )
+    out = svc.plan(
+        {
+            "workspace_id": "ws-1",
+            "vertical_norm": "education",
+            "base_domain_id": 6,
+            "prompt": "show students by county",
+            "debug": True,
+        },
+        user_id="user-1",
+    )
+
+    assert out["validation"]["is_valid"] is True
+    assert calls["slots"] == 1
+    assert calls["plan"] == 1
+    assert out["technical_details"]["planner_unified_llm"] is True
+    assert out["debug"]["unified_llm_trace"]["fallback_to_legacy_llm_path"] is True
 
 
 def test_explanation_summary_can_be_polished_by_llm(monkeypatch) -> None:
@@ -2059,3 +2252,181 @@ def test_district_county_retry_hint_does_not_trigger_for_geography_prompt() -> N
     )
 
     assert hint is None
+
+
+def test_normalize_llm_plan_accepts_metric_ref_aliases() -> None:
+    out = PlannerDomainService._normalize_llm_plan(  # noqa: SLF001
+        raw_plan={
+            "selects": {
+                "dimensions": [{"columnKey": "wt187.territory_name"}],
+                "metrics": [{"metricRef": "domain_metric:sales_revenue", "metric_ref": ""}],
+            }
+        },
+        trace_id="t1",
+        workspace_id="ws-1",
+        vertical_norm="education",
+        base_domain_id=3,
+        base_domain_name="Sales Performance",
+    )
+
+    assert out["selects"]["dimensions"] == [{"column_key": "wt187.territory_name"}]
+    assert out["selects"]["metrics"] == [{"metric_ref": "domain_metric:sales_revenue"}]
+
+
+def test_normalize_relative_time_last_month_to_custom_calendar_range() -> None:
+    plan = {
+        "time": {"time_range": "last_30_days"},
+        "filters": [
+            {"column_key": "wt179.month_num", "op": "=", "value": 11},
+            {"column_key": "wt187.region_name", "op": "=", "value": "West"},
+        ],
+    }
+    capabilities = {
+        "dimensions": [
+            {"column_key": "wt187.region_name", "column_name": "region_name", "data_type": "string"},
+        ],
+        "filter_columns": [
+            {"column_key": "wt179.month_num", "column_name": "month_num", "data_type": "int"},
+        ],
+        "time_columns": [
+            {"column_key": "wt179.date_key", "column_name": "date_key", "data_type": "date"},
+        ],
+    }
+
+    out, issues, debug = _normalize_relative_time_in_plan(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="What were total sales by territory last month?",
+        today=date(2026, 3, 10),
+    )
+
+    assert issues == []
+    assert out["time"]["time_range"] == "custom"
+    assert out["time"]["start_date"] == "2026-02-01"
+    assert out["time"]["end_date"] == "2026-02-28"
+    assert out["time"]["time_column_key"] == "wt179.date_key"
+    assert out["filters"] == [{"column_key": "wt187.region_name", "op": "=", "value": "West"}]
+    assert debug and debug[0]["action"] == "normalized_relative_time"
+
+
+def test_normalize_relative_time_this_month_to_custom_calendar_range() -> None:
+    plan = {
+        "time": {},
+        "filters": [
+            {"column_key": "wt179.month_num", "op": "=", "value": 10},
+            {"column_key": "wt179.year_num", "op": "=", "value": 2023},
+        ],
+    }
+    capabilities = {
+        "dimensions": [],
+        "filter_columns": [
+            {"column_key": "wt179.month_num", "column_name": "month_num", "data_type": "int"},
+            {"column_key": "wt179.year_num", "column_name": "year_num", "data_type": "int"},
+        ],
+        "time_columns": [
+            {"column_key": "wt179.date_key", "column_name": "date_key", "data_type": "date"},
+        ],
+    }
+
+    out, issues, debug = _normalize_relative_time_in_plan(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="Show me the top 5 sales reps for this month",
+        today=date(2026, 3, 11),
+    )
+
+    assert issues == []
+    assert out["time"]["time_range"] == "custom"
+    assert out["time"]["start_date"] == "2026-03-01"
+    assert out["time"]["end_date"] == "2026-03-11"
+    assert out["filters"] == []
+    assert debug and debug[0]["relative_phrase"] == "this month"
+
+
+def test_normalize_relative_time_does_not_rewrite_last_30_days_prompt() -> None:
+    plan = {"time": {"time_range": "last_30_days"}, "filters": []}
+    capabilities = {
+        "dimensions": [],
+        "filter_columns": [],
+        "time_columns": [
+            {"column_key": "wt179.date_key", "column_name": "date_key", "data_type": "date"},
+        ],
+    }
+    out, issues, debug = _normalize_relative_time_in_plan(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="Show total sales for the last 30 days",
+        today=date(2026, 3, 10),
+    )
+    assert issues == []
+    assert out["time"]["time_range"] == "last_30_days"
+    assert "start_date" not in out["time"]
+    assert debug == []
+
+
+def test_prompt_is_followup_edit_does_not_treat_top_query_as_patch() -> None:
+    assert _prompt_is_followup_edit(
+        prompt="Show me the top 5 sales reps for this month",
+        prior_prompt="Show me revenue by territory last month",
+    ) is False
+
+
+def test_normalize_top_bottom_ranking_sets_metric_limit_and_order() -> None:
+    plan = {
+        "intent": "list",
+        "selects": {
+            "dimensions": [
+                {"column_key": "wt186.first_name"},
+                {"column_key": "wt186.last_name"},
+                {"column_key": "wt186.sales_rep_id"},
+            ],
+            "metrics": [],
+        },
+        "filters": [],
+        "time": {},
+        "grouping": {"group_by": ["wt186.first_name", "wt186.last_name", "wt186.sales_rep_id"], "order_by": [], "limit": None},
+    }
+    capabilities = {
+        "domain_metrics": [
+            {"metric_key": "sales_revenue", "label": "Sales Revenue"},
+            {"metric_key": "sales_units", "label": "Sales Units"},
+        ],
+        "user_metrics": [],
+        "overlay_metrics": [],
+    }
+
+    out, issues, debug = _normalize_top_bottom_ranking_in_plan(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="Show me the top 5 sales reps for this month",
+    )
+
+    assert issues == []
+    assert out["intent"] == "aggregate"
+    assert out["selects"]["metrics"] == [{"metric_ref": "domain_metric:sales_revenue"}]
+    assert out["grouping"]["limit"] == 5
+    assert out["grouping"]["order_by"] == [{"by": "metric:domain_metric:sales_revenue", "dir": "desc"}]
+    assert debug and debug[0]["action"] == "normalized_top_bottom_ranking"
+
+
+def test_normalize_year_keyword_filters_for_year_num() -> None:
+    plan = {
+        "filters": [
+            {"column_key": "wt179.year_num", "op": "eq", "value": "current_year"},
+        ]
+    }
+    capabilities = {
+        "dimensions": [],
+        "filter_columns": [
+            {"column_key": "wt179.year_num", "column_name": "year_num", "data_type": "int"},
+        ],
+        "time_columns": [],
+    }
+    out, issues, debug = _normalize_year_keyword_filters_in_plan(
+        plan_json=plan,
+        capabilities=capabilities,
+        today=date(2026, 3, 10),
+    )
+    assert issues == []
+    assert out["filters"] == [{"column_key": "wt179.year_num", "op": "eq", "value": 2026}]
+    assert debug and debug[0]["action"] == "normalized_year_keyword"

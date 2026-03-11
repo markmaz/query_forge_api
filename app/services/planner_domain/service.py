@@ -6,7 +6,8 @@ import os
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
+from logging.handlers import WatchedFileHandler
 from time import perf_counter
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -23,12 +24,18 @@ from app.config import (
     QF_PLAN_DOMAIN_FAST_MODE_MAX_FILTER_COLUMNS,
     QF_PLAN_DOMAIN_FAST_MODE_PLAN_MAX_TOKENS,
     QF_PLAN_DOMAIN_FAST_MODE_SLOT_MAX_TOKENS,
+    QF_PLAN_DOMAIN_COMPACT_PLANNER_ENABLED,
+    QF_PLAN_DOMAIN_COMPACT_MAX_TOKENS,
     QF_PLAN_DOMAIN_LLM_EXPLANATION_ENABLED,
     QF_PLAN_DOMAIN_LLM_EXPLANATION_MAX_TOKENS,
     QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_ENABLED,
     QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_MAX_ITEMS,
     QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_MAX_TOKENS,
     QF_PLAN_DOMAIN_NEXT_ACTIONS_ASYNC_DEFAULT,
+    QF_PLAN_DOMAIN_PIPELINE_TRACE_ENABLED,
+    QF_PLAN_DOMAIN_PIPELINE_TRACE_LOG_FILE,
+    QF_PLAN_DOMAIN_PIPELINE_TRACE_MAX_CHARS,
+    QF_PLAN_DOMAIN_PIPELINE_TRACE_MAX_ITEMS,
     QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED,
     QF_PLAN_DOMAIN_TIMING_PROFILE_ENABLED,
     QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE,
@@ -66,6 +73,7 @@ from app.services.llm.prompts_plan_v2 import (
     build_user_prompt,
 )
 from app.services.planner.unified_llm_planner import build_plan_and_slots
+from app.services.planner.compact_planner import build_compact_plan_and_project
 from app.services.planner.value_normalizers.country import is_country_iso2_column, normalize_country_values
 from app.services.planner.value_normalizers.school_year import is_school_year_column, normalize_school_year_values
 from app.services.planner.value_normalizers.semester import is_semester_column, normalize_semester_values
@@ -129,9 +137,10 @@ _ADM_HINT_RE = re.compile(
     re.IGNORECASE,
 )
 _FOLLOWUP_EDIT_HINT_RE = re.compile(
-    r"\b(sort(ed)?|order(ed)?|arrange(d)?|limit|top|first|add|remove|drop|exclude|include|hide|also|now|then|keep|same)\b",
+    r"\b(sort(ed)?|order(ed)?|arrange(d)?|add|remove|drop|exclude|include|hide|also|now|then|keep|same)\b",
     re.IGNORECASE,
 )
+_TOP_BOTTOM_LIMIT_RE = re.compile(r"\b(?P<kind>top|bottom)\s+(?P<limit>\d{1,4})\b", re.IGNORECASE)
 _SORT_ONLY_PROMPT_RE = re.compile(
     r"^\s*(also\s+|now\s+|then\s+|please\s+)?(sort|order|arrange)(?:\s+the\s+results)?\s+by\b",
     re.IGNORECASE,
@@ -265,6 +274,8 @@ _US_STATE_ABBR = {
 logger = logging.getLogger(__name__)
 _PROFILE_LOGGER_NAME = "planner_domain.pipeline_profile"
 _PROFILE_LOGGER_INITIALIZED = False
+_TRACE_LOGGER_NAME = "planner_domain.pipeline_trace"
+_TRACE_LOGGER_INITIALIZED = False
 
 
 class PlanDomainRequest(BaseModel):
@@ -280,6 +291,7 @@ class PlanDomainRequest(BaseModel):
     debug: bool = False
     allow_unknown_conversation: bool = False
     profile_pipeline: bool = False
+    profile_pipeline_data: bool = False
     fast_mode: Optional[bool] = None
     next_actions_async: Optional[bool] = None
 
@@ -384,6 +396,11 @@ class PlannerDomainService:
             raise ForgeError("Invalid plan_domain request", status_code=400, details={"errors": exc.errors()}) from exc
 
         profile_enabled = bool(QF_PLAN_DOMAIN_TIMING_PROFILE_ENABLED or req.profile_pipeline)
+        trace_capture_enabled = bool(
+            QF_PLAN_DOMAIN_PIPELINE_TRACE_ENABLED
+            or req.profile_pipeline_data
+            or req.profile_pipeline
+        )
         pipeline_profile_steps: List[Dict[str, Any]] = []
         t0 = perf_counter()
         t_context = perf_counter()
@@ -432,6 +449,16 @@ class PlannerDomainService:
 
         fast_mode = bool(req.fast_mode) if req.fast_mode is not None else bool(QF_PLAN_DOMAIN_FAST_MODE_DEFAULT)
         trace_id = str(uuid.uuid4())
+        pipeline_trace: Dict[str, Any] = {
+            "trace_id": trace_id,
+            "workspace_id": req.workspace_id,
+            "user_id": str(user_id),
+            "conversation_id": conversation_id,
+            "prompt": req.prompt,
+            "fast_mode": fast_mode,
+            "planner_unified_llm": bool(PLANNER_UNIFIED_LLM),
+            "steps": [],
+        }
         timings: Dict[str, int] = {}
 
         t_prompt_norm = perf_counter()
@@ -445,6 +472,20 @@ class PlannerDomainService:
             step="normalize_prompt_and_vertical",
             label="Normalize prompt and effective vertical",
             started_at=t_prompt_norm,
+        )
+        pipeline_trace["normalized_prompt"] = normalized_prompt
+        pipeline_trace["vertical_norm"] = vertical
+        _append_pipeline_trace_step(
+            trace=pipeline_trace,
+            enabled=trace_capture_enabled,
+            step="normalize_prompt_and_vertical",
+            data={
+                "prompt": req.prompt,
+                "normalized_prompt": normalized_prompt,
+                "vertical_norm": vertical,
+                "conversation_context_used": context is not None,
+                "followup_mode": bool(context and context.followup_mode),
+            },
         )
 
         effective_domain_id = req.base_domain_id
@@ -464,6 +505,15 @@ class PlannerDomainService:
             step="domain_selection",
             label="Select candidate domains from vector index",
             started_at=t_domain,
+        )
+        _append_pipeline_trace_step(
+            trace=pipeline_trace,
+            enabled=trace_capture_enabled,
+            step="domain_selection",
+            data={
+                "provided_domain_id": effective_domain_id,
+                "domain_candidates": domain_candidates,
+            },
         )
 
         t_caps = perf_counter()
@@ -487,6 +537,21 @@ class PlannerDomainService:
             label="Load capabilities, shortlist columns, resolve semester indicators",
             started_at=t_caps,
         )
+        _append_pipeline_trace_step(
+            trace=pipeline_trace,
+            enabled=trace_capture_enabled,
+            step="capabilities",
+            data={
+                "selected_domain_id": selected_domain_id,
+                "selected_domain_name": _selected_domain_name(
+                    domain_candidates=domain_candidates,
+                    selected_domain_id=selected_domain_id,
+                ),
+                "shortlisted_columns_count": len(shortlisted_columns),
+                "ranking_debug": ranking_debug,
+                "capabilities_summary": _capabilities_summary(capabilities),
+            },
+        )
 
         selected_domain_name = _selected_domain_name(domain_candidates=domain_candidates, selected_domain_id=selected_domain_id)
         semantic_value_alias_constraints = self._semantic_value_alias_constraints(
@@ -495,6 +560,95 @@ class PlannerDomainService:
         )
         unified_trace: Dict[str, Any] = {}
         schema = plan_v2_json_schema()
+
+        def _run_legacy_llm_path() -> Tuple[SlotExtractionResult, Dict[str, Any], Dict[str, Any], LLMPlanResult]:
+            t_slots_local = perf_counter()
+            slots_local = self._call_llm_slots(
+                normalized_prompt=normalized_prompt,
+                workspace_id=req.workspace_id,
+                vertical_norm=vertical,
+                base_domain_id=selected_domain_id,
+                conversation_context=context,
+                fast_mode=fast_mode,
+            )
+            slot_hints_local = self._merge_slot_hints(
+                prompt=normalized_prompt,
+                slot_payload=slots_local.payload,
+                semantic_constraints=semantic_value_alias_constraints,
+            )
+            timings["llm_slots"] = _add_pipeline_step(
+                profile_steps=pipeline_profile_steps,
+                enabled=profile_enabled,
+                step="llm_slots",
+                label="Extract intent/constraints slot hints via LLM",
+                started_at=t_slots_local,
+            )
+            _append_pipeline_trace_step(
+                trace=pipeline_trace,
+                enabled=trace_capture_enabled,
+                step="llm_slots",
+                data={
+                    "slot_hints": slot_hints_local,
+                    "slot_raw_json": slots_local.raw_content,
+                    "slot_attempts": slots_local.attempts,
+                    "slot_repaired": slots_local.repaired,
+                },
+            )
+            t_caps_compact_local = perf_counter()
+            capabilities_llm_local = self._compact_capabilities_for_llm(
+                capabilities=capabilities,
+                shortlisted_columns=shortlisted_columns,
+                prompt=normalized_prompt,
+                slot_hints=slot_hints_local,
+                fast_mode=fast_mode,
+            )
+            _add_pipeline_step(
+                profile_steps=pipeline_profile_steps,
+                enabled=profile_enabled,
+                step="capabilities_compaction",
+                label="Compact capabilities payload for plan generation",
+                started_at=t_caps_compact_local,
+            )
+            _append_pipeline_trace_step(
+                trace=pipeline_trace,
+                enabled=trace_capture_enabled,
+                step="capabilities_compaction",
+                data={
+                    "capabilities_llm_summary": _capabilities_summary(capabilities_llm_local),
+                    "capabilities_llm": capabilities_llm_local,
+                },
+            )
+            t_llm_local = perf_counter()
+            llm_local = self._call_llm_plan(
+                normalized_prompt=normalized_prompt,
+                workspace_id=req.workspace_id,
+                vertical_norm=vertical,
+                base_domain_id=selected_domain_id,
+                capabilities=capabilities_llm_local,
+                schema=schema,
+                slot_hints=slot_hints_local,
+                conversation_context=context,
+                fast_mode=fast_mode,
+            )
+            timings["llm"] = _add_pipeline_step(
+                profile_steps=pipeline_profile_steps,
+                enabled=profile_enabled,
+                step="llm_plan",
+                label="Generate PlanV2 with LLM",
+                started_at=t_llm_local,
+            )
+            _append_pipeline_trace_step(
+                trace=pipeline_trace,
+                enabled=trace_capture_enabled,
+                step="llm_plan",
+                data={
+                    "llm_raw_json": llm_local.raw_content,
+                    "llm_attempts": llm_local.attempts,
+                    "llm_repaired": llm_local.repaired,
+                },
+            )
+            return slots_local, slot_hints_local, capabilities_llm_local, llm_local
+
         if PLANNER_UNIFIED_LLM:
             t_caps_compact = perf_counter()
             capabilities_llm = self._compact_capabilities_for_llm(
@@ -511,105 +665,119 @@ class PlannerDomainService:
                 label="Compact capabilities payload for plan generation",
                 started_at=t_caps_compact,
             )
-            t_llm = perf_counter()
-            unified_result = self._call_llm_unified(
-                prompt=req.prompt,
-                normalized_prompt=normalized_prompt,
-                workspace_id=req.workspace_id,
-                vertical_norm=vertical,
-                base_domain_id=selected_domain_id,
-                domain_name=selected_domain_name,
-                capabilities=capabilities_llm,
-                conversation_context=context,
-                trace_id=trace_id,
-                fast_mode=fast_mode,
-            )
-            slot_hints = self._merge_slot_hints(
-                prompt=normalized_prompt,
-                slot_payload=unified_result.get("slot_hints") if isinstance(unified_result.get("slot_hints"), Mapping) else {},
-                semantic_constraints=semantic_value_alias_constraints,
-            )
-            llm_result = LLMPlanResult(
-                plan_json=dict(unified_result.get("plan_json_v2") or {}),
-                raw_content=str(unified_result.get("llm_raw_json") or ""),
-                attempts=max(1, _to_int(unified_result.get("attempts")) or 1),
-                repaired=bool(unified_result.get("repaired")),
-            )
-            slots_result = SlotExtractionResult(
-                payload=dict(unified_result.get("slot_hints") or {}),
-                raw_content=str(unified_result.get("llm_raw_json") or ""),
-                attempts=max(1, _to_int(unified_result.get("attempts")) or 1),
-                repaired=bool(unified_result.get("repaired")),
-            )
-            unified_trace = {
-                "llm_model": str(unified_result.get("llm_model") or ""),
-                "llm_tokens": dict(unified_result.get("llm_tokens") or {}),
-            }
-            if "explanation_draft" in unified_result:
-                unified_trace["explanation_draft"] = unified_result.get("explanation_draft")
-            timings["llm"] = _add_pipeline_step(
-                profile_steps=pipeline_profile_steps,
-                enabled=profile_enabled,
-                step="llm_unified",
-                label="Generate slots+plan with LLM (unified)",
-                started_at=t_llm,
-            )
-        else:
-            t_slots = perf_counter()
-            slots_result = self._call_llm_slots(
-                normalized_prompt=normalized_prompt,
-                workspace_id=req.workspace_id,
-                vertical_norm=vertical,
-                base_domain_id=selected_domain_id,
-                conversation_context=context,
-                fast_mode=fast_mode,
-            )
-            slot_hints = self._merge_slot_hints(
-                prompt=normalized_prompt,
-                slot_payload=slots_result.payload,
-                semantic_constraints=semantic_value_alias_constraints,
-            )
-            timings["llm_slots"] = _add_pipeline_step(
-                profile_steps=pipeline_profile_steps,
-                enabled=profile_enabled,
-                step="llm_slots",
-                label="Extract intent/constraints slot hints via LLM",
-                started_at=t_slots,
-            )
-            t_caps_compact = perf_counter()
-            capabilities_llm = self._compact_capabilities_for_llm(
-                capabilities=capabilities,
-                shortlisted_columns=shortlisted_columns,
-                prompt=normalized_prompt,
-                slot_hints=slot_hints,
-                fast_mode=fast_mode,
-            )
-            _add_pipeline_step(
-                profile_steps=pipeline_profile_steps,
-                enabled=profile_enabled,
+            _append_pipeline_trace_step(
+                trace=pipeline_trace,
+                enabled=trace_capture_enabled,
                 step="capabilities_compaction",
-                label="Compact capabilities payload for plan generation",
-                started_at=t_caps_compact,
+                data={
+                    "capabilities_llm_summary": _capabilities_summary(capabilities_llm),
+                    "capabilities_llm": capabilities_llm,
+                },
             )
             t_llm = perf_counter()
-            llm_result = self._call_llm_plan(
-                normalized_prompt=normalized_prompt,
-                workspace_id=req.workspace_id,
-                vertical_norm=vertical,
-                base_domain_id=selected_domain_id,
-                capabilities=capabilities_llm,
-                schema=schema,
-                slot_hints=slot_hints,
-                conversation_context=context,
-                fast_mode=fast_mode,
-            )
-            timings["llm"] = _add_pipeline_step(
-                profile_steps=pipeline_profile_steps,
-                enabled=profile_enabled,
-                step="llm_plan",
-                label="Generate PlanV2 with LLM",
-                started_at=t_llm,
-            )
+            try:
+                unified_result = self._call_llm_unified(
+                    prompt=req.prompt,
+                    normalized_prompt=normalized_prompt,
+                    workspace_id=req.workspace_id,
+                    vertical_norm=vertical,
+                    base_domain_id=selected_domain_id,
+                    domain_name=selected_domain_name,
+                    capabilities=capabilities_llm,
+                    conversation_context=context,
+                    trace_id=trace_id,
+                    fast_mode=fast_mode,
+                )
+                slot_hints = self._merge_slot_hints(
+                    prompt=normalized_prompt,
+                    slot_payload=unified_result.get("slot_hints") if isinstance(unified_result.get("slot_hints"), Mapping) else {},
+                    semantic_constraints=semantic_value_alias_constraints,
+                )
+                llm_result = LLMPlanResult(
+                    plan_json=dict(unified_result.get("plan_json_v2") or {}),
+                    raw_content=str(unified_result.get("llm_raw_json") or ""),
+                    attempts=max(1, _to_int(unified_result.get("attempts")) or 1),
+                    repaired=bool(unified_result.get("repaired")),
+                )
+                slots_result = SlotExtractionResult(
+                    payload=dict(unified_result.get("slot_hints") or {}),
+                    raw_content=str(unified_result.get("llm_raw_json") or ""),
+                    attempts=max(1, _to_int(unified_result.get("attempts")) or 1),
+                    repaired=bool(unified_result.get("repaired")),
+                )
+                unified_trace = {
+                    "llm_model": str(unified_result.get("llm_model") or ""),
+                    "llm_tokens": dict(unified_result.get("llm_tokens") or {}),
+                }
+                if str(unified_result.get("planner_mode") or "").strip():
+                    unified_trace["planner_mode"] = str(unified_result.get("planner_mode") or "").strip()
+                if "finish_reason" in unified_result:
+                    unified_trace["finish_reason"] = unified_result.get("finish_reason")
+                if "candidate_summary" in unified_result:
+                    unified_trace["candidate_summary"] = unified_result.get("candidate_summary")
+                if "validation_warnings" in unified_result:
+                    unified_trace["validation_warnings"] = unified_result.get("validation_warnings")
+                if "llm_prompt_trace" in unified_result:
+                    unified_trace["llm_prompt_trace"] = unified_result.get("llm_prompt_trace")
+                if "needs_clarification" in unified_result:
+                    unified_trace["needs_clarification"] = bool(unified_result.get("needs_clarification"))
+                    unified_trace["clarification_question"] = unified_result.get("clarification_question")
+                    unified_trace["confidence"] = unified_result.get("confidence")
+                if "explanation_draft" in unified_result:
+                    unified_trace["explanation_draft"] = unified_result.get("explanation_draft")
+                timings["llm"] = _add_pipeline_step(
+                    profile_steps=pipeline_profile_steps,
+                    enabled=profile_enabled,
+                    step="llm_unified",
+                    label="Generate slots+plan with LLM (unified)",
+                    started_at=t_llm,
+                )
+                _append_pipeline_trace_step(
+                    trace=pipeline_trace,
+                    enabled=trace_capture_enabled,
+                    step="llm_unified",
+                    data={
+                        "slot_hints": dict(unified_result.get("slot_hints") or {}),
+                        "llm_model": str(unified_result.get("llm_model") or ""),
+                        "llm_tokens": dict(unified_result.get("llm_tokens") or {}),
+                        "finish_reason": unified_result.get("finish_reason"),
+                        "attempts": unified_result.get("attempts"),
+                        "repaired": unified_result.get("repaired"),
+                        "candidate_summary": unified_result.get("candidate_summary"),
+                        "validation_warnings": unified_result.get("validation_warnings"),
+                        "llm_prompt_trace": unified_result.get("llm_prompt_trace"),
+                    },
+                )
+            except ForgeError as exc:
+                err_msg = str(exc.message or "").strip().lower()
+                should_fallback = (
+                    "unified invalid model json" in err_msg
+                    or "planner_compact_truncation" in err_msg
+                    or "planner_compact_invalid_response" in err_msg
+                )
+                if not should_fallback:
+                    raise
+                _add_pipeline_step(
+                    profile_steps=pipeline_profile_steps,
+                    enabled=profile_enabled,
+                    step="llm_unified",
+                    label="Generate slots+plan with LLM (unified)",
+                    started_at=t_llm,
+                )
+                unified_trace = {
+                    "fallback_to_legacy_llm_path": True,
+                    "fallback_reason": str(exc.message or "unified_llm_failed"),
+                    "fallback_details": dict(exc.details or {}),
+                }
+                _append_pipeline_trace_step(
+                    trace=pipeline_trace,
+                    enabled=trace_capture_enabled,
+                    step="llm_unified_fallback",
+                    data=unified_trace,
+                )
+                slots_result, slot_hints, capabilities_llm, llm_result = _run_legacy_llm_path()
+        else:
+            slots_result, slot_hints, capabilities_llm, llm_result = _run_legacy_llm_path()
 
         t_plan_normalize = perf_counter()
         llm_plan = self._normalize_llm_plan(
@@ -634,6 +802,11 @@ class PlannerDomainService:
             plan_json=llm_plan,
             capabilities=capabilities_full,
         )
+        llm_plan, year_keyword_issues, year_keyword_debug = _normalize_year_keyword_filters_in_plan(
+            plan_json=llm_plan,
+            capabilities=capabilities_full,
+        )
+        _ = year_keyword_debug
         llm_plan, semester_issues, semester_debug = _normalize_semester_filters_in_plan(
             plan_json=llm_plan,
             capabilities=capabilities_full,
@@ -654,6 +827,27 @@ class PlannerDomainService:
             capabilities=capabilities_full,
             prompt=normalized_prompt,
         )
+        llm_plan, relative_time_issues, _ = _normalize_relative_time_in_plan(
+            plan_json=llm_plan,
+            capabilities=capabilities_full,
+            prompt=normalized_prompt,
+        )
+        llm_plan, top_bottom_issues, _ = _normalize_top_bottom_ranking_in_plan(
+            plan_json=llm_plan,
+            capabilities=capabilities_full,
+            prompt=normalized_prompt,
+        )
+        normalization_issues = (
+            country_issues
+            + school_year_issues
+            + year_keyword_issues
+            + semester_issues
+            + school_name_issues
+            + staff_role_issues
+            + adm_default_issues
+            + relative_time_issues
+            + top_bottom_issues
+        )
         _add_pipeline_step(
             profile_steps=pipeline_profile_steps,
             enabled=profile_enabled,
@@ -661,13 +855,14 @@ class PlannerDomainService:
             label="Normalize plan and apply deterministic value/filter normalizers",
             started_at=t_plan_normalize,
         )
-        normalization_issues = (
-            country_issues
-            + school_year_issues
-            + semester_issues
-            + school_name_issues
-            + staff_role_issues
-            + adm_default_issues
+        _append_pipeline_trace_step(
+            trace=pipeline_trace,
+            enabled=trace_capture_enabled,
+            step="plan_normalization",
+            data={
+                "normalized_plan_json_v2": llm_plan,
+                "normalization_issues": normalization_issues,
+            },
         )
 
         t_validate = perf_counter()
@@ -684,6 +879,17 @@ class PlannerDomainService:
             step="validation",
             label="Validate and repair plan against capabilities",
             started_at=t_validate,
+        )
+        _append_pipeline_trace_step(
+            trace=pipeline_trace,
+            enabled=trace_capture_enabled,
+            step="validation",
+            data={
+                "is_valid": validated.is_valid,
+                "issues": validated.issues,
+                "repairs_applied": validated.repairs_applied,
+                "validated_plan_json_v2": validated.plan_json,
+            },
         )
 
         district_county_retry_hint = _district_county_retry_hint(
@@ -718,6 +924,17 @@ class PlannerDomainService:
                 label="Retry PlanV2 generation after validation feedback",
                 started_at=t_llm_retry,
             )
+            _append_pipeline_trace_step(
+                trace=pipeline_trace,
+                enabled=trace_capture_enabled,
+                step="llm_retry",
+                data={
+                    "validation_feedback": retry_feedback,
+                    "llm_raw_json": llm_retry.raw_content,
+                    "llm_attempts": llm_retry.attempts,
+                    "llm_repaired": llm_retry.repaired,
+                },
+            )
 
             t_retry_normalize = perf_counter()
             retry_plan = self._normalize_llm_plan(
@@ -742,6 +959,10 @@ class PlannerDomainService:
                 plan_json=retry_plan,
                 capabilities=capabilities_full,
             )
+            retry_plan, retry_year_keyword_issues, retry_year_keyword_debug = _normalize_year_keyword_filters_in_plan(
+                plan_json=retry_plan,
+                capabilities=capabilities_full,
+            )
             retry_plan, retry_semester_issues, retry_semester_debug = _normalize_semester_filters_in_plan(
                 plan_json=retry_plan,
                 capabilities=capabilities_full,
@@ -762,13 +983,26 @@ class PlannerDomainService:
                 capabilities=capabilities_full,
                 prompt=normalized_prompt,
             )
+            retry_plan, retry_relative_time_issues, _ = _normalize_relative_time_in_plan(
+                plan_json=retry_plan,
+                capabilities=capabilities_full,
+                prompt=normalized_prompt,
+            )
+            retry_plan, retry_top_bottom_issues, _ = _normalize_top_bottom_ranking_in_plan(
+                plan_json=retry_plan,
+                capabilities=capabilities_full,
+                prompt=normalized_prompt,
+            )
             retry_normalization_issues = (
                 retry_country_issues
                 + retry_school_year_issues
+                + retry_year_keyword_issues
                 + retry_semester_issues
                 + retry_school_name_issues
                 + retry_staff_role_issues
                 + retry_adm_default_issues
+                + retry_relative_time_issues
+                + retry_top_bottom_issues
             )
             _add_pipeline_step(
                 profile_steps=pipeline_profile_steps,
@@ -792,9 +1026,21 @@ class PlannerDomainService:
                 label="Validate and repair retry plan",
                 started_at=t_validate_retry,
             )
+            _append_pipeline_trace_step(
+                trace=pipeline_trace,
+                enabled=trace_capture_enabled,
+                step="validation_retry",
+                data={
+                    "is_valid": validated.is_valid,
+                    "issues": validated.issues,
+                    "repairs_applied": validated.repairs_applied,
+                    "validated_plan_json_v2": validated.plan_json,
+                },
+            )
             llm_result = llm_retry
             country_debug = retry_country_debug
             school_year_debug = retry_school_year_debug
+            _ = retry_year_keyword_debug
             semester_debug = retry_semester_debug
             school_name_debug = retry_school_name_debug
             staff_role_debug = retry_staff_role_debug
@@ -812,6 +1058,12 @@ class PlannerDomainService:
             step="map_to_sqljson",
             label="Map validated plan to SQL JSON",
             started_at=t_map,
+        )
+        _append_pipeline_trace_step(
+            trace=pipeline_trace,
+            enabled=trace_capture_enabled,
+            step="map_to_sqljson",
+            data={"sql_json": sql_json},
         )
 
         t_explanation = perf_counter()
@@ -845,6 +1097,15 @@ class PlannerDomainService:
             label="Optionally polish explanation summary with LLM",
             started_at=t_explanation_polish,
         )
+        _append_pipeline_trace_step(
+            trace=pipeline_trace,
+            enabled=trace_capture_enabled,
+            step="explanation",
+            data={
+                "explanation": explanation,
+                "explanation_summary_trace": explanation_summary_trace,
+            },
+        )
         next_actions_async = (
             bool(req.next_actions_async)
             if req.next_actions_async is not None
@@ -859,6 +1120,12 @@ class PlannerDomainService:
                 step="next_actions",
                 label="Defer next action generation (async)",
                 started_at=perf_counter(),
+            )
+            _append_pipeline_trace_step(
+                trace=pipeline_trace,
+                enabled=trace_capture_enabled,
+                step="next_actions",
+                data={"status": "deferred"},
             )
         else:
             t_next_actions = perf_counter()
@@ -876,6 +1143,16 @@ class PlannerDomainService:
                 step="next_actions",
                 label="Generate in-domain next action suggestions",
                 started_at=t_next_actions,
+            )
+            _append_pipeline_trace_step(
+                trace=pipeline_trace,
+                enabled=trace_capture_enabled,
+                step="next_actions",
+                data={
+                    "status": "ready",
+                    "next_actions": next_actions,
+                    "next_actions_trace": next_actions_trace,
+                },
             )
 
         response: Dict[str, Any] = {
@@ -899,6 +1176,10 @@ class PlannerDomainService:
             },
             "timings_ms": timings,
         }
+        if bool(unified_trace.get("needs_clarification")):
+            response["needs_clarification"] = True
+            response["clarification_question"] = str(unified_trace.get("clarification_question") or "").strip() or None
+            response["planner_confidence"] = float(unified_trace.get("confidence") or 0.0)
         if req.profile_pipeline:
             response["pipeline_profile"] = pipeline_profile_steps
         if req.debug:
@@ -944,6 +1225,8 @@ class PlannerDomainService:
             }
             if profile_enabled:
                 response["debug"]["pipeline_profile"] = pipeline_profile_steps
+            if trace_capture_enabled:
+                response["debug"]["pipeline_trace"] = _sanitize_pipeline_trace_value(pipeline_trace)
         state = build_conversation_state(
             workspace_id=req.workspace_id,
             user_id=str(user_id),
@@ -983,6 +1266,25 @@ class PlannerDomainService:
             total_ms=int(timings.get("total") or 0),
             steps=pipeline_profile_steps,
         )
+        _emit_pipeline_trace_log(
+            enabled=trace_capture_enabled,
+            trace_payload={
+                **pipeline_trace,
+                "timings_ms": dict(timings),
+                "technical_details": {
+                    "trace_id": trace_id,
+                    "conversation_id": conversation_id,
+                    "fast_mode": fast_mode,
+                    "planner_unified_llm": bool(PLANNER_UNIFIED_LLM),
+                },
+            },
+        )
+        if trace_capture_enabled:
+            response["technical_details"]["pipeline_trace_enabled"] = True
+            response["technical_details"]["pipeline_trace_log_file"] = _resolve_plan_domain_log_path(
+                str(QF_PLAN_DOMAIN_PIPELINE_TRACE_LOG_FILE or ""),
+                "logs/plan_domain_pipeline_trace.jsonl",
+            )
         return response
 
     def get_pipeline_profile(
@@ -995,14 +1297,81 @@ class PlannerDomainService:
         token = str(trace_id or "").strip()
         if token == "":
             raise ForgeError("trace_id is required", status_code=400)
-        return _read_pipeline_profile_from_log(
+        profile = _read_pipeline_profile_from_log(
             trace_id=token,
             workspace_id=str(workspace_id or "").strip(),
             user_id=str(user_id or "").strip(),
         )
+        pipeline_trace = _read_pipeline_trace_from_log(
+            trace_id=token,
+            workspace_id=str(workspace_id or "").strip(),
+            user_id=str(user_id or "").strip(),
+        )
+        if pipeline_trace is not None:
+            profile["pipeline_trace"] = pipeline_trace
+        return profile
 
     def list_pipeline_profiles(self, *, limit: int = 50) -> List[Dict[str, Any]]:
         return _list_pipeline_profiles_from_log(limit=limit)
+
+    def emit_failed_plan_trace(
+        self,
+        *,
+        payload: Mapping[str, Any] | None,
+        user_id: str,
+        error: Exception,
+    ) -> Optional[str]:
+        body = dict(payload or {}) if isinstance(payload, Mapping) else {}
+        enabled = bool(
+            QF_PLAN_DOMAIN_PIPELINE_TRACE_ENABLED
+            or bool(body.get("profile_pipeline_data"))
+            or bool(body.get("profile_pipeline"))
+        )
+        if not enabled:
+            return None
+
+        error_details: Dict[str, Any] = {}
+        status_code = 500
+        error_message = str(error)
+        if isinstance(error, ForgeError):
+            status_code = int(error.status_code or 500)
+            error_message = str(error.message or error_message or "plan_domain failed")
+            if isinstance(error.details, Mapping):
+                error_details = dict(error.details)
+
+        trace_id = str(error_details.get("trace_id") or uuid.uuid4())
+        trace_payload: Dict[str, Any] = {
+            "trace_id": trace_id,
+            "workspace_id": str(body.get("workspace_id") or ""),
+            "user_id": str(user_id or ""),
+            "conversation_id": str(body.get("conversation_id") or ""),
+            "prompt": str(body.get("prompt") or ""),
+            "fast_mode": bool(body.get("fast_mode")) if body.get("fast_mode") is not None else bool(QF_PLAN_DOMAIN_FAST_MODE_DEFAULT),
+            "planner_unified_llm": bool(PLANNER_UNIFIED_LLM),
+            "failed": True,
+            "steps": [
+                {
+                    "step": "plan_failed",
+                    "data": {
+                        "error_type": error.__class__.__name__,
+                        "error_message": error_message,
+                        "status_code": status_code,
+                        "error_details": error_details,
+                        "request_context": {
+                            "workspace_id": str(body.get("workspace_id") or ""),
+                            "conversation_id": str(body.get("conversation_id") or ""),
+                            "vertical_norm": str(body.get("vertical_norm") or ""),
+                            "base_domain_id": body.get("base_domain_id"),
+                            "profile_pipeline": bool(body.get("profile_pipeline")),
+                            "profile_pipeline_data": bool(body.get("profile_pipeline_data")),
+                            "next_actions_async": bool(body.get("next_actions_async")),
+                        },
+                    },
+                }
+            ],
+        }
+        _emit_pipeline_trace_log(enabled=True, trace_payload=trace_payload)
+        return trace_id
 
     def generate_next_actions(
         self,
@@ -1683,6 +2052,31 @@ class PlannerDomainService:
             if conversation_context is not None and conversation_context.followup_mode
             else {}
         )
+        if QF_PLAN_DOMAIN_COMPACT_PLANNER_ENABLED:
+            compact_max_tokens = min(
+                int(SEMANTIC_PLAN_LLM_MAX_TOKENS),
+                max(
+                    160,
+                    min(
+                        int(QF_PLAN_DOMAIN_COMPACT_MAX_TOKENS),
+                        unified_max_tokens,
+                    ),
+                ),
+            )
+            return build_compact_plan_and_project(
+                prompt=prompt,
+                normalized_prompt=normalized_prompt,
+                workspace_id=workspace_id,
+                vertical_norm=vertical_norm,
+                base_domain_id=base_domain_id,
+                domain_name=domain_name,
+                capabilities_compact=dict(capabilities or {}),
+                conversation_context=conversation_payload,
+                trace_id=trace_id,
+                llm_client=self._llm,
+                max_tokens=compact_max_tokens,
+                fast_mode=fast_mode,
+            )
         return build_plan_and_slots(
             prompt=prompt,
             normalized_prompt=normalized_prompt,
@@ -2165,6 +2559,37 @@ class PlannerDomainService:
         out.setdefault("filters", [])
         out.setdefault("time", {})
         out.setdefault("grouping", {"group_by": [], "limit": None, "order_by": []})
+
+        # Normalize common LLM casing aliases so downstream validation sees canonical PlanV2 keys.
+        selects = out.get("selects") if isinstance(out.get("selects"), Mapping) else {}
+        raw_dims = list(selects.get("dimensions") or []) if isinstance(selects, Mapping) else []
+        normalized_dims: List[Dict[str, Any]] = []
+        for row in raw_dims:
+            if not isinstance(row, Mapping):
+                continue
+            column_key = _norm_key(row.get("column_key") or row.get("columnKey"))
+            if column_key == "":
+                continue
+            normalized_dims.append({"column_key": column_key})
+
+        raw_metrics = list(selects.get("metrics") or []) if isinstance(selects, Mapping) else []
+        normalized_metrics: List[Dict[str, Any]] = []
+        for row in raw_metrics:
+            if not isinstance(row, Mapping):
+                continue
+            metric_ref = _norm_key(
+                row.get("metric_ref")
+                or row.get("metricRef")
+                or row.get("metricref")
+            )
+            if metric_ref == "":
+                continue
+            normalized_metrics.append({"metric_ref": metric_ref})
+
+        out["selects"] = {
+            "dimensions": normalized_dims,
+            "metrics": normalized_metrics,
+        }
         return out
 
 
@@ -2466,6 +2891,38 @@ def _norm_vertical(vertical_norm: str) -> str:
     return "generic"
 
 
+def _capabilities_summary(capabilities: Mapping[str, Any]) -> Dict[str, Any]:
+    dims = list(capabilities.get("dimensions") or [])
+    filters = list(capabilities.get("filter_columns") or [])
+    times = list(capabilities.get("time_columns") or [])
+    domain_metrics = list(capabilities.get("domain_metrics") or [])
+    user_metrics = list(capabilities.get("user_metrics") or [])
+    overlay_metrics = list(capabilities.get("overlay_metrics") or [])
+    return {
+        "domain_id": _to_int(capabilities.get("domain_id")),
+        "domain_version": _to_int(capabilities.get("domain_version")),
+        "dimension_count": len(dims),
+        "filter_count": len(filters),
+        "time_count": len(times),
+        "domain_metric_count": len(domain_metrics),
+        "user_metric_count": len(user_metrics),
+        "overlay_metric_count": len(overlay_metrics),
+    }
+
+
+def _project_root_dir() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+
+def _resolve_plan_domain_log_path(configured_path: str, default_path: str) -> str:
+    token = str(configured_path or "").strip() or str(default_path or "").strip()
+    if token == "":
+        token = "logs/plan_domain_pipeline.log"
+    if os.path.isabs(token):
+        return token
+    return os.path.abspath(os.path.join(_project_root_dir(), token))
+
+
 def _pipeline_profile_logger() -> logging.Logger:
     global _PROFILE_LOGGER_INITIALIZED
 
@@ -2476,17 +2933,98 @@ def _pipeline_profile_logger() -> logging.Logger:
     profile_logger.setLevel(logging.INFO)
     profile_logger.propagate = False
     try:
-        log_path = str(QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE or "").strip() or "logs/plan_domain_pipeline_timing.log"
+        log_path = _resolve_plan_domain_log_path(
+            str(QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE or ""),
+            "logs/plan_domain_pipeline_timing.log",
+        )
         log_dir = os.path.dirname(log_path)
         if log_dir:
             os.makedirs(log_dir, exist_ok=True)
-        handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+        handler = WatchedFileHandler(log_path, mode="a", encoding="utf-8")
         handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s - %(message)s"))
         profile_logger.addHandler(handler)
         _PROFILE_LOGGER_INITIALIZED = True
     except Exception as exc:
         logger.warning("planner_domain timing profile logger init failed err=%s", exc)
     return profile_logger
+
+
+def _pipeline_trace_logger() -> logging.Logger:
+    global _TRACE_LOGGER_INITIALIZED
+
+    trace_logger = logging.getLogger(_TRACE_LOGGER_NAME)
+    if _TRACE_LOGGER_INITIALIZED:
+        return trace_logger
+
+    trace_logger.setLevel(logging.INFO)
+    trace_logger.propagate = False
+    try:
+        log_path = _resolve_plan_domain_log_path(
+            str(QF_PLAN_DOMAIN_PIPELINE_TRACE_LOG_FILE or ""),
+            "logs/plan_domain_pipeline_trace.jsonl",
+        )
+        log_dir = os.path.dirname(log_path)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+        handler = WatchedFileHandler(log_path, mode="a", encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        trace_logger.addHandler(handler)
+        _TRACE_LOGGER_INITIALIZED = True
+    except Exception as exc:
+        logger.warning("planner_domain pipeline trace logger init failed err=%s", exc)
+    return trace_logger
+
+
+def _append_pipeline_trace_step(
+    *,
+    trace: Dict[str, Any],
+    enabled: bool,
+    step: str,
+    data: Mapping[str, Any],
+) -> None:
+    if not enabled:
+        return
+    steps = trace.setdefault("steps", [])
+    if not isinstance(steps, list):
+        trace["steps"] = []
+        steps = trace["steps"]
+    steps.append(
+        {
+            "step": str(step or "").strip(),
+            "data": _sanitize_pipeline_trace_value(data),
+        }
+    )
+
+
+def _sanitize_pipeline_trace_value(value: Any, *, depth: int = 0) -> Any:
+    max_chars = max(200, int(QF_PLAN_DOMAIN_PIPELINE_TRACE_MAX_CHARS or 12000))
+    max_items = max(10, int(QF_PLAN_DOMAIN_PIPELINE_TRACE_MAX_ITEMS or 100))
+    if depth >= 8:
+        return "<max_depth>"
+    if value is None:
+        return None
+    if isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        token = value.strip()
+        return token[:max_chars]
+    if isinstance(value, Mapping):
+        out: Dict[str, Any] = {}
+        for idx, (k, v) in enumerate(value.items()):
+            if idx >= max_items:
+                out["__truncated__"] = f"{len(value) - max_items} more"
+                break
+            out[str(k)] = _sanitize_pipeline_trace_value(v, depth=depth + 1)
+        return out
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        items: List[Any] = []
+        for idx, item in enumerate(value):
+            if idx >= max_items:
+                items.append(f"<truncated:{len(value) - max_items} more>")
+                break
+            items.append(_sanitize_pipeline_trace_value(item, depth=depth + 1))
+        return items
+    return str(value)[:max_chars]
 
 
 def _add_pipeline_step(
@@ -2539,13 +3077,30 @@ def _emit_pipeline_profile_log(
         logger.warning("planner_domain timing profile emit failed trace_id=%s err=%s", trace_id, exc)
 
 
+def _emit_pipeline_trace_log(
+    *,
+    enabled: bool,
+    trace_payload: Mapping[str, Any],
+) -> None:
+    if not enabled:
+        return
+    try:
+        payload = _sanitize_pipeline_trace_value(trace_payload)
+        _pipeline_trace_logger().info(json.dumps(payload, ensure_ascii=True, separators=(",", ":")))
+    except Exception as exc:
+        logger.warning("planner_domain pipeline trace emit failed trace_id=%s err=%s", trace_payload.get("trace_id"), exc)
+
+
 def _read_pipeline_profile_from_log(
     *,
     trace_id: str,
     workspace_id: str,
     user_id: str,
 ) -> Dict[str, Any]:
-    log_path = str(QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE or "").strip() or "logs/plan_domain_pipeline_timing.log"
+    log_path = _resolve_plan_domain_log_path(
+        str(QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE or ""),
+        "logs/plan_domain_pipeline_timing.log",
+    )
     if not os.path.exists(log_path):
         raise ForgeError(
             "Pipeline profile log not found",
@@ -2598,8 +3153,52 @@ def _read_pipeline_profile_from_log(
     )
 
 
+def _read_pipeline_trace_from_log(
+    *,
+    trace_id: str,
+    workspace_id: str,
+    user_id: str,
+) -> Optional[Dict[str, Any]]:
+    log_path = _resolve_plan_domain_log_path(
+        str(QF_PLAN_DOMAIN_PIPELINE_TRACE_LOG_FILE or ""),
+        "logs/plan_domain_pipeline_trace.jsonl",
+    )
+    if not os.path.exists(log_path):
+        return None
+    try:
+        with open(log_path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except Exception:
+        logger.exception("Failed to read pipeline trace log")
+        return None
+
+    for line in reversed(lines):
+        text = str(line or "").strip()
+        if text == "":
+            continue
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        if str(parsed.get("trace_id") or "").strip() != trace_id:
+            continue
+        if workspace_id and str(parsed.get("workspace_id") or "").strip() != workspace_id:
+            continue
+        if user_id and str(parsed.get("user_id") or "").strip() != user_id:
+            continue
+        parsed["log_file"] = log_path
+        parsed["trace_enabled"] = bool(QF_PLAN_DOMAIN_PIPELINE_TRACE_ENABLED)
+        return parsed
+    return None
+
+
 def _list_pipeline_profiles_from_log(*, limit: int = 50) -> List[Dict[str, Any]]:
-    log_path = str(QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE or "").strip() or "logs/plan_domain_pipeline_timing.log"
+    log_path = _resolve_plan_domain_log_path(
+        str(QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE or ""),
+        "logs/plan_domain_pipeline_timing.log",
+    )
     if not os.path.exists(log_path):
         return []
     try:
@@ -2959,6 +3558,13 @@ def _build_column_query_texts(prompt: str) -> List[str]:
     text = str(prompt or "").strip()
     out = [text]
     text_l = text.lower()
+    group_entities = _extract_group_entities_for_shortlist(text_l)
+    if _has_group_entity(group_entities, "account"):
+        out.extend(["account name", "customer account"])
+    if _has_group_entity(group_entities, "territory"):
+        out.extend(["territory name", "sales territory"])
+    if _has_group_entity(group_entities, "region"):
+        out.extend(["region name"])
     if _prompt_has_subgroup(text):
         out.extend(["student race ethnicity", "student subgroup"])
     if _looks_like_list_students_prompt(text):
@@ -3014,6 +3620,7 @@ def _build_domain_query_texts(prompt: str) -> List[str]:
 def _required_column_keys(*, prompt: str, rows: Sequence[Mapping[str, Any]]) -> List[str]:
     required: List[str] = []
     text = str(prompt or "").lower()
+    group_entities = _extract_group_entities_for_shortlist(text)
     city_state_pattern = _prompt_has_city_state_pattern(text)
     prefer_human_school_filter = (
         _prompt_prefers_human_school_name_filter(text)
@@ -3033,6 +3640,9 @@ def _required_column_keys(*, prompt: str, rows: Sequence[Mapping[str, Any]]) -> 
         key = _norm_key(row.get("column_key"))
         col_name = str(row.get("column_name") or "").strip().lower()
         if key == "":
+            continue
+        if _matches_group_entity_column(col_name=col_name, entities=group_entities):
+            required.append(key)
             continue
         if prompt_has_adm_intent and _is_adm_signal_column_name(col_name):
             required.append(key)
@@ -3083,6 +3693,7 @@ def _column_heuristic_boost(*, prompt: str, row: Mapping[str, Any]) -> float:
     key = _norm_key(row.get("column_key"))
     score = 0.0
     text = str(prompt or "").lower()
+    group_entities = _extract_group_entities_for_shortlist(text)
     city_state_pattern = _prompt_has_city_state_pattern(text)
     prefer_human_school_filter = (
         _prompt_prefers_human_school_name_filter(text)
@@ -3091,6 +3702,21 @@ def _column_heuristic_boost(*, prompt: str, row: Mapping[str, Any]) -> float:
     prefer_staff_role_title_filter = _prompt_prefers_staff_role_title_filter(text)
     prefer_canonical_name_columns = _prompt_prefers_canonical_name_columns(text)
     prompt_has_adm_intent = _prompt_has_adm_intent(text)
+    if _has_group_entity(group_entities, "account"):
+        if col_name == "account_name":
+            score += 0.42
+        elif col_name in {"account_id", "account_type"}:
+            score -= 0.22
+    if _has_group_entity(group_entities, "territory"):
+        if col_name == "territory_name":
+            score += 0.4
+        elif col_name == "territory_id":
+            score -= 0.16
+    if _has_group_entity(group_entities, "region"):
+        if col_name == "region_name":
+            score += 0.3
+        elif col_name == "region_code":
+            score -= 0.12
     if prompt_has_adm_intent:
         if _is_adm_signal_column_name(col_name):
             score += 0.42
@@ -3131,6 +3757,61 @@ def _column_heuristic_boost(*, prompt: str, row: Mapping[str, Any]) -> float:
     if "district" in text and any(token in col_name for token in ("district", "lea_name", "lea")):
         score += 0.16
     return score
+
+
+def _extract_group_entities_for_shortlist(prompt_text: str) -> set[str]:
+    text = f" {str(prompt_text or '').strip().lower()} "
+    if " by " not in text:
+        return set()
+    segment = text.split(" by ", 1)[1]
+    segment = re.split(r"\b(where|for|with|during|in|on|from)\b", segment, maxsplit=1)[0]
+    parts = [part.strip() for part in re.split(r"\band\b|,", segment) if part.strip()]
+    out: set[str] = set()
+    for part in parts:
+        token = re.sub(r"\s+", " ", part).strip().lower()
+        if token == "":
+            continue
+        if "account" in token:
+            out.add("account")
+        if "territory" in token:
+            out.add("territory")
+        if "region" in token:
+            out.add("region")
+        if "district" in token:
+            out.add("district")
+        if "school" in token:
+            out.add("school")
+    return out
+
+
+def _has_group_entity(entities: set[str], name: str) -> bool:
+    return str(name or "").strip().lower() in entities
+
+
+def _matches_group_entity_column(*, col_name: str, entities: set[str]) -> bool:
+    col = str(col_name or "").strip().lower()
+    if col == "":
+        return False
+    if _has_group_entity(entities, "account"):
+        if col == "account_name":
+            return True
+        if col.startswith("account_") and col.endswith("_name"):
+            return True
+    if _has_group_entity(entities, "territory"):
+        if col == "territory_name":
+            return True
+        if col.startswith("territory_") and col.endswith("_name"):
+            return True
+    if _has_group_entity(entities, "region"):
+        if col == "region_name":
+            return True
+    if _has_group_entity(entities, "district"):
+        if col in {"district_name", "lea_name"}:
+            return True
+    if _has_group_entity(entities, "school"):
+        if col == "school_name":
+            return True
+    return False
 
 
 def _select_keys_with_table_cap(
@@ -4095,6 +4776,381 @@ def _normalize_adm_default_filters_in_plan(
 
     plan["filters"] = normalized_filters
     return plan, [], debug_rows
+
+
+def _normalize_relative_time_in_plan(
+    *,
+    plan_json: Mapping[str, Any],
+    capabilities: Mapping[str, Any],
+    prompt: str,
+    today: Optional[date] = None,
+) -> Tuple[Dict[str, Any], List[Dict[str, str]], List[Dict[str, Any]]]:
+    plan = dict(plan_json or {})
+    time_block = dict(plan.get("time") or {}) if isinstance(plan.get("time"), dict) else {}
+    prompt_norm = normalize_plan_prompt(prompt)
+    month_phrase = _prompt_relative_month_phrase(prompt_norm)
+    year_phrase = _prompt_relative_year_phrase(prompt_norm)
+    if month_phrase == "" and year_phrase == "":
+        return plan, [], []
+
+    anchor = today or date.today()
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    relative_phrase = ""
+
+    if month_phrase == "last_month":
+        this_month_start = date(anchor.year, anchor.month, 1)
+        end_date = this_month_start - timedelta(days=1)
+        start_date = date(end_date.year, end_date.month, 1)
+        relative_phrase = "last month"
+    elif month_phrase == "this_month":
+        start_date = date(anchor.year, anchor.month, 1)
+        end_date = anchor
+        relative_phrase = "this month"
+    elif year_phrase == "last_year":
+        start_date = date(anchor.year - 1, 1, 1)
+        end_date = date(anchor.year - 1, 12, 31)
+        relative_phrase = "last year"
+    elif year_phrase == "this_year":
+        start_date = date(anchor.year, 1, 1)
+        end_date = anchor
+        relative_phrase = "this year"
+
+    if start_date is None or end_date is None:
+        return plan, [], []
+
+    time_column_key = _norm_key(time_block.get("time_column_key"))
+    if time_column_key == "":
+        time_column_key = _best_time_column_key_for_relative_range(capabilities=capabilities)
+    if time_column_key == "":
+        return plan, [], [{"action": "relative_time_skipped", "reason": "no_time_column_available"}]
+
+    time_block["time_range"] = "custom"
+    time_block["start_date"] = start_date.isoformat()
+    time_block["end_date"] = end_date.isoformat()
+    time_block["time_column_key"] = time_column_key
+    if _norm_key(time_block.get("time_grain")) == "":
+        time_block["time_grain"] = "year" if year_phrase else "month"
+    plan["time"] = time_block
+
+    col_lookup = {
+        _norm_key(row.get("column_key")): dict(row)
+        for row in (
+            list(capabilities.get("filter_columns") or [])
+            + list(capabilities.get("dimensions") or [])
+            + list(capabilities.get("time_columns") or [])
+        )
+        if isinstance(row, Mapping) and _norm_key(row.get("column_key"))
+    }
+    dropped_keys: List[str] = []
+    normalized_filters: List[Dict[str, Any]] = []
+    for row in [dict(item) for item in list(plan.get("filters") or []) if isinstance(item, Mapping)]:
+        key = _norm_key(row.get("column_key"))
+        column_name = str((col_lookup.get(key) or {}).get("column_name") or "").strip().lower()
+        if _is_generic_month_column_name(column_name) or _is_generic_year_column_name(column_name):
+            dropped_keys.append(key)
+            continue
+        normalized_filters.append(row)
+    plan["filters"] = normalized_filters
+
+    debug_rows: List[Dict[str, Any]] = [
+        {
+            "action": "normalized_relative_time",
+            "relative_phrase": relative_phrase,
+            "time_column_key": time_column_key,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "dropped_month_filters": dropped_keys,
+        }
+    ]
+    return plan, [], debug_rows
+
+
+def _normalize_year_keyword_filters_in_plan(
+    *,
+    plan_json: Mapping[str, Any],
+    capabilities: Mapping[str, Any],
+    today: Optional[date] = None,
+) -> Tuple[Dict[str, Any], List[Dict[str, str]], List[Dict[str, Any]]]:
+    plan = dict(plan_json or {})
+    filters = [dict(item) for item in list(plan.get("filters") or []) if isinstance(item, dict)]
+    if not filters:
+        return plan, [], []
+
+    col_lookup = {
+        _norm_key(row.get("column_key")): dict(row)
+        for row in (
+            list(capabilities.get("filter_columns") or [])
+            + list(capabilities.get("dimensions") or [])
+            + list(capabilities.get("time_columns") or [])
+        )
+        if isinstance(row, Mapping) and _norm_key(row.get("column_key"))
+    }
+    if not col_lookup:
+        return plan, [], []
+
+    year_now = int((today or date.today()).year)
+    debug_rows: List[Dict[str, Any]] = []
+    normalized_filters: List[Dict[str, Any]] = []
+    for row in filters:
+        key = _norm_key(row.get("column_key"))
+        col_name = str((col_lookup.get(key) or {}).get("column_name") or "").strip().lower()
+        if not _is_generic_year_column_name(col_name):
+            normalized_filters.append(row)
+            continue
+        if col_name == "school_year":
+            normalized_filters.append(row)
+            continue
+
+        values = _extract_filter_values(row)
+        if not values:
+            normalized_filters.append(row)
+            continue
+
+        normalized_vals: List[int] = []
+        changed = False
+        for raw in values:
+            token = _norm_key(raw)
+            if token in {"current_year", "current year", "this_year", "this year"}:
+                normalized_vals.append(year_now)
+                changed = True
+                continue
+            if token in {"last_year", "last year", "previous_year", "previous year"}:
+                normalized_vals.append(year_now - 1)
+                changed = True
+                continue
+            if token.isdigit() and len(token) == 4:
+                normalized_vals.append(int(token))
+                changed = True
+                continue
+            normalized_vals = []
+            changed = False
+            break
+
+        if not changed or not normalized_vals:
+            normalized_filters.append(row)
+            continue
+
+        out_row = dict(row)
+        op_norm = _norm_key(out_row.get("op"))
+        if op_norm in {"in", "not_in"} or len(normalized_vals) > 1:
+            out_row["op"] = "in" if op_norm in {"in", "eq", "equals", "="} else "not_in"
+            out_row["values"] = normalized_vals
+            out_row.pop("value", None)
+        else:
+            out_row["op"] = "eq" if op_norm in {"eq", "equals", "="} else out_row.get("op") or "eq"
+            out_row["value"] = normalized_vals[0]
+            out_row.pop("values", None)
+        normalized_filters.append(out_row)
+        debug_rows.append(
+            {
+                "action": "normalized_year_keyword",
+                "column_key": key,
+                "column_name": col_name,
+                "original_values": values,
+                "normalized_values": normalized_vals,
+            }
+        )
+
+    plan["filters"] = normalized_filters
+    return plan, [], debug_rows
+
+
+def _is_generic_year_column_name(column_name: str) -> bool:
+    token = str(column_name or "").strip().lower()
+    if token == "":
+        return False
+    return token in {"year", "year_num", "calendar_year", "fiscal_year"} or token.endswith("_year")
+
+
+def _normalize_top_bottom_ranking_in_plan(
+    *,
+    plan_json: Mapping[str, Any],
+    capabilities: Mapping[str, Any],
+    prompt: str,
+) -> Tuple[Dict[str, Any], List[Dict[str, str]], List[Dict[str, Any]]]:
+    plan = dict(plan_json or {})
+    prompt_norm = normalize_plan_prompt(prompt).lower()
+    match = _TOP_BOTTOM_LIMIT_RE.search(prompt_norm)
+    if match is None:
+        return plan, [], []
+
+    ranking_kind = str(match.group("kind") or "").strip().lower()
+    try:
+        requested_limit = int(match.group("limit") or 0)
+    except Exception:
+        requested_limit = 0
+    if requested_limit <= 0:
+        return plan, [], []
+    requested_limit = min(requested_limit, 1000)
+
+    grouping = dict(plan.get("grouping") or {}) if isinstance(plan.get("grouping"), Mapping) else {}
+    grouping["limit"] = requested_limit
+
+    selects = dict(plan.get("selects") or {}) if isinstance(plan.get("selects"), Mapping) else {}
+    dimensions = [dict(item) for item in list(selects.get("dimensions") or []) if isinstance(item, Mapping)]
+    metrics = [dict(item) for item in list(selects.get("metrics") or []) if isinstance(item, Mapping)]
+
+    metric_ref = ""
+    if metrics:
+        metric_ref = _norm_key(metrics[0].get("metric_ref"))
+    else:
+        metric_ref = _pick_metric_ref_for_top_bottom(prompt_norm=prompt_norm, capabilities=capabilities)
+        if metric_ref:
+            metrics = [{"metric_ref": metric_ref}]
+            selects["metrics"] = metrics
+            plan["selects"] = selects
+
+    if metrics and _norm_key(plan.get("intent")) != "aggregate":
+        plan["intent"] = "aggregate"
+
+    if len(list(grouping.get("group_by") or [])) == 0 and dimensions:
+        grouping["group_by"] = [
+            str(item.get("column_key") or "").strip()
+            for item in dimensions
+            if str(item.get("column_key") or "").strip()
+        ]
+
+    if metric_ref:
+        metric_direction = "desc" if ranking_kind == "top" else "asc"
+        grouping["order_by"] = [{"by": f"metric:{metric_ref}", "dir": metric_direction}]
+
+    plan["grouping"] = grouping
+    debug_rows = [
+        {
+            "action": "normalized_top_bottom_ranking",
+            "kind": ranking_kind,
+            "limit": requested_limit,
+            "metric_ref": metric_ref,
+        }
+    ]
+    return plan, [], debug_rows
+
+
+def _pick_metric_ref_for_top_bottom(*, prompt_norm: str, capabilities: Mapping[str, Any]) -> str:
+    domain_metrics = [dict(row) for row in list(capabilities.get("domain_metrics") or []) if isinstance(row, Mapping)]
+    user_metrics = [dict(row) for row in list(capabilities.get("user_metrics") or []) if isinstance(row, Mapping)]
+    overlay_metrics = [dict(row) for row in list(capabilities.get("overlay_metrics") or []) if isinstance(row, Mapping)]
+
+    ranked: List[Tuple[int, str]] = []
+    for row in domain_metrics:
+        metric_key = _norm_key(row.get("metric_key"))
+        if metric_key == "":
+            continue
+        metric_ref = f"domain_metric:{metric_key}"
+        score = _score_metric_for_prompt(prompt_norm=prompt_norm, metric_key=metric_key, metric_label=row.get("label"))
+        ranked.append((score, metric_ref))
+    for row in user_metrics:
+        metric_id = _norm_key(row.get("metric_id") or row.get("id"))
+        if metric_id == "":
+            continue
+        metric_ref = f"user_metric:{metric_id}"
+        score = _score_metric_for_prompt(prompt_norm=prompt_norm, metric_key=metric_id, metric_label=row.get("label"))
+        ranked.append((score, metric_ref))
+    for row in overlay_metrics:
+        overlay_key = _norm_key(row.get("overlay_key"))
+        if overlay_key == "":
+            continue
+        metric_ref = f"overlay:{overlay_key}"
+        score = _score_metric_for_prompt(prompt_norm=prompt_norm, metric_key=overlay_key, metric_label=row.get("label"))
+        ranked.append((score, metric_ref))
+
+    if not ranked:
+        return ""
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return ranked[0][1]
+
+
+def _score_metric_for_prompt(*, prompt_norm: str, metric_key: str, metric_label: Any) -> int:
+    key = _norm_key(metric_key)
+    label = _norm_key(metric_label)
+    score = 0
+    if "sales" in prompt_norm:
+        if "sales_revenue" in key:
+            score += 120
+        if "sales" in key:
+            score += 50
+        if "revenue" in key:
+            score += 60
+    if "revenue" in prompt_norm and "revenue" in key:
+        score += 60
+    if "quota" in prompt_norm and "quota" in key:
+        score += 60
+    if "profit" in prompt_norm and "profit" in key:
+        score += 60
+    if "count" in prompt_norm and "count" in key:
+        score += 40
+
+    prompt_tokens = {tok for tok in re.split(r"[^a-z0-9]+", prompt_norm) if tok}
+    key_tokens = {tok for tok in re.split(r"[^a-z0-9]+", key) if tok}
+    label_tokens = {tok for tok in re.split(r"[^a-z0-9]+", label) if tok}
+    overlap = len(prompt_tokens & (key_tokens | label_tokens))
+    score += overlap * 5
+
+    # If no signal is available, still allow deterministic fallback to first metric.
+    if score == 0:
+        score = 1
+    return score
+
+
+def _prompt_relative_month_phrase(prompt_norm: str) -> str:
+    text = str(prompt_norm or "").strip().lower()
+    if re.search(r"\b(last|previous)\s+month\b", text) is not None:
+        return "last_month"
+    if re.search(r"\b(this|current)\s+month\b", text) is not None:
+        return "this_month"
+    return ""
+
+
+def _prompt_relative_year_phrase(prompt_norm: str) -> str:
+    text = str(prompt_norm or "").strip().lower()
+    if re.search(r"\b(last|previous)\s+year\b", text) is not None:
+        return "last_year"
+    if re.search(r"\b(this|current)\s+year\b", text) is not None:
+        return "this_year"
+    return ""
+
+
+def _is_generic_month_column_name(column_name: str) -> bool:
+    token = str(column_name or "").strip().lower()
+    if token == "":
+        return False
+    return token in {"month", "month_num", "month_number", "report_month", "calendar_month_num"} or token.endswith("_month")
+
+
+def _best_time_column_key_for_relative_range(*, capabilities: Mapping[str, Any]) -> str:
+    best_key = ""
+    best_score = -1
+    rows: List[Tuple[int, Mapping[str, Any]]] = []
+    for row in list(capabilities.get("time_columns") or []):
+        if isinstance(row, Mapping):
+            rows.append((3, row))
+    for row in list(capabilities.get("filter_columns") or []):
+        if isinstance(row, Mapping):
+            rows.append((2, row))
+    for row in list(capabilities.get("dimensions") or []):
+        if isinstance(row, Mapping):
+            rows.append((1, row))
+
+    for source_weight, row in rows:
+        key = _norm_key(row.get("column_key"))
+        if key == "":
+            continue
+        column_name = str(row.get("column_name") or "").strip().lower()
+        data_type = str(row.get("data_type") or "").strip().lower()
+        score = source_weight * 100
+        if column_name in {"date_key", "date", "order_date", "transaction_date", "sales_date", "invoice_date"}:
+            score += 200
+        if "date" in column_name:
+            score += 80
+        if "time" in column_name or column_name.endswith("_at"):
+            score += 40
+        if data_type in {"date", "datetime", "timestamp"}:
+            score += 50
+        if score > best_score:
+            best_score = score
+            best_key = key
+    return best_key
 
 
 def _normalize_school_year_filters_in_plan(

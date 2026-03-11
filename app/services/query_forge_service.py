@@ -403,16 +403,24 @@ class QueryForgeService:
             if not isinstance(s, dict):
                 raise ForgeError(f"sorting[{i}] must be an object", status_code=400)
 
+            metric_ref = str(s.get("metricRef") or s.get("metric_ref") or "").strip()
             if "col" in s:
                 col = self._qf_norm_col_key(s.get("col"), path=f"sorting[{i}].col")
-            else:
+            elif "columnName" in s:
                 col = self._qf_norm_col_key(s.get("columnName"), path=f"sorting[{i}].columnName")
+            elif metric_ref:
+                col = None
+            else:
+                raise ForgeError(f"sorting[{i}] requires col, columnName, or metricRef", status_code=400)
 
             dir_ = (s.get("dir") or "asc").lower()
             if dir_ not in ("asc", "desc"):
                 raise ForgeError(f"sorting[{i}].dir must be asc|desc", status_code=400)
 
-            norm_sort.append({"col": col, "dir": dir_})
+            if metric_ref:
+                norm_sort.append({"metricRef": metric_ref.lower(), "dir": dir_})
+            else:
+                norm_sort.append({"col": col, "dir": dir_})
         q["sorting"] = norm_sort
 
         if q.get("filters") is None:
@@ -726,6 +734,10 @@ class QueryForgeService:
         ids: set[int] = set()
         for s in sorting:
             if not isinstance(s, dict):
+                continue
+            metric_ref = str(s.get("metricRef") or s.get("metric_ref") or "").strip()
+            if metric_ref:
+                ids.add(int(plan.primary.workspace_table_id))
                 continue
             col = s.get("col") if "col" in s else s.get("columnName")
             if isinstance(col, dict):
@@ -1250,6 +1262,7 @@ class QueryForgeService:
         output_names: Dict[str, bool] = {}
         qf_output_cols: List[Dict[str, Any]] = []
         order_alias_by_key: Dict[tuple, str] = {}
+        metric_alias_by_ref: Dict[str, str] = {}
 
         def _qf_reserve_output_name(base_name: str | None, qf_alias_hint: Optional[str]) -> str:
             base = (base_name or "").strip() or "col"
@@ -1320,6 +1333,7 @@ class QueryForgeService:
                 field = m.get("field")
                 expr = m.get("expr")
                 label = m.get("label")
+                metric_ref = str(m.get("metric_ref") or m.get("metricRef") or m.get("id") or "").strip().lower()
 
                 metric_sql = self._compile_metric(
                     fn,
@@ -1338,6 +1352,8 @@ class QueryForgeService:
                 metric_sql += f" AS {self._safe_alias(output_name)}"
                 metric_exprs.append(metric_sql)
                 qf_output_cols.append({"key": output_name, "label": output_name})
+                if metric_ref:
+                    metric_alias_by_ref[metric_ref] = output_name
 
             select_exprs.extend(metric_exprs)
 
@@ -1456,6 +1472,7 @@ class QueryForgeService:
             alias_by_wt,
             rewrite_by_wt_col=rewrite_by_wt_col,
             order_alias_by_key=order_alias_by_key,
+            metric_alias_by_ref=metric_alias_by_ref,
             distinct=distinct,
         )
 
@@ -3515,14 +3532,27 @@ class QueryForgeService:
         *,
         rewrite_by_wt_col: Optional[Dict[tuple, str]] = None,
         order_alias_by_key: Optional[Dict[tuple, str]] = None,
+        metric_alias_by_ref: Optional[Dict[str, str]] = None,
         distinct: bool = False,
     ) -> str:
         if rewrite_by_wt_col is None:
             rewrite_by_wt_col = {}
+        if metric_alias_by_ref is None:
+            metric_alias_by_ref = {}
         parts: List[str] = []
         for s in sorting:
             if not isinstance(s, dict):
                 raise ForgeError("Invalid sorting entry", status_code=400)
+            dir_ = (s.get("dir") or "asc").lower()
+            if dir_ not in ("asc", "desc"):
+                raise ForgeError("Invalid sort direction", status_code=400)
+
+            metric_ref = str(s.get("metricRef") or s.get("metric_ref") or "").strip().lower()
+            if metric_ref:
+                metric_alias = metric_alias_by_ref.get(metric_ref)
+                if metric_alias:
+                    parts.append(f"{self._safe_alias(metric_alias)} {dir_.upper()}")
+                continue
 
             col = s.get("col") if "col" in s else s.get("columnName")
             if distinct and order_alias_by_key:
@@ -3544,9 +3574,6 @@ class QueryForgeService:
                 if key:
                     alias = order_alias_by_key.get(key)
                     if alias:
-                        dir_ = (s.get("dir") or "asc").lower()
-                        if dir_ not in ("asc", "desc"):
-                            raise ForgeError("Invalid sort direction", status_code=400)
                         parts.append(f"{self._safe_alias(alias)} {dir_.upper()}")
                         continue
 
@@ -3561,10 +3588,6 @@ class QueryForgeService:
                 alias_by_wt,
                 rewrite_by_wt_col=rewrite_by_wt_col,
             )
-
-            dir_ = (s.get("dir") or "asc").lower()
-            if dir_ not in ("asc", "desc"):
-                raise ForgeError("Invalid sort direction", status_code=400)
 
             parts.append(f"{col_expr} {dir_.upper()}")
         return ", ".join(parts)

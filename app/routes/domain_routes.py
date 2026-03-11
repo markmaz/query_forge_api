@@ -14,6 +14,7 @@ from app.services.domain.builder_column_feed_service import BuilderColumnFeedSer
 from app.services.domain.domain_admin_write_service import DomainAdminWriteService
 from app.services.domain.domain_column_sample_read_service import DomainColumnSampleReadService
 from app.services.domain.domain_join_service import DomainJoinService
+from app.services.domain.domain_profile_metric_config_service import DomainProfileMetricConfigService
 from app.services.domain.domain_summary_read_service import DomainSummaryReadService
 from app.services.domain.domain_table_read_service import DomainTableReadService
 from app.services.domain.domain_table_write_service import DomainTableWriteService
@@ -505,6 +506,43 @@ class DomainOverlayMetrics(ForgeResource):
             handler,
             log_message=f"Domain overlay metrics fetch failed domain_id={domain_id}",
             client_error="Domain overlay metrics fetch failed",
+        )
+
+
+@qf_domains_ns.route("/<int:domain_id>/profile-metrics")
+class DomainProfileMetrics(ForgeResource):
+    @token_required
+    def get(self, domain_id: int):
+        def handler() -> Tuple[Any, int]:
+            payload = DomainProfileMetricConfigService().get_profile_metrics(
+                workspace_id=_workspace_id(),
+                user_id=require_user_id(),
+                domain_id=domain_id,
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message=f"Domain profile metrics fetch failed domain_id={domain_id}",
+            client_error="Domain profile metrics fetch failed",
+        )
+
+    @token_required
+    def put(self, domain_id: int):
+        def handler() -> Tuple[Any, int]:
+            body = _json_body_dict()
+            payload = DomainProfileMetricConfigService().update_profile_metrics(
+                workspace_id=_workspace_id(),
+                user_id=require_user_id(),
+                domain_id=domain_id,
+                metrics_payload=body.get("metrics"),
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message=f"Domain profile metrics update failed domain_id={domain_id}",
+            client_error="Domain profile metrics update failed",
         )
 
 
