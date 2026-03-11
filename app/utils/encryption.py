@@ -7,12 +7,14 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 _fernet = None
+_FERNET_INITIALIZED = False  # add this
 
 
 def _get_fernet():
-    global _fernet
-    if _fernet is not None:
-        return _fernet
+    global _fernet, _FERNET_INITIALIZED
+    if _FERNET_INITIALIZED:
+        return _fernet  # returns None if key was invalid (cached)
+    _FERNET_INITIALIZED = True
     from cryptography.fernet import Fernet
     key = os.getenv("QF_LLM_ENCRYPTION_KEY", "").strip()
     if not key:
@@ -22,7 +24,7 @@ def _get_fernet():
         _fernet = Fernet(key.encode() if isinstance(key, str) else key)
         return _fernet
     except Exception:
-        logger.exception("Invalid QF_LLM_ENCRYPTION_KEY; API key encryption disabled")
+        logger.error("Invalid QF_LLM_ENCRYPTION_KEY; API key encryption disabled")
         return None
 
 

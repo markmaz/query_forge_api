@@ -47,3 +47,15 @@ def test_mask_api_key_none():
     from app.utils.encryption import mask_api_key
     assert mask_api_key(None) is None
     assert mask_api_key("") is None
+
+
+def test_decrypt_invalid_ciphertext_returns_none(monkeypatch):
+    key = Fernet.generate_key().decode()
+    monkeypatch.setenv("QF_LLM_ENCRYPTION_KEY", key)
+    import importlib
+    import app.utils.encryption as encryption
+    importlib.reload(encryption)
+
+    # Corrupted ciphertext should return None gracefully
+    result = encryption.decrypt_api_key("this-is-not-valid-fernet-ciphertext")
+    assert result is None
