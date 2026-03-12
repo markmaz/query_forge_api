@@ -82,6 +82,52 @@ def test_map_to_sqljson_emits_overlay_metric_node() -> None:
     assert overlay["metric_ref"] == "overlay:students_per_teacher"
 
 
+def test_map_to_sqljson_keeps_metric_order_by_as_metric_sort() -> None:
+    capabilities = {
+        "domain_id": 3,
+        "domain_version": 1,
+        "dimensions": [
+            {
+                "column_key": "wt186.sales_rep_id",
+                "label": "Sales Rep Id",
+                "data_type": "string",
+                "filterable": True,
+                "workspace_table_id": 186,
+                "model_column_id": 9790,
+                "column_name": "sales_rep_id",
+            }
+        ],
+        "domain_metrics": [{"metric_key": "sales_revenue", "label": "Sales Revenue", "kind": "sum", "agg": "sum"}],
+        "user_metrics": [],
+        "overlay_metrics": [],
+        "time_columns": [],
+    }
+    plan = {
+        "schema_version": 2,
+        "trace_id": "trace-top",
+        "workspace_id": "ws-1",
+        "vertical_norm": "education",
+        "base_domain_id": 3,
+        "intent": "aggregate",
+        "selects": {
+            "dimensions": [{"column_key": "wt186.sales_rep_id"}],
+            "metrics": [{"metric_ref": "domain_metric:sales_revenue"}],
+        },
+        "filters": [],
+        "time": {},
+        "grouping": {
+            "group_by": ["wt186.sales_rep_id"],
+            "order_by": [{"by": "metric:domain_metric:sales_revenue", "dir": "desc"}],
+            "limit": 5,
+        },
+    }
+    out = map_plan_v2_to_sqljson(plan_json=plan, capabilities=capabilities, prompt="top 5 reps by sales")
+    sorting = out.get("sorting") or []
+    assert sorting
+    assert sorting[0]["metricRef"] == "domain_metric:sales_revenue"
+    assert sorting[0]["dir"] == "desc"
+
+
 def test_map_to_sqljson_prefers_domain_metric_sql_metric_when_present() -> None:
     capabilities = _capabilities()
     capabilities["domain_metrics"] = [
@@ -485,3 +531,71 @@ def test_map_to_sqljson_honors_explicit_order_by_dimension_prefixed_form() -> No
     assert sorting
     assert sorting[0]["dir"] == "desc"
     assert (sorting[0].get("col") or {}).get("columnName") == "position_title"
+
+
+def test_map_to_sqljson_infers_amount_metric_field_without_coercing_agg() -> None:
+    capabilities = {
+        "domain_id": 3,
+        "domain_version": 1,
+        "dimensions": [
+            {
+                "column_key": "wt187.territory_name",
+                "label": "Territory Name",
+                "data_type": "string",
+                "filterable": True,
+                "workspace_table_id": 187,
+                "model_column_id": 9805,
+                "column_name": "territory_name",
+            },
+            {
+                "column_key": "wt190.total_net_amount",
+                "label": "Total Net Amount",
+                "data_type": "float",
+                "filterable": True,
+                "workspace_table_id": 190,
+                "model_column_id": 9845,
+                "column_name": "total_net_amount",
+            },
+            {
+                "column_key": "wt178.account_id",
+                "label": "Account Id",
+                "data_type": "string",
+                "filterable": True,
+                "workspace_table_id": 178,
+                "model_column_id": 9693,
+                "column_name": "account_id",
+            },
+        ],
+        "domain_metrics": [
+            {
+                "metric_key": "total_net_amount",
+                "label": "Total Net Amount",
+                "kind": "count",
+                "agg": "count",
+            }
+        ],
+        "user_metrics": [],
+        "overlay_metrics": [],
+        "time_columns": [],
+    }
+    plan = {
+        "schema_version": 2,
+        "trace_id": "trace-sales-1",
+        "workspace_id": "ws-1",
+        "vertical_norm": "generic",
+        "base_domain_id": 3,
+        "intent": "aggregate",
+        "selects": {
+            "dimensions": [{"column_key": "wt187.territory_name"}],
+            "metrics": [{"metric_ref": "domain_metric:total_net_amount", "label": "Total Net Amount"}],
+        },
+        "filters": [],
+        "time": {},
+        "grouping": {"group_by": ["wt187.territory_name"], "order_by": []},
+    }
+    out = map_plan_v2_to_sqljson(plan_json=plan, capabilities=capabilities, prompt="show total sales by territory")
+    metrics = ((out.get("aggs") or {}).get("metrics") or [])
+    assert metrics
+    metric = metrics[0]
+    assert metric["fn"] == "count"
+    assert (metric.get("field") or {}).get("columnName") == "total_net_amount"

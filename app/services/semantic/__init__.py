@@ -20,6 +20,13 @@ from app.services.semantic.semantic_postprocess import (
 from app.services.semantic.semantic_registry_service import SemanticRegistryService
 from app.services.semantic.semantic_relationship_service import SemanticRelationshipService
 from app.services.semantic.semantic_suggestion_service import SemanticSuggestionService
+from app.services.semantic.catalog import (
+    ColumnProfileBuilder,
+    SemanticCatalogBuilder,
+    SemanticCatalogRepository,
+    SemanticEnrichmentService,
+    SemanticIndexBuilder,
+)
 
 __all__ = [
     "SemanticCardService",
@@ -39,6 +46,11 @@ __all__ = [
     "SemanticRelationshipService",
     "SemanticSuggestionService",
     "ValueAliasResolutionService",
+    "ColumnProfileBuilder",
+    "SemanticEnrichmentService",
+    "SemanticCatalogRepository",
+    "SemanticCatalogBuilder",
+    "SemanticIndexBuilder",
     "postprocess_semantic_proposal",
     "apply_deterministic_overrides",
     "deterministic_identifier_override",

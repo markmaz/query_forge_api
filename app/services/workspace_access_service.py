@@ -24,8 +24,24 @@ class WorkspaceAccessService:
         rows = self._sql.execute_query(
             """
             SELECT 1
-            FROM user_workspace_map
-            WHERE user_id = :uid AND workspace_id = :ws
+            FROM workspace_membership wm
+            WHERE wm.user_id = :uid
+              AND wm.workspace_id = :ws
+              AND COALESCE(wm.is_active, 1) = 1
+
+            UNION ALL
+
+            SELECT 1
+            FROM workspace w
+            JOIN organization o
+              ON o.id = w.organization_id
+             AND COALESCE(o.is_active, 1) = 1
+            JOIN organization_membership om
+              ON om.organization_id = w.organization_id
+             AND om.user_id = :uid
+             AND COALESCE(om.is_active, 1) = 1
+            WHERE w.id = :ws
+              AND COALESCE(w.is_active, 1) = 1
             LIMIT 1
             """,
             {"uid": uid, "ws": ws},

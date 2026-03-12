@@ -4,11 +4,13 @@ from typing import Any, Dict, List, Set, Tuple
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.metadata.gateway import MetadataGateway
 
 
 class ModelWriteService:
-    def __init__(self, *, sql: ForgeQueryPort | None = None) -> None:
+    def __init__(self, *, sql: ForgeQueryPort | None = None, metadata_gateway: MetadataGateway | None = None) -> None:
         self._sql = sql or ForgeMetaSQL()
+        self._metadata_gateway = metadata_gateway or MetadataGateway(sql=self._sql)
 
     def upsert_dictionary(
         self,
@@ -62,6 +64,15 @@ class ModelWriteService:
                 {f"n{i}": name for i, name in enumerate(table_names)},
             )
             table_id_by_name = {str(r["name"]): int(r["id"]) for r in result}
+            for table_name, table_id in table_id_by_name.items():
+                self._metadata_gateway.sync_table_patch_from_model(
+                    model_table_id=int(table_id),
+                    updates={
+                        "source_table_name": table_name,
+                        "origin": "DICT",
+                        "is_missing_in_source": 1,
+                    },
+                )
 
             tids = list(table_id_by_name.values())
             if not tids:
@@ -118,32 +129,44 @@ class ModelWriteService:
                     }
                 )
 
-                if payload_cols:
-                    tx.execute_write(
-                        """
-                            INSERT INTO model_column
-                            (model_table_id, column_name, data_type, description, is_active, origin, is_missing_in_source, created_at)
-                            VALUES
-                            (:model_table_id, :column_name, :data_type, :description, 1, 'DICT', 1, CURRENT_TIMESTAMP)
-                            ON DUPLICATE KEY UPDATE
-                            description = VALUES(description),
-                            is_active = 1,
+            if payload_cols:
+                tx.execute_write(
+                    """
+                        INSERT INTO model_column
+                        (model_table_id, column_name, data_type, description, is_active, origin, is_missing_in_source, created_at)
+                        VALUES
+                        (:model_table_id, :column_name, :data_type, :description, 1, 'DICT', 1, CURRENT_TIMESTAMP)
+                        ON DUPLICATE KEY UPDATE
+                        description = VALUES(description),
+                        is_active = 1,
 
-                            -- critical: if row already exists from DBX import, keep it NOT missing
-                            is_missing_in_source = CASE
-                                WHEN origin = 'DBX' THEN 0
-                                ELSE 1
-                            END,
+                        -- critical: if row already exists from DBX import, keep it NOT missing
+                        is_missing_in_source = CASE
+                            WHEN origin = 'DBX' THEN 0
+                            ELSE 1
+                        END,
 
-                            -- preserve DBX as origin if it is DBX; otherwise keep DICT
-                            origin = CASE
-                                WHEN origin = 'DBX' THEN 'DBX'
-                                ELSE 'DICT'
-                            END,
+                        -- preserve DBX as origin if it is DBX; otherwise keep DICT
+                        origin = CASE
+                            WHEN origin = 'DBX' THEN 'DBX'
+                            ELSE 'DICT'
+                        END,
 
-                            updated_at = CURRENT_TIMESTAMP
-                """,
-                        payload_cols,
+                        updated_at = CURRENT_TIMESTAMP
+            """,
+                    payload_cols,
+                )
+                for row in payload_cols:
+                    self._metadata_gateway.sync_column_patch_from_model_table(
+                        model_table_id=int(row["model_table_id"]),
+                        column_name=str(row["column_name"]),
+                        updates={
+                            "data_type": row.get("data_type"),
+                            "description": row.get("description"),
+                            "is_active": 1,
+                            "origin": "DICT",
+                            "is_missing_in_source": 1,
+                        },
                     )
 
             if full_replace:
@@ -175,6 +198,10 @@ class ModelWriteService:
                         params,
                     )
                     deactivated_columns += int(res or 0)
+                    self._metadata_gateway.deactivate_workspace_columns_not_in(
+                        model_table_id=int(tid),
+                        keep_column_names=cols_sorted,
+                    )
 
         return dict(
             inserted_tables=inserted_tables,

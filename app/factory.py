@@ -83,7 +83,9 @@ from app.routes.user_routes import qf_user_ns
 from app.routes.user_workspace_routes import user_workspace_ns
 from app.routes.value_override_routes import value_override_ns
 from app.routes.vector_domains import vector_ns
+from app.routes.version_routes import version_ns
 from app.routes.workspace_inventory_routes import wsinv_ns
+from app.routes.workspace_llm_routes import llm_providers_ns, llm_roles_ns, workspace_llm_ns
 from app.routes.workspace_routes import workspace_ns
 from app.routes.workspace_table_routes import workspace_tables_ns
 from app.services.analytics.config_loader import load_analytics_config
@@ -92,6 +94,8 @@ from app.services.analytics.registry import AnalyticsDatasourceRegistry
 from app.services.auth_service import AuthService
 from app.services.base_service import build_url
 from app.services.semantic.concept_seed import ConceptSeedService
+from app.services.tenancy.datasource_catalog_service import DatasourceCatalogService
+from app.services.tenancy.secret_resolver import SecretResolver
 
 NAME = "api"
 VERSION = "v1"
@@ -149,11 +153,28 @@ def _register_analytics_registry(
     _logger = logging.getLogger(__name__)
     try:
         config = config if config is not None else load_analytics_config()
+        config = dict(config or {})
+        db_configs = DatasourceCatalogService().load_all_executor_configs()
+        if db_configs:
+            # DB-backed datasource definitions are the new source of truth.
+            config.update(db_configs)
         executors = {}
         skipped: list[str] = []
+        secret_resolver = SecretResolver()
         for name, cfg in config.items():
             try:
                 effective_cfg = dict(cfg)
+                ds_type = str(effective_cfg.get("type") or "").strip().lower()
+
+                secret_ref = str(effective_cfg.get("_secret_ref") or "").strip()
+                if secret_ref:
+                    resolved_secret = secret_resolver.resolve(secret_ref)
+                    if resolved_secret:
+                        if ds_type == "databricks" and not effective_cfg.get("token"):
+                            effective_cfg["token"] = resolved_secret
+                        elif ds_type in {"snowflake", "mysql"} and not effective_cfg.get("password"):
+                            effective_cfg["password"] = resolved_secret
+
                 if str(effective_cfg.get("type") or "").strip().lower() == "databricks":
                     token_raw = str(effective_cfg.get("token") or "").strip()
                     if (not token_raw) or "${" in token_raw or "}" in token_raw:
@@ -277,6 +298,7 @@ def create_app():
     api.add_namespace(otp_ns, path=build_url("/", NAME, VERSION, "otp"))
     api.add_namespace(product_group_ns, path=build_url("/", NAME, VERSION, "product-groups"))
     api.add_namespace(value_override_ns, path=build_url("/", NAME, VERSION, "value_overrides"))
+    api.add_namespace(version_ns, path=build_url("/", NAME, VERSION, "version"))
     api.add_namespace(public_ns, path=build_url("/", NAME, VERSION, "public"))
     api.add_namespace(qf_domains_ns, path=build_url("/", NAME, VERSION, "domains"))
     api.add_namespace(domain_profile_embeddings_ns, path=build_url("/", NAME, VERSION, "domain-profiles"))
@@ -309,6 +331,9 @@ def create_app():
     api.add_namespace(data_environment_ns, path=f"/{NAME}/{VERSION}/data-environment")
     api.add_namespace(datasource_ns, path=build_url("/", NAME, VERSION, "datasources"))
     api.add_namespace(ingestion_ns, path=build_url("/", NAME, VERSION, "ingestion"))
+    api.add_namespace(llm_roles_ns, path=build_url("/", NAME, VERSION, "llm-roles"))
+    api.add_namespace(llm_providers_ns, path=build_url("/", NAME, VERSION, "llm-providers"))
+    api.add_namespace(workspace_llm_ns, path=build_url("/", NAME, VERSION))
 
     configure_logging()
     logger = logging.getLogger(__name__)

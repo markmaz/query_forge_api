@@ -71,7 +71,7 @@ def test_concept_mapping_query_returns_columns() -> None:
     assert "rn <= :per_concept_limit" in m2m_query
     assert "COLLATE utf8mb4_0900_ai_ci" in m2m_query
     assert "COLLATE utf8mb4_unicode_ci" in m2m_query
-    assert "mc.semantic_concept_key IN" in fallback_query
+    assert "wc.semantic_concept_key IN" in fallback_query
     assert "COLLATE utf8mb4_0900_ai_ci" in fallback_query
     assert "COLLATE utf8mb4_unicode_ci" in fallback_query
 

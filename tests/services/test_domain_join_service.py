@@ -62,7 +62,6 @@ def test_create_join_inserts():
         [{"id": 1}],
         [{"workspace_table_id": 1}, {"workspace_table_id": 2}],
         [],
-        [],
     ]
     sql.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=7)]
     svc = DomainJoinService(sql=sql)
@@ -86,7 +85,6 @@ def test_create_join_existing_updates():
     sql.query_mappings_responses = [
         [{"id": 1}],
         [{"workspace_table_id": 1}, {"workspace_table_id": 2}],
-        [],
         [{"id": "j1", "is_active": 0}],
     ]
     svc = DomainJoinService(sql=sql)
@@ -111,7 +109,6 @@ def test_create_join_insert_no_lastrowid():
         [{"id": 1}],
         [{"workspace_table_id": 1}, {"workspace_table_id": 2}],
         [],
-        [],
     ]
     sql.insert_responses = [_NoLastRowId()]
     svc = DomainJoinService(sql=sql)
@@ -135,7 +132,6 @@ def test_create_join_with_expr_validates_expr_columns():
         [{"id": 1}],
         [{"workspace_table_id": 1}, {"workspace_table_id": 2}],
         [{"1": 1}],
-        [],
         [],
     ]
     sql.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=11)]
@@ -440,12 +436,43 @@ def test_validate_join_spec_right_col_type():
         )
 
 
-def test_validate_join_unique_to_table_conflict():
+def test_create_join_allows_shared_dimension_target_table():
     sql = FakeForgeQueryPort()
-    sql.query_mappings_responses = [[{"id": 1}]]
+    sql.query_mappings_responses = [
+        [{"id": 1}],
+        [{"workspace_table_id": 100}, {"workspace_table_id": 186}],
+        [],
+        [{"id": 1}],
+        [{"workspace_table_id": 190}, {"workspace_table_id": 186}],
+        [],
+    ]
+    sql.insert_responses = [
+        ForgeExecResult(rowcount=1, lastrowid=7),
+        ForgeExecResult(rowcount=1, lastrowid=8),
+    ]
     svc = DomainJoinService(sql=sql)
-    with pytest.raises(ForgeError):
-        svc._ensure_unique_to_table(sql, 1, 2, exclude_id=None)
+
+    first = svc.create_join(
+        workspace_id="ws",
+        domain_id=1,
+        from_workspace_table_id=100,
+        to_workspace_table_id=186,
+        join_type="LEFT",
+        join_spec=_basic_join_spec(100, 186),
+        sort_order=1,
+    )
+    second = svc.create_join(
+        workspace_id="ws",
+        domain_id=1,
+        from_workspace_table_id=190,
+        to_workspace_table_id=186,
+        join_type="LEFT",
+        join_spec=_basic_join_spec(190, 186),
+        sort_order=2,
+    )
+
+    assert first["ok"] is True and first["id"] == "7"
+    assert second["ok"] is True and second["id"] == "8"
 
 
 def test_validate_join_expr_columns_missing_scope_column():

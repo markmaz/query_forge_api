@@ -82,7 +82,6 @@ class DomainJoinService:
             self._ensure_domain(tx, workspace_id, payload.domain_id)
             self._ensure_tables_in_domain(tx, payload.domain_id, payload.from_workspace_table_id, payload.to_workspace_table_id)
             self._validate_join_expr_columns(tx, payload.join_spec, payload.from_workspace_table_id, payload.to_workspace_table_id)
-            self._ensure_unique_to_table(tx, payload.domain_id, payload.to_workspace_table_id, exclude_id=None)
 
             existing = tx.execute_query_mappings(
                 """
@@ -174,7 +173,6 @@ class DomainJoinService:
             self._ensure_join_exists(tx, payload.domain_id, join_id)
             self._ensure_tables_in_domain(tx, payload.domain_id, payload.from_workspace_table_id, payload.to_workspace_table_id)
             self._validate_join_expr_columns(tx, payload.join_spec, payload.from_workspace_table_id, payload.to_workspace_table_id)
-            self._ensure_unique_to_table(tx, payload.domain_id, payload.to_workspace_table_id, exclude_id=join_id)
 
             tx.execute_write(
                 """
@@ -260,8 +258,8 @@ class DomainJoinService:
                 """
                 SELECT
                   wt.id               AS workspace_table_id,
-                  d.model_table_id    AS model_table_id,
-                  mt.name             AS model_table_name,
+                  NULL                AS model_table_id,
+                  COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
                   dwt.relation_kind   AS relation_kind,
                   dwt.is_primary      AS is_primary,
                   dwt.sort_order      AS sort_order,
@@ -278,10 +276,9 @@ class DomainJoinService:
                 FROM domain_workspace_table dwt
                 JOIN domain d ON d.id = dwt.domain_id
                 JOIN workspace_table wt ON wt.id = dwt.workspace_table_id
-                LEFT JOIN model_table mt ON mt.id = d.model_table_id
                 WHERE d.workspace_id = :ws
                   AND d.id = :did
-                ORDER BY COALESCE(mt.name, ''), wt.full_name
+                ORDER BY COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name), wt.full_name
                 """,
                 {"ws": workspace_id, "did": int(domain_id)},
             )
@@ -338,22 +335,6 @@ class DomainJoinService:
         ids = {int(row["workspace_table_id"]) for row in rows}
         if int(qf_from_id) not in ids or int(qf_to_id) not in ids:
             raise ForgeError("Both tables must be assigned to the domain", status_code=400)
-
-    def _ensure_unique_to_table(self, tx: ForgeQueryTx, domain_id: int, qf_to_id: int, exclude_id: Optional[str]) -> None:
-        rows = tx.execute_query_mappings(
-            """
-            SELECT id
-            FROM domain_table_join
-            WHERE domain_id = :did
-              AND to_workspace_table_id = :qf_to_id
-              AND is_active = 1
-            """,
-            {"did": int(domain_id), "qf_to_id": int(qf_to_id)},
-        )
-        for row in rows:
-            if exclude_id and str(row["id"]) == str(exclude_id):
-                continue
-            raise ForgeError("This table already has an active join", status_code=400)
 
     def _ensure_join_exists(self, tx: ForgeQueryTx, domain_id: int, join_id: str) -> None:
         rows = tx.execute_query_mappings(

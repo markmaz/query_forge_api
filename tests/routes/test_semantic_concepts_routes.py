@@ -259,6 +259,7 @@ def test_concept_column_map_crud_routes(client, monkeypatch):
             assert kwargs["concept_key"] == "district"
             assert kwargs["column_name"] == "lea"
             assert kwargs["q"] == "district"
+            assert kwargs["workspace_column_id"] == 88
             return {"rows": [{"id": 5}], "total": 1, "page": kwargs["page"], "page_size": kwargs["page_size"]}
 
         def create_concept_column_map(self, payload):
@@ -277,7 +278,7 @@ def test_concept_column_map_crud_routes(client, monkeypatch):
     monkeypatch.setattr(semantic_concepts, "SemanticConceptService", _Svc)
 
     list_resp = client.get(
-        "/api/v1/semantic/concept-column-maps?page=1&page_size=10&concept_key=district&column_name=lea&q=district",
+        "/api/v1/semantic/concept-column-maps?page=1&page_size=10&concept_key=district&column_name=lea&q=district&workspace_column_id=88",
         headers=_headers(monkeypatch),
     )
     assert list_resp.status_code == 200
@@ -288,12 +289,13 @@ def test_concept_column_map_crud_routes(client, monkeypatch):
         json={
             "vertical_norm": "education",
             "semantic_concept_id": 10,
-            "model_column_id": 20,
+            "workspace_column_id": 88,
         },
         headers=_headers(monkeypatch),
     )
     assert create_resp.status_code == 201
     assert create_resp.json["row"]["id"] == 6
+    assert create_resp.json["row"]["workspace_column_id"] == 88
 
     get_resp = client.get("/api/v1/semantic/concept-column-maps/6", headers=_headers(monkeypatch))
     assert get_resp.status_code == 200

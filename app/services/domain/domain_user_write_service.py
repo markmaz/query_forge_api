@@ -129,12 +129,31 @@ class DomainUserWriteService:
         sql_validate = """
             SELECT
               (SELECT 1 FROM domain WHERE workspace_id=:ws AND id=:did AND is_active=1 LIMIT 1) AS ok_domain,
+              (SELECT 1 FROM users u WHERE u.user_id=:tuid LIMIT 1) AS ok_user,
               (SELECT 1
-                 FROM user_workspace_map uwm
-                 JOIN users u ON u.user_id = uwm.user_id
-                 WHERE uwm.workspace_id=:ws AND uwm.user_id=:tuid
+                 FROM (
+                    SELECT wm.user_id
+                    FROM workspace_membership wm
+                    WHERE wm.workspace_id=:ws
+                      AND wm.user_id=:tuid
+                      AND COALESCE(wm.is_active, 1) = 1
+
+                    UNION
+
+                    SELECT om.user_id
+                    FROM workspace w
+                    JOIN organization o
+                      ON o.id = w.organization_id
+                     AND COALESCE(o.is_active, 1) = 1
+                    JOIN organization_membership om
+                      ON om.organization_id = w.organization_id
+                     AND om.user_id = :tuid
+                     AND COALESCE(om.is_active, 1) = 1
+                    WHERE w.id = :ws
+                      AND COALESCE(w.is_active, 1) = 1
+                 ) members
                  LIMIT 1
-              ) AS ok_user
+              ) AS ok_workspace_member
         """
         with self._sql.transaction() as tx:
             rows = tx.execute_query_mappings(
@@ -145,7 +164,7 @@ class DomainUserWriteService:
 
             if not check or int(check.get("ok_domain") or 0) != 1:
                 raise ForgeError("Domain not found", status_code=404)
-            if int(check.get("ok_user") or 0) != 1:
+            if int(check.get("ok_user") or 0) != 1 or int(check.get("ok_workspace_member") or 0) != 1:
                 raise ForgeError("User not found in workspace", status_code=404)
 
             tx.execute_write(
@@ -245,10 +264,29 @@ class DomainUserWriteService:
 
                 found = tx.execute_query_mappings(
                     f"""
-                    SELECT uwm.user_id
-                    FROM user_workspace_map uwm
-                    WHERE uwm.workspace_id=:ws
-                      AND uwm.user_id IN ({placeholders})
+                    SELECT DISTINCT members.user_id
+                    FROM (
+                      SELECT wm.user_id
+                      FROM workspace_membership wm
+                      WHERE wm.workspace_id=:ws
+                        AND COALESCE(wm.is_active, 1) = 1
+                        AND wm.user_id IN ({placeholders})
+
+                      UNION
+
+                      SELECT om.user_id
+                      FROM workspace w
+                      JOIN organization o
+                        ON o.id = w.organization_id
+                       AND COALESCE(o.is_active, 1) = 1
+                      JOIN organization_membership om
+                        ON om.organization_id = w.organization_id
+                       AND COALESCE(om.is_active, 1) = 1
+                      WHERE w.id = :ws
+                        AND COALESCE(w.is_active, 1) = 1
+                        AND om.user_id IN ({placeholders})
+                    ) members
+                    JOIN users u ON u.user_id = members.user_id
                     """,
                     params,
                 )

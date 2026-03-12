@@ -25,8 +25,9 @@ _OVERLAY_CATALOG: List[Dict[str, Any]] = [
 
 
 class DomainCapabilitiesService:
-    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None, metadata_mode: Optional[str] = None) -> None:
         self._sql = sql or ForgeMetaSQL()
+        del metadata_mode
 
     def get_domain_capabilities(
         self,
@@ -120,9 +121,9 @@ class DomainCapabilitiesService:
               wc.column_name,
               wc.data_type,
               wc.nullable,
-              mc.id AS model_column_id,
-              mc.semantic_type,
-              mc.description
+              wc.id AS workspace_column_id,
+              wc.semantic_type,
+              wc.description
             FROM domain_workspace_table dwt
             JOIN workspace_table wt
               ON wt.id = dwt.workspace_table_id
@@ -130,11 +131,6 @@ class DomainCapabilitiesService:
              AND wt.exists_in_dbx = 1
             JOIN workspace_column wc
               ON wc.workspace_table_id = wt.id
-            LEFT JOIN model_column mc
-              ON mc.model_table_id = wt.model_table_id
-             AND mc.column_name = wc.column_name
-             AND mc.is_active = 1
-             AND mc.is_missing_in_source = 0
             WHERE dwt.domain_id = :domain_id
             ORDER BY wt.id ASC, wc.ordinal_position ASC
             """,
@@ -164,7 +160,9 @@ class DomainCapabilitiesService:
                     "data_type": data_type or "unknown",
                     "filterable": data_type not in {"array", "map", "struct", "json"},
                     "workspace_table_id": workspace_table_id,
-                    "model_column_id": _to_int(row.get("model_column_id")),
+                    "workspace_column_id": _to_int(row.get("workspace_column_id")),
+                    # Compatibility field consumed by planner/sqljson paths.
+                    "model_column_id": _to_int(row.get("workspace_column_id")),
                     "column_name": column_name,
                     "table_name": str(row.get("table_name") or ""),
                     "semantic_type": semantic_type or "unknown",

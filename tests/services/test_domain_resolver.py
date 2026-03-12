@@ -8,7 +8,6 @@ from app.services.domain_resolver import (
     DomainPlanJoin,
     DomainPlanTable,
     DomainResolver,
-    ResolvedDomainFrom,
     _safe_fqn,
 )
 from tests._support.fakes import FakeForgeQueryPort
@@ -177,13 +176,9 @@ def test_resolve_ambiguous_raises() -> None:
         resolver.resolve(1)
 
 
-def test_resolve_fallback() -> None:
+def test_resolve_without_mapping_raises_not_found() -> None:
     sql = FakeForgeQueryPort()
-    sql.query_mappings_responses = [
-        [],
-        [{"workspace_table_id": 9, "full_name": "main.asset.fallback"}],
-    ]
+    sql.query_mappings_responses = [[]]
     resolver = DomainResolver(workspace_id="ws1", sql=sql)
-    resolved = resolver.resolve(1)
-    assert isinstance(resolved, ResolvedDomainFrom)
-    assert resolved.workspace_table_id == 9
+    with pytest.raises(ForgeError, match="Unknown domainId"):
+        resolver.resolve(1)

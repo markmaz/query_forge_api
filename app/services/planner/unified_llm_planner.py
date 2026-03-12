@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from typing import Any, Dict, Mapping, Optional
 
 from app.config import SEMANTIC_PLAN_LLM_MAX_TOKENS, SEMANTIC_PLAN_LLM_MODEL
@@ -112,6 +113,13 @@ def build_plan_and_slots(
         "llm_tokens": provider_tokens,
         "attempts": attempt_count,
         "repaired": repaired,
+        "llm_prompt_trace": {
+            "system_prompt": system_prompt,
+            "developer_prompt": developer_prompt,
+            "user_prompt": user_prompt,
+            "response_format": True,
+            "max_tokens": max_tokens or int(SEMANTIC_PLAN_LLM_MAX_TOKENS),
+        },
     }
     explanation_draft = parsed.get("explanation_draft")
     if isinstance(explanation_draft, str) and explanation_draft.strip():
@@ -140,12 +148,20 @@ def _build_unified_developer_prompt(*, slot_schema: Mapping[str, Any], plan_sche
         "- Use ONLY column_key values present in capabilities payload.\n"
         "- Use ONLY metric refs present in capabilities payload.\n"
         "- Never invent or hallucinate column_keys or metric refs.\n"
+        "- Never set a filter value to a column_key token (for example 'wt20.school_name').\n"
+        "- Treat phrases like 'by <dimension>' or 'grouped by <dimension>' as grouping intent, not equality filters.\n"
         "- If a requested field is unavailable, select the closest allowed alternative.\n"
         "- For list intent, grouping.group_by should align with selected dimensions.\n"
         "- For aggregate intent, include at least one metric when possible.\n"
+        "- For prompts containing 'top N' or 'bottom N': set grouping.limit=N and rank by a relevant metric.\n"
+        "- For sales prompts, prefer a sales/revenue metric if available.\n"
+        "- Interpret relative dates from current_date in input.\n"
+        "- For 'this month' and 'last month', use time.time_range='custom' with start_date/end_date and a valid time_column_key.\n"
+        "- For 'this year' and 'last year', use a current-date anchored year range or a year filter using current_date.\n"
         "- Base domain is fixed; do not switch domains.\n"
         "Self-check before output:\n"
         "- Validate every column_key against allowed dimensions/filter columns/time columns.\n"
+        "- Validate every filter value: never echo a column_key token as a literal value.\n"
         "- If any column_key is disallowed, replace it with the closest allowed key.\n"
         f"slot_hints schema: {json.dumps(dict(slot_schema), ensure_ascii=True)}\n"
         f"plan_json_v2 schema: {json.dumps(dict(plan_schema), ensure_ascii=True)}"
@@ -166,6 +182,7 @@ def _build_unified_user_prompt(
     payload = {
         "prompt": prompt,
         "normalized_prompt": normalized_prompt,
+        "current_date": date.today().isoformat(),
         "workspace_id": workspace_id,
         "vertical_norm": vertical_norm,
         "base_domain_id": int(base_domain_id),

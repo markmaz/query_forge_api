@@ -48,10 +48,11 @@ def _camelize_row(row: Dict[str, Any]) -> Dict[str, Any]:
 class BuilderColumnFeedService:
     """
     Builder feed: only columns available through user's readable domains.
-    Includes optional dictionary metadata from model_column.
+    Uses workspace metadata as the source of truth.
     """
 
-    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+    def __init__(self, *, sql: Optional[ForgeQueryPort] = None, metadata_mode: Optional[str] = None) -> None:
+        del metadata_mode
         self._sql = sql or ForgeMetaSQL()
 
     def list_domain_tables(self, *, workspace_id: str, user_id: str, domain_id: Optional[int]) -> Dict[str, Any]:
@@ -59,8 +60,8 @@ class BuilderColumnFeedService:
             """
             SELECT DISTINCT
               wt.id AS workspace_table_id,
-              wt.model_table_id,
-              mt.name AS model_table_name,
+              NULL AS model_table_id,
+              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
               wt.catalog_name,
               wt.schema_name,
               wt.table_name,
@@ -80,10 +81,7 @@ class BuilderColumnFeedService:
             JOIN workspace_table wt
               ON wt.id = dwt.workspace_table_id
              AND wt.workspace_id = :ws
-             AND wt.exists_in_dbx = 1
-            LEFT JOIN model_table mt
-              ON mt.id = wt.model_table_id
-            ORDER BY COALESCE(mt.name, wt.table_name), wt.full_name
+            ORDER BY COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name), wt.full_name
             """,
             {
                 "ws": workspace_id,
@@ -136,7 +134,6 @@ class BuilderColumnFeedService:
               wt.catalog_name,
               wt.variant_code,
               wt.is_qe,
-              wt.exists_in_dbx,
               wt.last_seen_at,
               dwt.table_alias,
               dwt.is_primary,
@@ -149,12 +146,12 @@ class BuilderColumnFeedService:
               wc.data_type,
               wc.nullable,
               wc.ordinal_position,
-              mc.id                      AS model_column_id,
-              mc.description             AS description,
-              mc.sample_values_json      AS sample_values_json,
-              mc.sample_stats_json       AS sample_stats_json,
-              mc.sample_ran_at           AS sample_ran_at,
-              mc.sample_error            AS sample_error
+              wc.id                    AS model_column_id,
+              wc.description             AS description,
+              wc.sample_values_json      AS sample_values_json,
+              wc.sample_stats_json       AS sample_stats_json,
+              wc.sample_ran_at           AS sample_ran_at,
+              wc.sample_error            AS sample_error
             FROM user_domain_mapping udm
             JOIN domain d
               ON d.id = udm.domain_id
@@ -168,16 +165,10 @@ class BuilderColumnFeedService:
             JOIN workspace_table wt
               ON wt.id = dwt.workspace_table_id
              AND wt.workspace_id = :ws
-             AND wt.exists_in_dbx = 1
              AND (:variant_code IS NULL OR wt.variant_code = :variant_code)
              AND (:only_qe IS NULL OR wt.is_qe = :only_qe)
             JOIN workspace_column wc
               ON wc.workspace_table_id = wt.id
-            LEFT JOIN model_column mc
-              ON mc.model_table_id = wt.model_table_id
-             AND mc.column_name = wc.column_name
-             AND mc.is_active = 1
-             AND mc.is_missing_in_source = 0
             WHERE (
                 :table_q IS NULL OR
                 wt.full_name LIKE CONCAT('%', :table_q, '%') OR
@@ -187,7 +178,7 @@ class BuilderColumnFeedService:
               AND (
                 :column_q IS NULL OR
                 wc.column_name LIKE CONCAT('%', :column_q, '%') OR
-                mc.description LIKE CONCAT('%', :column_q, '%')
+                wc.description LIKE CONCAT('%', :column_q, '%')
             )
           )
         """

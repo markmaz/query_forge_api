@@ -11,13 +11,18 @@ logger = logging.getLogger(__name__)
 
 
 class DictionaryEnrichmentService:
-    """Optionally generates AI descriptions for model_column rows.
+    """Optionally generates AI descriptions for workspace_column rows.
 
     Only fills description when NULL unless overwrite=True.
     All LLM failures are swallowed and logged — never propagated.
     """
 
-    def __init__(self, *, mysql: ForgeMetaSQL | None = None, llm=None) -> None:
+    def __init__(
+        self,
+        *,
+        mysql: ForgeMetaSQL | None = None,
+        llm=None,
+    ) -> None:
         self._mysql = mysql or ForgeMetaSQL()
         self._llm = llm  # any object with .generate(prompt: str) -> str
 
@@ -31,7 +36,7 @@ class DictionaryEnrichmentService:
     ) -> dict[str, Any]:
         """Generate descriptions for columns with missing descriptions.
 
-        :param table_id_by_name: Maps table name -> model_table.id
+        :param table_id_by_name: Maps table name -> workspace_table.id (values optional, keys used)
         :param columns: Column dicts with at minimum table_name, column_name, data_type, comment
         :param overwrite: If True, overwrite existing non-null descriptions
         :returns: {enriched: int, errors: int}
@@ -53,7 +58,11 @@ class DictionaryEnrichmentService:
             cols_by_table.setdefault(col["table_name"], []).append(col)
 
         table_state_by_name: dict[str, dict[str, Any]] = {}
-        for table_name, table_id in table_id_by_name.items():
+        candidate_tables = sorted({str(t or "").strip() for t in table_id_by_name.keys() if str(t or "").strip()})
+        if not candidate_tables:
+            candidate_tables = sorted(cols_by_table.keys())
+
+        for table_name in candidate_tables:
             table_cols = cols_by_table.get(table_name, [])
             if not table_cols:
                 continue
@@ -63,40 +72,43 @@ class DictionaryEnrichmentService:
                 continue
 
             placeholders = ", ".join(f":c{i}" for i in range(len(col_names)))
-            params = {"tid": int(table_id), **{f"c{i}": cn for i, cn in enumerate(col_names)}}
-
             with self._mysql.transaction() as tx:
-                table_rows = tx.execute_query_mappings(
-                    """
-SELECT id, name, description
-FROM model_table
-WHERE id = :tid
-LIMIT 1
-""",
-                    {"tid": int(table_id)},
-                )
-                if not table_rows:
-                    continue
-
                 existing_columns = tx.execute_query_mappings(
                     f"""
 SELECT
-  id,
-  column_name,
-  description,
-  semantic_type,
-  semantic_entity,
-  semantic_sub_type
-FROM model_column
-WHERE model_table_id = :tid AND column_name IN ({placeholders})
+  MIN(wc.id) AS id,
+  wc.column_name,
+  MAX(wc.description) AS description,
+  MAX(wc.semantic_type) AS semantic_type,
+  MAX(wc.semantic_entity) AS semantic_entity,
+  MAX(wc.semantic_sub_type) AS semantic_sub_type
+FROM workspace_column wc
+JOIN workspace_table wt
+  ON wt.id = wc.workspace_table_id
+WHERE wt.table_name = :table_name
+  AND wc.column_name IN ({placeholders})
+GROUP BY wc.column_name
 """,
-                    params,
+                    {"table_name": table_name, **{f"c{i}": cn for i, cn in enumerate(col_names)}},
+                )
+                table_rows = tx.execute_query_mappings(
+                    """
+SELECT
+  MIN(id) AS id,
+  table_name AS name,
+  MAX(description) AS description
+FROM workspace_table
+WHERE table_name = :table_name
+GROUP BY table_name
+LIMIT 1
+""",
+                    {"table_name": table_name},
                 )
 
             existing_map = {str(r["column_name"]): dict(r) for r in existing_columns}
-            table_row = dict(table_rows[0])
+            table_row = dict(table_rows[0]) if table_rows else {"id": None, "name": table_name, "description": None}
             table_state_by_name[table_name] = {
-                "table_id": int(table_row["id"]),
+                "table_id": int(table_row.get("id") or 0),
                 "table_name": str(table_row.get("name") or table_name),
                 "table_description": table_row.get("description"),
                 "table_columns": table_cols,
@@ -200,13 +212,13 @@ WHERE model_table_id = :tid AND column_name IN ({placeholders})
                         with self._mysql.transaction() as tx:
                             tx.execute_write(
                                 """
-UPDATE model_table
+UPDATE workspace_table
 SET description = :description, updated_at = CURRENT_TIMESTAMP
-WHERE id = :table_id
+WHERE table_name = :table_name
 """,
                                 {
                                     "description": generated_table_description[:2000],
-                                    "table_id": int(state["table_id"]),
+                                    "table_name": table_name,
                                 },
                             )
                         tables_enriched += 1
@@ -226,7 +238,6 @@ WHERE id = :table_id
             with self._mysql.transaction() as tx:
                 for col, existing_row in candidates:
                     cn = str(col["column_name"])
-                    col_id = int(existing_row.get("id"))
                     _emit_progress(phase="enrichment_columns", current_table=table_name, current_column=cn)
 
                     try:
@@ -251,7 +262,7 @@ WHERE id = :table_id
                             generated = {"description": str(self._llm.generate(prompt) or "").strip() or None}
 
                         sets: list[str] = []
-                        params: dict[str, Any] = {"col_id": col_id}
+                        params: dict[str, Any] = {}
 
                         current_desc = str(existing_row.get("description") or "").strip()
                         description = str(generated.get("description") or "").strip()
@@ -300,11 +311,18 @@ WHERE id = :table_id
                             sets.append("updated_at = CURRENT_TIMESTAMP")
                             tx.execute_write(
                                 f"""
-UPDATE model_column
-SET {", ".join(sets)}
-WHERE id = :col_id
+UPDATE workspace_column wc
+JOIN workspace_table wt
+  ON wt.id = wc.workspace_table_id
+SET {", ".join(f"wc.{item}" for item in sets)}
+WHERE wt.table_name = :table_name
+  AND wc.column_name = :column_name
 """,
-                                params,
+                                {
+                                    **params,
+                                    "table_name": table_name,
+                                    "column_name": cn,
+                                },
                             )
                             columns_enriched += 1
                     except Exception as exc:

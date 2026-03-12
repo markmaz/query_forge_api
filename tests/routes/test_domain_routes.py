@@ -68,3 +68,133 @@ def test_domains_requires_auth(client):
 def test_domains_invalid_token(client, invalid_auth_headers):
     resp = client.get("/api/v1/domains/", headers=invalid_auth_headers)
     assert resp.status_code == 401
+
+
+def test_domain_profile_metrics_get_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def get_profile_metrics(self, *, workspace_id: str, user_id: str, domain_id: int):
+            return {
+                "domain_id": domain_id,
+                "domain_name": "Sales Performance",
+                "metrics": [{"metric_key": "total_net_amount", "agg": "sum"}],
+                "has_profile": True,
+                "can_edit": True,
+            }
+
+    monkeypatch.setattr(domain_routes, "DomainProfileMetricConfigService", _Svc)
+    resp = client.get("/api/v1/domains/3/profile-metrics", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json["domain_id"] == 3
+    assert resp.json["metrics"][0]["metric_key"] == "total_net_amount"
+
+
+def test_domain_profile_metrics_put_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def update_profile_metrics(self, *, workspace_id: str, user_id: str, domain_id: int, metrics_payload):
+            assert isinstance(metrics_payload, list)
+            return {
+                "domain_id": domain_id,
+                "domain_name": "Sales Performance",
+                "metrics": metrics_payload,
+                "has_profile": True,
+                "can_edit": True,
+            }
+
+    monkeypatch.setattr(domain_routes, "DomainProfileMetricConfigService", _Svc)
+    resp = client.put(
+        "/api/v1/domains/3/profile-metrics",
+        headers=auth_headers,
+        json={
+            "metrics": [
+                {
+                    "metric_key": "total_net_amount",
+                    "label": "Total Net Amount",
+                    "kind": "numeric",
+                    "agg": "sum",
+                    "column_key": "wt180.net_amount",
+                }
+            ]
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json["metrics"][0]["agg"] == "sum"
+
+
+def test_domain_profile_metrics_put_service_error(client, auth_headers, monkeypatch):
+    class _Svc:
+        def update_profile_metrics(self, *, workspace_id: str, user_id: str, domain_id: int, metrics_payload):
+            raise ForgeError("'metrics' must be a list", status_code=400)
+
+    monkeypatch.setattr(domain_routes, "DomainProfileMetricConfigService", _Svc)
+    resp = client.put(
+        "/api/v1/domains/3/profile-metrics",
+        headers=auth_headers,
+        json={"metrics": "bad"},
+    )
+    assert resp.status_code == 400
+    assert "must be a list" in resp.json["error"]
+
+
+def test_domain_time_policy_get_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def get_policy(self, *, workspace_id: str, user_id: str, domain_id: int):
+            return {
+                "domain_id": domain_id,
+                "domain_name": "Sales Performance",
+                "has_policy": True,
+                "can_edit": True,
+                "policy": {
+                    "calendar_mode": "fiscal",
+                    "fiscal_year_start_month": 7,
+                    "week_start": "monday",
+                },
+            }
+
+    monkeypatch.setattr(domain_routes, "DomainTimePolicyService", _Svc)
+    resp = client.get("/api/v1/domains/3/time-policy", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json["policy"]["calendar_mode"] == "fiscal"
+
+
+def test_domain_time_policy_put_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def update_policy(self, *, workspace_id: str, user_id: str, domain_id: int, policy_payload):
+            return {
+                "domain_id": domain_id,
+                "domain_name": "Sales Performance",
+                "has_policy": True,
+                "can_edit": True,
+                "policy": dict(policy_payload),
+            }
+
+    monkeypatch.setattr(domain_routes, "DomainTimePolicyService", _Svc)
+    resp = client.put(
+        "/api/v1/domains/3/time-policy",
+        headers=auth_headers,
+        json={
+            "policy": {
+                "calendar_mode": "fiscal",
+                "fiscal_year_start_month": 7,
+                "default_grain": "quarter",
+                "allow_relative_ranges": True,
+                "relative_map": {"this_quarter": "current_fiscal_quarter"},
+            }
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json["policy"]["default_grain"] == "quarter"
+
+
+def test_domain_time_policy_put_service_error(client, auth_headers, monkeypatch):
+    class _Svc:
+        def update_policy(self, *, workspace_id: str, user_id: str, domain_id: int, policy_payload):
+            raise ForgeError("policy.calendar_mode must be 'calendar' or 'fiscal'", status_code=400)
+
+    monkeypatch.setattr(domain_routes, "DomainTimePolicyService", _Svc)
+    resp = client.put(
+        "/api/v1/domains/3/time-policy",
+        headers=auth_headers,
+        json={"policy": {"calendar_mode": "bad"}},
+    )
+    assert resp.status_code == 400
+    assert "calendar_mode" in resp.json["error"]

@@ -268,6 +268,71 @@ def test_domain_profile_generate_all(client, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Semantic catalog build
+# ---------------------------------------------------------------------------
+
+def test_semantic_catalog_build_dry_run(client, monkeypatch):
+    class _FakeBuilder:
+        def build_catalog(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["domain_id"] == 3
+            assert kwargs["vertical_norm"] == "generic"
+            assert kwargs["dry_run"] is True
+            return {
+                "workspace_id": "ws-1",
+                "domain_id": 3,
+                "vertical_norm": "generic",
+                "dry_run": True,
+                "profile_count": 12,
+            }
+
+    monkeypatch.setattr(admin_routes, "SemanticCatalogBuilder", _FakeBuilder)
+    resp = client.post(
+        "/api/v1/admin/semantic-catalog/build",
+        json={"domain_id": 3},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["result"]["dry_run"] is True
+    assert resp.json["result"]["domain_id"] == 3
+
+
+def test_semantic_catalog_build_write_mode(client, monkeypatch):
+    class _FakeBuilder:
+        def build_catalog(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["domain_id"] == 9
+            assert kwargs["vertical_norm"] == "sales"
+            assert kwargs["domain_name"] == "Sales Performance"
+            assert kwargs["dry_run"] is False
+            assert kwargs["table_limit"] == 1200
+            return {
+                "workspace_id": "ws-1",
+                "domain_id": 9,
+                "vertical_norm": "sales",
+                "dry_run": False,
+                "concepts_upserted": 24,
+            }
+
+    monkeypatch.setattr(admin_routes, "SemanticCatalogBuilder", _FakeBuilder)
+    resp = client.post(
+        "/api/v1/admin/semantic-catalog/build",
+        json={
+            "workspace_id": "ws-1",
+            "domain_id": 9,
+            "vertical_norm": "sales",
+            "domain_name": "Sales Performance",
+            "dry_run": False,
+            "table_limit": 1200,
+        },
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["result"]["dry_run"] is False
+    assert resp.json["result"]["concepts_upserted"] == 24
+
+
+# ---------------------------------------------------------------------------
 # Vector rebuild
 # ---------------------------------------------------------------------------
 
@@ -377,3 +442,234 @@ def test_prompt_feedback_list_requires_admin(client, monkeypatch):
         headers={"Authorization": "Bearer test-token", "X-Workspace-Id": "ws-1"},
     )
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Tenancy admin routes
+# ---------------------------------------------------------------------------
+
+def test_admin_organizations_list(client, monkeypatch):
+    class _FakeSvc:
+        def list_organizations(self, **kwargs):
+            assert kwargs["include_inactive"] is True
+            return {"rows": [{"id": "org-1", "name": "Acme"}], "count": 1, "total": 1, "limit": 100, "offset": 0}
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.get("/api/v1/admin/organizations?include_inactive=true", headers=_headers(monkeypatch))
+    assert resp.status_code == 200
+    assert resp.json["count"] == 1
+    assert resp.json["rows"][0]["id"] == "org-1"
+
+
+def test_admin_tenancy_bootstrap_route(client, monkeypatch):
+    class _FakeBootstrapSvc:
+        def bootstrap(self, req):
+            assert req.workspace_id == "ws-1"
+            assert req.organization_name == "Acme District"
+            assert req.datasource_type == "snowflake"
+            return {
+                "workspace_id": "ws-1",
+                "organization": {"id": "org-1"},
+                "datasource": {"id": 11},
+                "workspace_binding": {"workspace_id": "ws-1", "datasource_id": 11},
+                "memberships": {},
+            }
+
+    monkeypatch.setattr(admin_routes, "TenancyBootstrapService", _FakeBootstrapSvc)
+    resp = client.post(
+        "/api/v1/admin/tenancy/bootstrap",
+        json={
+            "workspace_id": "ws-1",
+            "organization_name": "Acme District",
+            "datasource_name": "Primary",
+            "datasource_type": "snowflake",
+        },
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["result"]["organization"]["id"] == "org-1"
+
+
+def test_admin_organization_create(client, monkeypatch):
+    class _FakeSvc:
+        def create_organization(self, req):
+            assert req.name == "Acme District"
+            return {"id": "org-1", "name": req.name, "slug": "acme-district"}
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.post(
+        "/api/v1/admin/organizations",
+        json={"name": "Acme District"},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 201
+    assert resp.json["slug"] == "acme-district"
+
+
+def test_admin_organization_datasource_create(client, monkeypatch):
+    class _FakeSvc:
+        def create_datasource(self, *, organization_id, req):
+            assert organization_id == "org-1"
+            assert req.type == "snowflake"
+            return {"id": 99, "organization_id": organization_id, "type": req.type}
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.post(
+        "/api/v1/admin/organizations/org-1/datasources",
+        json={"name": "primary", "type": "snowflake", "config_json": {"account": "acc"}},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 201
+    assert resp.json["id"] == 99
+
+
+def test_admin_datasource_connection_test(client, monkeypatch):
+    class _FakeSvc:
+        def test_datasource(self, *, datasource_id):
+            assert datasource_id == 22
+            return {"datasource_id": 22, "status": "ok", "latency_ms": 10}
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.post("/api/v1/admin/datasources/22/test", headers=_headers(monkeypatch))
+    assert resp.status_code == 200
+    assert resp.json["result"]["status"] == "ok"
+
+
+def test_admin_workspace_membership_create(client, monkeypatch):
+    class _FakeSvc:
+        def upsert_workspace_membership(self, *, workspace_id, req):
+            assert workspace_id == "ws-1"
+            assert req.user_id == "user-2"
+            return {"id": 7, "workspace_id": workspace_id, "user_id": req.user_id, "is_active": True}
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.post(
+        "/api/v1/admin/workspaces/ws-1/memberships",
+        json={"user_id": "user-2", "role": "member"},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 201
+    assert resp.json["id"] == 7
+
+
+def test_admin_organization_membership_create_null_role_defaults_member(client, monkeypatch):
+    class _FakeSvc:
+        def upsert_organization_membership(self, *, organization_id, req):
+            assert organization_id == "org-1"
+            assert req.user_id == "user-2"
+            assert req.role == "member"
+            return {"id": 88, "organization_id": organization_id, "user_id": req.user_id, "role": req.role}
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.post(
+        "/api/v1/admin/organizations/org-1/memberships",
+        json={"user_id": "user-2", "role": None},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 201
+    assert resp.json["role"] == "member"
+
+
+def test_admin_workspace_membership_create_null_role_defaults_member(client, monkeypatch):
+    class _FakeSvc:
+        def upsert_workspace_membership(self, *, workspace_id, req):
+            assert workspace_id == "ws-1"
+            assert req.user_id == "user-2"
+            assert req.role == "member"
+            return {"id": 7, "workspace_id": workspace_id, "user_id": req.user_id, "role": req.role, "is_active": True}
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.post(
+        "/api/v1/admin/workspaces/ws-1/memberships",
+        json={"user_id": "user-2", "role": None},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 201
+    assert resp.json["role"] == "member"
+
+
+def test_admin_workspace_binding_list(client, monkeypatch):
+    class _FakeSvc:
+        def list_workspace_bindings(self, **kwargs):
+            assert kwargs["organization_id"] == "org-1"
+            return {"rows": [{"workspace_id": "ws-1", "datasource_id": 3}], "count": 1, "total": 1, "limit": 200, "offset": 0}
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.get("/api/v1/admin/workspaces?organization_id=org-1", headers=_headers(monkeypatch))
+    assert resp.status_code == 200
+    assert resp.json["rows"][0]["workspace_id"] == "ws-1"
+
+
+def test_admin_workspace_create(client, monkeypatch):
+    class _FakeSvc:
+        def create_workspace(self, req):
+            assert req.organization_id == "org-1"
+            assert req.name == "Acme Workspace"
+            return {"workspace_id": "ws-new-1", "organization_id": req.organization_id}
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.post(
+        "/api/v1/admin/workspaces",
+        json={"organization_id": "org-1", "name": "Acme Workspace"},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 201
+    assert resp.json["workspace_id"] == "ws-new-1"
+
+
+def test_admin_workspace_binding_update(client, monkeypatch):
+    class _FakeSvc:
+        def update_workspace_binding(self, *, workspace_id, req):
+            assert workspace_id == "ws-1"
+            assert req.datasource_id == 8
+            return {"workspace_id": workspace_id, "datasource_id": req.datasource_id}
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.patch(
+        "/api/v1/admin/workspaces/ws-1/binding",
+        json={"datasource_id": 8},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["datasource_id"] == 8
+
+
+def test_admin_tenancy_routes_require_admin(client, monkeypatch):
+    from app import factory
+    from app.decorators import security
+    from app.routes import request_helpers as _route_utils
+    from app.services.workspace_inventory import workspace_context
+
+    def _verify_token(_token):
+        return {"sub": "user-1", "username": "user-1", "is_admin": False}
+
+    def _allow_workspace_access(*, user_id, workspace_id):
+        return workspace_id
+
+    monkeypatch.setattr(security.auth_service, "verify_token", _verify_token)
+    monkeypatch.setattr(factory.auth_service, "verify_token", _verify_token)
+    monkeypatch.setattr(security.workspace_access_service, "assert_workspace_access", _allow_workspace_access)
+    monkeypatch.setattr(_route_utils.workspace_access_service, "assert_workspace_access", _allow_workspace_access)
+    monkeypatch.setattr(
+        workspace_context.WorkspaceAccessService,
+        "assert_workspace_access",
+        lambda self, *, user_id, workspace_id: workspace_id,
+    )
+
+    resp = client.get(
+        "/api/v1/admin/organizations",
+        headers={"Authorization": "Bearer test-token", "X-Workspace-Id": "ws-1"},
+    )
+    assert resp.status_code == 403
+
+    resp_bootstrap = client.post(
+        "/api/v1/admin/tenancy/bootstrap",
+        json={
+            "workspace_id": "ws-1",
+            "organization_name": "Acme District",
+            "datasource_name": "Primary",
+            "datasource_type": "snowflake",
+        },
+        headers={"Authorization": "Bearer test-token", "X-Workspace-Id": "ws-1"},
+    )
+    assert resp_bootstrap.status_code == 403

@@ -14,9 +14,11 @@ from app.services.domain.builder_column_feed_service import BuilderColumnFeedSer
 from app.services.domain.domain_admin_write_service import DomainAdminWriteService
 from app.services.domain.domain_column_sample_read_service import DomainColumnSampleReadService
 from app.services.domain.domain_join_service import DomainJoinService
+from app.services.domain.domain_profile_metric_config_service import DomainProfileMetricConfigService
 from app.services.domain.domain_summary_read_service import DomainSummaryReadService
 from app.services.domain.domain_table_read_service import DomainTableReadService
 from app.services.domain.domain_table_write_service import DomainTableWriteService
+from app.services.domain.domain_time_policy_service import DomainTimePolicyService
 from app.services.domain.domain_user_read_service import UserDomainReadService
 from app.services.domain.domain_user_write_service import DomainUserWriteService
 from app.services.domains.capabilities_service import DomainCapabilitiesService
@@ -98,7 +100,6 @@ class DomainsRoot(ForgeResource):
                 name=(body.get("name") or "").strip(),
                 kind=body.get("kind"),
                 description=body.get("description"),
-                model_table_id=body.get("model_table_id"),
                 column_name_policy=body.get("column_name_policy"),
             )
             return {"row": row}, 201
@@ -120,7 +121,6 @@ class DomainById(ForgeResource):
                 kind=body.get("kind") if "kind" in body else None,
                 description=body.get("description") if "description" in body else None,
                 is_active=body.get("is_active") if "is_active" in body else None,
-                model_table_id=body.get("model_table_id") if "model_table_id" in body else None,
                 column_name_policy=body.get("column_name_policy") if "column_name_policy" in body else None,
             )
             return {"row": row}, 200
@@ -507,6 +507,81 @@ class DomainOverlayMetrics(ForgeResource):
             handler,
             log_message=f"Domain overlay metrics fetch failed domain_id={domain_id}",
             client_error="Domain overlay metrics fetch failed",
+        )
+
+
+@qf_domains_ns.route("/<int:domain_id>/profile-metrics")
+class DomainProfileMetrics(ForgeResource):
+    @token_required
+    def get(self, domain_id: int):
+        def handler() -> Tuple[Any, int]:
+            payload = DomainProfileMetricConfigService().get_profile_metrics(
+                workspace_id=_workspace_id(),
+                user_id=require_user_id(),
+                domain_id=domain_id,
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message=f"Domain profile metrics fetch failed domain_id={domain_id}",
+            client_error="Domain profile metrics fetch failed",
+        )
+
+    @token_required
+    def put(self, domain_id: int):
+        def handler() -> Tuple[Any, int]:
+            body = _json_body_dict()
+            payload = DomainProfileMetricConfigService().update_profile_metrics(
+                workspace_id=_workspace_id(),
+                user_id=require_user_id(),
+                domain_id=domain_id,
+                metrics_payload=body.get("metrics"),
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message=f"Domain profile metrics update failed domain_id={domain_id}",
+            client_error="Domain profile metrics update failed",
+        )
+
+
+@qf_domains_ns.route("/<int:domain_id>/time-policy")
+class DomainTimePolicy(ForgeResource):
+    @token_required
+    def get(self, domain_id: int):
+        def handler() -> Tuple[Any, int]:
+            payload = DomainTimePolicyService().get_policy(
+                workspace_id=_workspace_id(),
+                user_id=require_user_id(),
+                domain_id=domain_id,
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message=f"Domain time policy fetch failed domain_id={domain_id}",
+            client_error="Domain time policy fetch failed",
+        )
+
+    @token_required
+    def put(self, domain_id: int):
+        def handler() -> Tuple[Any, int]:
+            body = _json_body_dict()
+            policy_payload = body.get("policy", body)
+            payload = DomainTimePolicyService().update_policy(
+                workspace_id=_workspace_id(),
+                user_id=require_user_id(),
+                domain_id=domain_id,
+                policy_payload=policy_payload,
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message=f"Domain time policy update failed domain_id={domain_id}",
+            client_error="Domain time policy update failed",
         )
 
 

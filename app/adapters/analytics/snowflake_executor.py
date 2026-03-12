@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from urllib.parse import urlparse
 from typing import Optional
 
@@ -59,6 +60,104 @@ def _load_private_key(private_key_path: str, private_key_passphrase: Optional[st
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
+
+
+def _rewrite_named_params_for_snowflake(sql: str, params: Optional[dict]) -> str:
+    """Convert SQLAlchemy-style ``:name`` placeholders to Snowflake ``%(name)s``.
+
+    Query Forge compiles SQL using ``:p1`` style bind names. Snowflake's Python
+    connector expects pyformat placeholders when binding a dict.
+    """
+    text = str(sql or "")
+    if text == "" or not isinstance(params, dict) or not params:
+        return text
+    out = text
+    for name in params.keys():
+        token = str(name or "").strip()
+        if token == "":
+            continue
+        out = re.sub(rf":{re.escape(token)}\b", f"%({token})s", out)
+    return out
+
+
+def _rewrite_identifier_quotes_for_snowflake(sql: str) -> str:
+    """Convert backtick-quoted identifiers to Snowflake double-quoted identifiers.
+
+    Query Forge SQL generation currently uses backticks for quoted identifiers
+    (Spark/MySQL style). Snowflake requires double quotes for quoted identifiers.
+    This rewrite intentionally only operates outside string literals.
+    """
+    text = str(sql or "")
+    if "`" not in text:
+        return text
+
+    out: list[str] = []
+    in_single = False
+    in_double = False
+    in_backtick = False
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+
+        if in_single:
+            out.append(ch)
+            if ch == "'" and i + 1 < n and text[i + 1] == "'":
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if ch == "'":
+                in_single = False
+            i += 1
+            continue
+
+        if in_double:
+            out.append(ch)
+            if ch == '"' and i + 1 < n and text[i + 1] == '"':
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                in_double = False
+            i += 1
+            continue
+
+        if ch == "'":
+            in_single = True
+            out.append(ch)
+            i += 1
+            continue
+
+        if ch == '"':
+            in_double = True
+            out.append(ch)
+            i += 1
+            continue
+
+        if ch == "`":
+            in_backtick = not in_backtick
+            out.append('"')
+            i += 1
+            continue
+
+        if in_backtick and ch == '"':
+            # Preserve literal quotes inside identifier by escaping per Snowflake rules.
+            out.append('""')
+            i += 1
+            continue
+
+        out.append(ch)
+        i += 1
+
+    return "".join(out)
+
+
+def _is_missing_warehouse_error(exc: Exception) -> bool:
+    err_no = getattr(exc, "errno", None)
+    if err_no in {606, "606"}:
+        return True
+    text = str(exc or "").lower()
+    return "no active warehouse selected" in text or "use warehouse" in text
 
 
 class SnowflakeSQLExecutor(SQLExecutor):
@@ -185,9 +284,12 @@ class SnowflakeSQLExecutor(SQLExecutor):
 
             # Snowflake connector accepts params as a sequence for ``%s`` or a dict for ``%(name)s``
             if params:
-                cursor.execute(sql, params)
+                rewritten_sql = _rewrite_identifier_quotes_for_snowflake(sql)
+                rewritten_sql = _rewrite_named_params_for_snowflake(rewritten_sql, params)
+                cursor.execute(rewritten_sql, params)
             else:
-                cursor.execute(sql)
+                rewritten_sql = _rewrite_identifier_quotes_for_snowflake(sql)
+                cursor.execute(rewritten_sql)
 
             columns = [desc[0] for desc in (cursor.description or [])]
             rows = cursor.fetchall()
@@ -208,6 +310,11 @@ class SnowflakeSQLExecutor(SQLExecutor):
                     "Verify SNOWFLAKE_PRIVATE_KEY_PATH/SNOWFLAKE_PRIVATE_KEY_PASSPHRASE and "
                     "that the matching RSA public key is configured for the Snowflake user."
                 ) from exc
+            if _is_missing_warehouse_error(exc):
+                raise RuntimeError(
+                    "Analytics execution failed: no active Snowflake warehouse selected. "
+                    "Set datasource config_json.warehouse (or issue USE WAREHOUSE before queries)."
+                ) from exc
             raise RuntimeError("Analytics query execution failed") from exc
         finally:
             if cursor is not None:
@@ -225,6 +332,9 @@ class SnowflakeSQLExecutor(SQLExecutor):
         """Verify connectivity by running ``SELECT CURRENT_VERSION()``."""
         try:
             self.execute("SELECT CURRENT_VERSION() AS _ping")
+        except RuntimeError:
+            # Preserve specific connection/warehouse/auth diagnostics from execute().
+            raise
         except Exception as exc:
             # FIND-021: sanitized message — no account identifier or hostname.
             logger.exception("SnowflakeSQLExecutor.test_connection failed")

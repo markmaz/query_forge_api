@@ -20,23 +20,48 @@ class SemanticCardService:
         sql: Optional[ForgeQueryPort] = None,
         sample_values_limit: Optional[int] = None,
         stats_enabled: Optional[bool] = None,
+        metadata_mode: Optional[str] = None,
     ) -> None:
+        del metadata_mode
         self._sql = sql or ForgeMetaSQL()
         self._sample_values_limit = max(1, int(sample_values_limit or SEMANTIC_SAMPLE_VALUES_LIMIT))
         self._stats_enabled = SEMANTIC_STATS_ENABLED if stats_enabled is None else bool(stats_enabled)
 
-    def count_columns(self, *, model_table_id: Optional[int] = None) -> int:
+    def count_columns(
+        self,
+        *,
+        model_table_id: Optional[int] = None,
+        workspace_table_id: Optional[int] = None,
+    ) -> int:
+        return self._count_columns_workspace(
+            model_table_id=model_table_id,
+            workspace_table_id=workspace_table_id,
+        )
+
+    def _count_columns_workspace(
+        self,
+        *,
+        model_table_id: Optional[int],
+        workspace_table_id: Optional[int],
+    ) -> int:
         params: Dict[str, Any] = {}
-        where = ""
+        where_parts = ["wt.exists_in_dbx = 1", "wc.exists_in_dbx = 1"]
+        if workspace_table_id is not None:
+            where_parts.append("wc.workspace_table_id = :workspace_table_id")
+            params["workspace_table_id"] = int(workspace_table_id)
         if model_table_id is not None:
-            where = "WHERE mc.model_table_id = :model_table_id"
+            # Legacy compatibility: treat model_table_id filter as workspace_table_id.
+            where_parts.append("wc.workspace_table_id = :model_table_id")
             params["model_table_id"] = int(model_table_id)
 
+        where_sql = f"WHERE {' AND '.join(where_parts)}"
         rows = self._sql.execute_query_mappings(
             f"""
             SELECT COUNT(*) AS total
-            FROM model_column mc
-            {where}
+            FROM workspace_column wc
+            JOIN workspace_table wt
+              ON wt.id = wc.workspace_table_id
+            {where_sql}
             """,
             params,
         )
@@ -48,29 +73,52 @@ class SemanticCardService:
         offset: int,
         limit: int,
         model_table_id: Optional[int] = None,
+        workspace_table_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        return self._build_column_cards_workspace(
+            offset=offset,
+            limit=limit,
+            model_table_id=model_table_id,
+            workspace_table_id=workspace_table_id,
+        )
+
+    def _build_column_cards_workspace(
+        self,
+        *,
+        offset: int,
+        limit: int,
+        model_table_id: Optional[int],
+        workspace_table_id: Optional[int],
     ) -> List[Dict[str, Any]]:
         params: Dict[str, Any] = {"offset": max(0, int(offset)), "limit": max(1, int(limit))}
-        where_parts = []
+        where_parts = ["wt.exists_in_dbx = 1", "wc.exists_in_dbx = 1"]
         if model_table_id is not None:
-            where_parts.append("mc.model_table_id = :model_table_id")
+            # Legacy compatibility: treat model_table_id filter as workspace_table_id.
+            where_parts.append("wc.workspace_table_id = :model_table_id")
             params["model_table_id"] = int(model_table_id)
+        if workspace_table_id is not None:
+            where_parts.append("wc.workspace_table_id = :workspace_table_id")
+            params["workspace_table_id"] = int(workspace_table_id)
+        where_sql = f"WHERE {' AND '.join(where_parts)}"
 
-        where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
         rows = self._sql.execute_query_mappings(
             f"""
             SELECT
-              mc.id AS model_column_id,
-              mc.model_table_id,
-              mt.name AS table_name,
-              mc.column_name,
-              mc.data_type,
-              mc.description,
-              mc.sample_values_json,
-              mc.sample_stats_json
-            FROM model_column mc
-            LEFT JOIN model_table mt ON mt.id = mc.model_table_id
+              COALESCE(wc.model_column_id, wc.id) AS model_column_id,
+              NULL AS model_table_id,
+              wc.id AS workspace_column_id,
+              wt.id AS workspace_table_id,
+              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name, wt.full_name) AS table_name,
+              wc.column_name,
+              wc.data_type,
+              wc.description,
+              wc.sample_values_json,
+              wc.sample_stats_json
+            FROM workspace_column wc
+            JOIN workspace_table wt
+              ON wt.id = wc.workspace_table_id
             {where_sql}
-            ORDER BY mc.id
+            ORDER BY wc.id
             LIMIT :limit OFFSET :offset
             """,
             params,
@@ -85,6 +133,8 @@ class SemanticCardService:
                 {
                     "modelColumnId": int(row["model_column_id"]),
                     "modelTableId": int(row["model_table_id"]) if row.get("model_table_id") is not None else None,
+                    "workspaceColumnId": int(row["workspace_column_id"]),
+                    "workspaceTableId": int(row["workspace_table_id"]),
                     "tableName": row.get("table_name"),
                     "columnName": row.get("column_name"),
                     "dataType": row.get("data_type"),

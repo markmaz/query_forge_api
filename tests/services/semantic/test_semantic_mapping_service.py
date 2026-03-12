@@ -151,3 +151,45 @@ def test_find_concepts_for_column_requires_identifier() -> None:
 
     with pytest.raises(ForgeError, match=r"model_column_id or table_name\+column_name is required"):
         svc.find_concepts_for_column(workspace_id="ws1")
+
+
+def test_mapping_create_with_workspace_column_id_resolves_model_column() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [
+            {
+                "workspace_column_id": 77,
+                "model_column_id": 123,
+                "column_name": "first_name",
+                "workspace_id": "ws1",
+                "table_name": "students",
+            }
+        ],
+        [{"id": 42}],
+        [
+            {
+                "id": 11,
+                "semantic_registry_id": 42,
+                "workspace_id": "ws1",
+                "workspace_norm": "ws1",
+                "model_column_id": 123,
+                "workspace_column_id": 77,
+                "table_name": None,
+                "column_name": None,
+                "priority_rank": 1,
+                "confidence_score": None,
+                "created_at": "2026-01-01",
+                "concept_key": "student.first_name",
+                "vertical": None,
+                "vertical_norm": "__global__",
+                "semantic_type": "attribute",
+                "entity": "student",
+            }
+        ],
+    ]
+    sql.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=11)]
+
+    svc = SemanticMappingService(sql=sql)
+    row = svc.create_mapping({"semantic_registry_id": 42, "workspace_column_id": 77, "priority_rank": 1})
+    assert row["model_column_id"] == 123
+    assert row["workspace_column_id"] == 77

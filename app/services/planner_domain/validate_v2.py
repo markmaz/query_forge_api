@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
+
+_COLUMN_TOKEN_RE = re.compile(r"^wt\d+\.[a-z0-9_]+$")
 
 
 @dataclass(frozen=True)
@@ -157,6 +161,18 @@ def validate_and_repair_plan_v2(
                 )
             )
             repairs.append("removed_prompt_echo_filter")
+            continue
+
+        if _is_self_referential_filter_value(column_key=key, value=value):
+            repairs.append("removed_self_referential_filter")
+            continue
+
+        if _contains_column_token_value(op=op, value=value):
+            repairs.append("removed_column_token_filter_value")
+            continue
+
+        if _is_missing_filter_value(op=op, item=item):
+            repairs.append("removed_missing_filter_value")
             continue
 
         if _is_overlong_filter_value(op=op, value=value):
@@ -377,6 +393,50 @@ def _is_overlong_filter_value(*, op: str, value: Any) -> bool:
     if op_norm in {"in", "not_in"} and isinstance(value, list) and len(value) > 1:
         return any(isinstance(item, str) and len(item) > 80 for item in value)
     return isinstance(value, str) and len(value) > 80
+
+
+def _is_self_referential_filter_value(*, column_key: str, value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    return _norm_key(value) == _norm_key(column_key)
+
+
+def _contains_column_token_value(*, op: str, value: Any) -> bool:
+    op_norm = str(op or "").strip().lower()
+    candidates: List[Any]
+    if op_norm in {"in", "not_in", "between"} and isinstance(value, list):
+        candidates = list(value)
+    else:
+        candidates = [value]
+    for item in candidates:
+        if not isinstance(item, str):
+            continue
+        token = _norm_key(item)
+        if token and _COLUMN_TOKEN_RE.match(token):
+            return True
+    return False
+
+
+def _is_missing_filter_value(*, op: str, item: Mapping[str, Any]) -> bool:
+    op_norm = str(op or "").strip().lower()
+    if op_norm in {"is_null", "is_not_null", "exists", "not_exists"}:
+        return False
+    if op_norm in {"in", "not_in", "between"}:
+        values = item.get("values")
+        if isinstance(values, list) and len(values) > 0:
+            return False
+        value = item.get("value")
+        if value is None:
+            return True
+        if isinstance(value, str) and value.strip() == "":
+            return True
+        return False
+    value = item.get("value")
+    if value is None:
+        return True
+    if isinstance(value, str) and value.strip() == "":
+        return True
+    return False
 
 
 def _plan_is_empty(plan: Mapping[str, Any]) -> bool:

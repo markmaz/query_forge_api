@@ -16,9 +16,14 @@ class Workspace(BaseModel):
 
     @field_validator("server", mode="before")
     def format_server_url(cls, value):
-        if "https:" not in value:
-            return f"{URL_PREFIX}{value}.{URL_SUFFIX}"
-        return value
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        if text.startswith(("https://", "http://")):
+            return text
+        if URL_PREFIX and URL_SUFFIX:
+            return f"{URL_PREFIX}{text}.{URL_SUFFIX}"
+        return text
     
     @field_validator("workspace_id", mode="before")
     def convert_workspace_id_to_str(cls, value):

@@ -74,7 +74,6 @@ class DomainResolver:
 
     lookup order for resolve():
       1) explicit domain_workspace_table mapping
-      2) fallback by matching domain.model_table_id -> workspace_table.model_table_id
     """
 
     def __init__(self, *, workspace_id: str, allow_ambiguous: bool = False, sql: Optional[ForgeQueryPort] = None):
@@ -199,27 +198,6 @@ class DomainResolver:
                     status_code=400,
                 )
             row = mapped_rows[0]
-            return ResolvedDomainFrom(workspace_table_id=int(row["workspace_table_id"]), full_name=_safe_fqn(row["full_name"]))
-
-        fallback_rows = self._sql.execute_query_mappings(
-            """
-            SELECT wt.id AS workspace_table_id, wt.full_name
-            FROM domain d
-            JOIN workspace_table wt
-              ON wt.model_table_id = d.model_table_id
-             AND wt.workspace_id = d.workspace_id
-            WHERE d.id = :domain_id
-              AND d.workspace_id = :ws
-              AND d.is_active = 1
-              AND wt.exists_in_dbx = 1
-            ORDER BY wt.id ASC
-            LIMIT 1
-            """,
-            {"domain_id": domain_id, "ws": self._workspace_id},
-        )
-
-        if fallback_rows:
-            row = fallback_rows[0]
             return ResolvedDomainFrom(workspace_table_id=int(row["workspace_table_id"]), full_name=_safe_fqn(row["full_name"]))
 
         raise ForgeError(f"Unknown domainId {domain_id} for workspace {self._workspace_id}", status_code=404)

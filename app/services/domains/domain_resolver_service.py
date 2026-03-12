@@ -15,8 +15,15 @@ class _Hit:
 
 
 class DomainResolverService:
-    def __init__(self, db_session: Optional[ForgeQueryPort] = None, *, sql: Optional[ForgeQueryPort] = None) -> None:
+    def __init__(
+        self,
+        db_session: Optional[ForgeQueryPort] = None,
+        *,
+        sql: Optional[ForgeQueryPort] = None,
+        metadata_mode: Optional[str] = None,
+    ) -> None:
         self._sql = sql or db_session or ForgeMetaSQL()
+        del metadata_mode
 
     def resolve_from_table_hits(
         self,
@@ -136,10 +143,8 @@ class DomainResolverService:
         sql = f"""
         SELECT
           wt.id AS workspace_table_id,
-          COALESCE(mt.source_table_name, mt.name, wt.table_name, wt.full_name) AS table_name
+          COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name, wt.full_name) AS table_name
         FROM workspace_table wt
-        LEFT JOIN model_table mt
-          ON mt.id = wt.model_table_id
         LEFT JOIN domain_workspace_table dwt
           ON dwt.workspace_table_id = wt.id
         LEFT JOIN domain d

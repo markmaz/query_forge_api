@@ -27,7 +27,28 @@ class _FakeSQL:
                     "domain_is_active": 1,
                 }
             ]
-        if "FROM domain_workspace_table dwt" in query and "LEFT JOIN model_table" in query:
+        if "JOIN workspace_column wc" in query:
+            return [
+                {
+                    "workspace_table_id": 34,
+                    "column_name": "normalized_adm",
+                    "data_type": "double",
+                    "nullable": 1,
+                    "ordinal_position": 1,
+                    "semantic_type": "metric",
+                    "description": "Normalized ADM",
+                },
+                {
+                    "workspace_table_id": 20,
+                    "column_name": "school_name",
+                    "data_type": "string",
+                    "nullable": 1,
+                    "ordinal_position": 1,
+                    "semantic_type": "entity",
+                    "description": "School Name",
+                },
+            ]
+        if "FROM domain_workspace_table dwt" in query and "JOIN workspace_table wt" in query:
             return [
                 {
                     "domain_id": 15,
@@ -68,27 +89,6 @@ class _FakeSQL:
                     "model_table_id": 101,
                     "source_table_name": "dim_school",
                     "table_description": "School dimension",
-                },
-            ]
-        if "JOIN workspace_column wc" in query:
-            return [
-                {
-                    "workspace_table_id": 34,
-                    "column_name": "normalized_adm",
-                    "data_type": "double",
-                    "nullable": 1,
-                    "ordinal_position": 1,
-                    "semantic_type": "metric",
-                    "description": "Normalized ADM",
-                },
-                {
-                    "workspace_table_id": 20,
-                    "column_name": "school_name",
-                    "data_type": "string",
-                    "nullable": 1,
-                    "ordinal_position": 1,
-                    "semantic_type": "entity",
-                    "description": "School Name",
                 },
             ]
         if "FROM domain_table_join dtj" in query:
