@@ -269,3 +269,108 @@ prompt=Show total sales by account and territory
 11. Optionally polish explanation summary with LLM: 1087ms
 12. Defer next action generation (async): 0ms
 13. Persist conversation state for follow-up context: 0ms
+2026-03-11 18:02:00,978 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=1a4d5d3b-8d94-41fc-b818-12b9f9e2824b workspace_id=ws_dd20dc22de3844449772220c user_id=ebc3f256-0520-40f6-a71f-140a1fb2af82 conversation_id=pdc_5a415e29251a4cf4a9aa total_ms=18971
+prompt=Show total sales by account and territory
+1. Load and prepare conversation context: 1ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 185ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 193ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 16630ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 1953ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-11 18:04:28,962 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=8e00ec43-83bd-4297-8897-57743d0d1fae workspace_id=ws_dd20dc22de3844449772220c user_id=ebc3f256-0520-40f6-a71f-140a1fb2af82 conversation_id=pdc_5a415e29251a4cf4a9aa total_ms=30026
+prompt=Show total sales by account and territory
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 118ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 303ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 27652ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 1945ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-11 18:10:05,003 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=2f565d09-4def-4ba7-a2d6-c3395f55d930 workspace_id=ws_dd20dc22de3844449772220c user_id=ebc3f256-0520-40f6-a71f-140a1fb2af82 conversation_id=pdc_5a415e29251a4cf4a9aa total_ms=7733
+prompt=Show total sales revenue by sales rep this quarter
+1. Load and prepare conversation context: 2ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 144ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 130ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 6329ms
+7. Normalize plan and apply deterministic value/filter normalizers: 1ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 1118ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-11 19:24:25,358 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=65d73859-e4f8-4cda-ad07-b2c4b3ab6974 workspace_id=ws_dd20dc22de3844449772220c user_id=ebc3f256-0520-40f6-a71f-140a1fb2af82 conversation_id=pdc_5a415e29251a4cf4a9aa total_ms=6814
+prompt=Show total sales revenue by sales rep this quarter
+1. Load and prepare conversation context: 1ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 143ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 76ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 5464ms
+7. Normalize plan and apply deterministic value/filter normalizers: 1ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 1118ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-11 19:31:21,451 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=2323392b-5605-4e5d-96d3-425398ecf0f5 workspace_id=ws_dd20dc22de3844449772220c user_id=ebc3f256-0520-40f6-a71f-140a1fb2af82 conversation_id=pdc_5a415e29251a4cf4a9aa total_ms=89805
+prompt=Show total sales revenue by sales rep this quarter
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 54ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 79ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 88559ms
+7. Normalize plan and apply deterministic value/filter normalizers: 3ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 1100ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-11 20:50:08,719 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=7cd10480-6a3e-4b4b-a10e-6786a688567d workspace_id=ws_dd20dc22de3844449772220c user_id=ebc3f256-0520-40f6-a71f-140a1fb2af82 conversation_id=pdc_5a415e29251a4cf4a9aa total_ms=106887
+prompt=Show total sales revenue by sales rep this quarter
+1. Load and prepare conversation context: 10ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 441ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 211ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 105102ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 1101ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-11 20:51:40,295 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=3979ab7e-653b-4a5f-86c1-d38f1d71c840 workspace_id=ws_dd20dc22de3844449772220c user_id=ebc3f256-0520-40f6-a71f-140a1fb2af82 conversation_id=pdc_5a415e29251a4cf4a9aa total_ms=6800
+prompt=Show total sales revenue by sales rep this quarter and include their first name and last name
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 97ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 69ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 5197ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 1427ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 0ms

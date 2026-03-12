@@ -307,3 +307,67 @@ def test_compact_planner_raises_specific_truncation_error_when_both_attempts_tru
         )
     assert str(exc.value.message) == "planner_compact_truncation"
     assert exc.value.status_code == 502
+
+
+def test_compact_planner_coerces_relative_time_when_time_key_not_candidate() -> None:
+    payload = {
+        "base_domain_key": "sales_performance",
+        "intent": "aggregate",
+        "metrics": ["sales_amount"],
+        "dimensions": ["account_name"],
+        "filters": [],
+        "time": {
+            "time_concept_key": "fiscal_quarter",
+            "time_range": None,
+            "time_grain": None,
+            "start_date": None,
+            "end_date": None,
+        },
+        "needs_clarification": False,
+        "clarification_question": None,
+        "confidence": 0.9,
+    }
+    llm = _FakeLLM(
+        [
+            {
+                "parsed": payload,
+                "content": json.dumps(payload),
+                "raw_text": json.dumps(payload),
+                "finish_reason": "stop",
+            }
+        ]
+    )
+    candidates = _semantic_candidates().model_copy(
+        update={
+            "time_candidates": [],
+            "filter_candidates": [
+                SemanticConceptCandidate(
+                    concept_key="FISCAL_QUARTER",
+                    label="Fiscal Quarter",
+                    source_column_key="wt179.fiscal_quarter",
+                    score=0.2,
+                    semantic_type="filter",
+                    aliases=["fiscal quarter"],
+                    domain_key="SALES_PERFORMANCE",
+                )
+            ],
+        }
+    )
+    out = build_compact_plan_and_project(
+        prompt="Show total sales by account this quarter",
+        normalized_prompt="Show total sales by account this quarter",
+        workspace_id="ws-1",
+        vertical_norm="generic",
+        base_domain_id=3,
+        domain_name="Sales Performance",
+        capabilities_compact=_capabilities(),
+        conversation_context={},
+        trace_id="trace-compact-5",
+        llm_client=llm,
+        retrieval_service=_FakeRetrieval(candidates),
+        max_tokens=500,
+        fast_mode=False,
+    )
+    assert out["compact_plan"]["time"]["time_range"] == "this_quarter"
+    assert out["compact_plan"]["time"]["time_grain"] == "quarter"
+    assert out["compact_plan"]["time"].get("time_concept_key") in {None, ""}

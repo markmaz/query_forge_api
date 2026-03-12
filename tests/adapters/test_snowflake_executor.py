@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.adapters.analytics.snowflake_executor import (
     _is_missing_warehouse_error,
+    _rewrite_identifier_quotes_for_snowflake,
     _rewrite_named_params_for_snowflake,
 )
 
@@ -27,3 +28,15 @@ def test_is_missing_warehouse_error_by_errno() -> None:
 
 def test_is_missing_warehouse_error_by_message() -> None:
     assert _is_missing_warehouse_error(Exception("No active warehouse selected in the current session")) is True
+
+
+def test_rewrite_identifier_quotes_for_snowflake_converts_backticks() -> None:
+    sql = "select `Total Net Amount`, `x y` from `SCHEMA`.`TABLE`"
+    out = _rewrite_identifier_quotes_for_snowflake(sql)
+    assert out == 'select "Total Net Amount", "x y" from "SCHEMA"."TABLE"'
+
+
+def test_rewrite_identifier_quotes_for_snowflake_preserves_string_literals() -> None:
+    sql = "select '`literal`' as `label`, 'it''s ok' as `note`"
+    out = _rewrite_identifier_quotes_for_snowflake(sql)
+    assert out == 'select \'`literal`\' as "label", \'it\'\'s ok\' as "note"'

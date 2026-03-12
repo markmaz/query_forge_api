@@ -18,6 +18,7 @@ from app.services.domain.domain_profile_metric_config_service import DomainProfi
 from app.services.domain.domain_summary_read_service import DomainSummaryReadService
 from app.services.domain.domain_table_read_service import DomainTableReadService
 from app.services.domain.domain_table_write_service import DomainTableWriteService
+from app.services.domain.domain_time_policy_service import DomainTimePolicyService
 from app.services.domain.domain_user_read_service import UserDomainReadService
 from app.services.domain.domain_user_write_service import DomainUserWriteService
 from app.services.domains.capabilities_service import DomainCapabilitiesService
@@ -543,6 +544,44 @@ class DomainProfileMetrics(ForgeResource):
             handler,
             log_message=f"Domain profile metrics update failed domain_id={domain_id}",
             client_error="Domain profile metrics update failed",
+        )
+
+
+@qf_domains_ns.route("/<int:domain_id>/time-policy")
+class DomainTimePolicy(ForgeResource):
+    @token_required
+    def get(self, domain_id: int):
+        def handler() -> Tuple[Any, int]:
+            payload = DomainTimePolicyService().get_policy(
+                workspace_id=_workspace_id(),
+                user_id=require_user_id(),
+                domain_id=domain_id,
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message=f"Domain time policy fetch failed domain_id={domain_id}",
+            client_error="Domain time policy fetch failed",
+        )
+
+    @token_required
+    def put(self, domain_id: int):
+        def handler() -> Tuple[Any, int]:
+            body = _json_body_dict()
+            policy_payload = body.get("policy", body)
+            payload = DomainTimePolicyService().update_policy(
+                workspace_id=_workspace_id(),
+                user_id=require_user_id(),
+                domain_id=domain_id,
+                policy_payload=policy_payload,
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message=f"Domain time policy update failed domain_id={domain_id}",
+            client_error="Domain time policy update failed",
         )
 
 

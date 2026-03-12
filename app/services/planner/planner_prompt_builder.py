@@ -16,6 +16,7 @@ def build_compact_semantic_planner_developer_prompt() -> str:
         "Prefer NAME/LABEL concepts for grouping when user says 'by X'.\n"
         "Do not add filters unless user asked for a restriction.\n"
         "Do not infer time range or time grain unless user asked for time.\n"
+        "For relative phrases like this/last month/quarter/year, set time.time_range and keep time.time_concept_key null unless it exists in time_candidates.\n"
         "If a business term maps to multiple metrics and no default is provided, ask for clarification.\n"
         "Use intent='aggregate' for totals, sums, counts, averages, and grouped 'by' requests.\n"
         "No markdown, prose, code fences, or comments.\n"
@@ -147,4 +148,3 @@ def _candidate_for_prompt(row: Any) -> Dict[str, Any]:
         "label": str(getattr(row, "label", "") or "").strip(),
         "score": float(getattr(row, "score", 0.0) or 0.0),
     }
-

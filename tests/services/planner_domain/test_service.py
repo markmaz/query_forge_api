@@ -2364,6 +2364,110 @@ def test_normalize_relative_time_does_not_rewrite_last_30_days_prompt() -> None:
     assert debug == []
 
 
+def test_normalize_relative_time_this_quarter_with_fiscal_policy() -> None:
+    plan = {
+        "time": {},
+        "filters": [
+            {
+                "column_key": "wt179.fiscal_quarter",
+                "op": "in",
+                "value": {"type": "time_period", "time_period": "quarter", "time_range": "this_quarter"},
+            }
+        ],
+    }
+    capabilities = {
+        "dimensions": [],
+        "filter_columns": [
+            {"column_key": "wt179.fiscal_quarter", "column_name": "fiscal_quarter", "data_type": "string"},
+        ],
+        "time_columns": [
+            {"column_key": "wt179.date_key", "column_name": "date_key", "data_type": "date"},
+        ],
+    }
+    policy = {
+        "calendar_mode": "fiscal",
+        "fiscal_year_start_month": 7,
+        "relative_map": {},
+    }
+    out, issues, debug = _normalize_relative_time_in_plan(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="Show total sales by rep this quarter",
+        domain_time_policy=policy,
+        today=date(2026, 3, 11),
+    )
+    assert issues == []
+    assert out["time"]["time_range"] == "custom"
+    assert out["time"]["start_date"] == "2026-01-01"
+    assert out["time"]["end_date"] == "2026-03-11"
+    assert out["time"]["time_grain"] == "quarter"
+    assert out["filters"] == []
+    assert debug and debug[0]["relative_token"] == "this_quarter"
+
+
+def test_normalize_relative_time_uses_policy_relative_map_alias() -> None:
+    plan = {"time": {}, "filters": []}
+    capabilities = {
+        "dimensions": [],
+        "filter_columns": [],
+        "time_columns": [
+            {"column_key": "wt179.date_key", "column_name": "date_key", "data_type": "date"},
+        ],
+    }
+    policy = {
+        "calendar_mode": "calendar",
+        "relative_map": {"this qtr": "this_quarter"},
+    }
+    out, issues, debug = _normalize_relative_time_in_plan(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="Show total sales by territory this qtr",
+        domain_time_policy=policy,
+        today=date(2026, 3, 10),
+    )
+    assert issues == []
+    assert out["time"]["start_date"] == "2026-01-01"
+    assert out["time"]["end_date"] == "2026-03-10"
+    assert debug and debug[0]["relative_token"] == "this_quarter"
+
+
+def test_normalize_relative_time_rewrites_time_period_filter_without_prompt_phrase() -> None:
+    plan = {
+        "time": {},
+        "filters": [
+            {
+                "column_key": "wt179.fiscal_quarter",
+                "op": "in",
+                "value": {"type": "time_period", "time_period": "quarter", "time_range": "this_quarter"},
+            },
+            {"column_key": "wt187.region_name", "op": "=", "value": "West"},
+        ],
+    }
+    capabilities = {
+        "dimensions": [
+            {"column_key": "wt187.region_name", "column_name": "region_name", "data_type": "string"},
+        ],
+        "filter_columns": [
+            {"column_key": "wt179.fiscal_quarter", "column_name": "fiscal_quarter", "data_type": "string"},
+        ],
+        "time_columns": [
+            {"column_key": "wt179.date_key", "column_name": "date_key", "data_type": "date"},
+        ],
+    }
+    out, issues, _debug = _normalize_relative_time_in_plan(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="Show total sales by region",
+        domain_time_policy={"relative_map": {}},
+        today=date(2026, 3, 10),
+    )
+    assert issues == []
+    assert out["time"]["time_range"] == "custom"
+    assert out["time"]["start_date"] == "2026-01-01"
+    assert out["time"]["end_date"] == "2026-03-10"
+    assert out["filters"] == [{"column_key": "wt187.region_name", "op": "=", "value": "West"}]
+
+
 def test_prompt_is_followup_edit_does_not_treat_top_query_as_patch() -> None:
     assert _prompt_is_followup_edit(
         prompt="Show me the top 5 sales reps for this month",

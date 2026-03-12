@@ -27,7 +27,20 @@ semantic_relationship_model = semantic_relationships_ns.model(
         "vertical": fields.String(readOnly=True),
         "vertical_norm": fields.String(readOnly=True),
         "parent_concept_key": fields.String(readOnly=True),
+        "parent_concept_name": fields.String(readOnly=True),
+        "parent_display_label": fields.String(readOnly=True),
         "child_concept_key": fields.String(readOnly=True),
+        "child_concept_name": fields.String(readOnly=True),
+        "child_display_label": fields.String(readOnly=True),
+    },
+)
+
+semantic_relationship_patch_model = semantic_relationships_ns.model(
+    "SemanticRelationshipPatch",
+    {
+        "parent_concept_id": fields.Integer(required=False),
+        "child_concept_id": fields.Integer(required=False),
+        "relationship_type": fields.String(required=False),
     },
 )
 
@@ -76,8 +89,59 @@ class SemanticRelationshipsCollection(ForgeResource):
             return {"error": "semantic relationship create failed"}, 500
 
 
+@semantic_relationships_ns.route("/concepts")
+class SemanticRelationshipConceptLookup(ForgeResource):
+    @token_required
+    @semantic_relationships_ns.doc(
+        params={
+            "vertical": "Filter by vertical scope",
+            "q": "Search by concept key/name/description",
+            "page": "Page number",
+            "page_size": "Page size",
+        }
+    )
+    def get(self):
+        try:
+            result = SemanticRelationshipService().list_concept_lookup(
+                vertical=request.args.get("vertical") or None,
+                q=request.args.get("q") or None,
+                page=int_arg("page", 1),
+                page_size=int_arg("page_size", 100),
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("semantic relationship concept lookup failed")
+            return {"error": "semantic relationship concept lookup failed"}, 500
+
+
 @semantic_relationships_ns.route("/<int:relationship_id>")
 class SemanticRelationshipsById(ForgeResource):
+    @token_required
+    def get(self, relationship_id: int):
+        try:
+            row = SemanticRelationshipService().get_relationship(relationship_id)
+            return {"row": row}, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("semantic relationship get failed")
+            return {"error": "semantic relationship get failed"}, 500
+
+    @token_required
+    @semantic_relationships_ns.expect(semantic_relationship_patch_model, validate=False)
+    def patch(self, relationship_id: int):
+        try:
+            body: Dict[str, Any] = request.get_json(silent=True) or {}
+            row = SemanticRelationshipService().patch_relationship(relationship_id, body)
+            return {"row": row}, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("semantic relationship patch failed")
+            return {"error": "semantic relationship patch failed"}, 500
+
     @token_required
     def delete(self, relationship_id: int):
         try:

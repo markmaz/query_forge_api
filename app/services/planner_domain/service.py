@@ -6,10 +6,11 @@ import os
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from logging.handlers import WatchedFileHandler
 from time import perf_counter
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from qdrant_client.http import models as qdrant_models
@@ -59,6 +60,7 @@ from app.exceptions.forge_error import ForgeError
 from app.infra.embedding_model import EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
 from app.services.domains.capabilities_service import DomainCapabilitiesService
+from app.services.domain.domain_time_policy_service import DomainTimePolicyService
 from app.services.llm.llm_client import LLMClient
 from app.services.llm.prompts_plan_v2 import (
     NEXT_ACTIONS_JSON_SCHEMA,
@@ -368,6 +370,7 @@ class PlannerDomainService:
         embedding_model: Optional[EmbeddingModel] = None,
         column_qdrant: Optional[QdrantClientWrapper] = None,
         value_alias_resolver: Optional[ValueAliasResolutionService] = None,
+        domain_time_policy_service: Optional[DomainTimePolicyService] = None,
         conversation_store: Optional[PlannerDomainConversationStore] = None,
         conversation_ttl_seconds: Optional[int] = None,
     ) -> None:
@@ -381,6 +384,7 @@ class PlannerDomainService:
         self._embedding = embedding_model
         self._column_qdrant = column_qdrant
         self._value_alias_resolver_svc = value_alias_resolver
+        self._domain_time_policy = domain_time_policy_service or DomainTimePolicyService()
         self._conversation_store = conversation_store or HybridPlannerDomainConversationStore()
         self._conversation_ttl_seconds = max(60, int(conversation_ttl_seconds or default_conversation_ttl_seconds()))
 
@@ -554,6 +558,32 @@ class PlannerDomainService:
         )
 
         selected_domain_name = _selected_domain_name(domain_candidates=domain_candidates, selected_domain_id=selected_domain_id)
+        domain_time_policy: Dict[str, Any] = {}
+        if selected_domain_id is not None:
+            try:
+                policy_resp = self._domain_time_policy.get_policy(
+                    workspace_id=req.workspace_id,
+                    user_id=str(user_id),
+                    domain_id=int(selected_domain_id),
+                )
+                policy_obj = policy_resp.get("policy") if isinstance(policy_resp, Mapping) else None
+                if isinstance(policy_obj, Mapping):
+                    domain_time_policy = dict(policy_obj)
+            except Exception as exc:
+                logger.warning(
+                    "planner_domain time_policy_load_failed workspace_id=%s domain_id=%s trace_id=%s err=%s",
+                    req.workspace_id,
+                    selected_domain_id,
+                    trace_id,
+                    exc,
+                )
+                domain_time_policy = {}
+        _append_pipeline_trace_step(
+            trace=pipeline_trace,
+            enabled=trace_capture_enabled,
+            step="time_policy",
+            data={"domain_time_policy": domain_time_policy},
+        )
         semantic_value_alias_constraints = self._semantic_value_alias_constraints(
             prompt=normalized_prompt,
             vertical_norm=vertical,
@@ -831,6 +861,7 @@ class PlannerDomainService:
             plan_json=llm_plan,
             capabilities=capabilities_full,
             prompt=normalized_prompt,
+            domain_time_policy=domain_time_policy,
         )
         llm_plan, top_bottom_issues, _ = _normalize_top_bottom_ranking_in_plan(
             plan_json=llm_plan,
@@ -987,6 +1018,7 @@ class PlannerDomainService:
                 plan_json=retry_plan,
                 capabilities=capabilities_full,
                 prompt=normalized_prompt,
+                domain_time_policy=domain_time_policy,
             )
             retry_plan, retry_top_bottom_issues, _ = _normalize_top_bottom_ranking_in_plan(
                 plan_json=retry_plan,
@@ -4783,45 +4815,41 @@ def _normalize_relative_time_in_plan(
     plan_json: Mapping[str, Any],
     capabilities: Mapping[str, Any],
     prompt: str,
+    domain_time_policy: Optional[Mapping[str, Any]] = None,
     today: Optional[date] = None,
 ) -> Tuple[Dict[str, Any], List[Dict[str, str]], List[Dict[str, Any]]]:
     plan = dict(plan_json or {})
     time_block = dict(plan.get("time") or {}) if isinstance(plan.get("time"), dict) else {}
+    filters = [dict(item) for item in list(plan.get("filters") or []) if isinstance(item, Mapping)]
     prompt_norm = normalize_plan_prompt(prompt)
-    month_phrase = _prompt_relative_month_phrase(prompt_norm)
-    year_phrase = _prompt_relative_year_phrase(prompt_norm)
-    if month_phrase == "" and year_phrase == "":
+    policy = _normalize_domain_time_policy(domain_time_policy)
+    if not bool(policy.get("allow_relative_ranges", True)):
         return plan, [], []
 
-    anchor = today or date.today()
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    relative_phrase = ""
+    relative_token = _resolve_relative_time_token(
+        prompt_norm=prompt_norm,
+        time_block=time_block,
+        filters=filters,
+        relative_map=policy.get("relative_map") if isinstance(policy.get("relative_map"), Mapping) else {},
+    )
+    if relative_token == "":
+        return plan, [], []
 
-    if month_phrase == "last_month":
-        this_month_start = date(anchor.year, anchor.month, 1)
-        end_date = this_month_start - timedelta(days=1)
-        start_date = date(end_date.year, end_date.month, 1)
-        relative_phrase = "last month"
-    elif month_phrase == "this_month":
-        start_date = date(anchor.year, anchor.month, 1)
-        end_date = anchor
-        relative_phrase = "this month"
-    elif year_phrase == "last_year":
-        start_date = date(anchor.year - 1, 1, 1)
-        end_date = date(anchor.year - 1, 12, 31)
-        relative_phrase = "last year"
-    elif year_phrase == "this_year":
-        start_date = date(anchor.year, 1, 1)
-        end_date = anchor
-        relative_phrase = "this year"
+    anchor = _policy_anchor_date(today=today, timezone_name=str(policy.get("timezone") or ""))
+    start_date, end_date, relative_phrase = _compute_relative_range(
+        token=relative_token,
+        anchor=anchor,
+        policy=policy,
+    )
 
     if start_date is None or end_date is None:
         return plan, [], []
 
-    time_column_key = _norm_key(time_block.get("time_column_key"))
-    if time_column_key == "":
-        time_column_key = _best_time_column_key_for_relative_range(capabilities=capabilities)
+    time_column_key = _resolve_time_column_key_for_relative_range(
+        explicit_time_column_key=time_block.get("time_column_key"),
+        policy_default_time_column_key=policy.get("default_time_concept_key"),
+        capabilities=capabilities,
+    )
     if time_column_key == "":
         return plan, [], [{"action": "relative_time_skipped", "reason": "no_time_column_available"}]
 
@@ -4830,7 +4858,11 @@ def _normalize_relative_time_in_plan(
     time_block["end_date"] = end_date.isoformat()
     time_block["time_column_key"] = time_column_key
     if _norm_key(time_block.get("time_grain")) == "":
-        time_block["time_grain"] = "year" if year_phrase else "month"
+        default_grain = _norm_key(policy.get("default_grain"))
+        if default_grain in {"day", "week", "month", "quarter", "year"}:
+            time_block["time_grain"] = default_grain
+        else:
+            time_block["time_grain"] = _relative_time_grain(relative_token)
     plan["time"] = time_block
 
     col_lookup = {
@@ -4844,10 +4876,17 @@ def _normalize_relative_time_in_plan(
     }
     dropped_keys: List[str] = []
     normalized_filters: List[Dict[str, Any]] = []
-    for row in [dict(item) for item in list(plan.get("filters") or []) if isinstance(item, Mapping)]:
+    for row in filters:
         key = _norm_key(row.get("column_key"))
         column_name = str((col_lookup.get(key) or {}).get("column_name") or "").strip().lower()
-        if _is_generic_month_column_name(column_name) or _is_generic_year_column_name(column_name):
+        if _is_time_period_filter_value(row):
+            dropped_keys.append(key or "(time_period)")
+            continue
+        if (
+            _is_generic_month_column_name(column_name)
+            or _is_generic_year_column_name(column_name)
+            or _is_generic_quarter_column_name(column_name)
+        ):
             dropped_keys.append(key)
             continue
         normalized_filters.append(row)
@@ -4856,11 +4895,14 @@ def _normalize_relative_time_in_plan(
     debug_rows: List[Dict[str, Any]] = [
         {
             "action": "normalized_relative_time",
+            "relative_token": relative_token,
             "relative_phrase": relative_phrase,
+            "policy_calendar_mode": policy.get("calendar_mode"),
+            "policy_timezone": policy.get("timezone"),
             "time_column_key": time_column_key,
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
-            "dropped_month_filters": dropped_keys,
+            "dropped_time_filters": dropped_keys,
         }
     ]
     return plan, [], debug_rows
@@ -4961,6 +5003,13 @@ def _is_generic_year_column_name(column_name: str) -> bool:
     if token == "":
         return False
     return token in {"year", "year_num", "calendar_year", "fiscal_year"} or token.endswith("_year")
+
+
+def _is_generic_quarter_column_name(column_name: str) -> bool:
+    token = str(column_name or "").strip().lower()
+    if token == "":
+        return False
+    return token in {"quarter", "quarter_num", "fiscal_quarter", "calendar_quarter"} or token.endswith("_quarter")
 
 
 def _normalize_top_bottom_ranking_in_plan(
@@ -5111,6 +5160,276 @@ def _prompt_relative_year_phrase(prompt_norm: str) -> str:
     return ""
 
 
+def _prompt_relative_quarter_phrase(prompt_norm: str) -> str:
+    text = str(prompt_norm or "").strip().lower()
+    if re.search(r"\b(last|previous)\s+fiscal\s+quarter\b", text) is not None:
+        return "fiscal_last_quarter"
+    if re.search(r"\b(this|current)\s+fiscal\s+quarter\b", text) is not None:
+        return "fiscal_this_quarter"
+    if re.search(r"\b(last|previous)\s+quarter\b", text) is not None:
+        return "last_quarter"
+    if re.search(r"\b(this|current)\s+quarter\b", text) is not None:
+        return "this_quarter"
+    return ""
+
+
+def _canonical_relative_time_token(raw: Any) -> str:
+    token = _norm_key(raw).replace("-", "_").replace(" ", "_")
+    aliases = {
+        "this_month": "this_month",
+        "current_month": "this_month",
+        "last_month": "last_month",
+        "previous_month": "last_month",
+        "this_year": "this_year",
+        "current_year": "this_year",
+        "last_year": "last_year",
+        "previous_year": "last_year",
+        "this_quarter": "this_quarter",
+        "current_quarter": "this_quarter",
+        "last_quarter": "last_quarter",
+        "previous_quarter": "last_quarter",
+        "fiscal_this_quarter": "fiscal_this_quarter",
+        "this_fiscal_quarter": "fiscal_this_quarter",
+        "current_fiscal_quarter": "fiscal_this_quarter",
+        "fiscal_last_quarter": "fiscal_last_quarter",
+        "last_fiscal_quarter": "fiscal_last_quarter",
+        "previous_fiscal_quarter": "fiscal_last_quarter",
+    }
+    return aliases.get(token, "")
+
+
+def _resolve_relative_time_token(
+    *,
+    prompt_norm: str,
+    time_block: Mapping[str, Any],
+    filters: Sequence[Mapping[str, Any]],
+    relative_map: Mapping[str, Any],
+) -> str:
+    direct = _prompt_relative_quarter_phrase(prompt_norm)
+    if direct == "":
+        direct = _prompt_relative_month_phrase(prompt_norm)
+    if direct == "":
+        direct = _prompt_relative_year_phrase(prompt_norm)
+
+    mapped = _resolve_relative_token_from_map(prompt_norm=prompt_norm, relative_map=relative_map)
+    if mapped != "":
+        return mapped
+    if direct != "":
+        return direct
+
+    block_token = _canonical_relative_time_token(time_block.get("time_range"))
+    if block_token != "":
+        return block_token
+
+    return _resolve_relative_token_from_filters(filters)
+
+
+def _resolve_relative_token_from_map(*, prompt_norm: str, relative_map: Mapping[str, Any]) -> str:
+    text = _norm_key(prompt_norm)
+    if text == "" or not isinstance(relative_map, Mapping):
+        return ""
+
+    items: List[Tuple[str, str]] = []
+    for raw_key, raw_value in dict(relative_map).items():
+        key = _norm_key(raw_key)
+        value = _canonical_relative_time_token(raw_value)
+        if key == "" or value == "":
+            continue
+        items.append((key, value))
+    if not items:
+        return ""
+    items.sort(key=lambda item: len(item[0]), reverse=True)
+    for key, value in items:
+        if text == key:
+            return value
+        pattern = rf"(^|[^a-z0-9]){re.escape(key)}($|[^a-z0-9])"
+        if re.search(pattern, text) is not None:
+            return value
+    return ""
+
+
+def _resolve_relative_token_from_filters(filters: Sequence[Mapping[str, Any]]) -> str:
+    for row in filters:
+        if not isinstance(row, Mapping):
+            continue
+        value = row.get("value")
+        if isinstance(value, Mapping):
+            token = _canonical_relative_time_token(value.get("time_range"))
+            if token != "":
+                return token
+            period = _norm_key(value.get("time_period"))
+            if period == "quarter":
+                return "this_quarter"
+            if period == "month":
+                return "this_month"
+            if period == "year":
+                return "this_year"
+        token = _canonical_relative_time_token(row.get("value"))
+        if token != "":
+            return token
+        for item in list(row.get("values") or []):
+            token = _canonical_relative_time_token(item)
+            if token != "":
+                return token
+    return ""
+
+
+def _relative_time_grain(relative_token: str) -> str:
+    token = _canonical_relative_time_token(relative_token)
+    if token.endswith("_quarter"):
+        return "quarter"
+    if token.endswith("_year"):
+        return "year"
+    return "month"
+
+
+def _normalize_domain_time_policy(policy: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "calendar_mode": "calendar",
+        "fiscal_year_start_month": None,
+        "timezone": None,
+        "default_time_concept_key": None,
+        "allow_relative_ranges": True,
+        "default_grain": None,
+        "relative_map": {},
+    }
+    if not isinstance(policy, Mapping):
+        return out
+    calendar_mode = _norm_key(policy.get("calendar_mode"))
+    if calendar_mode in {"calendar", "fiscal"}:
+        out["calendar_mode"] = calendar_mode
+    fiscal_month = _to_int(policy.get("fiscal_year_start_month"))
+    if fiscal_month is not None and 1 <= fiscal_month <= 12:
+        out["fiscal_year_start_month"] = fiscal_month
+    timezone_name = str(policy.get("timezone") or "").strip()
+    out["timezone"] = timezone_name or None
+    default_time_key = _norm_key(policy.get("default_time_concept_key"))
+    out["default_time_concept_key"] = default_time_key or None
+    if "allow_relative_ranges" in policy:
+        out["allow_relative_ranges"] = bool(policy.get("allow_relative_ranges"))
+    default_grain = _norm_key(policy.get("default_grain"))
+    if default_grain in {"day", "week", "month", "quarter", "year"}:
+        out["default_grain"] = default_grain
+    rel = policy.get("relative_map")
+    if isinstance(rel, Mapping):
+        out["relative_map"] = {str(k): str(v) for k, v in dict(rel).items()}
+    return out
+
+
+def _policy_anchor_date(*, today: Optional[date], timezone_name: str) -> date:
+    if today is not None:
+        return today
+    tz = str(timezone_name or "").strip()
+    if tz:
+        try:
+            return datetime.now(ZoneInfo(tz)).date()
+        except Exception:
+            pass
+    return date.today()
+
+
+def _compute_relative_range(
+    *,
+    token: str,
+    anchor: date,
+    policy: Mapping[str, Any],
+) -> Tuple[Optional[date], Optional[date], str]:
+    canonical_token = _canonical_relative_time_token(token)
+    if canonical_token == "":
+        return None, None, ""
+
+    if canonical_token == "last_month":
+        this_month_start = date(anchor.year, anchor.month, 1)
+        end_date = this_month_start - timedelta(days=1)
+        start_date = date(end_date.year, end_date.month, 1)
+        return start_date, end_date, "last month"
+    if canonical_token == "this_month":
+        start_date = date(anchor.year, anchor.month, 1)
+        return start_date, anchor, "this month"
+
+    calendar_mode = _norm_key(policy.get("calendar_mode"))
+    fiscal_start = _to_int(policy.get("fiscal_year_start_month"))
+    use_fiscal_quarter = canonical_token in {"fiscal_this_quarter", "fiscal_last_quarter"} or (
+        canonical_token in {"this_quarter", "last_quarter"}
+        and calendar_mode == "fiscal"
+        and fiscal_start is not None
+        and 1 <= fiscal_start <= 12
+    )
+
+    if canonical_token in {"this_quarter", "fiscal_this_quarter"}:
+        start_date, quarter_end = _current_quarter_range(anchor=anchor, use_fiscal=use_fiscal_quarter, fiscal_start_month=fiscal_start)
+        del quarter_end
+        return start_date, anchor, "this quarter"
+    if canonical_token in {"last_quarter", "fiscal_last_quarter"}:
+        start_date, end_date = _last_quarter_range(anchor=anchor, use_fiscal=use_fiscal_quarter, fiscal_start_month=fiscal_start)
+        return start_date, end_date, "last quarter"
+
+    use_fiscal_year = calendar_mode == "fiscal" and fiscal_start is not None and 1 <= fiscal_start <= 12
+    if canonical_token == "this_year":
+        if use_fiscal_year:
+            start_date = _fiscal_year_start_for_date(anchor=anchor, fiscal_start_month=int(fiscal_start))
+            return start_date, anchor, "this year"
+        return date(anchor.year, 1, 1), anchor, "this year"
+    if canonical_token == "last_year":
+        if use_fiscal_year:
+            fy_start = _fiscal_year_start_for_date(anchor=anchor, fiscal_start_month=int(fiscal_start))
+            start_date = _add_months(fy_start, -12)
+            end_date = fy_start - timedelta(days=1)
+            return start_date, end_date, "last year"
+        return date(anchor.year - 1, 1, 1), date(anchor.year - 1, 12, 31), "last year"
+
+    return None, None, ""
+
+
+def _fiscal_year_start_for_date(*, anchor: date, fiscal_start_month: int) -> date:
+    if anchor.month >= fiscal_start_month:
+        return date(anchor.year, fiscal_start_month, 1)
+    return date(anchor.year - 1, fiscal_start_month, 1)
+
+
+def _current_quarter_range(
+    *,
+    anchor: date,
+    use_fiscal: bool,
+    fiscal_start_month: Optional[int],
+) -> Tuple[date, date]:
+    if use_fiscal and fiscal_start_month is not None and 1 <= fiscal_start_month <= 12:
+        fy_start = _fiscal_year_start_for_date(anchor=anchor, fiscal_start_month=fiscal_start_month)
+        months_since_fy = (anchor.year - fy_start.year) * 12 + (anchor.month - fy_start.month)
+        quarter_index = max(0, months_since_fy // 3)
+        quarter_start = _add_months(fy_start, quarter_index * 3)
+        quarter_end = _add_months(quarter_start, 3) - timedelta(days=1)
+        return quarter_start, quarter_end
+
+    quarter_start_month = ((anchor.month - 1) // 3) * 3 + 1
+    quarter_start = date(anchor.year, quarter_start_month, 1)
+    quarter_end = _add_months(quarter_start, 3) - timedelta(days=1)
+    return quarter_start, quarter_end
+
+
+def _last_quarter_range(
+    *,
+    anchor: date,
+    use_fiscal: bool,
+    fiscal_start_month: Optional[int],
+) -> Tuple[date, date]:
+    current_q_start, _ = _current_quarter_range(
+        anchor=anchor,
+        use_fiscal=use_fiscal,
+        fiscal_start_month=fiscal_start_month,
+    )
+    last_q_start = _add_months(current_q_start, -3)
+    last_q_end = current_q_start - timedelta(days=1)
+    return last_q_start, last_q_end
+
+
+def _add_months(base: date, months: int) -> date:
+    month_index = (base.month - 1) + int(months)
+    year = base.year + (month_index // 12)
+    month = (month_index % 12) + 1
+    return date(year, month, 1)
+
+
 def _is_generic_month_column_name(column_name: str) -> bool:
     token = str(column_name or "").strip().lower()
     if token == "":
@@ -5151,6 +5470,46 @@ def _best_time_column_key_for_relative_range(*, capabilities: Mapping[str, Any])
             best_score = score
             best_key = key
     return best_key
+
+
+def _resolve_time_column_key_for_relative_range(
+    *,
+    explicit_time_column_key: Any,
+    policy_default_time_column_key: Any,
+    capabilities: Mapping[str, Any],
+) -> str:
+    valid_keys = {
+        _norm_key(row.get("column_key"))
+        for row in (
+            list(capabilities.get("time_columns") or [])
+            + list(capabilities.get("filter_columns") or [])
+            + list(capabilities.get("dimensions") or [])
+        )
+        if isinstance(row, Mapping) and _norm_key(row.get("column_key"))
+    }
+
+    explicit_key = _norm_key(explicit_time_column_key)
+    if explicit_key and explicit_key in valid_keys:
+        return explicit_key
+
+    policy_key = _norm_key(policy_default_time_column_key)
+    if policy_key and policy_key in valid_keys:
+        return policy_key
+
+    return _best_time_column_key_for_relative_range(capabilities=capabilities)
+
+
+def _is_time_period_filter_value(filter_row: Mapping[str, Any]) -> bool:
+    value = filter_row.get("value")
+    if isinstance(value, Mapping):
+        if _norm_key(value.get("type")) == "time_period":
+            return True
+        if _canonical_relative_time_token(value.get("time_range")) != "":
+            return True
+    for item in list(filter_row.get("values") or []):
+        if _canonical_relative_time_token(item) != "":
+            return True
+    return False
 
 
 def _normalize_school_year_filters_in_plan(

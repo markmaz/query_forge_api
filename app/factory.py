@@ -83,6 +83,7 @@ from app.routes.user_routes import qf_user_ns
 from app.routes.user_workspace_routes import user_workspace_ns
 from app.routes.value_override_routes import value_override_ns
 from app.routes.vector_domains import vector_ns
+from app.routes.version_routes import version_ns
 from app.routes.workspace_inventory_routes import wsinv_ns
 from app.routes.workspace_llm_routes import llm_providers_ns, llm_roles_ns, workspace_llm_ns
 from app.routes.workspace_routes import workspace_ns
@@ -297,6 +298,7 @@ def create_app():
     api.add_namespace(otp_ns, path=build_url("/", NAME, VERSION, "otp"))
     api.add_namespace(product_group_ns, path=build_url("/", NAME, VERSION, "product-groups"))
     api.add_namespace(value_override_ns, path=build_url("/", NAME, VERSION, "value_overrides"))
+    api.add_namespace(version_ns, path=build_url("/", NAME, VERSION, "version"))
     api.add_namespace(public_ns, path=build_url("/", NAME, VERSION, "public"))
     api.add_namespace(qf_domains_ns, path=build_url("/", NAME, VERSION, "domains"))
     api.add_namespace(domain_profile_embeddings_ns, path=build_url("/", NAME, VERSION, "domain-profiles"))

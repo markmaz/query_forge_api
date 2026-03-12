@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Dict, Mapping, Optional, Sequence
 
 from pydantic import ValidationError
@@ -174,6 +175,12 @@ def build_compact_plan_and_project(
 
     if parsed_plan is None:
         raise _planner_truncation_error(trace_id=trace_id, traces=traces, candidate_summary=candidate_summary)
+
+    parsed_plan = _coerce_relative_time_plan(
+        plan=parsed_plan,
+        prompt=normalized_prompt or prompt,
+        candidates=candidates,
+    )
 
     validation = validator.validate(plan=parsed_plan, candidates=candidates)
     if validation.errors:
@@ -416,6 +423,77 @@ def _clarification_question_for_validation_errors(
             if len(labels) >= 2:
                 return f"Did you mean {labels[0]} or {labels[1]}?"
     return "Can you clarify which metric and grouping fields you want?"
+
+
+def _coerce_relative_time_plan(
+    *,
+    plan: CompactSemanticPlan,
+    prompt: str,
+    candidates: SemanticCandidatePayload,
+) -> CompactSemanticPlan:
+    relative_token = _relative_token_from_prompt(prompt)
+    if relative_token == "":
+        return plan
+
+    time_map = {
+        str(item.concept_key or "").strip().upper()
+        for item in list(candidates.time_candidates or [])
+        if str(item.concept_key or "").strip()
+    }
+    current_time_key = str(plan.time.time_concept_key or "").strip().upper()
+    time_range = str(plan.time.time_range or "").strip()
+    time_grain = str(plan.time.time_grain or "").strip()
+    needs_update = False
+
+    payload = plan.model_dump(mode="json")
+    time_payload = dict(payload.get("time") or {})
+
+    if current_time_key and current_time_key not in time_map:
+        # Guardrail for local models: avoid invalid time_concept_key when we only have relative-time intent.
+        time_payload["time_concept_key"] = None
+        needs_update = True
+
+    if time_range == "":
+        time_payload["time_range"] = relative_token
+        needs_update = True
+
+    if time_grain == "":
+        time_payload["time_grain"] = _relative_time_grain(relative_token)
+        needs_update = True
+
+    if not needs_update:
+        return plan
+
+    payload["time"] = time_payload
+    return CompactSemanticPlan.model_validate(payload)
+
+
+def _relative_token_from_prompt(prompt: str) -> str:
+    text = str(prompt or "").strip().lower()
+    if text == "":
+        return ""
+    if re.search(r"\b(this|current)\s+quarter\b", text):
+        return "this_quarter"
+    if re.search(r"\b(last|previous)\s+quarter\b", text):
+        return "last_quarter"
+    if re.search(r"\b(this|current)\s+month\b", text):
+        return "this_month"
+    if re.search(r"\b(last|previous)\s+month\b", text):
+        return "last_month"
+    if re.search(r"\b(this|current)\s+year\b", text):
+        return "this_year"
+    if re.search(r"\b(last|previous)\s+year\b", text):
+        return "last_year"
+    return ""
+
+
+def _relative_time_grain(relative_token: str) -> str:
+    token = str(relative_token or "").strip().lower()
+    if "quarter" in token:
+        return "quarter"
+    if "year" in token:
+        return "year"
+    return "month"
 
 
 __all__ = ["build_compact_plan_and_project"]
