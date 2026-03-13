@@ -259,6 +259,21 @@ class DetailedHealth(ForgeResource):
             return {"error": "health check failed"}, 500
 
 
+@admin_ns.route("/health/broker")
+class BrokerHealth(ForgeResource):
+    @token_required
+    def get(self):
+        try:
+            _require_admin()
+            result = AdminHealthService().check_broker()
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("broker health check failed")
+            return {"error": "broker health check failed"}, 500
+
+
 # ---------------------------------------------------------------------------
 # Pipeline profile (list recent)
 # ---------------------------------------------------------------------------

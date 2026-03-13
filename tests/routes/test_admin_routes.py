@@ -52,6 +52,7 @@ def test_detailed_health_returns_checks(client, monkeypatch):
                     "mysql": {"status": "ok", "latency_ms": 1},
                     "vllm": {"status": "ok", "model": "qwen25-7b"},
                     "qdrant": {"status": "ok", "latency_ms": 2},
+                    "broker": {"status": "ok", "ok": True},
                 },
             }
 
@@ -73,6 +74,7 @@ def test_detailed_health_degraded(client, monkeypatch):
                     "mysql": {"status": "error", "error": "connection refused"},
                     "vllm": {"status": "ok"},
                     "qdrant": {"status": "ok"},
+                    "broker": {"status": "error", "ok": False},
                 },
             }
 
@@ -80,6 +82,22 @@ def test_detailed_health_degraded(client, monkeypatch):
     resp = client.get("/api/v1/admin/health/detailed", headers=_headers(monkeypatch))
     assert resp.status_code == 200
     assert resp.json["overall"] == "degraded"
+
+
+def test_broker_health_returns_status(client, monkeypatch):
+    class _FakeHealthSvc:
+        def check_broker(self):
+            return {
+                "ok": True,
+                "broker_url": "redis://localhost:6379/0",
+                "valkey": {"ping_ok": True},
+                "celery": {"broker_connect_ok": True, "worker_ping_ok": True, "workers": ["celery@host"]},
+            }
+
+    monkeypatch.setattr(admin_routes, "AdminHealthService", _FakeHealthSvc)
+    resp = client.get("/api/v1/admin/health/broker", headers=_headers(monkeypatch))
+    assert resp.status_code == 200
+    assert resp.json["ok"] is True
 
 
 # ---------------------------------------------------------------------------

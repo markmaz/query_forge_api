@@ -12,4 +12,4 @@ Pre-commit hook:
 ```
 pre-commit install
 ```
-celery -A app.celery_app worker --loglevel=INFO
+celery -A app.celery_app worker --loglevel=INFO --pool=solo --concurrency=1

@@ -54,6 +54,7 @@ from app.routes.embeddings import embeddings_ns
 from app.routes.execution_routes import executions_ns
 from app.routes.export_routes import exports_ns
 from app.routes.forge_insights import forge_insights_ns
+from app.routes.forge_match_routes import forge_match_ns
 from app.routes.model_routes import model_ns
 from app.routes.nlp_review import nlp_review_ns
 from app.routes.nlp_routes import nlp_ns
@@ -261,8 +262,8 @@ def create_app():
     app.config.from_object(ForgeMailConfig)
     mail.init_app(app=app)
 
-    app.config["CELERY_BROKER_URL"] = VALKEY_CONFIG
-    app.config["CELERY_RESULT_BACKEND"] = VALKEY_CONFIG
+    app.config["broker_url"] = VALKEY_CONFIG
+    app.config["result_backend"] = VALKEY_CONFIG
 
     configure_forge_celery(app)
     app.config["CELERY"] = celery
@@ -317,6 +318,7 @@ def create_app():
     api.add_namespace(ai_ns, path=build_url("/", NAME, VERSION, "ai"))
     api.add_namespace(prompt_feedback_ns, path=build_url("/", NAME, VERSION, "prompt-feedback"))
     api.add_namespace(forge_insights_ns, path=build_url("/", NAME, VERSION, "forge-insights"))
+    api.add_namespace(forge_match_ns, path=build_url("/", NAME, VERSION, "forge-match"))
     api.add_namespace(chat_ns, path=build_url("/", NAME, VERSION, "chat"))
     api.add_namespace(semantic_concepts_ns, path=build_url("/", NAME, VERSION, "semantic", "concepts"))
     api.add_namespace(semantic_concept_aliases_ns, path=build_url("/", NAME, VERSION, "semantic", "concept-aliases"))
