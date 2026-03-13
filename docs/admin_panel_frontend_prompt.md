@@ -4,7 +4,7 @@
 
 Build a **React Admin Panel** (single-page application) for the Query Forge API backend. The panel provides four main features:
 
-1. **System Health Dashboard** — real-time status of Flask API, MySQL, vLLM (Qwen LLM), and Qdrant
+1. **System Health Dashboard** — real-time status of Flask API, MySQL, vLLM (Qwen LLM), Qdrant, and the Celery/Valkey broker
 2. **Pipeline Profiling** — view recent planner pipeline timing data with charts
 3. **Vector Index Management** — rebuild/reindex Qdrant vector indexes in the correct order
 4. **Domain Profile Management** — full CRUD for domain profile records
@@ -52,6 +52,7 @@ Configure `API_BASE_URL` via environment variable (e.g., `VITE_API_BASE_URL`).
 ### Page: `/admin/health`
 
 **Endpoint:** `GET /api/v1/admin/health/detailed`
+**Broker Endpoint:** `GET /api/v1/admin/health/broker`
 
 **Headers:** `Authorization`, `X-Workspace-Id`
 
@@ -79,6 +80,24 @@ Configure `API_BASE_URL` via environment variable (e.g., `VITE_API_BASE_URL`).
       "status": "ok" | "error",
       "latency_ms": 8,
       "error": "optional error message"
+    },
+    "broker": {
+      "status": "ok" | "error",
+      "ok": true,
+      "broker_url": "redis://localhost:6379/0",
+      "valkey": {
+        "address": "localhost",
+        "port": 6379,
+        "ping_ok": true,
+        "error": null
+      },
+      "celery": {
+        "broker_connect_ok": true,
+        "worker_ping_ok": true,
+        "workers": ["celery@host"],
+        "broker_error": null,
+        "worker_error": null
+      }
     }
   }
 }
@@ -99,11 +118,21 @@ Configure `API_BASE_URL` via environment variable (e.g., `VITE_API_BASE_URL`).
    - Model name (for vLLM only)
    - Error message (if status is "error"), shown in a collapsible section
 
-3. **Latency Bar Chart**: Horizontal bar chart comparing latency_ms across MySQL, vLLM, and Qdrant. Color-code bars: green < 100ms, yellow 100-500ms, red > 500ms.
+3. **Queue/Broker Card** (add as 5th card):
+   - Source: `GET /api/v1/admin/health/broker`
+   - Show:
+     - overall `ok` state
+     - masked broker URL
+     - Valkey ping (`valkey.ping_ok`)
+     - Celery broker connect (`celery.broker_connect_ok`)
+     - Celery worker ping (`celery.worker_ping_ok`)
+     - worker list (`celery.workers`)
+     - broker/worker error text when present
+4. **Latency Bar Chart**: Horizontal bar chart comparing latency_ms across MySQL, vLLM, and Qdrant. Color-code bars: green < 100ms, yellow 100-500ms, red > 500ms.
 
-4. **Auto-refresh**: Poll the health endpoint every 30 seconds. Show a "Last checked: X seconds ago" timestamp. Include a manual "Refresh Now" button.
+5. **Auto-refresh**: Poll `/health/detailed` and `/health/broker` every 30 seconds. Show a "Last checked: X seconds ago" timestamp. Include a manual "Refresh Now" button.
 
-5. **History** (optional enhancement): Keep last 20 health check results in local state, render a line chart showing latency trends over time for each service.
+6. **History** (optional enhancement): Keep last 20 health check results in local state, render a line chart showing latency trends over time for each service.
 
 ---
 

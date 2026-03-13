@@ -3,11 +3,14 @@ from __future__ import annotations
 import logging
 import time
 from typing import Any, Dict, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
+import valkey
 
+from app.celery_app import celery
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
-from app.config import QDRANT_URL, VLLM_BASE_URL, VLLM_MODEL
+from app.config import QDRANT_URL, VALKEY_ADDRESS, VALKEY_CONFIG, VALKEY_PORT, VLLM_BASE_URL, VLLM_MODEL
 from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
@@ -33,6 +36,7 @@ class AdminHealthService:
         checks["mysql"] = self._check_mysql()
         checks["vllm"] = self._check_vllm()
         checks["qdrant"] = self._check_qdrant()
+        checks["broker"] = self.check_broker()
 
         statuses = [c["status"] for c in checks.values()]
         if all(s == "ok" for s in statuses):
@@ -91,3 +95,75 @@ class AdminHealthService:
             latency_ms = int((time.perf_counter() - start) * 1000)
             logger.exception("Qdrant health check failed")
             return {"status": "error", "latency_ms": latency_ms, "error": str(exc)}
+
+    def check_broker(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "broker_url": _mask_broker_url(VALKEY_CONFIG),
+            "valkey": {
+                "address": VALKEY_ADDRESS,
+                "port": int(VALKEY_PORT or 0),
+                "ping_ok": False,
+                "ping_response": None,
+                "error": None,
+            },
+            "celery": {
+                "broker_connect_ok": False,
+                "broker_error": None,
+                "worker_ping_ok": False,
+                "workers": [],
+                "worker_error": None,
+            },
+        }
+
+        try:
+            client = valkey.Valkey(
+                host=str(VALKEY_ADDRESS or "localhost"),
+                port=int(VALKEY_PORT or 6379),
+                db=0,
+                socket_timeout=1.5,
+            )
+            pong = client.ping()
+            out["valkey"]["ping_ok"] = bool(pong)
+            out["valkey"]["ping_response"] = str(pong)
+        except Exception as exc:
+            out["valkey"]["error"] = str(exc)
+
+        try:
+            with celery.connection_for_write() as conn:
+                conn.ensure_connection(max_retries=0)
+            out["celery"]["broker_connect_ok"] = True
+        except Exception as exc:
+            out["celery"]["broker_error"] = str(exc)
+
+        try:
+            inspector = celery.control.inspect(timeout=1.5)
+            ping_map = inspector.ping() or {}
+            workers = sorted(str(name) for name in ping_map.keys())
+            out["celery"]["worker_ping_ok"] = bool(workers)
+            out["celery"]["workers"] = workers
+        except Exception as exc:
+            out["celery"]["worker_error"] = str(exc)
+
+        out["ok"] = bool(out["valkey"]["ping_ok"] and out["celery"]["broker_connect_ok"])
+        out["status"] = "ok" if out["ok"] else "error"
+        return out
+
+
+def _mask_broker_url(raw_url: str) -> str:
+    text = str(raw_url or "").strip()
+    if text == "":
+        return ""
+    try:
+        parts = urlsplit(text)
+        netloc = parts.netloc or ""
+        if "@" not in netloc:
+            return text
+        creds, host_part = netloc.split("@", 1)
+        if ":" in creds:
+            user = creds.split(":", 1)[0]
+            masked_creds = f"{user}:***"
+        else:
+            masked_creds = "***"
+        return urlunsplit((parts.scheme, f"{masked_creds}@{host_part}", parts.path, parts.query, parts.fragment))
+    except Exception:
+        return text
