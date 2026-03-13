@@ -10,6 +10,7 @@ class DomainProfileGenerateRequest(BaseModel):
 
     domain_ids: List[int] = Field(..., min_length=1)
     force: bool = False
+    llm_id: int | None = Field(default=None, ge=1)
 
     @field_validator("domain_ids", mode="before")
     @classmethod
@@ -26,9 +27,11 @@ class DomainProfileGenerateAllRequest(BaseModel):
 
     force: bool = False
     include_inactive: bool = False
+    llm_id: int | None = Field(default=None, ge=1)
 
 
 class DomainProfileGenerateOneRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     force: bool = False
+    llm_id: int | None = Field(default=None, ge=1)

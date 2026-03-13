@@ -167,6 +167,13 @@ SEMANTIC_PLAN_LLM_MODEL = (
 )
 SEMANTIC_PLAN_LLM_TIMEOUT_SECONDS = int(os.getenv("SEMANTIC_PLAN_LLM_TIMEOUT_SECONDS", "60"))
 SEMANTIC_PLAN_LLM_MAX_TOKENS = int(os.getenv("SEMANTIC_PLAN_LLM_MAX_TOKENS", "1200"))
+QF_WORKSPACE_LLM_RUNTIME_ENABLED = os.getenv("QF_WORKSPACE_LLM_RUNTIME_ENABLED", "1").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+)
 SEMANTIC_CONCEPT_SEED_ON_STARTUP = os.getenv("SEMANTIC_CONCEPT_SEED_ON_STARTUP", "").strip().lower() in (
     "1",
     "true",

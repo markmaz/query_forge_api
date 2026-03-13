@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any, Dict, List, Optional
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
@@ -67,12 +66,43 @@ class WorkspaceLLMService:
                 """,
                 {"ws": ws, "role": r},
             )
+            if rows:
+                out = self._to_internal_dict(rows[0])
+                out["_source"] = "workspace_role"
+                out["_resolved_role"] = str(rows[0].get("role") or "").strip()
+                return out
+
+            # Deterministic fallback: any active workspace LLM if exact role is absent.
+            fallback_rows = self._sql.execute_query_mappings(
+                f"""
+                SELECT {_SELECT_COLS} FROM workspace_llm
+                WHERE workspace_id = :ws AND is_active = 1
+                ORDER BY updated_at DESC, id DESC
+                LIMIT 1
+                """,
+                {"ws": ws},
+            )
+            if fallback_rows:
+                out = self._to_internal_dict(fallback_rows[0])
+                out["_source"] = "workspace_any_role"
+                out["_resolved_role"] = str(fallback_rows[0].get("role") or "").strip()
+                return out
         except Exception:
             logger.exception("get_llm_for_role DB lookup failed ws=%s role=%s", ws, r)
-            rows = []
-        if rows:
-            return self._to_internal_dict(rows[0])
-        return self._env_fallback(r)
+        return None
+
+    def get_internal_by_id(self, llm_id: int) -> Optional[Dict[str, Any]]:
+        try:
+            rows = self._sql.execute_query_mappings(
+                f"SELECT {_SELECT_COLS} FROM workspace_llm WHERE id = :id LIMIT 1",
+                {"id": llm_id},
+            )
+        except Exception:
+            logger.exception("get_internal_by_id failed for id=%s", llm_id)
+            return None
+        if not rows:
+            return None
+        return self._to_internal_dict(rows[0])
 
     def create_llm(self, workspace_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         ws = str(workspace_id or "").strip()
@@ -99,6 +129,11 @@ class WorkspaceLLMService:
         api_key_plaintext = str(data.get("api_key") or "").strip() or None
         api_key_encrypted = encrypt_api_key(api_key_plaintext) if api_key_plaintext else None
         endpoint_url = str(data.get("endpoint_url") or "").strip() or None
+        self._validate_provider_requirements(
+            provider=provider,
+            endpoint_url=endpoint_url,
+            has_api_key=bool(api_key_plaintext),
+        )
         config_json_raw = data.get("config_json")
         config_json = json.dumps(config_json_raw) if config_json_raw else None
 
@@ -158,6 +193,12 @@ class WorkspaceLLMService:
 
         api_key_plaintext = str(data.get("api_key") or "").strip() or None
         api_key_encrypted = encrypt_api_key(api_key_plaintext) if api_key_plaintext else existing.get("api_key_encrypted")
+        has_api_key = bool(api_key_plaintext or existing.get("api_key_encrypted"))
+        self._validate_provider_requirements(
+            provider=provider,
+            endpoint_url=endpoint_url,
+            has_api_key=has_api_key,
+        )
 
         config_json_raw = data.get("config_json")
         config_json = json.dumps(config_json_raw) if config_json_raw is not None else existing.get("config_json")
@@ -245,6 +286,25 @@ class WorkspaceLLMService:
                 "Deactivate it first."
             )
 
+    @staticmethod
+    def _validate_provider_requirements(
+        *,
+        provider: str,
+        endpoint_url: Optional[str],
+        has_api_key: bool,
+    ) -> None:
+        p = str(provider or "").strip().lower()
+        endpoint = str(endpoint_url or "").strip()
+        if p in {LLMProvider.OPENAI, LLMProvider.ANTHROPIC} and not has_api_key:
+            raise ValueError(f"provider '{p}' requires api_key")
+        if p == LLMProvider.AZURE_OPENAI:
+            if not has_api_key:
+                raise ValueError("provider 'azure_openai' requires api_key")
+            if not endpoint:
+                raise ValueError("provider 'azure_openai' requires endpoint_url")
+        if p in {LLMProvider.GENERIC, LLMProvider.OLLAMA} and not endpoint:
+            raise ValueError(f"provider '{p}' requires endpoint_url")
+
     def _to_public_dict(self, row: Dict[str, Any]) -> Dict[str, Any]:
         encrypted = row.get("api_key_encrypted")
         has_api_key = bool(encrypted)
@@ -288,28 +348,6 @@ class WorkspaceLLMService:
             "config_json": config_json,
         }
 
-    def _env_fallback(self, role: str) -> Optional[Dict[str, Any]]:
-        if role in (LLMRole.PLANNER, LLMRole.QUERY_GENERATOR, LLMRole.ENRICHMENT):
-            endpoint = os.getenv("VLLM_BASE_URL", "").strip()
-            model = os.getenv("SEMANTIC_PLAN_LLM_MODEL", "").strip()
-        elif role in (LLMRole.NER, LLMRole.SUMMARIZER):
-            endpoint = os.getenv("SEMANTIC_LLM_ENDPOINT", "").strip()
-            model = os.getenv("SEMANTIC_LLM_MODEL", "").strip()
-        else:
-            return None
-        if not endpoint or not model:
-            return None
-        return {
-            "provider": LLMProvider.GENERIC,
-            "model_name": model,
-            "role": role,
-            "api_key": None,
-            "endpoint_url": endpoint,
-            "is_active": True,
-            "config_json": None,
-            "_source": "env",
-        }
-
     @staticmethod
     def _coerce_json(value: Any) -> Optional[Dict[str, Any]]:
         if isinstance(value, dict):
@@ -324,7 +362,7 @@ class WorkspaceLLMService:
 
     def _test_openai_compatible(self, endpoint: str, api_key: str, model: str) -> Dict[str, Any]:
         import httpx
-        url = endpoint.rstrip("/") + "/models"
+        url = endpoint.rstrip("/") + "/api/tags"
         headers = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"

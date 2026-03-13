@@ -17,6 +17,7 @@ class ForgeMatchAnalyzeRequest(BaseModel):
     vertical_norm: Optional[str] = None
     domain_id: Optional[int] = Field(default=None, ge=1)
     force: bool = False
+    llm_id: Optional[int] = Field(default=None, ge=1)
 
     @field_validator("vertical_norm", mode="before")
     @classmethod

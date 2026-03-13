@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from qdrant_client.http import models as qdrant_models
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.config.llm_resolver import build_llm_client_for_role
 from app.config import (
     EMBEDDING_MODEL_NAME,
     PLANNER_UNIFIED_LLM,
@@ -56,6 +57,7 @@ from app.config import (
     SEMANTIC_PLAN_LLM_TIMEOUT_SECONDS,
     VLLM_BASE_URL,
 )
+from app.constants.llm_roles import LLMRole
 from app.exceptions.forge_error import ForgeError
 from app.infra.embedding_model import EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
@@ -296,6 +298,7 @@ class PlanDomainRequest(BaseModel):
     profile_pipeline_data: bool = False
     fast_mode: Optional[bool] = None
     next_actions_async: Optional[bool] = None
+    llm_id: Optional[int] = None
 
     @field_validator("conversation_id")
     @classmethod
@@ -346,6 +349,7 @@ class PlanDomainNextActionsRequest(BaseModel):
     base_domain_id: Optional[int] = None
     conversation_id: Optional[str] = None
     trace_id: Optional[str] = None
+    llm_id: Optional[int] = None
 
     @field_validator("conversation_id")
     @classmethod
@@ -376,6 +380,7 @@ class PlannerDomainService:
     ) -> None:
         self._capabilities = capabilities_service or DomainCapabilitiesService()
         self._domain_vector = domain_vector_service or DomainVectorIndexService()
+        self._explicit_llm = llm_client is not None
         self._llm = llm_client or LLMClient(
             endpoint=VLLM_BASE_URL,
             model=SEMANTIC_PLAN_LLM_MODEL,
@@ -387,6 +392,39 @@ class PlannerDomainService:
         self._domain_time_policy = domain_time_policy_service or DomainTimePolicyService()
         self._conversation_store = conversation_store or HybridPlannerDomainConversationStore()
         self._conversation_ttl_seconds = max(60, int(conversation_ttl_seconds or default_conversation_ttl_seconds()))
+        self._llm_runtime_meta: Dict[str, Any] = {
+            "source": "bootstrap",
+            "role": LLMRole.PLANNER,
+            "llm_id": None,
+            "provider": "generic",
+            "model": str(getattr(self._llm, "_model", "") or ""),
+            "endpoint": str(getattr(self._llm, "_endpoint", "") or ""),
+        }
+
+    def _resolve_runtime_llm(
+        self,
+        *,
+        workspace_id: str,
+        role: str,
+        llm_id_override: Optional[int] = None,
+    ) -> None:
+        if self._explicit_llm:
+            return
+        resolved = build_llm_client_for_role(
+            workspace_id=workspace_id,
+            role=role,
+            llm_id_override=llm_id_override,
+            timeout_seconds=None,
+        )
+        self._llm = resolved.client
+        self._llm_runtime_meta = {
+            "source": resolved.source,
+            "role": resolved.role,
+            "llm_id": resolved.llm_id,
+            "provider": resolved.provider,
+            "model": resolved.model,
+            "endpoint": resolved.endpoint,
+        }
 
     def plan(
         self,
@@ -398,6 +436,11 @@ class PlannerDomainService:
             req = PlanDomainRequest.model_validate(payload or {})
         except ValidationError as exc:
             raise ForgeError("Invalid plan_domain request", status_code=400, details={"errors": exc.errors()}) from exc
+        self._resolve_runtime_llm(
+            workspace_id=req.workspace_id,
+            role=LLMRole.PLANNER,
+            llm_id_override=req.llm_id,
+        )
 
         profile_enabled = bool(QF_PLAN_DOMAIN_TIMING_PROFILE_ENABLED or req.profile_pipeline)
         trace_capture_enabled = bool(
@@ -461,6 +504,7 @@ class PlannerDomainService:
             "prompt": req.prompt,
             "fast_mode": fast_mode,
             "planner_unified_llm": bool(PLANNER_UNIFIED_LLM),
+            "llm_resolution": dict(self._llm_runtime_meta),
             "steps": [],
         }
         timings: Dict[str, int] = {}
@@ -1205,6 +1249,7 @@ class PlannerDomainService:
                 "conversation_id": conversation_id,
                 "fast_mode": fast_mode,
                 "planner_unified_llm": bool(PLANNER_UNIFIED_LLM),
+                "llm_resolution": dict(self._llm_runtime_meta),
             },
             "timings_ms": timings,
         }
@@ -1253,6 +1298,7 @@ class PlannerDomainService:
                     "conversation_id": conversation_id,
                     "fast_mode": fast_mode,
                     "planner_unified_llm": bool(PLANNER_UNIFIED_LLM),
+                    "llm_resolution": dict(self._llm_runtime_meta),
                 },
             }
             if profile_enabled:
@@ -1397,6 +1443,7 @@ class PlannerDomainService:
                             "profile_pipeline": bool(body.get("profile_pipeline")),
                             "profile_pipeline_data": bool(body.get("profile_pipeline_data")),
                             "next_actions_async": bool(body.get("next_actions_async")),
+                            "llm_id": body.get("llm_id"),
                         },
                     },
                 }
@@ -1415,6 +1462,11 @@ class PlannerDomainService:
             req = PlanDomainNextActionsRequest.model_validate(payload or {})
         except ValidationError as exc:
             raise ForgeError("Invalid next actions request", status_code=400, details={"errors": exc.errors()}) from exc
+        self._resolve_runtime_llm(
+            workspace_id=req.workspace_id,
+            role=LLMRole.SUMMARIZER,
+            llm_id_override=req.llm_id,
+        )
 
         plan_json = dict(req.plan_json_v2 or {}) if isinstance(req.plan_json_v2, Mapping) else {}
         if not plan_json:
@@ -1454,6 +1506,7 @@ class PlannerDomainService:
             "technical_details": {
                 "trace_id": trace_id,
                 "conversation_id": conversation_id,
+                "llm_resolution": dict(self._llm_runtime_meta),
             },
             "timings_ms": {"next_actions": timing_ms},
             "debug": {"next_actions_trace": next_actions_trace} if next_actions_trace else {},

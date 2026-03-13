@@ -14,6 +14,7 @@ class SemanticCatalogBuildRequest(BaseModel):
     domain_name: Optional[str] = Field(default=None, max_length=255)
     dry_run: bool = True
     table_limit: int = Field(default=5000, ge=1, le=50000)
+    llm_id: Optional[int] = Field(default=None, ge=1)
 
     @field_validator("workspace_id", mode="before")
     @classmethod

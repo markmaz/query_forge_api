@@ -5,6 +5,8 @@ from datetime import date
 from typing import Any, Dict, Mapping, Optional
 
 from app.config import SEMANTIC_PLAN_LLM_MAX_TOKENS, SEMANTIC_PLAN_LLM_MODEL
+from app.config.llm_resolver import build_llm_client_for_role
+from app.constants.llm_roles import LLMRole
 from app.exceptions.forge_error import ForgeError
 from app.services.llm.llm_client import LLMClient
 from app.services.llm.prompts_plan_v2 import SLOT_JSON_SCHEMA, build_system_prompt
@@ -37,8 +39,17 @@ def build_plan_and_slots(
     trace_id: str,
     llm_client: Optional[LLMClient] = None,
     max_tokens: Optional[int] = None,
+    llm_id: Optional[int] = None,
 ) -> dict:
-    llm = llm_client or LLMClient()
+    active_llm = llm_client
+    if active_llm is None:
+        resolved = build_llm_client_for_role(
+            workspace_id=workspace_id,
+            role=LLMRole.PLANNER,
+            llm_id_override=llm_id,
+        )
+        active_llm = resolved.client
+    llm = active_llm
     system_prompt = build_system_prompt()
     developer_prompt = _build_unified_developer_prompt(
         slot_schema=SLOT_JSON_SCHEMA,
@@ -103,7 +114,7 @@ def build_plan_and_slots(
 
     provider_model, provider_tokens = _extract_provider_model_and_tokens(
         trace=trace_for_meta,
-        fallback_model=SEMANTIC_PLAN_LLM_MODEL,
+        fallback_model=str(getattr(llm, "_model", "") or SEMANTIC_PLAN_LLM_MODEL),
     )
     response: Dict[str, Any] = {
         "slot_hints": dict(parsed.get("slot_hints") or {}),

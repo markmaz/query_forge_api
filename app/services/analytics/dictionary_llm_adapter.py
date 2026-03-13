@@ -3,16 +3,38 @@ from __future__ import annotations
 import json
 from typing import Any, Sequence
 
+from app.config.llm_resolver import build_llm_client_for_role
+from app.constants.llm_roles import LLMRole
 from app.services.llm.llm_client import LLMClient
 
 
 class DictionaryLLMAdapter:
     """Adapter exposing a simple ``generate(prompt)`` API for dictionary enrichment."""
 
-    def __init__(self, *, llm_client: LLMClient | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        llm_client: LLMClient | None = None,
+        workspace_id: str | None = None,
+        llm_id: int | None = None,
+    ) -> None:
+        self._explicit_llm = llm_client is not None
         self._llm = llm_client or LLMClient()
+        if workspace_id and not self._explicit_llm:
+            self._resolve_runtime_llm(workspace_id=workspace_id, llm_id_override=llm_id)
 
-    def generate(self, prompt: str) -> str:
+    def _resolve_runtime_llm(self, *, workspace_id: str, llm_id_override: int | None = None) -> None:
+        resolved = build_llm_client_for_role(
+            workspace_id=str(workspace_id or "").strip(),
+            role=LLMRole.ENRICHMENT,
+            llm_id_override=llm_id_override,
+            timeout_seconds=None,
+        )
+        self._llm = resolved.client
+
+    def generate(self, prompt: str, *, workspace_id: str | None = None, llm_id: int | None = None) -> str:
+        if workspace_id and not self._explicit_llm:
+            self._resolve_runtime_llm(workspace_id=workspace_id, llm_id_override=llm_id)
         payload: dict[str, Any] = self._llm.chat_json(
             system_prompt=(
                 "You write concise data dictionary descriptions for analytics columns. "
@@ -31,7 +53,11 @@ class DictionaryLLMAdapter:
         *,
         table_name: str,
         columns: Sequence[dict[str, Any]],
+        workspace_id: str | None = None,
+        llm_id: int | None = None,
     ) -> str:
+        if workspace_id and not self._explicit_llm:
+            self._resolve_runtime_llm(workspace_id=workspace_id, llm_id_override=llm_id)
         compact_columns = [
             {
                 "column_name": str(col.get("column_name") or "").strip(),
@@ -67,7 +93,11 @@ class DictionaryLLMAdapter:
         column_name: str,
         data_type: str | None,
         source_comment: str | None,
+        workspace_id: str | None = None,
+        llm_id: int | None = None,
     ) -> dict[str, Any]:
+        if workspace_id and not self._explicit_llm:
+            self._resolve_runtime_llm(workspace_id=workspace_id, llm_id_override=llm_id)
         payload: dict[str, Any] = self._llm.chat_json(
             system_prompt=(
                 "You generate column dictionary metadata for analytics modeling and vector retrieval. "

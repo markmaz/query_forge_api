@@ -12,7 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from qdrant_client.http import models as qdrant_models
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
-from app.config import VLLM_BASE_URL, VLLM_MODEL
+from app.config.llm_resolver import build_llm_client_for_role
+from app.constants.llm_roles import LLMRole
 from app.exceptions.forge_error import ForgeError
 from app.infra.embedding_model import EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
@@ -54,6 +55,7 @@ class PlannerLLMRequest(BaseModel):
     vertical: str = Field(default="generic")
     constraints: PlannerLLMConstraints = Field(default_factory=PlannerLLMConstraints)
     debug: bool = False
+    llm_id: Optional[int] = None
 
 
 @dataclass
@@ -382,15 +384,44 @@ class PlannerLLMService:
         retriever: Optional[PlannerLLMCandidateRetriever] = None,
     ) -> None:
         self._sql = sql or ForgeMetaSQL()
-        self._llm = llm_client or LLMClient(endpoint=VLLM_BASE_URL, model=VLLM_MODEL, timeout_seconds=60)
+        self._explicit_llm = llm_client is not None
+        self._llm = llm_client or LLMClient(timeout_seconds=60)
         self._cache = cache or PlannerLLMCache(sql=self._sql)
         self._retriever = retriever or PlannerLLMCandidateRetriever(sql=self._sql)
+        self._llm_runtime_meta: Dict[str, Any] = {
+            "source": "bootstrap",
+            "role": LLMRole.PLANNER,
+            "llm_id": None,
+            "provider": "generic",
+            "model": str(getattr(self._llm, "_model", "") or ""),
+            "endpoint": str(getattr(self._llm, "_endpoint", "") or ""),
+        }
+
+    def _resolve_runtime_llm(self, *, workspace_id: str, llm_id_override: Optional[int] = None) -> None:
+        if self._explicit_llm:
+            return
+        resolved = build_llm_client_for_role(
+            workspace_id=workspace_id,
+            role=LLMRole.PLANNER,
+            llm_id_override=llm_id_override,
+            timeout_seconds=None,
+        )
+        self._llm = resolved.client
+        self._llm_runtime_meta = {
+            "source": resolved.source,
+            "role": resolved.role,
+            "llm_id": resolved.llm_id,
+            "provider": resolved.provider,
+            "model": resolved.model,
+            "endpoint": resolved.endpoint,
+        }
 
     def plan(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         try:
             req = PlannerLLMRequest.model_validate(payload or {})
         except ValidationError as exc:
             raise ForgeError("Invalid planner_llm request", status_code=400, details={"errors": exc.errors()}) from exc
+        self._resolve_runtime_llm(workspace_id=req.workspace_id, llm_id_override=req.llm_id)
 
         trace_id = str(uuid.uuid4())
         timings: Dict[str, int] = {}
@@ -424,6 +455,7 @@ class PlannerLLMService:
                 response["debug_artifacts"] = {
                     "normalized_prompt": normalized_prompt,
                     "registry_version": registry_version,
+                    "llm_resolution": dict(self._llm_runtime_meta),
                 }
             logger.info(
                 "planner_llm trace_id=%s cache_hit=true workspace_id=%s vertical=%s timings_ms=%s",
@@ -515,6 +547,7 @@ class PlannerLLMService:
                 "llm_repaired": llm_result.repaired,
                 "registry_version": registry_version,
                 "repairs": validation_payload["repairs_applied"],
+                "llm_resolution": dict(self._llm_runtime_meta),
             }
         logger.info(
             "planner_llm trace_id=%s cache_hit=false workspace_id=%s vertical=%s valid=%s timings_ms=%s",

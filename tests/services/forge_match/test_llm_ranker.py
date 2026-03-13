@@ -52,6 +52,6 @@ def test_ranker_rejects_out_of_set_ids() -> None:
         }
     ]
 
-    out = ranker.rank(source_record=_source(), candidates=candidates)
+    out = ranker.rank(workspace_id="ws-test", source_record=_source(), candidates=candidates)
     assert out["match_decision"] == "no_confident_match"
     assert out["selected_column_id"] is None

@@ -67,6 +67,7 @@ class SemanticCatalogBuilder:
         domain_name: Optional[str] = None,
         dry_run: bool = False,
         table_limit: int = 5000,
+        llm_id: Optional[int] = None,
     ) -> SemanticCatalogBuildResult:
         normalized_vertical = _normalize_vertical(vertical_norm)
         resolved_domain_name = domain_name or self._load_domain_name(workspace_id=workspace_id, domain_id=domain_id)
@@ -78,8 +79,10 @@ class SemanticCatalogBuilder:
         )
         enriched = self._enrichment.enrich_profiles(
             profiles=profiles,
+            workspace_id=workspace_id,
             vertical_norm=normalized_vertical,
             domain_name=resolved_domain_name,
+            llm_id=llm_id,
         )
         if _looks_like_sales_domain(resolved_domain_name):
             enriched = _apply_sales_performance_overrides(enriched)
@@ -209,6 +212,7 @@ class SemanticCatalogBuilder:
         domain_id: int,
         vertical_norm: str = "generic",
         dry_run: bool = True,
+        llm_id: Optional[int] = None,
     ) -> SemanticCatalogBuildResult:
         """
         Example entrypoint requested for Sales Performance domain bootstrap.
@@ -219,6 +223,7 @@ class SemanticCatalogBuilder:
             vertical_norm=vertical_norm,
             domain_name="Sales Performance",
             dry_run=dry_run,
+            llm_id=llm_id,
         )
 
     def _load_domain_name(self, *, workspace_id: str, domain_id: int) -> str:

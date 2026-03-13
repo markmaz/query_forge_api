@@ -27,6 +27,7 @@ _generate_one_model = domain_profile_embeddings_ns.model(
     "DomainProfileGenerateOneRequestPublic",
     {
         "force": fields.Boolean(required=False, default=False),
+        "llm_id": fields.Integer(required=False, description="Optional workspace LLM id override"),
     },
 )
 
@@ -35,6 +36,7 @@ _generate_batch_model = domain_profile_embeddings_ns.model(
     {
         "domain_ids": fields.List(fields.Integer, required=True),
         "force": fields.Boolean(required=False, default=False),
+        "llm_id": fields.Integer(required=False, description="Optional workspace LLM id override"),
     },
 )
 
@@ -43,6 +45,7 @@ _generate_all_model = domain_profile_embeddings_ns.model(
     {
         "force": fields.Boolean(required=False, default=False),
         "include_inactive": fields.Boolean(required=False, default=False),
+        "llm_id": fields.Integer(required=False, description="Optional workspace LLM id override"),
     },
 )
 
@@ -57,11 +60,14 @@ class DomainProfileGenerateOne(ForgeResource):
             body = request.get_json(silent=True) or {}
             req = DomainProfileGenerateOneRequest(**body)
             workspace_id = extract_workspace_id()
-            result = DomainProfileEmbeddingService().generate_one(
-                workspace_id=workspace_id,
-                domain_id=domain_id,
-                force=req.force,
-            )
+            args = {
+                "workspace_id": workspace_id,
+                "domain_id": domain_id,
+                "force": req.force,
+            }
+            if req.llm_id is not None:
+                args["llm_id"] = req.llm_id
+            result = DomainProfileEmbeddingService().generate_one(**args)
             return {"result": result}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -80,11 +86,14 @@ class DomainProfileGenerateBatch(ForgeResource):
             body = request.get_json(silent=True) or {}
             req = DomainProfileGenerateRequest(**body)
             workspace_id = extract_workspace_id()
-            result = DomainProfileEmbeddingService().generate_many(
-                workspace_id=workspace_id,
-                domain_ids=req.domain_ids,
-                force=req.force,
-            )
+            args = {
+                "workspace_id": workspace_id,
+                "domain_ids": req.domain_ids,
+                "force": req.force,
+            }
+            if req.llm_id is not None:
+                args["llm_id"] = req.llm_id
+            result = DomainProfileEmbeddingService().generate_many(**args)
             return result, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -103,11 +112,14 @@ class DomainProfileGenerateAll(ForgeResource):
             body = request.get_json(silent=True) or {}
             req = DomainProfileGenerateAllRequest(**body)
             workspace_id = extract_workspace_id()
-            result = DomainProfileEmbeddingService().generate_all(
-                workspace_id=workspace_id,
-                force=req.force,
-                include_inactive=req.include_inactive,
-            )
+            args = {
+                "workspace_id": workspace_id,
+                "force": req.force,
+                "include_inactive": req.include_inactive,
+            }
+            if req.llm_id is not None:
+                args["llm_id"] = req.llm_id
+            result = DomainProfileEmbeddingService().generate_all(**args)
             return result, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code

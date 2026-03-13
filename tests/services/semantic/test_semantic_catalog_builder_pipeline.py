@@ -85,7 +85,12 @@ def test_semantic_enrichment_service_falls_back_to_heuristics_when_llm_fails() -
         )
     ]
     svc = SemanticEnrichmentService(llm_adapter=_FailingLLM(), enable_llm=True, batch_size=5)
-    enriched = svc.enrich_profiles(profiles=profiles, vertical_norm="generic", domain_name="Sales Performance")
+    enriched = svc.enrich_profiles(
+        profiles=profiles,
+        workspace_id="ws-test",
+        vertical_norm="generic",
+        domain_name="Sales Performance",
+    )
 
     assert len(enriched) == 1
     assert enriched[0].enrichment.semantic_type in {"measure", "metric"}

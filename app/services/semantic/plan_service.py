@@ -12,10 +12,10 @@ from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import (
     NLP_TIER2_ENABLED,
     SEMANTIC_PLAN_LLM_MAX_TOKENS,
-    SEMANTIC_PLAN_LLM_MODEL,
     SEMANTIC_PLAN_LLM_TIMEOUT_SECONDS,
-    VLLM_BASE_URL,
 )
+from app.config.llm_resolver import build_llm_client_for_role
+from app.constants.llm_roles import LLMRole
 from app.exceptions.forge_error import ForgeError
 from app.models.ai_suggest import AddSelectEdit, SetDomainEdit, SqlColumnKey
 from app.nlp.normalization import normalize_prompt
@@ -44,6 +44,7 @@ class PlanningRequest(BaseModel):
     max_concepts: int = 12
     max_columns: int = 60
     debug: bool = False
+    llm_id: Optional[int] = None
 
 
 class LLMSelectedColumn(BaseModel):
@@ -139,13 +140,37 @@ class PlanService:
         self._column_vector = column_vector or ConstrainedColumnVectorService(sql=self._sql)
         self._domain_selector = domain_selector or DomainSelectionService(sql=self._sql)
         self._value_alias_resolver = value_alias_resolver or ValueAliasResolutionService(sql=self._sql)
-        self._llm = llm_client or LLMClient(
-            endpoint=VLLM_BASE_URL,
-            model=SEMANTIC_PLAN_LLM_MODEL,
-            timeout_seconds=SEMANTIC_PLAN_LLM_TIMEOUT_SECONDS,
-        )
+        self._explicit_llm = llm_client is not None
+        self._llm = llm_client or LLMClient(timeout_seconds=SEMANTIC_PLAN_LLM_TIMEOUT_SECONDS)
+        self._llm_runtime_meta: Dict[str, Any] = {
+            "source": "bootstrap",
+            "role": LLMRole.PLANNER,
+            "llm_id": None,
+            "provider": "generic",
+            "model": str(getattr(self._llm, "_model", "") or ""),
+            "endpoint": str(getattr(self._llm, "_endpoint", "") or ""),
+        }
         self._tier2_runner = tier2_runner or run_tier2_with_meta
         self._semantic_extractor = semantic_extractor or SemanticExtractService()
+
+    def _resolve_runtime_llm(self, *, workspace_id: str, llm_id_override: Optional[int] = None) -> None:
+        if self._explicit_llm:
+            return
+        resolved = build_llm_client_for_role(
+            workspace_id=workspace_id,
+            role=LLMRole.PLANNER,
+            llm_id_override=llm_id_override,
+            timeout_seconds=None,
+        )
+        self._llm = resolved.client
+        self._llm_runtime_meta = {
+            "source": resolved.source,
+            "role": resolved.role,
+            "llm_id": resolved.llm_id,
+            "provider": resolved.provider,
+            "model": resolved.model,
+            "endpoint": resolved.endpoint,
+        }
 
     def plan(self, payload: Dict[str, Any], *, include_llm: bool = True) -> Dict[str, Any]:
         try:
@@ -431,6 +456,7 @@ class PlanService:
         }
 
         if include_llm:
+            self._resolve_runtime_llm(workspace_id=workspace_id, llm_id_override=req.llm_id)
             t4 = time.perf_counter()
             llm_plan = self._plan_with_llm(
                 prompt=prompt,
@@ -457,7 +483,8 @@ class PlanService:
             if llm_warnings:
                 warnings.extend(llm_warnings)
             response["llm_plan"] = {
-                "model": SEMANTIC_PLAN_LLM_MODEL,
+                "model": str(self._llm_runtime_meta.get("model") or ""),
+                "llm_resolution": dict(self._llm_runtime_meta),
                 **llm_plan,
             }
         else:
