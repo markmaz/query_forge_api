@@ -55,6 +55,7 @@ from app.routes.embeddings import embeddings_ns
 from app.routes.execution_routes import executions_ns
 from app.routes.export_routes import exports_ns
 from app.routes.forge_insights import forge_insights_ns
+from app.routes.destination_routes import destinations_ns
 from app.routes.forge_match_routes import forge_match_ns
 from app.routes.skills_routes import skills_ns
 from app.routes.model_routes import model_ns
@@ -324,6 +325,7 @@ def create_app():
     api.add_namespace(ai_ns, path=build_url("/", NAME, VERSION, "ai"))
     api.add_namespace(prompt_feedback_ns, path=build_url("/", NAME, VERSION, "prompt-feedback"))
     api.add_namespace(forge_insights_ns, path=build_url("/", NAME, VERSION, "forge-insights"))
+    api.add_namespace(destinations_ns, path=build_url("/", NAME, VERSION, "workspaces", "destinations"))
     api.add_namespace(forge_match_ns, path=build_url("/", NAME, VERSION, "forge-match"))
     api.add_namespace(skills_ns, path=build_url("/", NAME, VERSION, "skills"))
     api.add_namespace(chat_ns, path=build_url("/", NAME, VERSION, "chat"))
