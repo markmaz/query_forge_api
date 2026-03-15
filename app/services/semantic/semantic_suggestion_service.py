@@ -93,7 +93,7 @@ class SemanticSuggestionService:
             raise ForgeError("Failed to create suggestion run", status_code=500)
         return self.get_run(int(result.lastrowid))
 
-    def execute_run(self, run_id: int) -> Dict[str, Any]:
+    def execute_run(self, run_id: int, *, llm_id: Optional[int] = None) -> Dict[str, Any]:
         run = self.get_run(run_id)
         if run["status"] == "running":
             raise ForgeError("Run is already in progress", status_code=409)
@@ -106,6 +106,7 @@ class SemanticSuggestionService:
         page_size = max(1, min(page_size, 1000))
         processed_columns = 0
         vertical_norm = _normalize_vertical_norm(run.get("vertical"))
+        workspace_id = str(run.get("workspace_id") or "").strip()
 
         self._set_run_status(run_id, status="running")
         try:
@@ -175,6 +176,8 @@ class SemanticSuggestionService:
                             cards=unresolved_cards,
                             vertical=run.get("vertical"),
                             known_concepts=known_concepts,
+                            workspace_id=workspace_id,
+                            llm_id=llm_id,
                         )
                         llm_raw = getattr(self._labeler, "last_batch_raw", None)
                         if not isinstance(llm_raw, list) or len(llm_raw) != len(unresolved_cards):

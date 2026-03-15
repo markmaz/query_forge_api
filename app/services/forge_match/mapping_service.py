@@ -273,6 +273,7 @@ class ForgeMatchMappingService:
         domain_id: Optional[int] = None,
         top_n: int = 8,
         force: bool = False,
+        llm_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         return self.run_analyze_job(
             workspace_id=workspace_id,
@@ -282,6 +283,7 @@ class ForgeMatchMappingService:
             top_n=top_n,
             force=force,
             job_id=None,
+            llm_id=llm_id,
         )
 
     def start_analyze_session_job(
@@ -293,6 +295,7 @@ class ForgeMatchMappingService:
         domain_id: Optional[int] = None,
         vertical_norm: Optional[str] = None,
         force: bool = False,
+        llm_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         del vertical_norm  # reserved for future filtering
         ws = _required_text(workspace_id, "workspace_id")
@@ -338,6 +341,7 @@ class ForgeMatchMappingService:
             "top_n": max(3, int(top_n or 8)),
             "domain_id": int(domain_id) if domain_id is not None else None,
             "force": bool(force),
+            "llm_id": int(llm_id) if llm_id is not None else None,
         }
 
     def run_analyze_job(
@@ -350,6 +354,7 @@ class ForgeMatchMappingService:
         top_n: int = 8,
         force: bool = False,
         job_id: Optional[str] = None,
+        llm_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         del vertical_norm  # reserved for future filtering
 
@@ -462,7 +467,12 @@ class ForgeMatchMappingService:
                         top_n=max(3, int(top_n or 8)),
                         domain_id=int(domain_id) if domain_id is not None else None,
                     )
-                    llm_rank = self._ranker.rank(source_record=source_record, candidates=candidates)
+                    llm_rank = self._ranker.rank(
+                        workspace_id=ws,
+                        source_record=source_record,
+                        candidates=candidates,
+                        llm_id=llm_id,
+                    )
                     selected = self._find_candidate(candidates, llm_rank.get("selected_column_id"))
                     alternates = self._find_alternates(candidates, llm_rank.get("alternate_column_ids") or [])
                     confidence = self._confidence.score(

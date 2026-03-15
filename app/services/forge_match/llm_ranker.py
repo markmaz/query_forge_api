@@ -4,7 +4,8 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence
 
-from app.exceptions.forge_error import ForgeError
+from app.config.llm_resolver import build_llm_client_for_role
+from app.constants.llm_roles import LLMRole
 from app.services.forge_match.field_extractor import SourceFieldRecord
 from app.services.llm.llm_client import LLMClient
 
@@ -25,14 +26,25 @@ _ALLOWED_REASON_CODES = {
 
 class ForgeMatchLLMRanker:
     def __init__(self, *, llm: Optional[LLMClient] = None, max_tokens: int = 500) -> None:
+        self._explicit_llm = llm is not None
         self._llm = llm or LLMClient()
         self._max_tokens = max(200, int(max_tokens or 500))
+        self._llm_runtime_meta: Dict[str, Any] = {
+            "source": "bootstrap",
+            "role": LLMRole.ENRICHMENT,
+            "llm_id": None,
+            "provider": "generic",
+            "model": str(getattr(self._llm, "_model", "") or ""),
+            "endpoint": str(getattr(self._llm, "_endpoint", "") or ""),
+        }
 
     def rank(
         self,
         *,
+        workspace_id: str,
         source_record: SourceFieldRecord,
         candidates: Sequence[Dict[str, Any]],
+        llm_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         if not candidates:
             return {
@@ -45,6 +57,8 @@ class ForgeMatchLLMRanker:
                 "llm_confidence": 0.0,
             }
 
+        if not self._explicit_llm:
+            self._resolve_runtime_llm(workspace_id=workspace_id, llm_id_override=llm_id)
         candidate_ids = {int(row.get("column_id") or 0) for row in candidates if int(row.get("column_id") or 0) > 0}
         prompt = self._build_user_prompt(source_record=source_record, candidates=candidates)
 
@@ -84,7 +98,25 @@ class ForgeMatchLLMRanker:
             normalized["ambiguity_note"] = "Model selected candidates outside retrieved set; review required."
             normalized["reason_codes"] = ["insufficient_signal"]
             normalized["llm_confidence"] = min(float(normalized.get("llm_confidence") or 0.0), 0.25)
+        normalized["llm_resolution"] = dict(self._llm_runtime_meta)
         return normalized
+
+    def _resolve_runtime_llm(self, *, workspace_id: str, llm_id_override: Optional[int] = None) -> None:
+        resolved = build_llm_client_for_role(
+            workspace_id=str(workspace_id or "").strip(),
+            role=LLMRole.ENRICHMENT,
+            llm_id_override=llm_id_override,
+            timeout_seconds=None,
+        )
+        self._llm = resolved.client
+        self._llm_runtime_meta = {
+            "source": resolved.source,
+            "role": resolved.role,
+            "llm_id": resolved.llm_id,
+            "provider": resolved.provider,
+            "model": resolved.model,
+            "endpoint": resolved.endpoint,
+        }
 
     @staticmethod
     def _build_system_prompt() -> str:

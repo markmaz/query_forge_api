@@ -33,6 +33,8 @@ class DictionaryEnrichmentService:
         columns: list[dict],
         overwrite: bool = False,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        workspace_id: str | None = None,
+        llm_id: int | None = None,
     ) -> dict[str, Any]:
         """Generate descriptions for columns with missing descriptions.
 
@@ -201,13 +203,24 @@ LIMIT 1
                             }
                         )
 
-                    generated_table_description = str(
-                        self._llm.generate_table_description(
-                            table_name=state["table_name"],
-                            columns=context_rows,
-                        )
-                        or ""
-                    ).strip()
+                    try:
+                        generated_table_description = str(
+                            self._llm.generate_table_description(
+                                table_name=state["table_name"],
+                                columns=context_rows,
+                                workspace_id=workspace_id,
+                                llm_id=llm_id,
+                            )
+                            or ""
+                        ).strip()
+                    except TypeError:
+                        generated_table_description = str(
+                            self._llm.generate_table_description(
+                                table_name=state["table_name"],
+                                columns=context_rows,
+                            )
+                            or ""
+                        ).strip()
                     if generated_table_description:
                         with self._mysql.transaction() as tx:
                             tx.execute_write(
@@ -242,16 +255,30 @@ WHERE table_name = :table_name
 
                     try:
                         if supports_structured_column_metadata:
-                            generated = dict(
-                                self._llm.generate_column_metadata(
-                                    table_name=table_name,
-                                    table_description=table_description,
-                                    column_name=cn,
-                                    data_type=str(col.get("data_type") or "").strip() or None,
-                                    source_comment=str(col.get("comment") or "").strip() or None,
+                            try:
+                                generated = dict(
+                                    self._llm.generate_column_metadata(
+                                        table_name=table_name,
+                                        table_description=table_description,
+                                        column_name=cn,
+                                        data_type=str(col.get("data_type") or "").strip() or None,
+                                        source_comment=str(col.get("comment") or "").strip() or None,
+                                        workspace_id=workspace_id,
+                                        llm_id=llm_id,
+                                    )
+                                    or {}
                                 )
-                                or {}
-                            )
+                            except TypeError:
+                                generated = dict(
+                                    self._llm.generate_column_metadata(
+                                        table_name=table_name,
+                                        table_description=table_description,
+                                        column_name=cn,
+                                        data_type=str(col.get("data_type") or "").strip() or None,
+                                        source_comment=str(col.get("comment") or "").strip() or None,
+                                    )
+                                    or {}
+                                )
                         else:
                             prompt = (
                                 f"Write a concise one-sentence data dictionary description for a column "
@@ -259,7 +286,14 @@ WHERE table_name = :table_name
                                 f"in table '{table_name}'. "
                                 f"Source comment: {col.get('comment') or 'none'}."
                             )
-                            generated = {"description": str(self._llm.generate(prompt) or "").strip() or None}
+                            try:
+                                generated = {
+                                    "description": str(
+                                        self._llm.generate(prompt, workspace_id=workspace_id, llm_id=llm_id) or ""
+                                    ).strip() or None
+                                }
+                            except TypeError:
+                                generated = {"description": str(self._llm.generate(prompt) or "").strip() or None}
 
                         sets: list[str] = []
                         params: dict[str, Any] = {}

@@ -24,6 +24,7 @@ plan_llm_request_model = planner_ns.model(
         "vertical": fields.String(required=False, default="generic"),
         "constraints": fields.Raw(required=False),
         "debug": fields.Boolean(required=False, default=False),
+        "llm_id": fields.Integer(required=False, description="Optional workspace LLM id override"),
     },
 )
 
@@ -49,4 +50,3 @@ class PlannerPlanLLM(ForgeResource):
         except Exception:
             logger.exception("planner llm failed")
             return {"error": "planner llm failed"}, 500
-

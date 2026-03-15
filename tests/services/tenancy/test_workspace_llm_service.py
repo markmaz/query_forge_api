@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -64,23 +63,24 @@ def test_get_llm_for_role_returns_db_config(service, mock_sql):
     assert result["api_key"] == "sk-real"
 
 
-def test_get_llm_for_role_falls_back_to_env(service, mock_sql, monkeypatch):
-    mock_sql.execute_query_mappings.return_value = []
-    monkeypatch.setenv("VLLM_BASE_URL", "http://localhost:8000")
-    monkeypatch.setenv("SEMANTIC_PLAN_LLM_MODEL", "qwen25-7b")
-    result = service.get_llm_for_role("ws1", "planner")
+def test_get_llm_for_role_falls_back_to_any_active_workspace_llm(service, mock_sql):
+    mock_sql.execute_query_mappings.side_effect = [
+        [],  # exact role miss
+        [_make_row(role="summarizer", encrypted_key="enc_key")],  # any active fallback
+    ]
+    with patch("app.services.tenancy.workspace_llm_service.decrypt_api_key", return_value="sk-real"):
+        result = service.get_llm_for_role("ws1", "planner")
     assert result is not None
-    assert result["provider"] == "generic"
-    assert result["endpoint_url"] == "http://localhost:8000"
+    assert result["provider"] == "openai"
+    assert result["role"] == "summarizer"
+    assert result["_source"] == "workspace_any_role"
 
 
-def test_get_llm_for_role_returns_none_when_nothing_configured(service, mock_sql, monkeypatch):
-    mock_sql.execute_query_mappings.return_value = []
-    monkeypatch.delenv("VLLM_BASE_URL", raising=False)
-    monkeypatch.delenv("VLLM_MODEL", raising=False)
-    monkeypatch.delenv("SEMANTIC_LLM_ENDPOINT", raising=False)
-    monkeypatch.delenv("SEMANTIC_LLM_MODEL", raising=False)
-    monkeypatch.delenv("SEMANTIC_PLAN_LLM_MODEL", raising=False)
+def test_get_llm_for_role_returns_none_when_nothing_configured(service, mock_sql):
+    mock_sql.execute_query_mappings.side_effect = [
+        [],  # exact role miss
+        [],  # any-role miss
+    ]
     result = service.get_llm_for_role("ws1", "planner")
     assert result is None
 
@@ -146,26 +146,6 @@ def test_delete_llm_raises_on_missing(service, mock_sql):
     mock_sql.execute_query_mappings.return_value = []
     with pytest.raises(ValueError, match="not found"):
         service.delete_llm(999)
-
-
-# ── _env_fallback ─────────────────────────────────────────────────────────────
-
-def test_env_fallback_ner_role(service, mock_sql, monkeypatch):
-    mock_sql.execute_query_mappings.return_value = []
-    monkeypatch.setenv("SEMANTIC_LLM_ENDPOINT", "http://nlp-server:8000")
-    monkeypatch.setenv("SEMANTIC_LLM_MODEL", "ner-model")
-    result = service.get_llm_for_role("ws1", "ner")
-    assert result is not None
-    assert result["endpoint_url"] == "http://nlp-server:8000"
-    assert result["model_name"] == "ner-model"
-
-
-def test_env_fallback_returns_none_if_model_missing(service, mock_sql, monkeypatch):
-    mock_sql.execute_query_mappings.return_value = []
-    monkeypatch.setenv("VLLM_BASE_URL", "http://localhost:8000")
-    monkeypatch.delenv("SEMANTIC_PLAN_LLM_MODEL", raising=False)
-    result = service.get_llm_for_role("ws1", "planner")
-    assert result is None
 
 
 def test_update_llm_preserves_existing_api_key_when_not_provided(service, mock_sql):

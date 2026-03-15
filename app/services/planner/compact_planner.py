@@ -15,6 +15,8 @@ from app.config import (
     SEMANTIC_PLAN_LLM_MAX_TOKENS,
     SEMANTIC_PLAN_LLM_MODEL,
 )
+from app.config.llm_resolver import build_llm_client_for_role
+from app.constants.llm_roles import LLMRole
 from app.exceptions.forge_error import ForgeError
 from app.services.llm.llm_client import LLMClient
 from app.services.llm.prompts_plan_v2 import build_system_prompt
@@ -52,8 +54,17 @@ def build_compact_plan_and_project(
     compiler: Optional[SemanticPlanCompiler] = None,
     max_tokens: Optional[int] = None,
     fast_mode: bool = False,
+    llm_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    llm = llm_client or LLMClient()
+    active_seed_llm = llm_client
+    if active_seed_llm is None:
+        resolved = build_llm_client_for_role(
+            workspace_id=workspace_id,
+            role=LLMRole.PLANNER,
+            llm_id_override=llm_id,
+        )
+        active_seed_llm = resolved.client
+    llm = active_seed_llm
     retrieval = retrieval_service or SemanticRetrievalService()
     validator = validation_service or PlannerValidationService()
     plan_compiler = compiler or SemanticPlanCompiler()
@@ -141,6 +152,7 @@ def build_compact_plan_and_project(
                         endpoint=str(getattr(llm, "_endpoint", "") or None),
                         model=QF_PLAN_DOMAIN_COMPACT_FALLBACK_MODEL,
                         timeout_seconds=int(getattr(llm, "_timeout_seconds", 60)),
+                        headers=dict(getattr(llm, "_headers", {}) or {}),
                     )
                 continue
             raise _planner_truncation_error(

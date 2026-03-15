@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import EMBEDDING_MODEL_NAME, QF_DOMAIN_PROFILE_LLM_MAX_TOKENS
+from app.config.llm_resolver import build_llm_client_for_role
+from app.constants.llm_roles import LLMRole
 from app.exceptions.forge_error import ForgeError
 from app.infra.embedding_model import EmbeddingModel
 from app.models.domain_profile import DomainProfileBase, compute_content_hash, _build_embedding_text
@@ -102,14 +104,50 @@ class DomainProfileEmbeddingService:
     ) -> None:
         self._sql = sql or ForgeMetaSQL()
         self._builder = builder or DomainProfileBuilder(sql=self._sql)
+        self._explicit_llm = llm_client is not None
         self._llm = llm_client or LLMClient()
         self._embedding_model = embedding_model or EmbeddingModel(model_name=EMBEDDING_MODEL_NAME)
+        self._llm_runtime_meta: Dict[str, Any] = {
+            "source": "bootstrap",
+            "role": LLMRole.ENRICHMENT,
+            "llm_id": None,
+            "provider": "generic",
+            "model": str(getattr(self._llm, "_model", "") or ""),
+            "endpoint": str(getattr(self._llm, "_endpoint", "") or ""),
+        }
 
-    def generate_one(self, *, workspace_id: str, domain_id: int, force: bool = False) -> Dict[str, Any]:
+    def _resolve_runtime_llm(self, *, workspace_id: str, llm_id_override: Optional[int] = None) -> None:
+        if self._explicit_llm:
+            return
+        resolved = build_llm_client_for_role(
+            workspace_id=str(workspace_id or "").strip(),
+            role=LLMRole.ENRICHMENT,
+            llm_id_override=llm_id_override,
+            timeout_seconds=None,
+        )
+        self._llm = resolved.client
+        self._llm_runtime_meta = {
+            "source": resolved.source,
+            "role": resolved.role,
+            "llm_id": resolved.llm_id,
+            "provider": resolved.provider,
+            "model": resolved.model,
+            "endpoint": resolved.endpoint,
+        }
+
+    def generate_one(
+        self,
+        *,
+        workspace_id: str,
+        domain_id: int,
+        force: bool = False,
+        llm_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
         return self._generate_domain(
             workspace_id=str(workspace_id or "").strip(),
             domain_id=int(domain_id),
             force=bool(force),
+            llm_id=llm_id,
         )
 
     def generate_many(
@@ -118,6 +156,7 @@ class DomainProfileEmbeddingService:
         workspace_id: str,
         domain_ids: Sequence[int],
         force: bool = False,
+        llm_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         workspace = str(workspace_id or "").strip()
         if not workspace:
@@ -131,7 +170,12 @@ class DomainProfileEmbeddingService:
         failed = 0
         for domain_id in clean_ids:
             try:
-                result = self._generate_domain(workspace_id=workspace, domain_id=domain_id, force=bool(force))
+                result = self._generate_domain(
+                    workspace_id=workspace,
+                    domain_id=domain_id,
+                    force=bool(force),
+                    llm_id=llm_id,
+                )
                 results.append(result)
             except Exception as exc:
                 failed += 1
@@ -169,6 +213,7 @@ class DomainProfileEmbeddingService:
         workspace_id: str,
         force: bool = False,
         include_inactive: bool = False,
+        llm_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         workspace = str(workspace_id or "").strip()
         if not workspace:
@@ -178,13 +223,26 @@ class DomainProfileEmbeddingService:
             {"workspace_id": workspace, "include_inactive": 1 if include_inactive else 0},
         )
         domain_ids = [int(row.get("id") or 0) for row in rows if int(row.get("id") or 0) > 0]
-        return self.generate_many(workspace_id=workspace, domain_ids=domain_ids, force=force)
+        return self.generate_many(
+            workspace_id=workspace,
+            domain_ids=domain_ids,
+            force=force,
+            llm_id=llm_id,
+        )
 
-    def _generate_domain(self, *, workspace_id: str, domain_id: int, force: bool) -> Dict[str, Any]:
+    def _generate_domain(
+        self,
+        *,
+        workspace_id: str,
+        domain_id: int,
+        force: bool,
+        llm_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
         if not workspace_id:
             raise ForgeError("workspace_id is required", status_code=400)
         if int(domain_id) <= 0:
             raise ForgeError("domain_id must be > 0", status_code=400)
+        self._resolve_runtime_llm(workspace_id=workspace_id, llm_id_override=llm_id)
 
         started = time.perf_counter()
         trace_id = f"dpg_{uuid.uuid4().hex[:24]}"
@@ -266,6 +324,7 @@ class DomainProfileEmbeddingService:
             "embedding_model": embedding_model_name,
             "generation_time_ms": elapsed_ms,
             "llm": llm_meta,
+            "llm_resolution": dict(self._llm_runtime_meta),
         }
 
     def _generate_profile_with_llm(self, *, context: Mapping[str, Any], trace_id: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:

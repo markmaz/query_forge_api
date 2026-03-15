@@ -21,6 +21,7 @@ def analyze_forge_match_session_task(
     domain_id: int | None = None,
     vertical_norm: str | None = None,
     force: bool = False,
+    llm_id: int | None = None,
 ) -> dict:
     del self
     sql = ForgeMetaSQL()
@@ -34,6 +35,7 @@ def analyze_forge_match_session_task(
             vertical_norm=vertical_norm,
             force=force,
             job_id=job_id,
+            llm_id=llm_id,
         )
         return {
             "job_id": job_id,

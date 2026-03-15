@@ -27,6 +27,8 @@ class LLMClient:
         endpoint: Optional[str] = None,
         model: Optional[str] = None,
         timeout_seconds: Optional[int] = None,
+        api_key: Optional[str] = None,
+        headers: Optional[Mapping[str, str]] = None,
     ) -> None:
         raw_endpoint = str(endpoint if endpoint is not None else SEMANTIC_LLM_ENDPOINT)
         normalized_endpoint = raw_endpoint.strip().strip('"').strip("'")
@@ -36,7 +38,7 @@ class LLMClient:
         self._endpoint = normalized_endpoint
         self._model = (model or SEMANTIC_LLM_MODEL).strip()
         self._timeout_seconds = int(timeout_seconds or SEMANTIC_LLM_TIMEOUT_SECONDS)
-        self._headers = self._build_headers()
+        self._headers = self._build_headers(api_key=api_key, headers=headers)
 
     def chat_json(
         self,
@@ -422,11 +424,24 @@ class LLMClient:
         return token.endswith("/v1/chat/completions")
 
     @staticmethod
-    def _build_headers() -> Dict[str, str]:
-        api_key = str(os.getenv("SEMANTIC_LLM_API_KEY", "")).strip()
-        if api_key == "":
-            return {}
-        return {"Authorization": f"Bearer {api_key}"}
+    def _build_headers(
+        *,
+        api_key: Optional[str] = None,
+        headers: Optional[Mapping[str, str]] = None,
+    ) -> Dict[str, str]:
+        out: Dict[str, str] = {}
+        if isinstance(headers, Mapping):
+            for key, value in headers.items():
+                k = str(key or "").strip()
+                v = str(value or "").strip()
+                if k and v:
+                    out[k] = v
+        if "Authorization" in out:
+            return out
+        token = str(api_key if api_key is not None else os.getenv("SEMANTIC_LLM_API_KEY", "")).strip()
+        if token:
+            out["Authorization"] = f"Bearer {token}"
+        return out
 
     @staticmethod
     def _extract_chat_content(body: Dict[str, Any]) -> Optional[str]:

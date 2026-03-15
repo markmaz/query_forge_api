@@ -68,9 +68,11 @@ class SuggestionRuns(ForgeResource):
 @semantic_suggestions_ns.route("/runs/<int:run_id>/execute")
 class SuggestionRunExecute(ForgeResource):
     @token_required
+    @semantic_suggestions_ns.doc(params={"llm_id": "Optional workspace LLM id override"})
     def post(self, run_id: int):
         try:
-            run = SemanticSuggestionService().execute_run(run_id)
+            llm_id = _optional_int(request.args.get("llm_id"), "llm_id")
+            run = SemanticSuggestionService().execute_run(run_id, llm_id=llm_id)
             return {"run": run}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code

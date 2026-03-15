@@ -30,6 +30,7 @@ plan_domain_request_model = planner_ns.model(
         "profile_pipeline_data": fields.Boolean(required=False, default=False),
         "fast_mode": fields.Boolean(required=False),
         "next_actions_async": fields.Boolean(required=False),
+        "llm_id": fields.Integer(required=False, description="Optional workspace LLM override id"),
     },
 )
 
@@ -43,6 +44,7 @@ next_actions_request_model = planner_ns.model(
         "base_domain_id": fields.Integer(required=False),
         "conversation_id": fields.String(required=False),
         "trace_id": fields.String(required=False),
+        "llm_id": fields.Integer(required=False, description="Optional workspace LLM override id"),
     },
 )
 

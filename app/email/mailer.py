@@ -51,8 +51,20 @@ def send_password_reset(to_email: str, token: str) -> None:
     send_email(get_logo(), rendered.subject, to_email, rendered.html)
 
 
-def send_email(logo_path: str, subject: str, to_email: str, html: str) -> None:
+def send_email(
+    logo_path: str,
+    subject: str,
+    to_email: str,
+    html: str,
+    attachments: list[tuple[str, str, bytes]] | None = None,
+    reply_to: str | None = None,
+) -> None:
     message = Message(subject=subject, recipients=[to_email], html=html)
+    if reply_to:
+        message.reply_to = [reply_to]
+    if attachments:
+        for filename, content_type, data in attachments:
+            message.attach(filename, content_type, data)
     _attach_logo(message, logo_path)
     mail.send(message)
 

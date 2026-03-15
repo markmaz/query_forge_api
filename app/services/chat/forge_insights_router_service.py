@@ -13,6 +13,8 @@ from app.config import (
     QF_FORGE_INSIGHTS_ROUTE_DOMAIN_VECTOR_SCORE_THRESHOLD,
     QF_FORGE_INSIGHTS_ROUTE_LLM_MAX_TOKENS,
 )
+from app.config.llm_resolver import build_llm_client_for_role
+from app.constants.llm_roles import LLMRole
 from app.exceptions.forge_error import ForgeError
 from app.services.chat.education_fewshot_service import EducationFewshotService
 from app.services.chat.minimal_chat_service import ForgeInsightsChatService, MinimalChatRequest
@@ -71,7 +73,16 @@ class ForgeInsightsRouterService:
         self._chat = chat_service or ForgeInsightsChatService()
         self._planner = planner_domain_service or PlannerDomainService()
         self._execution = execution_service or ExecutionService()
+        self._explicit_llm = llm_client is not None
         self._llm = llm_client or LLMClient()
+        self._llm_runtime_meta: Dict[str, Any] = {
+            "source": "bootstrap",
+            "role": LLMRole.NER,
+            "llm_id": None,
+            "provider": "generic",
+            "model": str(getattr(self._llm, "_model", "") or ""),
+            "endpoint": str(getattr(self._llm, "_endpoint", "") or ""),
+        }
         self._fewshots = fewshot_service or EducationFewshotService()
         self._domain_vector = domain_vector_service or getattr(self._planner, "_domain_vector", None)
         self._auto_plan_enabled = bool(auto_plan_enabled)
@@ -80,6 +91,24 @@ class ForgeInsightsRouterService:
         self._route_domain_vector_enabled = bool(route_domain_vector_enabled)
         self._route_domain_vector_limit = max(1, min(int(route_domain_vector_limit), 5))
         self._route_domain_vector_score_threshold = max(0.0, min(float(route_domain_vector_score_threshold), 1.0))
+
+    def _resolve_runtime_llm(self, *, workspace_id: str) -> None:
+        if self._explicit_llm:
+            return
+        resolved = build_llm_client_for_role(
+            workspace_id=str(workspace_id or "").strip(),
+            role=LLMRole.NER,
+            timeout_seconds=None,
+        )
+        self._llm = resolved.client
+        self._llm_runtime_meta = {
+            "source": resolved.source,
+            "role": resolved.role,
+            "llm_id": resolved.llm_id,
+            "provider": resolved.provider,
+            "model": resolved.model,
+            "endpoint": resolved.endpoint,
+        }
 
     def ask(
         self,
@@ -186,7 +215,13 @@ class ForgeInsightsRouterService:
             "keyword_force_match": keyword_force_match,
             "fewshot_count": len(fewshot_examples),
             "domain_vector_match": vector_hit,
+            "llm_resolution": dict(self._llm_runtime_meta),
         }
+
+        try:
+            self._resolve_runtime_llm(workspace_id=workspace_id)
+        except Exception:
+            return fallback
 
         try:
             llm_out = self._llm.chat_json(
@@ -230,6 +265,7 @@ class ForgeInsightsRouterService:
             "keyword_force_match": keyword_force_match,
             "fewshot_count": len(fewshot_examples),
             "domain_vector_match": vector_hit,
+            "llm_resolution": dict(self._llm_runtime_meta),
         }
 
     def _domain_vector_hit(self, *, prompt: str, workspace_id: str) -> Dict[str, Any]:

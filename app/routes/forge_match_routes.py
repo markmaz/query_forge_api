@@ -33,6 +33,7 @@ _analyze_model = forge_match_ns.model(
         "vertical_norm": fields.String(required=False),
         "domain_id": fields.Integer(required=False),
         "force": fields.Boolean(required=False, default=False),
+        "llm_id": fields.Integer(required=False, description="Optional workspace LLM id override"),
     },
 )
 
@@ -188,6 +189,7 @@ class ForgeMatchAnalyze(ForgeResource):
                 domain_id=req.domain_id,
                 top_n=req.top_n,
                 force=req.force,
+                llm_id=req.llm_id,
             )
             return result, 200
         except ValidationError as exc:
@@ -217,6 +219,7 @@ class ForgeMatchAnalyzeStart(ForgeResource):
                 domain_id=req.domain_id,
                 top_n=req.top_n,
                 force=req.force,
+                llm_id=req.llm_id,
             )
 
             job_id = str(run["job_id"])
@@ -232,6 +235,7 @@ class ForgeMatchAnalyzeStart(ForgeResource):
                             "domain_id": req.domain_id,
                             "vertical_norm": req.vertical_norm,
                             "force": req.force,
+                            "llm_id": req.llm_id,
                         },
                         task_id=job_id,
                         retry=False,

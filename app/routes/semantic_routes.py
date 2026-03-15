@@ -26,6 +26,7 @@ plan_request_model = semantic_ns.model(
         "max_concepts": fields.Integer(required=False, default=12),
         "max_columns": fields.Integer(required=False, default=60),
         "debug": fields.Boolean(required=False, default=False),
+        "llm_id": fields.Integer(required=False, description="Optional workspace LLM id override"),
     },
 )
 

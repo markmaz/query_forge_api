@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import ValidationError
 
+from app.config.llm_resolver import build_llm_client_for_role
+from app.constants.llm_roles import LLMRole
 from app.services.llm.llm_client import LLMClient
 from app.services.semantic.semantic_llm_schema import BatchOutput, normalize_concept_key
 
@@ -91,7 +93,16 @@ Input column cards JSON array:
 
 class SemanticLLMLabeler:
     def __init__(self, *, llm_client: Optional[LLMClient] = None) -> None:
+        self._explicit_llm = llm_client is not None
         self._llm = llm_client or LLMClient()
+        self._llm_runtime_meta: Dict[str, Any] = {
+            "source": "bootstrap",
+            "role": LLMRole.ENRICHMENT,
+            "llm_id": None,
+            "provider": "generic",
+            "model": str(getattr(self._llm, "_model", "") or ""),
+            "endpoint": str(getattr(self._llm, "_endpoint", "") or ""),
+        }
         self.last_batch_raw: List[Dict[str, Any]] = []
         self._max_prompt_chars = 24000
         self._max_known_concepts = 120
@@ -102,10 +113,29 @@ class SemanticLLMLabeler:
         cards: List[Dict[str, Any]],
         vertical: Optional[str],
         known_concepts: Optional[List[Dict[str, Any]]] = None,
+        workspace_id: Optional[str] = None,
+        llm_id: Optional[int] = None,
     ) -> Tuple[List[Optional[Dict[str, Any]]], List[Optional[str]]]:
         self.last_batch_raw = []
         if not cards:
             return [], []
+        ws = str(workspace_id or "").strip()
+        if ws and not self._explicit_llm:
+            resolved = build_llm_client_for_role(
+                workspace_id=ws,
+                role=LLMRole.ENRICHMENT,
+                llm_id_override=llm_id,
+                timeout_seconds=None,
+            )
+            self._llm = resolved.client
+            self._llm_runtime_meta = {
+                "source": resolved.source,
+                "role": resolved.role,
+                "llm_id": resolved.llm_id,
+                "provider": resolved.provider,
+                "model": resolved.model,
+                "endpoint": resolved.endpoint,
+            }
 
         slim_cards = [self._slim_card(card) for card in cards]
         canonical = self._select_known_concepts(known_concepts or [], slim_cards)

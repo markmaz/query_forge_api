@@ -7,6 +7,8 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Protocol, Seque
 
 from pydantic import BaseModel, ValidationError
 
+from app.config.llm_resolver import build_llm_client_for_role
+from app.constants.llm_roles import LLMRole
 from app.services.llm.llm_client import LLMClient
 from app.services.semantic.catalog.catalog_models import (
     ColumnEnrichment,
@@ -26,8 +28,10 @@ class SemanticEnrichmentLLMInterface(Protocol):
         self,
         *,
         profiles: Sequence[ColumnProfile],
+        workspace_id: str,
         vertical_norm: str,
         domain_name: Optional[str],
+        llm_id: Optional[int] = None,
     ) -> List[ColumnEnrichment]:
         ...
 
@@ -39,18 +43,45 @@ class LLMSemanticEnrichmentClient:
     """
 
     def __init__(self, *, llm_client: Optional[LLMClient] = None, max_tokens: int = 1400) -> None:
+        self._explicit_llm = llm_client is not None
         self._llm = llm_client or LLMClient()
         self._max_tokens = max(300, int(max_tokens))
+        self._llm_runtime_meta: Dict[str, Any] = {
+            "source": "bootstrap",
+            "role": LLMRole.ENRICHMENT,
+            "llm_id": None,
+            "provider": "generic",
+            "model": str(getattr(self._llm, "_model", "") or ""),
+            "endpoint": str(getattr(self._llm, "_endpoint", "") or ""),
+        }
 
     def enrich_batch(
         self,
         *,
         profiles: Sequence[ColumnProfile],
+        workspace_id: str,
         vertical_norm: str,
         domain_name: Optional[str],
+        llm_id: Optional[int] = None,
     ) -> List[ColumnEnrichment]:
         if not profiles:
             return []
+        if not self._explicit_llm:
+            resolved = build_llm_client_for_role(
+                workspace_id=str(workspace_id or "").strip(),
+                role=LLMRole.ENRICHMENT,
+                llm_id_override=llm_id,
+                timeout_seconds=None,
+            )
+            self._llm = resolved.client
+            self._llm_runtime_meta = {
+                "source": resolved.source,
+                "role": resolved.role,
+                "llm_id": resolved.llm_id,
+                "provider": resolved.provider,
+                "model": resolved.model,
+                "endpoint": resolved.endpoint,
+            }
 
         cards = [
             {
@@ -188,8 +219,10 @@ class SemanticEnrichmentService:
         self,
         *,
         profiles: Sequence[ColumnProfile],
+        workspace_id: str,
         vertical_norm: str,
         domain_name: Optional[str],
+        llm_id: Optional[int] = None,
     ) -> List[EnrichedColumnProfile]:
         profile_list = list(profiles or [])
         if not profile_list:
@@ -212,8 +245,10 @@ class SemanticEnrichmentService:
             try:
                 llm_items = self._llm.enrich_batch(
                     profiles=batch_profiles,
+                    workspace_id=workspace_id,
                     vertical_norm=vertical_norm,
                     domain_name=domain_name,
+                    llm_id=llm_id,
                 )
                 for idx, profile in enumerate(batch_profiles):
                     merged_item = _merge_with_heuristic(llm_items[idx], batch_heuristics[idx], profile=profile)
