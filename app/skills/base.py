@@ -5,6 +5,45 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 
+class SkillResult(dict):
+    """
+    Return value from BaseSkill.execute().
+
+    Extends dict so json.dumps(result) works in skill_runner without changes.
+    Attribute-style access (.success, .message, .data, .error) used by tests.
+    """
+
+    def __init__(
+        self,
+        success: bool,
+        message: str = "",
+        data: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        super().__init__(
+            success=success,
+            message=message,
+            data=data if data is not None else {},
+            error=error,
+        )
+
+    @property
+    def success(self) -> bool:
+        return self["success"]
+
+    @property
+    def message(self) -> str:
+        return self["message"]
+
+    @property
+    def data(self) -> Dict[str, Any]:
+        return self["data"]
+
+    @property
+    def error(self) -> Optional[str]:
+        return self["error"]
+
+
 @dataclass
 class QueryMetadata:
     """Metadata about the query that was run for this skill execution."""
@@ -31,6 +70,7 @@ class SkillContext:
     triggered_by: Optional[str] = None
     results: List[Dict[str, Any]] = field(default_factory=list)
     metadata: Optional[QueryMetadata] = None
+    workspace_config: Dict[str, Any] = field(default_factory=dict)
 
 
 class BaseSkill:
