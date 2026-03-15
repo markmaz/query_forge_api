@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 import logging
 import pkgutil
-from typing import Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type
 
 from app.skills.base import BaseSkill
 
@@ -23,8 +23,19 @@ class SkillRegistry:
         return cls._registry.get(skill_type)
 
     @classmethod
+    def exists(cls, skill_type: str) -> bool:
+        return skill_type in cls._registry
+
+    @classmethod
     def all_types(cls) -> List[str]:
         return list(cls._registry.keys())
+
+    @classmethod
+    def all_skills(cls) -> List[Dict]:
+        return [
+            {"skill_type": skill_type, "cls": skill_cls}
+            for skill_type, skill_cls in cls._registry.items()
+        ]
 
     @classmethod
     def autodiscover(cls, package_name: str) -> None:

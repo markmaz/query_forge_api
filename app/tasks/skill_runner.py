@@ -1,3 +1,25 @@
+"""
+app/tasks/skill_runner.py
+
+Celery tasks for the QueryForge skills system.
+
+Changes from v2:
+  - dispatch_due_skills now records a heartbeat to Valkey on every tick
+  - catch_up=False (default) skips overdue runs older than one interval
+  - Task names use qf.* prefix to match this project's convention
+  - App context acquired via pattern from forge_match_tasks.py
+
+Startup commands:
+  Development:
+    celery -A app.celery_app worker --loglevel=info
+    celery -A app.celery_app beat --loglevel=info      <- must run separately
+
+  Production (systemd):
+    Add two systemd units — see docs/systemd/
+    queryforge-celery-worker.service
+    queryforge-celery-beat.service                     <- Beat MUST be its own unit
+"""
+
 from __future__ import annotations
 
 import json as _json
@@ -13,8 +35,13 @@ logger = logging.getLogger(__name__)
 _SKILL_EXECUTE_ROW_CAP = 500
 
 
+# ---------------------------------------------------------------------------
+# Core execution task
+# ---------------------------------------------------------------------------
+
+
 @celery.task(name="qf.skills.execute")
-def execute_skill_task(
+def execute_skill(
     *,
     skill_id: str,
     workspace_id: str,
@@ -33,13 +60,23 @@ def execute_skill_task(
         )
 
 
+# ---------------------------------------------------------------------------
+# Scheduler dispatcher — runs every 60s via Celery Beat
+# ---------------------------------------------------------------------------
+
+
 @celery.task(name="qf.skills.dispatch_due")
-def dispatch_due_skills_task() -> Dict[str, Any]:
+def dispatch_due_skills() -> Dict[str, Any]:
     from app import create_app
 
     app = create_app()
     with app.app_context():
         return _run_dispatch_due()
+
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
 
 
 def _run_execute(
@@ -113,7 +150,7 @@ def _run_execute(
         return result
 
     except Exception as exc:
-        logger.exception("execute_skill_task failed skill_id=%s execution_id=%s", skill_id, execution_id)
+        logger.exception("execute_skill failed skill_id=%s execution_id=%s", skill_id, execution_id)
         sql.execute_write(
             "UPDATE skill_executions SET status = 'failed', completed_at = :now, error_message = :err WHERE id = :id",
             {"now": datetime.now(timezone.utc), "id": execution_id, "err": str(exc)[:2000]},
@@ -122,6 +159,11 @@ def _run_execute(
 
 
 def _execute_skill_query(*, workspace_id: str, query_id: str):
+    """
+    Execute the saved query and return (rows, columns).
+    Seam: ForgeMetaSQL -> saved_query.sql_json -> WorkspaceContextBuilder -> QueryForgeService
+    """
+    import json
     from app.adapters.mysql_sql_executor import ForgeMetaSQL
     from app.services.domain_resolver import DomainResolver
     from app.services.query_forge_service import QueryForgeService
@@ -129,15 +171,18 @@ def _execute_skill_query(*, workspace_id: str, query_id: str):
 
     sql = ForgeMetaSQL()
     rows_q = sql.execute_query_mappings(
-        "SELECT sql_json FROM saved_query WHERE id = :id AND workspace_id = :ws AND is_deleted = 0 LIMIT 1",
+        "SELECT sql_json, name FROM saved_query "
+        "WHERE id = :id AND workspace_id = :ws AND is_deleted = 0 LIMIT 1",
         {"id": query_id, "ws": workspace_id},
     )
     if not rows_q:
         logger.warning("_execute_skill_query: saved_query %s not found in workspace %s", query_id, workspace_id)
         return [], []
 
-    raw = rows_q[0]["sql_json"]
-    sql_json: Dict[str, Any] = _json.loads(raw) if isinstance(raw, str) else (raw or {})
+    sql_json = rows_q[0]["sql_json"]
+    if isinstance(sql_json, str):
+        sql_json = json.loads(sql_json)
+    sql_json = sql_json or {}
 
     ctx = WorkspaceContextBuilder().build(workspace_id)
     svc = QueryForgeService(
@@ -148,15 +193,42 @@ def _execute_skill_query(*, workspace_id: str, query_id: str):
     return result.rows or [], result.columns or []
 
 
+def _get_workspace_config(workspace_id: str) -> dict:
+    """
+    Return workspace config dict for use by skills.
+    Seam: WorkspaceLLMService resolves config only.
+    """
+    try:
+        from app.services.tenancy.workspace_llm_service import WorkspaceLLMService
+        llm = WorkspaceLLMService().get_llm_for_role(workspace_id, "default")
+        return {"llm": llm}
+    except Exception as exc:
+        logger.warning("Could not load workspace LLM config for %s: %s", workspace_id, exc)
+        return {}
+
+
 def _run_dispatch_due() -> Dict[str, Any]:
+    """
+    Poll skill_schedules for rows where next_run_at <= now and is_active=True.
+    Dispatches execute_skill for each due schedule, then advances next_run_at.
+
+    Catch-up protection: if catch_up=False (default) and the schedule is more
+    than one full interval overdue, skip it and advance to the next future run.
+    This prevents alert/email storms after Beat downtime.
+    """
     from app.adapters.mysql_sql_executor import ForgeMetaSQL
+    from app.skills.schedule_utils import record_dispatch_heartbeat
+
+    # Record heartbeat so /scheduler/status can verify Beat is alive
+    record_dispatch_heartbeat()
 
     sql = ForgeMetaSQL()
     now = datetime.now(timezone.utc)
 
     due_rows = sql.execute_query_mappings(
         """
-        SELECT ss.id AS schedule_id, ss.skill_id, ss.workspace_id
+        SELECT ss.id AS schedule_id, ss.skill_id, ss.workspace_id,
+               ss.cron_expr, ss.timezone, ss.next_run_at, ss.catch_up
         FROM skill_schedules ss
         JOIN query_skills qs ON qs.id = ss.skill_id
         WHERE ss.is_active = 1
@@ -170,10 +242,29 @@ def _run_dispatch_due() -> Dict[str, Any]:
     )
 
     dispatched: List[Dict[str, str]] = []
+    skipped_catchup: List[str] = []
+
     for row in due_rows:
         skill_id = str(row["skill_id"])
         workspace_id = str(row["workspace_id"])
         schedule_id = str(row["schedule_id"])
+        cron_expr = str(row.get("cron_expr") or "")
+        catch_up = bool(row.get("catch_up", 0))
+        next_run_at = row.get("next_run_at")
+
+        # Catch-up protection
+        if not catch_up and _is_overdue_by_more_than_one_interval(cron_expr, next_run_at, now):
+            logger.info(
+                "Skipping overdue schedule_id=%s (catch_up=False) — advancing.",
+                schedule_id,
+            )
+            sql.execute_write(
+                "UPDATE skill_schedules SET last_run_at = :now, next_run_at = NULL WHERE id = :id",
+                {"now": now, "id": schedule_id},
+            )
+            skipped_catchup.append(skill_id)
+            continue
+
         execution_id = str(uuid.uuid4())
 
         try:
@@ -193,7 +284,7 @@ def _run_dispatch_due() -> Dict[str, Any]:
                 "UPDATE skill_schedules SET last_run_at = :now, next_run_at = NULL WHERE id = :id",
                 {"now": now, "id": schedule_id},
             )
-            execute_skill_task.apply_async(
+            execute_skill.apply_async(
                 kwargs={
                     "skill_id": skill_id,
                     "workspace_id": workspace_id,
@@ -202,10 +293,46 @@ def _run_dispatch_due() -> Dict[str, Any]:
                 }
             )
             dispatched.append({"skill_id": skill_id, "execution_id": execution_id})
+            logger.info("Dispatched skill_id=%s (schedule_id=%s)", skill_id, schedule_id)
         except Exception:
             logger.exception("dispatch_due: failed to dispatch skill_id=%s schedule_id=%s", skill_id, schedule_id)
 
-    return {"dispatched": len(dispatched), "items": dispatched}
+    logger.info(
+        "dispatch_due_skills: dispatched=%s skipped_catchup=%s",
+        len(dispatched), len(skipped_catchup),
+    )
+    return {
+        "dispatched": len(dispatched),
+        "skipped_catchup": len(skipped_catchup),
+        "items": dispatched,
+    }
 
 
-__all__ = ["execute_skill_task", "dispatch_due_skills_task"]
+def _is_overdue_by_more_than_one_interval(
+    cron_expr: str, next_run_at: Any, now: datetime
+) -> bool:
+    """
+    Returns True if next_run_at is more than one full cron interval in the past
+    — i.e. we've missed more than one run.
+    """
+    if not cron_expr or not next_run_at:
+        return False
+    try:
+        from croniter import croniter
+
+        if isinstance(next_run_at, str):
+            next_run_at = datetime.fromisoformat(next_run_at)
+
+        cron = croniter(cron_expr, next_run_at)
+        one_interval_later = cron.get_next(datetime)
+        now_naive = now.replace(tzinfo=None) if now.tzinfo else now
+        return now_naive > one_interval_later.replace(tzinfo=None)
+    except Exception:
+        return False
+
+
+# Backward-compat aliases — tasks/__init__.py and skills_routes.py use old names
+execute_skill_task = execute_skill
+dispatch_due_skills_task = dispatch_due_skills
+
+__all__ = ["execute_skill", "dispatch_due_skills", "execute_skill_task", "dispatch_due_skills_task"]
