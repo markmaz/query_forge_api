@@ -20,6 +20,7 @@ from app.config import (
     AWS_REGION,
     AWS_SECRET_ACCESS_KEY,
     AWS_SESSION_TOKEN,
+    FRONTEND_BASE_URL,
     LLM_INSTANCE_ID,
     LLM_STATUS_CACHE_SECONDS,
     LOG_QUEUE,
@@ -55,6 +56,7 @@ from app.routes.execution_routes import executions_ns
 from app.routes.export_routes import exports_ns
 from app.routes.forge_insights import forge_insights_ns
 from app.routes.forge_match_routes import forge_match_ns
+from app.routes.skills_routes import skills_ns
 from app.routes.model_routes import model_ns
 from app.routes.nlp_review import nlp_review_ns
 from app.routes.nlp_routes import nlp_ns
@@ -251,6 +253,7 @@ def create_app():
     app.config["LLM_STATUS_CACHE_SECONDS"] = LLM_STATUS_CACHE_SECONDS
     app.config["QF_MINIMAL_CHAT_ENABLED"] = QF_MINIMAL_CHAT_ENABLED
     app.config["QF_FORGE_INSIGHTS_ENABLED"] = QF_FORGE_INSIGHTS_ENABLED
+    app.config["FRONTEND_BASE_URL"] = FRONTEND_BASE_URL
     if not app.config["LLM_INSTANCE_ID"]:
         raise RuntimeError("LLM_INSTANCE_ID environment variable is required")
     if not app.config["AWS_ACCESS_KEY_ID"] or not app.config["AWS_SECRET_ACCESS_KEY"]:
@@ -267,6 +270,9 @@ def create_app():
 
     configure_forge_celery(app)
     app.config["CELERY"] = celery
+
+    from app.skills.registry import SkillRegistry
+    SkillRegistry.autodiscover("app.skills")
 
     api = Api(
         app,
@@ -319,6 +325,7 @@ def create_app():
     api.add_namespace(prompt_feedback_ns, path=build_url("/", NAME, VERSION, "prompt-feedback"))
     api.add_namespace(forge_insights_ns, path=build_url("/", NAME, VERSION, "forge-insights"))
     api.add_namespace(forge_match_ns, path=build_url("/", NAME, VERSION, "forge-match"))
+    api.add_namespace(skills_ns, path=build_url("/", NAME, VERSION, "skills"))
     api.add_namespace(chat_ns, path=build_url("/", NAME, VERSION, "chat"))
     api.add_namespace(semantic_concepts_ns, path=build_url("/", NAME, VERSION, "semantic", "concepts"))
     api.add_namespace(semantic_concept_aliases_ns, path=build_url("/", NAME, VERSION, "semantic", "concept-aliases"))

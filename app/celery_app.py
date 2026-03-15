@@ -47,3 +47,11 @@ def configure_forge_celery(app):
     celery.conf.worker_pool = selected_pool
     if selected_pool == "solo":
         celery.conf.worker_concurrency = int(os.getenv("QF_CELERY_WORKER_CONCURRENCY", "1"))
+
+
+beat_schedule = dict(getattr(celery.conf, "beat_schedule", {}) or {})
+beat_schedule["dispatch-due-skills"] = {
+    "task": "qf.skills.dispatch_due",
+    "schedule": 60.0,
+}
+celery.conf.beat_schedule = beat_schedule
