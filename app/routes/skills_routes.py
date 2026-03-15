@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
+from app.skills.schedule_utils import get_scheduler_health, next_n_runs, validate_cron
 from typing import Any, Dict
 
 from flask import g, request
@@ -535,6 +536,131 @@ class SkillScheduleDetail(ForgeResource):
         except Exception:
             logger.exception("skill schedule update failed schedule_id=%s", schedule_id)
             return {"error": "skill schedule update failed"}, 500
+
+
+@skills_ns.route("/scheduler/status")
+class SchedulerStatus(ForgeResource):
+    @token_required
+    def get(self):
+        """
+        Return Beat scheduler health. Used by ops dashboards and
+        the SkillBuilder UI to warn when the scheduler is not running.
+        """
+        try:
+            health = get_scheduler_health()
+            status_code = 200 if health["healthy"] else 503
+            return health, status_code
+        except Exception:
+            logger.exception("scheduler status check failed")
+            return {"error": "scheduler status check failed"}, 500
+
+
+@skills_ns.route("/<string:skill_id>/schedule/upcoming")
+class SkillScheduleUpcoming(ForgeResource):
+    @token_required
+    def get(self, skill_id: str):
+        """
+        Return the next N scheduled run times for a skill.
+        Used by the SkillBuilder UI to preview when a skill will next fire.
+
+        Query params:
+          n  — number of upcoming runs to return (default 5, max 20)
+        """
+        try:
+            workspace_id = extract_workspace_id()
+            from app.adapters.mysql_sql_executor import ForgeMetaSQL
+
+            sql = ForgeMetaSQL()
+            schedule_rows = sql.execute_query_mappings(
+                """
+                SELECT cron_expr, timezone FROM skill_schedules
+                WHERE skill_id = :skill_id AND workspace_id = :ws AND is_active = 1
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                {"skill_id": skill_id, "ws": workspace_id},
+            )
+            if not schedule_rows:
+                return {"upcoming": [], "reason": "No schedule configured."}, 200
+
+            row = schedule_rows[0]
+            cron_expr = str(row["cron_expr"] or "")
+            timezone_str = str(row["timezone"] or "UTC")
+
+            if not cron_expr:
+                return {"upcoming": [], "reason": "No cron expression configured."}, 200
+
+            n = min(int(request.args.get("n", 5) or 5), 20)
+            runs = next_n_runs(expression=cron_expr, timezone_name=timezone_str, n=n)
+            return {
+                "upcoming": runs,
+                "cron_expr": cron_expr,
+                "timezone": timezone_str,
+            }, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("skill schedule upcoming failed skill_id=%s", skill_id)
+            return {"error": "skill schedule upcoming failed"}, 500
+
+
+@skills_ns.route("/<string:skill_id>/acknowledge")
+class SkillAlertAcknowledge(ForgeResource):
+    @token_required
+    def post(self, skill_id: str):
+        """
+        Manually acknowledge an alert. Sets alert_acknowledged_at to now.
+        Only relevant for threshold_alert skills with resolution_mode="manual".
+        """
+        try:
+            workspace_id = extract_workspace_id()
+            from app.adapters.mysql_sql_executor import ForgeMetaSQL
+
+            sql = ForgeMetaSQL()
+            rows = sql.execute_query_mappings(
+                "SELECT id, skill_type FROM query_skills WHERE id = :id AND workspace_id = :ws AND is_active = 1 LIMIT 1",
+                {"id": skill_id, "ws": workspace_id},
+            )
+            if not rows:
+                raise ForgeError(f"Skill {skill_id} not found", status_code=404)
+
+            if str(rows[0]["skill_type"]) != "threshold_alert":
+                return {"error": "Only threshold_alert skills support acknowledgement."}, 400
+
+            now = datetime.now(timezone.utc)
+            sql.execute_write(
+                "UPDATE query_skills SET alert_acknowledged_at = :now WHERE id = :id",
+                {"now": now, "id": skill_id},
+            )
+            return {"acknowledged": True, "acknowledged_at": now.isoformat()}, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("skill acknowledge failed skill_id=%s", skill_id)
+            return {"error": "skill acknowledge failed"}, 500
+
+
+@skills_ns.route("/schedule/validate")
+class ScheduleValidate(ForgeResource):
+    @token_required
+    def post(self):
+        """
+        Validate a cron expression and return next 5 run times.
+        Called by the SkillBuilder UI on every cron expression change.
+        """
+        try:
+            body: Dict[str, Any] = request.get_json(silent=True) or {}
+            expression = str(body.get("cron_expression") or "").strip()
+            timezone_name = str(body.get("timezone") or "UTC").strip() or "UTC"
+
+            errors = validate_cron(expression, timezone_name)
+            if errors:
+                return {"valid": False, "errors": errors, "upcoming": []}, 200
+
+            upcoming = next_n_runs(expression, timezone_name, n=5)
+            return {"valid": True, "errors": [], "upcoming": upcoming}, 200
+        except Exception:
+            logger.exception("schedule validate failed")
+            return {"error": "schedule validate failed"}, 500
 
 
 __all__ = ["skills_ns"]

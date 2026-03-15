@@ -1,0 +1,17 @@
+[Unit]
+Description=QueryForge Celery Beat
+After=network.target
+
+[Service]
+Type=simple
+User=mmaslak
+Group=staff
+WorkingDirectory=/Users/mmaslak/Local Documents/projects/query_forge/query-forge-api
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/Users/mmaslak/Local\ Documents/projects/query_forge/query-forge-api/.venv/bin/celery \
+    -A app.celery_app beat --loglevel=INFO
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

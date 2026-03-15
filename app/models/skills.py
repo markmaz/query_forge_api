@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Index, Integer, String, Text, text
+from sqlalchemy import Boolean, DateTime, Index, Integer, String, Text, text
 from sqlalchemy.dialects.mysql import JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +25,8 @@ class QuerySkill(SemanticBase):
     config_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    last_alert_state: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    alert_acknowledged_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime,
@@ -49,6 +51,7 @@ class SkillSchedule(SemanticBase):
     next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    catch_up: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime,

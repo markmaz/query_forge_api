@@ -24,6 +24,8 @@ email_validator
 celery
 redis
 valkey
+pytz
+croniter
 
 # HTTP / API clients
 requests

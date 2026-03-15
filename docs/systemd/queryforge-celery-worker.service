@@ -1,0 +1,19 @@
+[Unit]
+Description=QueryForge Celery Worker
+After=network.target
+
+[Service]
+Type=forking
+User=mmaslak
+Group=staff
+WorkingDirectory=/Users/mmaslak/Local Documents/projects/query_forge/query-forge-api
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/Users/mmaslak/Local\ Documents/projects/query_forge/query-forge-api/.venv/bin/celery \
+    -A app.celery_app worker --loglevel=INFO --pool=solo --concurrency=1 \
+    --detach --pidfile=/tmp/queryforge-celery-worker.pid
+ExecStop=/bin/kill -TERM $MAINPID
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
