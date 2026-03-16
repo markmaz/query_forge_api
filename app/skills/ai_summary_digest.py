@@ -25,13 +25,17 @@ The LLM receives the full prompt in one call and returns structured JSON:
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
 from html import escape as _escape
 
+from app.skills.analysis_utils import (
+    build_analysis_system_prompt,
+    build_analysis_user_prompt,
+    call_analysis_llm,
+)
 from app.skills.base import BaseSkill, SkillContext, SkillResult
 from app.skills.registry import SkillRegistry
 
@@ -188,86 +192,28 @@ class AISummaryDigestSkill(BaseSkill):
         if not llm_config:
             return self._fallback_digest(context)
 
-        system_prompt = self._build_system_prompt(cfg, previous_snapshot)
-        user_prompt = self._build_user_prompt(context, cfg, previous_snapshot)
-
+        system_prompt = build_analysis_system_prompt(
+            hint=cfg.get("prompt_hint", ""),
+            include_comparison=cfg.get("include_comparison", True),
+        )
+        user_prompt = build_analysis_user_prompt(
+            query_name=context.metadata.query_name,
+            column_names=context.metadata.column_names,
+            row_count=context.metadata.row_count,
+            rows=context.results,
+            previous_highlights=(previous_snapshot or {}).get("highlights"),
+            previous_run_date=(previous_snapshot or {}).get("executed_at"),
+        )
         try:
-            from app.config.llm_resolver import build_llm_client_for_role
-            from app.constants.llm_roles import LLMRole
-
-            # Resolve role — fall back to SUMMARIZER, then default
-            role_name = cfg.get("llm_role", "summarizer").upper()
-            role = getattr(LLMRole, role_name, LLMRole.SUMMARIZER)
-
-            runtime = build_llm_client_for_role(
+            return call_analysis_llm(
                 workspace_id=context.workspace_id,
-                role=role,
-            )
-            result = runtime.client.chat_json(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                response_format=True,
-                validator=lambda d: (
-                    isinstance(d, dict)
-                    and isinstance(d.get("narrative"), str)
-                    and isinstance(d.get("highlights"), list)
-                ),
                 max_tokens=800,
             )
-            return {
-                "narrative": result.get("narrative", ""),
-                "highlights": result.get("highlights", []),
-                "comparison": result.get("comparison"),
-            }
         except Exception as exc:
             logger.warning("LLM digest failed, using fallback: %s", exc)
             return self._fallback_digest(context)
-
-    def _build_system_prompt(self, cfg: dict, previous_snapshot: dict | None) -> str:
-        hint = cfg.get("prompt_hint", "")
-        hint_line = f"\nAdditional guidance: {hint}" if hint else ""
-        comparison_instruction = (
-            '\n- "comparison": one sentence comparing to the previous run (key changes, trends)'
-            if previous_snapshot else
-            '\n- "comparison": null (no previous data available)'
-        )
-        return (
-            f"You are a data analyst writing a concise business digest. "
-            f"Analyse the query results and respond ONLY with valid JSON in this exact format:\n"
-            f'{{"narrative": "2-4 paragraph summary", '
-            f'"highlights": ["key insight 1", "key insight 2", "key insight 3"],'
-            f'"comparison": "comparison sentence or null"}}\n'
-            f"Rules:\n"
-            f"- narrative: 2-4 concise paragraphs for a business audience\n"
-            f"- highlights: exactly 3-5 bullet points, each under 15 words\n"
-            f"{comparison_instruction}"
-            f"{hint_line}"
-        )
-
-    def _build_user_prompt(
-        self,
-        context: SkillContext,
-        cfg: dict,
-        previous_snapshot: dict | None,
-    ) -> str:
-        col_list = ", ".join(context.metadata.column_names[:15])
-        sample = context.results[:30]
-        prev_section = ""
-        if previous_snapshot:
-            prev_date = previous_snapshot.get("executed_at", "previous run")
-            prev_highlights = previous_snapshot.get("highlights", [])
-            prev_section = (
-                f"\nPrevious run ({prev_date}) highlights:\n"
-                + "\n".join(f"- {h}" for h in prev_highlights)
-            )
-
-        return (
-            f"Query: {context.metadata.query_name}\n"
-            f"Columns: {col_list}\n"
-            f"Total rows: {context.metadata.row_count}\n"
-            f"Sample data (first 30 rows):\n{json.dumps(sample, default=str)}"
-            f"{prev_section}"
-        )
 
     def _fallback_digest(self, context: SkillContext) -> dict:
         """Minimal digest when no LLM is configured."""

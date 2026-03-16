@@ -125,15 +125,24 @@ def _qf_int_from_args(args: Dict[str, Any], name: str, default: int) -> int:
         raise ForgeError(f"Invalid integer for '{name}'", status_code=400)
 
 
-def _qf_exec_extract_total(count_rows: list[Any]) -> int:
+def _qf_exec_extract_total(count_rows: list[Any]) -> Optional[int]:
+    """Extract total row count from a COUNT(*) result. Returns None if not determinable."""
     if not count_rows:
-        return 0
+        return None
     first = count_rows[0]
-    if isinstance(first, dict):
-        return int(first.get("total") or 0)
+    if isinstance(first, dict) and first:
+        # Try "total" first, then any first column value
+        val = first.get("total") if "total" in first else next(iter(first.values()), None)
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return None
     if isinstance(first, (list, tuple)) and len(first) >= 1:
-        return int(first[0] or 0)
-    return 0
+        try:
+            return int(first[0])
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def _normalize_status_dict(raw: Any) -> Optional[Dict[str, Any]]:
@@ -381,7 +390,11 @@ class ExecutionService:
             total = _qf_exec_extract_total((count_resp or {}).get("rows") or [])
         if total is None:
             result = status.get("result") or {}
-            total = result.get("row_count") or result.get("rowcount") or status.get("rowcount")
+            raw_total = result.get("row_count") or result.get("rowcount") or status.get("rowcount")
+            try:
+                total = int(raw_total) if raw_total is not None else None
+            except (TypeError, ValueError):
+                total = None
         if total is None:
             total = len(rows)
 

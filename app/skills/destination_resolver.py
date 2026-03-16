@@ -32,11 +32,11 @@ def resolve_destination(destination_id: int, workspace_id: int) -> dict[str, Any
     Raises:
         ValueError — if destination not found, inactive, or belongs to different workspace
     """
-    dest = WorkspaceDestination.query.filter_by(
-        id=destination_id,
-        workspace_id=workspace_id,
-        is_active=True,
-    ).first()
+    dest = (
+        db.session.query(WorkspaceDestination)
+        .filter_by(id=destination_id, workspace_id=workspace_id, is_active=True)
+        .first()
+    )
 
     if not dest:
         raise ValueError(
@@ -92,10 +92,11 @@ def validate_destination_ref(destination_id: int, workspace_id: int) -> list[str
     Validate that a destination_id is usable. Returns list of error strings.
     Called during skill config validation.
     """
-    dest = WorkspaceDestination.query.filter_by(
-        id=destination_id,
-        workspace_id=workspace_id,
-    ).first()
+    dest = (
+        db.session.query(WorkspaceDestination)
+        .filter_by(id=destination_id, workspace_id=workspace_id)
+        .first()
+    )
 
     if not dest:
         return [f"Destination {destination_id} not found in this workspace."]

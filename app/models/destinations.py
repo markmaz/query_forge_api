@@ -119,9 +119,7 @@ class WorkspaceDestination(db.Model):
     __tablename__ = "workspace_destinations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    workspace_id: Mapped[int] = mapped_column(
-        Integer, db.ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
-    )
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(500))
     destination_type: Mapped[str] = mapped_column(Enum(*DESTINATION_TYPES), nullable=False)

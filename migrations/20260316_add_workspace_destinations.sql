@@ -8,7 +8,7 @@
 
 CREATE TABLE workspace_destinations (
     id                      INT NOT NULL AUTO_INCREMENT,
-    workspace_id            INT NOT NULL,
+    workspace_id            VARCHAR(128) NOT NULL,
     name                    VARCHAR(255) NOT NULL,
     description             VARCHAR(500) NULL,
     destination_type        ENUM('slack', 'teams', 'webhook', 'email_group') NOT NULL,
@@ -33,9 +33,7 @@ CREATE TABLE workspace_destinations (
     created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-    PRIMARY KEY (id),
-    CONSTRAINT fk_wd_workspace
-        FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE INDEX ix_workspace_destinations_workspace

@@ -65,7 +65,7 @@ destination_update_model = destinations_ns.model("DestinationUpdate", {
 @destinations_ns.route("/types")
 class DestinationTypeList(Resource):
     @token_required
-    def get(self):
+    def get(self, workspace_id: str = ""):
         """Return all destination types with their config schemas. Available to all users."""
         workspace_id = extract_workspace_id()
         return {
@@ -87,15 +87,18 @@ class DestinationTypeList(Resource):
 @destinations_ns.route("/")
 class DestinationList(Resource):
     @token_required
-    def get(self):
+    def get(self, workspace_id: str = ""):
         """
         List all active destinations for the workspace.
         All users see names + types. Config is masked (sensitive fields as ••••••).
         """
         workspace_id = extract_workspace_id()
-        destinations = WorkspaceDestination.query.filter_by(
-            workspace_id=workspace_id,
-        ).order_by(WorkspaceDestination.name).all()
+        destinations = (
+            db.session.query(WorkspaceDestination)
+            .filter_by(workspace_id=workspace_id)
+            .order_by(WorkspaceDestination.name)
+            .all()
+        )
 
         return {
             "destinations": [
@@ -105,7 +108,7 @@ class DestinationList(Resource):
         }, 200
 
     @token_required
-    def post(self):
+    def post(self, workspace_id: str = ""):
         """Create a destination. Admin only."""
         _require_admin()
         workspace_id = extract_workspace_id()
@@ -148,13 +151,13 @@ class DestinationList(Resource):
 @destinations_ns.route("/<int:destination_id>")
 class DestinationDetail(Resource):
     @token_required
-    def get(self, destination_id: int):
+    def get(self, workspace_id: str = "", destination_id: int = 0):
         """Get a single destination. Config is masked."""
         dest = _get_dest_or_404(destination_id)
         return {**dest.to_dict(), "usage": dest.get_usage_summary()}, 200
 
     @token_required
-    def put(self, destination_id: int):
+    def put(self, workspace_id: str = "", destination_id: int = 0):
         """Update a destination. Admin only."""
         _require_admin()
         dest = _get_dest_or_404(destination_id)
@@ -194,7 +197,7 @@ class DestinationDetail(Resource):
         return dest.to_dict(), 200
 
     @token_required
-    def delete(self, destination_id: int):
+    def delete(self, workspace_id: str = "", destination_id: int = 0):
         """
         Delete a destination. Admin only.
         Blocked if any active skills reference this destination.
@@ -224,7 +227,7 @@ class DestinationDetail(Resource):
 @destinations_ns.route("/<int:destination_id>/test")
 class DestinationTest(Resource):
     @token_required
-    def post(self, destination_id: int):
+    def post(self, workspace_id: str = "", destination_id: int = 0):
         """
         Send a test message to the destination. Admin only.
         Updates last_tested_at, last_test_status, last_test_message.
@@ -317,10 +320,11 @@ def _test_email_html(dest_name: str) -> str:
 
 def _get_dest_or_404(destination_id: int) -> WorkspaceDestination:
     workspace_id = extract_workspace_id()
-    dest = WorkspaceDestination.query.filter_by(
-        id=destination_id,
-        workspace_id=workspace_id,
-    ).first()
+    dest = (
+        db.session.query(WorkspaceDestination)
+        .filter_by(id=destination_id, workspace_id=workspace_id)
+        .first()
+    )
     if not dest:
         destinations_ns.abort(404, f"Destination {destination_id} not found.")
     return dest
