@@ -1,6 +1,75 @@
 # Backend Agent Audit
 
 ## Date
+2026-03-17 (last updated)
+
+---
+
+## Task 4b — dictionary_routes.py hardening (2026-03-17)
+
+### Files Changed
+- `app/routes/dictionary_routes.py` — added `_parse_int` helper and `_MAX_IMPORT_BYTES` constant; replaced 4 unsafe `int(...)` calls; added file-size guard in `_parse_file`
+
+### Findings
+- **Critical (fixed):** `int(...)` on user-supplied query params raised `ValueError` → 500. Fixed with `_parse_int` helper (ForgeError 400 on non-numeric input), matching the `_optional_int` pattern in `semantic_suggestions.py`.
+- **Important (fixed):** No file-size limit in `_parse_file` allowed arbitrarily large uploads. Added `_MAX_IMPORT_BYTES = 10 MB` guard returning ForgeError 413.
+
+### Completed Work
+- `_MAX_IMPORT_BYTES = 10 * 1024 * 1024` constant at module level (line 17).
+- `_parse_int(raw, default, name)` helper at module level (lines 22-30).
+- `DictionaryTables.get`: `limit` and `offset` now use `_parse_int` (lines 90-91).
+- `DictionaryColumns.get`: `workspace_table_id` now uses `_parse_int` (line 116).
+- `DictionaryColumnsSearch.get`: `limit` now uses `_parse_int` (line 143).
+- `_parse_file`: size check added after `content = file_storage.read()` (lines 48-51).
+- Service tests: 10/10 passed. `ruff check app/routes/dictionary_routes.py`: clean.
+
+---
+
+## Task 4 — dictionary_routes.py and factory wiring (2026-03-17)
+
+### Files Changed
+- `app/routes/dictionary_routes.py` — created; 5 endpoints (GET /tables, GET /columns, GET /columns/search, PATCH /columns/<id>, POST /columns/import)
+- `app/factory.py` — added import for `dictionary_ns` (line after `workspace_tables_ns` import) and `api.add_namespace(dictionary_ns, ...)` (line after `workspace_tables_ns` registration)
+- `tests/routes/test_dictionary_routes.py` — created; 12 tests covering all endpoints
+
+### Findings
+No new issues. The `_parse_file` helper rejects unsupported file types with a 400 before any pandas parse, protecting against unexpected content. The `fullReplace + empty file` guard prevents accidental data wipes. All client input goes through `ForgeError` validation before reaching the service layer.
+
+### Completed Work
+- 5 route handlers wired to `DictionaryService` via the existing monkeypatch-friendly module-level attribute pattern.
+- Route tests: 12 skipped (expected — `TEST_USERNAME`/`TEST_PASSWORD` not set in this environment; same behavior as all other `auth_headers`-dependent route tests).
+- Service tests: 10/10 passed.
+- Full suite: 928 passed, 10 pre-existing failures (workspace_context ImportError, planner_domain conversation, semantic suggestion, domain summary, model write service — all unrelated to this task), 12 skipped.
+- `factory.py` changes: 2 lines added (1 import + 1 `add_namespace` call).
+
+### Pre-existing failures (not introduced by this task)
+- `tests/services/test_workspace_context.py` (4 tests) — `ModuleNotFoundError: No module named 'app.services.workspace_inventory.workspace_context.WorkspaceService'`
+- `tests/services/models/test_model_write_service.py::test_upsert_dictionary_full_replace_deactivates`
+- `tests/services/planner_domain/test_conversation_context.py` (2 tests)
+- `tests/services/semantic/test_semantic_suggestion_service.py` (2 tests)
+- `tests/services/test_domain_summary_read_service.py::test_list_domain_summaries`
+
+---
+
+## Task 3 — patch_column and import_columns (2026-03-17)
+
+### Files Changed
+- `app/services/dictionary/dictionary_service.py` — added `patch_column` and `import_columns`
+- `tests/services/test_dictionary_service.py` — appended 4 new tests
+
+### Findings
+No issues. Implementation follows existing patterns; f-string column interpolation in `patch_column` is safe because column names come exclusively from `_ALLOWED_PATCH_FIELDS` (a frozenset of hard-coded strings), never from user input.
+
+### Completed Work
+- `patch_column(workspace_id, column_id, patch)`: parameterized UPDATE joined to `workspace_table` for workspace isolation; raises ForgeError(404) on rowcount==0; returns `{"row": normalized_dict}`.
+- `import_columns(workspace_id, rows, full_replace)`: optional clear pass when `full_replace=True`; per-row UPDATE with rowcount tracking; returns `{"updated": int, "unmatched": list}`.
+- 4 new tests, all passing. Full suite: 10/10 passed.
+
+---
+
+## Prior sessions
+
+## Date
 2026-03-08
 
 ## Files Reviewed
@@ -671,4 +740,28 @@ The `model_catalog_writer.py`, `metadata_sync_service.py`, and `metadata_provide
 | Non-atomic INSERT + enqueue | `app/routes/ingestion_routes.py` | Wrapped `apply_async()` in try/except; marks run failed on broker error |
 | Column name SQL injection (Databricks) | `app/adapters/analytics/databricks_metadata_provider.py` | `_safe_ident()` called on all column names in steps 2 and 3 |
 | Column name SQL injection (Snowflake) | `app/adapters/analytics/snowflake_metadata_provider.py` | `_safe_ident()` called on all column names in steps 2 and 3 |
+
+---
+
+## Task 2: Add list_columns and search_columns to DictionaryService
+
+**Date:** 2026-03-16
+
+**Files Changed:**
+- `app/services/dictionary/dictionary_service.py`
+- `tests/services/test_dictionary_service.py`
+
+**Findings:** No security issues. All SQL uses parameterized binds (`:ws`, `:wtid`, `:q`, `:limit`). The `q` search parameter is only injected as a LIKE pattern value, never into the SQL string structure. The `active_only` flag controls a static f-string clause with no user input in the clause itself.
+
+**Completed Work:**
+- Appended 4 tests to `tests/services/test_dictionary_service.py`:
+  - `test_list_columns_returns_full_shape`: verifies JSON field parsing and `is_active` bool coercion
+  - `test_list_columns_404_when_table_not_in_workspace`: verifies ForgeError 404 when existence check returns None
+  - `test_list_columns_empty_table_returns_200`: verifies empty rows (not 404) when table exists but has no columns
+  - `test_search_columns_matches_column_name`: verifies cross-table search returns matching column
+- Implemented `_COLUMN_SELECT` class-level constant (shared JOIN query fragment)
+- Implemented `_normalize_column_row()` helper (bool coercion + JSON parsing)
+- Implemented `list_columns()` with two-phase empty-check: main query then table existence check
+- Implemented `search_columns()` with LIKE search across column_name, description, and table_name
+- All 6 tests in the file pass (2 pre-existing + 4 new)
 | Column name SQL injection (MySQL) | `app/adapters/analytics/mysql_metadata_provider.py` | `_safe_ident()` called on all column names in steps 2 and 3 |

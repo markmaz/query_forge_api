@@ -93,6 +93,7 @@ from app.routes.workspace_inventory_routes import wsinv_ns
 from app.routes.workspace_llm_routes import llm_providers_ns, llm_roles_ns, workspace_llm_ns
 from app.routes.workspace_routes import workspace_ns
 from app.routes.workspace_table_routes import workspace_tables_ns
+from app.routes.dictionary_routes import dictionary_ns
 from app.services.analytics.config_loader import load_analytics_config
 from app.services.analytics.executor_factory import ExecutorFactory
 from app.services.analytics.registry import AnalyticsDatasourceRegistry
@@ -298,6 +299,7 @@ def create_app():
     api.add_namespace(qf_user_ns, path=build_url("/", NAME, VERSION, "users"))
     api.add_namespace(workspace_ns, path=build_url("/", NAME, VERSION, "workspaces"))
     api.add_namespace(workspace_tables_ns, path=build_url("/", NAME, VERSION, "workspace-tables"))
+    api.add_namespace(dictionary_ns, path=build_url("/", NAME, VERSION, "dictionary"))
     api.add_namespace(connection_ns, path=build_url("/", NAME, VERSION, "connections"))
     api.add_namespace(user_workspace_ns, path=build_url("/", NAME, VERSION, "user-workspaces"))
     api.add_namespace(role_ns, path=build_url("/", NAME, VERSION, "roles"))
