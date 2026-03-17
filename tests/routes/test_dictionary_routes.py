@@ -162,3 +162,39 @@ def test_import_columns_empty_file_full_replace(client, auth_headers, monkeypatc
                        data=data, content_type="multipart/form-data",
                        headers=auth_headers)
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# PATCH /dictionary/tables/:id
+# ---------------------------------------------------------------------------
+
+def test_patch_table_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def patch_table(self, *, workspace_id, table_id, patch):
+            return {"row": {"id": table_id, "table_name": "dim_prov",
+                            "full_name": "asset.dim_prov", "schema_name": "asset",
+                            "catalog_name": None, "description": patch.get("description")}}
+
+    monkeypatch.setattr(dict_routes, "DictionaryService", _Svc)
+    resp = client.patch(
+        "/api/v1/dictionary/tables/1",
+        json={"description": "Updated"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json["row"]["description"] == "Updated"
+
+
+def test_patch_table_400_on_empty_body(client, auth_headers, monkeypatch):
+    class _Svc:
+        def patch_table(self, *, workspace_id, table_id, patch):
+            from app.exceptions.forge_error import ForgeError
+            raise ForgeError("No patchable fields in request body", status_code=400)
+
+    monkeypatch.setattr(dict_routes, "DictionaryService", _Svc)
+    resp = client.patch(
+        "/api/v1/dictionary/tables/1",
+        json={},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 400

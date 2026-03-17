@@ -101,6 +101,33 @@ class DictionaryTables(ForgeResource):
 
 
 # ---------------------------------------------------------------------------
+# /tables/:id  (PATCH)
+# ---------------------------------------------------------------------------
+
+@dictionary_ns.route("/tables/<int:table_id>")
+class DictionaryTableDetail(ForgeResource):
+    @token_required
+    def patch(self, table_id: int):
+        try:
+            workspace_id = _workspace_id()
+            body = request.get_json(silent=True) or {}
+            patch = {}
+            if "description" in body:
+                patch["description"] = body["description"]
+            if not patch:
+                raise ForgeError("No patchable fields in request body", status_code=400)
+            result = DictionaryService().patch_table(
+                workspace_id=workspace_id, table_id=table_id, patch=patch
+            )
+            return result, 200
+        except ForgeError as exc:
+            return _error(exc)
+        except Exception:
+            logger.exception("PATCH /dictionary/tables/%s failed", table_id)
+            return {"error": "Failed to update table"}, 500
+
+
+# ---------------------------------------------------------------------------
 # /columns  and  /columns/search
 # ---------------------------------------------------------------------------
 

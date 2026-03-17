@@ -284,3 +284,40 @@ def test_patch_column_rejects_unknown_fields(svc):
             patch={"not_a_real_field": "value"},
         )
     assert exc_info.value.status_code == 400
+
+
+def test_patch_table_updates_description(svc):
+    updated_row = {
+        "id": 1, "table_name": "dim_prov", "full_name": "asset.dim_prov",
+        "schema_name": "asset", "catalog_name": None, "description": "Updated desc",
+    }
+    conn, cm = _make_conn([updated_row])
+    with patch("app.services.dictionary.dictionary_service.engine") as mock_engine:
+        mock_engine.connect.return_value = cm
+        result = svc.patch_table(
+            workspace_id="ws-1",
+            table_id=1,
+            patch={"description": "Updated desc"},
+        )
+    assert result["row"]["description"] == "Updated desc"
+    assert result["row"]["table_name"] == "dim_prov"
+    # Must return all 6 DictionaryTableRow fields
+    for field in ("id", "table_name", "full_name", "schema_name", "catalog_name", "description"):
+        assert field in result["row"]
+
+
+def test_patch_table_404_for_wrong_workspace(svc):
+    conn, cm = _make_conn([])
+    with patch("app.services.dictionary.dictionary_service.engine") as mock_engine:
+        mock_engine.connect.return_value = cm
+        from app.exceptions.forge_error import ForgeError
+        with pytest.raises(ForgeError) as exc_info:
+            svc.patch_table(workspace_id="ws-other", table_id=1, patch={"description": "x"})
+    assert exc_info.value.status_code == 404
+
+
+def test_patch_table_400_for_empty_patch(svc):
+    from app.exceptions.forge_error import ForgeError
+    with pytest.raises(ForgeError) as exc_info:
+        svc.patch_table(workspace_id="ws-1", table_id=1, patch={})
+    assert exc_info.value.status_code == 400

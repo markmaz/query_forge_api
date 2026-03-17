@@ -227,6 +227,48 @@ class DictionaryService:
             raise ForgeError("Column not found", status_code=404)
         return {"row": self._normalize_column_row(rows[0])}
 
+    _ALLOWED_TABLE_PATCH_FIELDS = frozenset({"description"})
+
+    def patch_table(self, *, workspace_id: str, table_id: int, patch: dict) -> dict:
+        from app.exceptions.forge_error import ForgeError
+
+        allowed = {k: v for k, v in patch.items() if k in self._ALLOWED_TABLE_PATCH_FIELDS}
+        if not allowed:
+            raise ForgeError("No patchable fields provided", status_code=400)
+
+        set_clauses = ", ".join(f"wt.{col} = :{col}" for col in allowed)
+        params: dict = {"tbl_id": table_id, "ws": workspace_id, **allowed}
+
+        update_sql = f"""
+        UPDATE workspace_table wt
+        SET {set_clauses}
+        WHERE wt.id = :tbl_id
+          AND wt.workspace_id = :ws
+        """
+
+        fetch_sql = """
+        SELECT wt.id, wt.table_name, wt.full_name,
+               wt.schema_name, wt.catalog_name, wt.description
+        FROM workspace_table wt
+        WHERE wt.id = :tbl_id AND wt.workspace_id = :ws
+        LIMIT 1
+        """
+
+        with engine.connect() as conn:
+            result = conn.execute(text(update_sql), params)
+            if result.rowcount == 0:
+                raise ForgeError("Workspace table not found", status_code=404)
+            conn.commit()
+
+        with engine.connect() as conn:
+            rows = [dict(r) for r in conn.execute(
+                text(fetch_sql), {"tbl_id": table_id, "ws": workspace_id}
+            ).mappings().all()]
+
+        if not rows:
+            raise ForgeError("Workspace table not found", status_code=404)
+        return {"row": rows[0]}
+
     # ------------------------------------------------------------------
     # Import
     # ------------------------------------------------------------------
