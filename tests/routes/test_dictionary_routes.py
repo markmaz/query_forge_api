@@ -185,13 +185,7 @@ def test_patch_table_success(client, auth_headers, monkeypatch):
     assert resp.json["row"]["description"] == "Updated"
 
 
-def test_patch_table_400_on_empty_body(client, auth_headers, monkeypatch):
-    class _Svc:
-        def patch_table(self, *, workspace_id, table_id, patch):
-            from app.exceptions.forge_error import ForgeError
-            raise ForgeError("No patchable fields in request body", status_code=400)
-
-    monkeypatch.setattr(dict_routes, "DictionaryService", _Svc)
+def test_patch_table_400_on_empty_body(client, auth_headers):
     resp = client.patch(
         "/api/v1/dictionary/tables/1",
         json={},

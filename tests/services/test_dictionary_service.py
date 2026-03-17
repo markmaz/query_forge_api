@@ -321,3 +321,25 @@ def test_patch_table_400_for_empty_patch(svc):
     with pytest.raises(ForgeError) as exc_info:
         svc.patch_table(workspace_id="ws-1", table_id=1, patch={})
     assert exc_info.value.status_code == 400
+
+
+def test_patch_table_accepts_null_description(svc):
+    """description: null is valid — it clears the field (sets NULL in the DB)."""
+    updated_row = {
+        "id": 1, "table_name": "dim_prov", "full_name": "asset.dim_prov",
+        "schema_name": "asset", "catalog_name": None, "description": None,
+    }
+    conn, cm = _make_conn([updated_row])
+    with patch("app.services.dictionary.dictionary_service.engine") as mock_engine:
+        mock_engine.connect.return_value = cm
+        result = svc.patch_table(
+            workspace_id="ws-1",
+            table_id=1,
+            patch={"description": None},
+        )
+    assert result["row"]["description"] is None
+    # Verify None was passed to SQL (not filtered out)
+    assert conn.execute.call_count == 2  # call 0 = UPDATE, call 1 = SELECT
+    first_call_params = conn.execute.call_args_list[0][0][1]
+    assert "description" in first_call_params
+    assert first_call_params["description"] is None
