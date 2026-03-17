@@ -178,7 +178,15 @@ class DictionaryService:
     # Patch
     # ------------------------------------------------------------------
 
-    _ALLOWED_PATCH_FIELDS = frozenset({"description", "data_type", "is_active"})
+    _ALLOWED_PATCH_FIELDS = frozenset({
+        "description",
+        "data_type",
+        "is_active",
+        "semantic_type",
+        "semantic_entity",
+        "semantic_sub_type",
+        "semantic_confidence",
+    })
 
     def patch_column(self, *, workspace_id: str, column_id: int, patch: dict) -> dict:
         from app.exceptions.forge_error import ForgeError

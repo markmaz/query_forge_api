@@ -172,6 +172,15 @@ class DictionaryColumn(ForgeResource):
                 patch["data_type"] = body["data_type"]
             if "is_active" in body:
                 patch["is_active"] = bool(body["is_active"])
+            if "semantic_type" in body:
+                patch["semantic_type"] = body["semantic_type"] or None
+            if "semantic_entity" in body:
+                patch["semantic_entity"] = body["semantic_entity"] or None
+            if "semantic_sub_type" in body:
+                patch["semantic_sub_type"] = body["semantic_sub_type"] or None
+            if "semantic_confidence" in body:
+                raw = body["semantic_confidence"]
+                patch["semantic_confidence"] = float(raw) if raw is not None else None
             if not patch:
                 raise ForgeError("No patchable fields in request body", status_code=400)
             result = DictionaryService().patch_column(

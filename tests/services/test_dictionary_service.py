@@ -220,3 +220,59 @@ def test_import_columns_full_replace_clears_first(svc):
     assert conn.execute.call_count == 2
     assert result["updated"] == 1
     assert result["unmatched"] == []
+
+
+def test_patch_column_accepts_semantic_type(svc):
+    updated_row = {
+        "id": 5, "workspace_table_id": 1, "column_name": "npi",
+        "data_type": "string", "ordinal_position": 1,
+        "description": None, "is_active": 1,
+        "semantic_type": "Identifier", "semantic_entity": None,
+        "semantic_sub_type": None, "semantic_confidence": None,
+        "sample_values_json": None, "sample_stats_json": None,
+        "sample_ran_at": None, "sample_error": None,
+        "table_name": "dim_prov", "full_name": "asset.dim_prov",
+    }
+    conn, cm = _make_conn([updated_row])
+    with patch("app.services.dictionary.dictionary_service.engine") as mock_engine:
+        mock_engine.connect.return_value = cm
+        result = svc.patch_column(
+            workspace_id="ws-1",
+            column_id=5,
+            patch={"semantic_type": "Identifier"},
+        )
+    assert result["row"]["semantic_type"] == "Identifier"
+
+
+def test_patch_column_accepts_semantic_confidence(svc):
+    updated_row = {
+        "id": 5, "workspace_table_id": 1, "column_name": "npi",
+        "data_type": "string", "ordinal_position": 1,
+        "description": None, "is_active": 1,
+        "semantic_type": None, "semantic_entity": None,
+        "semantic_sub_type": None, "semantic_confidence": 0.92,
+        "sample_values_json": None, "sample_stats_json": None,
+        "sample_ran_at": None, "sample_error": None,
+        "table_name": "dim_prov", "full_name": "asset.dim_prov",
+    }
+    conn, cm = _make_conn([updated_row])
+    with patch("app.services.dictionary.dictionary_service.engine") as mock_engine:
+        mock_engine.connect.return_value = cm
+        result = svc.patch_column(
+            workspace_id="ws-1",
+            column_id=5,
+            patch={"semantic_confidence": 0.92},
+        )
+    assert result["row"]["semantic_confidence"] == 0.92
+
+
+def test_patch_column_rejects_unknown_fields(svc):
+    """Fields not in _ALLOWED_PATCH_FIELDS must raise 400, not silently drop."""
+    from app.exceptions.forge_error import ForgeError
+    with pytest.raises(ForgeError) as exc_info:
+        svc.patch_column(
+            workspace_id="ws-1",
+            column_id=5,
+            patch={"not_a_real_field": "value"},
+        )
+    assert exc_info.value.status_code == 400
