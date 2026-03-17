@@ -339,7 +339,7 @@ def test_patch_table_accepts_null_description(svc):
         )
     assert result["row"]["description"] is None
     # Verify None was passed to SQL (not filtered out)
-    assert conn.execute.call_count == 2  # call 0 = UPDATE, call 1 = SELECT
+    assert conn.execute.call_count == 2  # call 0 = UPDATE, call 1 = SELECT (patch_table uses two engine.connect() blocks; mock reuses same conn)
     first_call_params = conn.execute.call_args_list[0][0][1]
     assert "description" in first_call_params
     assert first_call_params["description"] is None
