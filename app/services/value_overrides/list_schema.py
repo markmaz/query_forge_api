@@ -1,9 +1,11 @@
 # app/services/lists/list_schema.py
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Literal
 
-from app.models.value_override import ColumnSpec, ForgeSectionKey
+from app.models.value_override import ColumnSpec
+
+ForgeSectionKey = Literal["regions", "npiCategories", "serviceLines"]
 
 TABLE_BY_TYPE: Dict[ForgeSectionKey, str] = {
     "regions": "workboard.custom_regions_lists",

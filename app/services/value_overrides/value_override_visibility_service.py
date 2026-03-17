@@ -5,8 +5,9 @@ from typing import Any, Dict, List, Optional
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
-from app.models.value_override import ValueOverrideListIndex, ValueOverrideMeta, ForgeSectionKey
+from app.models.value_override import ValueOverrideListIndex, ValueOverrideMeta
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.value_overrides.list_schema import ForgeSectionKey
 
 
 @dataclass(frozen=True)

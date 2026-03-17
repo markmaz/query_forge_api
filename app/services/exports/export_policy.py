@@ -3,23 +3,39 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 QF_EXCEL_MAX_ROWS = 1_048_576
+QF_CSV_MAX_ROWS = 5_000_000   # practical CSV size limit for large datasets
 _ROWCOUNT_CACHE_TTL_S = 300
 
-_rowcount_cache: dict[str, tuple[float, int]] = {}
+
+@dataclass(slots=True)
+class _CacheEntry:
+    expires_at: float
+    total_rows: int
+
+
+_rowcount_cache: dict[str, _CacheEntry] = {}
 
 
 def build_qf_export_policy(total_rows: int) -> Dict[str, Any]:
-    allowed = int(total_rows or 0) <= QF_EXCEL_MAX_ROWS
+    n = int(total_rows or 0)
+    excel_ok = n <= QF_EXCEL_MAX_ROWS
+    csv_ok = n <= QF_CSV_MAX_ROWS
     return {
         "excel": {
             "maxRows": QF_EXCEL_MAX_ROWS,
-            "allowed": allowed,
-            "reason": None if allowed else "EXCEL_ROW_LIMIT",
+            "allowed": excel_ok,
+            "reason": None if excel_ok else "EXCEL_ROW_LIMIT",
         },
-        "csv": {"allowed": True},
+        "csv": {
+            "maxRows": QF_CSV_MAX_ROWS,
+            "allowed": csv_ok,
+            "reason": None if csv_ok else "CSV_ROW_LIMIT",
+        },
+        "json": {"allowed": True},
     }
 
 
@@ -33,19 +49,21 @@ def fetch_cached_rowcount(signature: str) -> Optional[int]:
     if not signature:
         return None
     entry = _rowcount_cache.get(signature)
-    if not entry:
+    if entry is None:
         return None
-    expires_at, total_rows = entry
-    if expires_at < time.time():
+    if entry.expires_at < time.time():
         _rowcount_cache.pop(signature, None)
         return None
-    return total_rows
+    return entry.total_rows
 
 
 def store_cached_rowcount(signature: str, total_rows: int) -> None:
     if not signature:
         return
-    _rowcount_cache[signature] = (time.time() + _ROWCOUNT_CACHE_TTL_S, int(total_rows))
+    _rowcount_cache[signature] = _CacheEntry(
+        expires_at=time.time() + _ROWCOUNT_CACHE_TTL_S,
+        total_rows=int(total_rows),
+    )
 
 
 def clear_qf_rowcount_cache() -> None:

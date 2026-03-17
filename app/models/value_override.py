@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
-
-ForgeSectionKey = Literal["regions", "npiCategories", "serviceLines"]
 
 
 class ColumnSpec(BaseModel):
@@ -35,7 +33,7 @@ class ValueOverrideListIndex(BaseModel):
 class ValueOverrideDetails(BaseModel):
     list_id: str
     list_name: str
-    list_type: ForgeSectionKey
+    list_type: str
     columns: List[ColumnSpec]
     rows: List[Dict[str, Any]]
     total_rows: int = Field(ge=0)

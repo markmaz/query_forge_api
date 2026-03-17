@@ -13,6 +13,9 @@ from app.services.models.model_write_service import ModelWriteService  # <-- con
 
 REQUIRED_COLUMNS = {"table_name", "column_name", "data_type", "description"}
 
+# Optional QF-specific columns: included in the upload if present, silently ignored otherwise
+SEMANTIC_COLUMNS = {"semantic_type", "semantic_entity", "semantic_sub_type"}
+
 
 @dataclass
 class UploadError:
@@ -112,12 +115,20 @@ class ModelUploadService:
         for c in REQUIRED_COLUMNS:
             df[c] = df[c].astype(str).map(lambda x: (x or "").strip())
 
+        # Detect which optional semantic columns are present in this upload
+        present_semantic = SEMANTIC_COLUMNS & set(df.columns)
+
         errors: List[UploadError] = []
         rows: List[Dict[str, str]] = []
 
         for idx, row in df.iterrows():
             row_num = int(idx) + 2
             r = {k: (row.get(k) or "").strip() for k in REQUIRED_COLUMNS}
+
+            # Carry through any semantic type columns that were included in the file
+            for col in present_semantic:
+                val = row.get(col)
+                r[col] = (str(val) if val is not None else "").strip() or None
 
             for col in ("table_name", "column_name", "data_type"):
                 if not r[col]:

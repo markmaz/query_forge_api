@@ -126,6 +126,10 @@ class ModelWriteService:
                         "column_name": cname,
                         "data_type": (r.get("data_type") or None),
                         "description": (r.get("description") or None),
+                        # QF-specific: optional semantic type classification from upload
+                        "semantic_type": r.get("semantic_type") or None,
+                        "semantic_entity": r.get("semantic_entity") or None,
+                        "semantic_sub_type": r.get("semantic_sub_type") or None,
                     }
                 )
 
@@ -133,30 +137,39 @@ class ModelWriteService:
                 tx.execute_write(
                     """
                         INSERT INTO model_column
-                        (model_table_id, column_name, data_type, description, is_active, origin, is_missing_in_source, created_at)
+                        (model_table_id, column_name, data_type, description,
+                         semantic_type, semantic_entity, semantic_sub_type,
+                         is_active, origin, is_missing_in_source, created_at)
                         VALUES
-                        (:model_table_id, :column_name, :data_type, :description, 1, 'DICT', 1, CURRENT_TIMESTAMP)
+                        (:model_table_id, :column_name, :data_type, :description,
+                         :semantic_type, :semantic_entity, :semantic_sub_type,
+                         1, 'DICT', 1, CURRENT_TIMESTAMP)
                         ON DUPLICATE KEY UPDATE
                         description = VALUES(description),
+                        semantic_type = COALESCE(VALUES(semantic_type), semantic_type),
+                        semantic_entity = COALESCE(VALUES(semantic_entity), semantic_entity),
+                        semantic_sub_type = COALESCE(VALUES(semantic_sub_type), semantic_sub_type),
                         is_active = 1,
-
-                        -- critical: if row already exists from DBX import, keep it NOT missing
                         is_missing_in_source = CASE
                             WHEN origin = 'DBX' THEN 0
                             ELSE 1
                         END,
-
-                        -- preserve DBX as origin if it is DBX; otherwise keep DICT
                         origin = CASE
                             WHEN origin = 'DBX' THEN 'DBX'
                             ELSE 'DICT'
                         END,
-
                         updated_at = CURRENT_TIMESTAMP
             """,
                     payload_cols,
                 )
                 for row in payload_cols:
+                    semantic_updates: Dict[str, Any] = {}
+                    if row.get("semantic_type") is not None:
+                        semantic_updates["semantic_type"] = row["semantic_type"]
+                    if row.get("semantic_entity") is not None:
+                        semantic_updates["semantic_entity"] = row["semantic_entity"]
+                    if row.get("semantic_sub_type") is not None:
+                        semantic_updates["semantic_sub_type"] = row["semantic_sub_type"]
                     self._metadata_gateway.sync_column_patch_from_model_table(
                         model_table_id=int(row["model_table_id"]),
                         column_name=str(row["column_name"]),
@@ -166,6 +179,7 @@ class ModelWriteService:
                             "is_active": 1,
                             "origin": "DICT",
                             "is_missing_in_source": 1,
+                            **semantic_updates,
                         },
                     )
 

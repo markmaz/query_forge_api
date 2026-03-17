@@ -11,10 +11,9 @@ from app.models.value_override import (
     ValueOverrideDetails,
     ValueOverrideListIndex,
     ValueOverrideMeta,
-    ForgeSectionKey,
 )
 from app.ports.sql_executor import ForgeQueryPort
-from app.services.value_overrides.list_schema import DATA_COLUMNS_BY_TYPE, TABLE_BY_TYPE
+from app.services.value_overrides.list_schema import DATA_COLUMNS_BY_TYPE, ForgeSectionKey, TABLE_BY_TYPE
 
 logger = logging.getLogger(__name__)
 

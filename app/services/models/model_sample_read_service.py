@@ -66,22 +66,26 @@ class ModelColumnSampleReadService:
         if not mtid:
             raise ForgeError("Domain is missing model_table_id", status_code=400)
 
-            # 4) Read sample from model_column
-            sql_col = """
-            SELECT
-              mc.model_table_id,
-              mt.name AS model_table_name,
-              mc.column_name,
-              mc.sample_values_json,
-              mc.sample_stats_json,
-              mc.sample_ran_at,
-              mc.sample_error
-            FROM model_column mc
-            JOIN model_table mt ON mt.id = mc.model_table_id
-            WHERE mc.model_table_id = :mtid
-              AND mc.column_name = :col
-            LIMIT 1
-            """
+        # 4) Read sample from model_column — include semantic type fields (QF-specific)
+        sql_col = """
+        SELECT
+          mc.model_table_id,
+          mt.name AS model_table_name,
+          mc.column_name,
+          mc.sample_values_json,
+          mc.sample_stats_json,
+          mc.sample_ran_at,
+          mc.sample_error,
+          mc.semantic_type,
+          mc.semantic_entity,
+          mc.semantic_sub_type,
+          mc.semantic_confidence
+        FROM model_column mc
+        JOIN model_table mt ON mt.id = mc.model_table_id
+        WHERE mc.model_table_id = :mtid
+          AND mc.column_name = :col
+        LIMIT 1
+        """
 
         rows = self._sql.execute_query_mappings(
             sql_col,
@@ -101,6 +105,7 @@ class ModelColumnSampleReadService:
         except Exception:
             sample_values = []
 
+        sc = row.get("semantic_confidence")
         return {
             "domainId": did,
             "workspaceTableId": wtid,
@@ -111,4 +116,8 @@ class ModelColumnSampleReadService:
             "sampleStatsJson": row.get("sample_stats_json"),
             "sampleRanAt": row.get("sample_ran_at"),  # serialize_record will isoformat it
             "error": row.get("sample_error"),
+            "semanticType": row.get("semantic_type"),
+            "semanticEntity": row.get("semantic_entity"),
+            "semanticSubType": row.get("semantic_sub_type"),
+            "semanticConfidence": float(sc) if sc is not None else None,
         }
