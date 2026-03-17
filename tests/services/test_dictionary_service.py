@@ -242,6 +242,9 @@ def test_patch_column_accepts_semantic_type(svc):
             patch={"semantic_type": "Identifier"},
         )
     assert result["row"]["semantic_type"] == "Identifier"
+    # Verify the UPDATE execute call actually received semantic_type in its params
+    first_call_params = conn.execute.call_args_list[0][0][1]
+    assert first_call_params.get("semantic_type") == "Identifier"
 
 
 def test_patch_column_accepts_semantic_confidence(svc):
@@ -264,6 +267,9 @@ def test_patch_column_accepts_semantic_confidence(svc):
             patch={"semantic_confidence": 0.92},
         )
     assert result["row"]["semantic_confidence"] == 0.92
+    # Verify the UPDATE execute call actually received semantic_confidence in its params
+    first_call_params = conn.execute.call_args_list[0][0][1]
+    assert first_call_params.get("semantic_confidence") == 0.92
 
 
 def test_patch_column_rejects_unknown_fields(svc):
