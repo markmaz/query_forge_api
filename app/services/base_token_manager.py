@@ -7,7 +7,6 @@ from flask import current_app
 
 from app.exceptions.forge_error import ForgeError
 
-QF_SIGMA_TOKEN = "SIGMA_TOKEN_MANAGER"
 QF_DATABRICKS_TOKEN = "DATABRICKS_TOKEN_MANAGER"
 
 

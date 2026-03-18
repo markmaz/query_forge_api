@@ -19,6 +19,3 @@ class Product(BaseModel):
             datetime: lambda v: v.isoformat()
         },
     )
-
-class SigmaProduct(Product):
-    sigma_id: Optional[str] = None

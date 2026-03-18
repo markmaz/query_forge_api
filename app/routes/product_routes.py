@@ -108,9 +108,3 @@ class DeleteProductRoles(ForgeResource):
     def delete(self, product_id: str, role_id: str):
         return _role_service().remove_role_from_product(product_id, role_id=role_id)
 
-
-@product_ns.route("/sigma")
-class SigmaProduct(ForgeResource):
-    @token_required
-    def post(self):
-        return {"status": "ok"}, 200

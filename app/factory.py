@@ -13,7 +13,6 @@ from flask_cors import CORS
 from flask_restx import Api
 
 from app.adapters.databricks_token_manager import DatabricksForgeTokenPort
-from app.adapters.sigma_token_manager import ForgeTokenManager
 from app.celery_app import celery, configure_forge_celery
 from app.config import (
     AWS_ACCESS_KEY_ID,
@@ -45,7 +44,6 @@ from app.routes.admin_routes import admin_ns
 from app.routes.ai import ai_ns
 from app.routes.auth_routes import qf_auth_ns
 from app.routes.chat_minimal import chat_ns
-from app.routes.connection_routes import connection_ns
 from app.routes.data_environment import data_environment_ns
 from app.routes.datasource_routes import datasource_ns
 from app.routes.ingestion_routes import ingestion_ns
@@ -139,12 +137,6 @@ def _databricks_oauth_configured() -> bool:
     client_secret = (os.getenv("DATABRICKS_CLIENT_SECRET") or "").strip()
     return bool(token_url.startswith(("http://", "https://")) and client_id and client_secret)
 
-
-def _sigma_oauth_configured() -> bool:
-    token_url = (os.getenv("SIGMA_TOKEN_URL") or "").strip()
-    client_id = (os.getenv("SIGMA_CLIENT_ID") or "").strip()
-    client_secret = (os.getenv("SIGMA_CLIENT_SECRET") or "").strip()
-    return bool(token_url.startswith(("http://", "https://")) and client_id and client_secret)
 
 
 def _register_analytics_registry(
@@ -299,7 +291,6 @@ def create_app():
     api.add_namespace(workspace_ns, path=build_url("/", NAME, VERSION, "workspaces"))
     api.add_namespace(workspace_tables_ns, path=build_url("/", NAME, VERSION, "workspace-tables"))
     api.add_namespace(dictionary_ns, path=build_url("/", NAME, VERSION, "dictionary"))
-    api.add_namespace(connection_ns, path=build_url("/", NAME, VERSION, "connections"))
     api.add_namespace(user_workspace_ns, path=build_url("/", NAME, VERSION, "user-workspaces"))
     api.add_namespace(role_ns, path=build_url("/", NAME, VERSION, "roles"))
     api.add_namespace(admin_ns, path=build_url("/", NAME, VERSION, "admin"))
@@ -379,12 +370,6 @@ def create_app():
     else:
         logger.info("Databricks token manager not started: no Databricks datasource needs token refresh")
 
-    if _sigma_oauth_configured():
-        sigma_token_manager = ForgeTokenManager()
-        sigma_token_manager.start_auto_refresh()
-        app.config["SIGMA_TOKEN_MANAGER"] = sigma_token_manager
-    else:
-        logger.info("Sigma token manager not started: SIGMA OAuth env is incomplete")
 
     valkey_client = valkey.StrictValkey(host=VALKEY_ADDRESS, port=VALKEY_PORT, decode_responses=True)
 

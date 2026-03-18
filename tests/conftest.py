@@ -37,7 +37,6 @@ def app(monkeypatch: pytest.MonkeyPatch):
     from app import factory
 
     monkeypatch.setattr(factory, "DatabricksForgeTokenPort", _DummyForgeTokenPort)
-    monkeypatch.setattr(factory, "ForgeTokenManager", _DummyForgeTokenPort)
     monkeypatch.setattr(factory, "valkey", _DummyValkeyModule)
     monkeypatch.setattr(factory, "LLM_INSTANCE_ID", "i-test-llm")
     monkeypatch.setattr(factory, "AWS_REGION", "us-east-1")
