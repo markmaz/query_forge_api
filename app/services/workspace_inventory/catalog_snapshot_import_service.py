@@ -1,22 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
-from app.config import (
-    DBX_MODEL_COLUMNS_SNAPSHOT_TABLE,
-    DBX_MODEL_SNAPSHOT_CATALOG,
-    DBX_MODEL_SNAPSHOT_SCHEMA,
-    DBX_MODEL_TABLES_SNAPSHOT_TABLE,
-)
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.metadata.gateway import MetadataGateway
-
-COLUMNS_PATH = f"{DBX_MODEL_SNAPSHOT_CATALOG}.{DBX_MODEL_SNAPSHOT_SCHEMA}.{DBX_MODEL_COLUMNS_SNAPSHOT_TABLE}"
-TABLE_PATH = f"{DBX_MODEL_SNAPSHOT_CATALOG}.{DBX_MODEL_SNAPSHOT_SCHEMA}.{DBX_MODEL_TABLES_SNAPSHOT_TABLE}"
 
 def _chunk(xs: List[Any], n: int = 500) -> List[List[Any]]:
     return [xs[i:i+n] for i in range(0, len(xs), n)]
@@ -45,10 +37,16 @@ class CatalogSnapshotImportService:
         sql: ForgeQueryPort,
         mysql: Optional[ForgeQueryPort] = None,
         metadata_gateway: Optional[MetadataGateway] = None,
+        tables_path: Optional[str] = None,
+        columns_path: Optional[str] = None,
     ):
         self._sql = sql
         self._mysql = mysql or ForgeMetaSQL()
         self._metadata_gateway = metadata_gateway or MetadataGateway(sql=self._mysql)
+        catalog = os.getenv("DBX_MODEL_SNAPSHOT_CATALOG", "analytics")
+        schema = os.getenv("DBX_MODEL_SNAPSHOT_SCHEMA", "workboard")
+        self._tables_path = tables_path or f"{catalog}.{schema}.{os.getenv('DBX_MODEL_TABLES_SNAPSHOT_TABLE', 'model_tables_snapshot')}"
+        self._columns_path = columns_path or f"{catalog}.{schema}.{os.getenv('DBX_MODEL_COLUMNS_SNAPSHOT_TABLE', 'model_columns_snapshot')}"
 
     # ----------------------------
     # Datasource reads
@@ -57,7 +55,7 @@ class CatalogSnapshotImportService:
     def _latest_snapshot_id(self) -> str:
         sql_text = f"""
 SELECT snapshot_id
-FROM {TABLE_PATH}
+FROM {self._tables_path}
 ORDER BY snapshot_utc DESC
 LIMIT 1
 """
@@ -79,7 +77,7 @@ SELECT
   full_name,
   table_comment,
   column_count
-FROM {TABLE_PATH}
+FROM {self._tables_path}
 WHERE snapshot_id = '{snapshot_id}'
 """
         resp = self._sql.submit_statement(sql_text, qf_result_fmt="ARROW_STREAM")
@@ -104,7 +102,7 @@ SELECT
   sample_values_json,
   sample_stats_json,
   sample_error
-FROM {COLUMNS_PATH}
+FROM {self._columns_path}
 WHERE snapshot_id = '{snapshot_id}'
 """
         resp = self._sql.submit_statement(sql_text, qf_result_fmt="ARROW_STREAM")

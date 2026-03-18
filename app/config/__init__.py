@@ -121,11 +121,6 @@ AWS_SESSION_TOKEN = os.getenv("AWS_SESSION_TOKEN", "").strip() or None
 LLM_INSTANCE_ID = os.getenv("LLM_INSTANCE_ID", "").strip()
 LLM_STATUS_CACHE_SECONDS = int(os.getenv("LLM_STATUS_CACHE_SECONDS", "5"))
 
-# Databricks model snapshot (Delta)
-DBX_MODEL_SNAPSHOT_CATALOG = os.getenv("DBX_MODEL_SNAPSHOT_CATALOG", "analytics")
-DBX_MODEL_SNAPSHOT_SCHEMA = os.getenv("DBX_MODEL_SNAPSHOT_SCHEMA", "workboard")
-DBX_MODEL_COLUMNS_SNAPSHOT_TABLE = os.getenv("DBX_MODEL_COLUMNS_SNAPSHOT_TABLE", "model_columns_snapshot")
-DBX_MODEL_TABLES_SNAPSHOT_TABLE = os.getenv("DBX_MODEL_TABLES_SNAPSHOT_TABLE", "model_tables_snapshot")
 
 # Qdrant
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
