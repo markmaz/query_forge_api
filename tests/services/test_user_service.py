@@ -9,7 +9,7 @@ from app.models.product import Product
 from app.models.role import ProductRole
 from app.models.role import Role
 from app.models.user import User
-from app.models.user_invitation import UserInvitation
+from app.models.user_workspace import UserInvitation
 from app.models.user_workspace import UserWorkspace
 from app.services import user_service as user_service_mod
 from app.services.user_service import UserService

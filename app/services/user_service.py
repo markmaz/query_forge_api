@@ -15,7 +15,7 @@ from app.models.role import ProductRole
 from app.models.role import Role
 from app.models.status_enum import UserStatus
 from app.models.user import User
-from app.models.user_invitation import UserInvitation
+from app.models.user_workspace import UserInvitation
 from app.models.user_workspace import UserWorkspace
 from app.ports.sql_executor import ForgeQueryPort, ForgeQueryTx
 from app.services.password_service import generate_otp_secret, validate_password_policy
