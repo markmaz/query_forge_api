@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from app.services.models.model_snapshot_import_service import ModelSnapshotImportService
+from app.services.workspace_inventory.catalog_snapshot_import_service import CatalogSnapshotImportService
 from tests._support.fakes import FakeDatabricksForgeQueryPort, FakeForgeQueryPort
 
 
@@ -58,7 +58,7 @@ class _GatewayStub:
 def test_latest_snapshot_id_missing() -> None:
     sql = FakeDatabricksForgeQueryPort()
     sql.submit_responses.append({"rows": []})
-    svc = ModelSnapshotImportService(sql=sql, mysql=FakeForgeQueryPort(), metadata_gateway=_GatewayStub())  # type: ignore[arg-type]
+    svc = CatalogSnapshotImportService(sql=sql, mysql=FakeForgeQueryPort(), metadata_gateway=_GatewayStub())  # type: ignore[arg-type]
 
     with pytest.raises(ValueError):
         svc._latest_snapshot_id()
@@ -104,7 +104,7 @@ def test_import_snapshot_upserts_and_deactivates() -> None:
     mysql.write_responses = [0, 0, 3]
     gateway = _GatewayStub()
 
-    svc = ModelSnapshotImportService(sql=sql, mysql=mysql, metadata_gateway=gateway)  # type: ignore[arg-type]
+    svc = CatalogSnapshotImportService(sql=sql, mysql=mysql, metadata_gateway=gateway)  # type: ignore[arg-type]
     result = svc.import_snapshot(snapshot_id="snap-1", deactivate_missing=True)
 
     assert result.tables_upserted == 2

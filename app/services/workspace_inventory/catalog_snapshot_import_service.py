@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from app.adapters.databricks_sql_executor import DatabricksForgeQueryPort
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import (
     DBX_MODEL_COLUMNS_SNAPSHOT_TABLE,
@@ -31,9 +30,9 @@ class ImportResult:
     columns_deactivated: int
 
 
-class ModelSnapshotImportService:
+class CatalogSnapshotImportService:
     """
-    Imports model structure + samples from DBX Delta snapshot tables into MySQL:
+    Imports catalog structure + samples from datasource snapshot tables into MySQL:
       - model_table (name, source_table_name)
       - model_column (data_type, nullable, ordinal_position, sample_*)
 
@@ -43,7 +42,7 @@ class ModelSnapshotImportService:
     def __init__(
         self,
         *,
-        sql: DatabricksForgeQueryPort,
+        sql: ForgeQueryPort,
         mysql: Optional[ForgeQueryPort] = None,
         metadata_gateway: Optional[MetadataGateway] = None,
     ):
@@ -52,7 +51,7 @@ class ModelSnapshotImportService:
         self._metadata_gateway = metadata_gateway or MetadataGateway(sql=self._mysql)
 
     # ----------------------------
-    # DBX reads
+    # Datasource reads
     # ----------------------------
 
     def _latest_snapshot_id(self) -> str:
@@ -138,7 +137,7 @@ WHERE snapshot_id = '{snapshot_id}'
             table_payload.append({"name": name, "source_table_name": src})
 
         with self._mysql.transaction() as tx:
-            # 1) Upsert model_table as DBX source-of-truth
+            # 1) Upsert model_table as datasource source-of-truth
             if table_payload:
                 tx.execute_write(
                     """
@@ -177,7 +176,7 @@ WHERE snapshot_id = '{snapshot_id}'
                     },
                 )
 
-            # 3) Upsert model_column (DBX truth) and CLEAR missing flag
+            # 3) Upsert model_column (datasource truth) and CLEAR missing flag
             col_payload: List[Dict[str, Any]] = []
             cols_by_table_id: Dict[int, set] = {}
 
@@ -267,8 +266,8 @@ WHERE snapshot_id = '{snapshot_id}'
                         },
                     )
 
-            # 4) Deactivate missing DBX columns (optional)
-            # IMPORTANT: only deactivate rows that are DBX-origin AND not dictionary-missing placeholders.
+            # 4) Deactivate missing datasource columns (optional)
+            # IMPORTANT: only deactivate rows that are datasource-origin AND not dictionary-missing placeholders.
             deactivated = 0
             if deactivate_missing:
                 for tid, colset in cols_by_table_id.items():

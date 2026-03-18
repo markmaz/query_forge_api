@@ -4,11 +4,11 @@ from typing import Any, Dict, List, Optional
 
 import pyarrow as pa
 
-from app.services.models.model_sample_write_service import ModelSampleService, _quote_col, _quote_uc_ident
+from app.services.workspace_inventory.column_sample_write_service import ColumnSampleWriteService, _quote_col, _quote_uc_ident
 from tests._support.fakes import FakeDatabricksForgeQueryPort, FakeForgeQueryPort
 
 
-class _SampleService(ModelSampleService):
+class _SampleService(ColumnSampleWriteService):
     def _fetch_column_stats(self, *, full_name: str, column_name: str, qf_timeout_s: Optional[int] = 120) -> Dict[str, Any]:
         return {"sample_row_count": 10, "null_count": 1, "null_pct": 0.1, "approx_distinct": 2}
 
@@ -47,7 +47,7 @@ def test_fetch_column_stats_and_samples() -> None:
     sql.submit_responses.append(
         {"table": pa.Table.from_pylist([{"value": "alpha", "n": 2}, {"value": "beta", "n": 1}])}
     )
-    svc = ModelSampleService(sql=sql, mysql=FakeForgeQueryPort())
+    svc = ColumnSampleWriteService(sql=sql, mysql=FakeForgeQueryPort())
 
     stats = svc._fetch_column_stats(full_name="main.asset.table", column_name="col")
     samples = svc._fetch_column_samples(full_name="main.asset.table", column_name="col", limit=5)

@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
-from app.adapters.databricks_sql_executor import DatabricksForgeQueryPort
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.metadata.gateway import MetadataGateway
@@ -21,7 +20,7 @@ SAFE_IDENT_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 def _quote_uc_ident(ident: str) -> str:
     """
-    Quote `catalog.schema.table` into `cat`.`sch`.`tbl` for Spark/DBX SQL.
+    Quote `catalog.schema.table` into `cat`.`sch`.`tbl` for Spark SQL.
     Escapes any backticks inside parts.
     """
     parts = [p.strip() for p in (ident or "").split(".") if p.strip()]
@@ -36,7 +35,7 @@ def _quote_uc_ident(ident: str) -> str:
 
 def _quote_col(col: str) -> str:
     """
-    Quote a column name safely for Spark SQL.
+    Quote a column name safely for SQL.
     - If simple (A-Za-z0-9_), we still quote it for consistency.
     - If it contains other chars, backticks still work if we escape internal backticks.
     """
@@ -47,7 +46,7 @@ def _quote_col(col: str) -> str:
     return f"`{c}`"
 
 
-class ModelSampleService:
+class ColumnSampleWriteService:
     """
     Column-level sampling into model_column.* sample fields.
 
@@ -64,7 +63,7 @@ class ModelSampleService:
     def __init__(
         self,
         *,
-        sql: DatabricksForgeQueryPort,
+        sql: ForgeQueryPort,
         mysql: Optional[ForgeQueryPort] = None,
         metadata_gateway: Optional[MetadataGateway] = None,
     ):
@@ -124,10 +123,6 @@ ORDER BY ordinal_position, column_name
         tbl = _quote_uc_ident(full_name)
         col = _quote_col(column_name)
 
-        # Spark SQL:
-        # - COUNT(*) total rows
-        # - COUNT(col) non-null rows
-        # - approx_count_distinct(col) for cardinality (fast)
         sql_text = f"""
 SELECT
   COUNT(1)                                  AS sample_row_count,
