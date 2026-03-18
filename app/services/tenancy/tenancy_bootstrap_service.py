@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from app.exceptions.forge_error import ForgeError
-from app.models.tenancy_admin import (
+from app.models.tenancy.tenancy_admin import (
     DatasourceCreateRequest,
     OrganizationCreateRequest,
     OrganizationMembershipCreateRequest,

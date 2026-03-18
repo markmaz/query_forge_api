@@ -17,7 +17,7 @@ from app.constants.llm_roles import LLMRole
 from app.exceptions.forge_error import ForgeError
 from app.infra.embedding_model import EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
-from app.models.ai_suggest import AddAggregateEdit, AddFilterEdit, AddGroupByEdit, AddSelectEdit, SetDomainEdit, SqlColumnKey
+from app.models.query.ai_suggest import AddAggregateEdit, AddFilterEdit, AddGroupByEdit, AddSelectEdit, SetDomainEdit, SqlColumnKey
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.llm.llm_client import LLMClient
 from app.services.planner_llm.cache import PlannerLLMCache

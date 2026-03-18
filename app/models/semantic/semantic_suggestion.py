@@ -8,7 +8,7 @@ from sqlalchemy import Computed, DateTime, ForeignKey, Index, Integer, String, T
 from sqlalchemy.dialects.mysql import BIGINT, DECIMAL, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.semantic_registry import SemanticBase
+from app.models.semantic.semantic_registry import SemanticBase
 
 
 class SemanticSuggestionRun(SemanticBase):

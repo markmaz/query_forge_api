@@ -26,7 +26,7 @@ from flask_restx import Namespace, Resource, fields
 
 from app.decorators.security import token_required
 from app.extensions import db
-from app.models.destinations import (
+from app.models.domain.destinations import (
     DESTINATION_CONFIG_SCHEMAS,
     DESTINATION_TYPES,
     WorkspaceDestination,

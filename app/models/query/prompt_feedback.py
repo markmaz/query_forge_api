@@ -7,7 +7,7 @@ from sqlalchemy import DateTime, Enum, Index, String, Text, UniqueConstraint, te
 from sqlalchemy.dialects.mysql import BIGINT, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.semantic_registry import SemanticBase
+from app.models.semantic.semantic_registry import SemanticBase
 
 
 class PromptFeedback(SemanticBase):

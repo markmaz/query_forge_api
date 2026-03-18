@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
-from app.models.forge_insights_schema import (
+from app.models.query.forge_insights_schema import (
     ForgeInsightsProjectCreateRequest,
     ForgeInsightsProjectResponse,
     ForgeInsightsProjectUpdateRequest,

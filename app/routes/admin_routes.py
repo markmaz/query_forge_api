@@ -9,17 +9,17 @@ from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
-from app.models.domain_profile import (
+from app.models.domain.domain_profile import (
     DomainProfileCreateRequest,
     DomainProfileUpdateRequest,
 )
-from app.models.domain_profile_embedding import (
+from app.models.domain.domain_profile_embedding import (
     DomainProfileGenerateAllRequest,
     DomainProfileGenerateOneRequest,
     DomainProfileGenerateRequest,
 )
-from app.models.semantic_catalog_admin import SemanticCatalogBuildRequest
-from app.models.tenancy_admin import (
+from app.models.semantic.semantic_catalog_admin import SemanticCatalogBuildRequest
+from app.models.tenancy.tenancy_admin import (
     DatasourceCreateRequest,
     DatasourceUpdateRequest,
     OrganizationCreateRequest,

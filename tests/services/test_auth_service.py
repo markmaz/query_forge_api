@@ -4,8 +4,8 @@ import pytest
 from sqlalchemy.exc import OperationalError
 
 from app.exceptions.forge_error import ForgeError
-from app.models.user import User
-from app.models.user_workspace import UserWorkspace
+from app.models.tenancy.user import User
+from app.models.tenancy.user_workspace import UserWorkspace
 from app.services import auth_service
 from app.services.auth_service import AuthService
 

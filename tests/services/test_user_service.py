@@ -5,12 +5,12 @@ from datetime import datetime, timezone
 import pytest
 
 from app.exceptions.forge_error import ForgeError
-from app.models.product import Product
-from app.models.role import ProductRole
-from app.models.role import Role
-from app.models.user import User
-from app.models.user_workspace import UserInvitation
-from app.models.user_workspace import UserWorkspace
+from app.models.tenancy.product import Product
+from app.models.tenancy.role import ProductRole
+from app.models.tenancy.role import Role
+from app.models.tenancy.user import User
+from app.models.tenancy.user_workspace import UserInvitation
+from app.models.tenancy.user_workspace import UserWorkspace
 from app.services import user_service as user_service_mod
 from app.services.user_service import UserService
 from tests._support.fakes import FakeForgeQueryPort

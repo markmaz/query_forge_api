@@ -7,7 +7,7 @@ from flask_restx import Namespace, reqparse
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
-from app.models.product import Product
+from app.models.tenancy.product import Product
 from app.services.product_service import ProductService
 from app.services.role_service import RoleService
 

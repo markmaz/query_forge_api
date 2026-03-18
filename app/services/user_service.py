@@ -10,13 +10,13 @@ from werkzeug.security import generate_password_hash
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.decorators.validate import validate_params
 from app.exceptions.forge_error import ForgeError
-from app.models.product import Product
-from app.models.role import ProductRole
-from app.models.role import Role
-from app.models.status_enum import UserStatus
-from app.models.user import User
-from app.models.user_workspace import UserInvitation
-from app.models.user_workspace import UserWorkspace
+from app.models.tenancy.product import Product
+from app.models.tenancy.role import ProductRole
+from app.models.tenancy.role import Role
+from app.models.tenancy.status_enum import UserStatus
+from app.models.tenancy.user import User
+from app.models.tenancy.user_workspace import UserInvitation
+from app.models.tenancy.user_workspace import UserWorkspace
 from app.ports.sql_executor import ForgeQueryPort, ForgeQueryTx
 from app.services.password_service import generate_otp_secret, validate_password_policy
 

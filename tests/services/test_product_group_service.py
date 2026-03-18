@@ -4,8 +4,8 @@ import pytest
 from sqlalchemy import exc
 
 from app.exceptions.forge_error import ForgeError
-from app.models.product import Product
-from app.models.product_group import ProductGroup
+from app.models.tenancy.product import Product
+from app.models.tenancy.product_group import ProductGroup
 from app.services.product_groups_service import ProductGroupService
 from tests._support.fakes import FakeForgeQueryPort
 

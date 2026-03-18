@@ -7,8 +7,8 @@ from pydantic import ValidationError
 
 from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
-from app.models.user import User
-from app.models.user_workspace import UserInvitation
+from app.models.tenancy.user import User
+from app.models.tenancy.user_workspace import UserInvitation
 from app.services.user_service import UserService
 
 logger = logging.getLogger(__name__)

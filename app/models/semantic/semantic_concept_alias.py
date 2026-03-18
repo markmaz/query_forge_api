@@ -6,7 +6,7 @@ from sqlalchemy import DateTime, Index, String, UniqueConstraint, text
 from sqlalchemy.dialects.mysql import BIGINT, DECIMAL
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.semantic_registry import SemanticBase
+from app.models.semantic.semantic_registry import SemanticBase
 
 
 class SemanticConceptAlias(SemanticBase):

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from app.exceptions.forge_error import ForgeError
-from app.models.domain_profile import compute_content_hash
+from app.models.domain.domain_profile import compute_content_hash
 from app.services.admin.domain_profile_embedding_service import DomainProfileEmbeddingService
 
 

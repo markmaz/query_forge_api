@@ -3,15 +3,15 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.product import Product
+from app.models.tenancy.role import ProductRole
 
 
-class ProductGroup(BaseModel):
-    product_group_id: str
-    product_group_name: str
-    status: str
+class Product(BaseModel):
+    product_id: Optional[str] = None
+    product_name: Optional[str] = None
+    status: Optional[str] = None
     last_update: Optional[datetime] = None
-    products: List[Product] = Field(default_factory=list)
+    roles: List[ProductRole] = Field(default_factory=list)
 
     model_config = ConfigDict(
         extra="ignore",

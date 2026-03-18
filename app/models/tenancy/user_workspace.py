@@ -2,7 +2,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, EmailStr
 
-from app.models.product import Product
+from app.models.tenancy.product import Product
 
 
 class UserWorkspace(BaseModel):

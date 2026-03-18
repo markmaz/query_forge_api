@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.exceptions.forge_error import ForgeError
-from app.models.user import User
+from app.models.tenancy.user import User
 from app.services.user_service import UserService
 from tests._support.fakes import FakeForgeQueryPort
 

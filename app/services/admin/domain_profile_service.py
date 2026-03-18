@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
-from app.models.domain_profile import (
+from app.models.domain.domain_profile import (
     DomainProfileCreateRequest,
     DomainProfileResponse,
     DomainProfileUpdateRequest,

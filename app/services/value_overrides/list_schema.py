@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Literal
 
-from app.models.value_override import ColumnSpec
+from app.models.query.value_override import ColumnSpec
 
 ForgeSectionKey = Literal["regions", "npiCategories", "serviceLines"]
 

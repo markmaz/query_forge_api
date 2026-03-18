@@ -7,7 +7,7 @@ from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.mysql import BIGINT, DECIMAL, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.semantic_registry import SemanticBase
+from app.models.semantic.semantic_registry import SemanticBase
 
 
 class ForgeMatchSession(SemanticBase):

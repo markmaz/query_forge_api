@@ -8,7 +8,7 @@ from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
-from app.models.domain_profile_embedding import (
+from app.models.domain.domain_profile_embedding import (
     DomainProfileGenerateAllRequest,
     DomainProfileGenerateOneRequest,
     DomainProfileGenerateRequest,

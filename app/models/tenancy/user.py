@@ -3,9 +3,9 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, computed_field
 
-from app.models.product import Product
-from app.models.role import Role
-from app.models.user_workspace import UserWorkspace
+from app.models.tenancy.product import Product
+from app.models.tenancy.role import Role
+from app.models.tenancy.user_workspace import UserWorkspace
 
 
 class User(BaseModel):

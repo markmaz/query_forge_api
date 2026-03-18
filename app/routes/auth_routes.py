@@ -9,8 +9,8 @@ from app.routes.forge_resource import ForgeResource
 from app.config import COOKIE_SAMESITE, COOKIE_SECURE, REFRESH_COOKIE_PATH
 from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
-from app.models.status_enum import UserStatus
-from app.models.user import User
+from app.models.tenancy.status_enum import UserStatus
+from app.models.tenancy.user import User
 from app.services.auth import (
     LOGIN_CHALLENGE_TTL_S,
     LoginChallengeService,

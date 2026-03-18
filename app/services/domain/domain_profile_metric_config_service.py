@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
-from app.models.domain_profile import DomainProfileBase, _build_embedding_text, compute_content_hash
+from app.models.domain.domain_profile import DomainProfileBase, _build_embedding_text, compute_content_hash
 from app.ports.sql_executor import ForgeQueryPort
 
 _ALLOWED_AGGS = {"count", "count_distinct", "sum", "avg", "min", "max"}

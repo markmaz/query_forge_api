@@ -7,7 +7,7 @@ from typing import List, Optional
 import pyarrow as pa
 
 from app.exceptions.forge_error import ForgeError
-from app.models.value_override import (
+from app.models.query.value_override import (
     ValueOverrideDetails,
     ValueOverrideListIndex,
     ValueOverrideMeta,

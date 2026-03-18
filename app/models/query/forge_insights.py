@@ -7,7 +7,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, Uniqu
 from sqlalchemy.dialects.mysql import BIGINT
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.semantic_registry import SemanticBase
+from app.models.semantic.semantic_registry import SemanticBase
 
 
 

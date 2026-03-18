@@ -24,7 +24,7 @@ from app.config import (
 )
 from app.decorators.validate import validate_params
 from app.exceptions.forge_error import ForgeError
-from app.models.user import User
+from app.models.tenancy.user import User
 from app.services.user_service import UserService
 from app.utils.jwt_claims import claim_has_role
 from app.utils.token_utils import generate_token as generate

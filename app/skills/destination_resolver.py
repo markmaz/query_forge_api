@@ -20,7 +20,7 @@ import logging
 from typing import Any
 
 from app.extensions import db
-from app.models.destinations import WorkspaceDestination
+from app.models.domain.destinations import WorkspaceDestination
 
 logger = logging.getLogger(__name__)
 

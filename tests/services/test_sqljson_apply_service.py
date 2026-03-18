@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.models.ai_suggest import (
+from app.models.query.ai_suggest import (
     AddAggregateEdit,
     AddFilterEdit,
     AddGroupByEdit,

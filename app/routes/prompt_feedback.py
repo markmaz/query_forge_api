@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from app.config import QF_PROMPT_FEEDBACK_MAX_PAYLOAD_BYTES
 from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
-from app.models.prompt_feedback_schema import PromptFeedbackRequest, PromptFeedbackResponse
+from app.models.query.prompt_feedback_schema import PromptFeedbackRequest, PromptFeedbackResponse
 from app.routes.request_helpers import require_user_id, extract_workspace_id
 from app.services.prompt_feedback_service import PromptFeedbackService
 

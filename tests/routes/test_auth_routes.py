@@ -5,7 +5,7 @@ from typing import Any, Dict
 import app.routes.auth_routes as auth_routes
 from app.decorators import security
 from app.exceptions.forge_error import ForgeError
-from app.models.user import User
+from app.models.tenancy.user import User
 
 
 def test_login_success(client, monkeypatch):

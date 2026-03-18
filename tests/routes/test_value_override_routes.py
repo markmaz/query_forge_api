@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import app.routes.value_override_routes as value_override_routes
 import app.decorators.security as security
 from app.exceptions.forge_error import ForgeError
-from app.models.value_override import ValueOverrideListIndex, ValueOverrideMeta
+from app.models.query.value_override import ValueOverrideListIndex, ValueOverrideMeta
 
 
 def _headers_with_auth(monkeypatch):
