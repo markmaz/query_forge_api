@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
-from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
+from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 from app.services.workspace_inventory.workspace_inventory_pipeline_service import WorkspacePipelineService
 
 
@@ -65,7 +65,7 @@ class WorkspaceSnapshotEnsureService:
         return rows[0].get("max_seen")
 
     def _run_snapshot(self, *, workspace_id: str, schema_name: str) -> None:
-        context = WorkspaceContextBuilder().build(workspace_id)
+        context = WorkspaceSqlContextBuilder().build(workspace_id)
         WorkspacePipelineService(sql=context.sql_exec).sync_snapshot(
             workspace_id=workspace_id,
             schema_name=schema_name,

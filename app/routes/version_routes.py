@@ -4,6 +4,7 @@ import logging
 
 from flask_restx import Namespace
 
+from app.decorators.rbac import public
 from app.exceptions.forge_error import ForgeError
 from app.routes.forge_resource import ForgeResource
 from app.services.version_service import VersionService
@@ -15,6 +16,7 @@ version_ns = Namespace("version", description="Application version")
 
 @version_ns.route("/")
 class VersionInfo(ForgeResource):
+    @public
     def get(self):
         try:
             return VersionService().get_version_payload(), 200

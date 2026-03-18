@@ -8,6 +8,7 @@ from flask_restx import Namespace, fields
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import int_arg
 from app.services.semantic.semantic_relationship_service import SemanticRelationshipService
@@ -48,6 +49,7 @@ semantic_relationship_patch_model = semantic_relationships_ns.model(
 @semantic_relationships_ns.route("")
 class SemanticRelationshipsCollection(ForgeResource):
     @token_required
+    @require_access("semantic")
     @semantic_relationships_ns.doc(
         params={
             "vertical": "Filter by vertical scope",
@@ -76,6 +78,7 @@ class SemanticRelationshipsCollection(ForgeResource):
             return {"error": "semantic relationships list failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_relationships_ns.expect(semantic_relationship_model, validate=False)
     def post(self):
         try:
@@ -92,6 +95,7 @@ class SemanticRelationshipsCollection(ForgeResource):
 @semantic_relationships_ns.route("/concepts")
 class SemanticRelationshipConceptLookup(ForgeResource):
     @token_required
+    @require_access("semantic")
     @semantic_relationships_ns.doc(
         params={
             "vertical": "Filter by vertical scope",
@@ -119,6 +123,7 @@ class SemanticRelationshipConceptLookup(ForgeResource):
 @semantic_relationships_ns.route("/<int:relationship_id>")
 class SemanticRelationshipsById(ForgeResource):
     @token_required
+    @require_access("semantic")
     def get(self, relationship_id: int):
         try:
             row = SemanticRelationshipService().get_relationship(relationship_id)
@@ -130,6 +135,7 @@ class SemanticRelationshipsById(ForgeResource):
             return {"error": "semantic relationship get failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_relationships_ns.expect(semantic_relationship_patch_model, validate=False)
     def patch(self, relationship_id: int):
         try:
@@ -143,6 +149,7 @@ class SemanticRelationshipsById(ForgeResource):
             return {"error": "semantic relationship patch failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     def delete(self, relationship_id: int):
         try:
             SemanticRelationshipService().delete_relationship(relationship_id)

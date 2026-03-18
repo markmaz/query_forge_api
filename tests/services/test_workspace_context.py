@@ -5,7 +5,7 @@ from flask import g
 
 from app.exceptions.forge_error import ForgeError
 from app.services.tenancy.datasource_resolver_service import ResolvedWorkspaceDatasource
-from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
+from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 
 
 class _DummyForgeTokenPort:
@@ -42,7 +42,7 @@ def test_build_context(monkeypatch: pytest.MonkeyPatch) -> None:
         _DummyExecutor,
     )
 
-    ctx = WorkspaceContextBuilder().build("ws-1")
+    ctx = WorkspaceSqlContextBuilder().build("ws-1")
     assert ctx.workspace_url == "https://dbx"
     assert ctx.warehouse_id == "wh-1"
     assert ctx.user_name == "user-1"
@@ -53,7 +53,7 @@ def test_resolve_workspace_url_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         "app.services.workspace_inventory.workspace_context.WorkspaceService.get_workspace",
         lambda *_args, **_kwargs: {"workspace_id": "ws-1"},
     )
-    builder = WorkspaceContextBuilder()
+    builder = WorkspaceSqlContextBuilder()
     with pytest.raises(ForgeError):
         builder._resolve_workspace_url("ws-1")
 
@@ -63,7 +63,7 @@ def test_resolve_workspace_url_object(monkeypatch: pytest.MonkeyPatch) -> None:
         "app.services.workspace_inventory.workspace_context.WorkspaceService.get_workspace",
         lambda *_args, **_kwargs: type("Ws", (), {"server": "https://dbx"})(),
     )
-    builder = WorkspaceContextBuilder()
+    builder = WorkspaceSqlContextBuilder()
     assert builder._resolve_workspace_url("ws-1") == "https://dbx"
 
 
@@ -76,7 +76,7 @@ def test_resolve_default_warehouse_missing(monkeypatch: pytest.MonkeyPatch) -> N
         "app.services.workspace_inventory.workspace_context.WarehouseService.get_warehouse_by_name",
         lambda *_args, **_kwargs: {},
     )
-    builder = WorkspaceContextBuilder()
+    builder = WorkspaceSqlContextBuilder()
     with pytest.raises(ForgeError):
         builder._resolve_default_warehouse_id("ws-1")
 
@@ -92,7 +92,7 @@ def test_build_context_forbidden_workspace_in_request_context(app, monkeypatch: 
     with app.test_request_context("/"):
         g.user_id = "user-1"
         with pytest.raises(ForgeError) as exc:
-            WorkspaceContextBuilder().build("ws-1")
+            WorkspaceSqlContextBuilder().build("ws-1")
     assert exc.value.status_code == 403
 
 
@@ -125,7 +125,7 @@ def test_build_context_uses_workspace_datasource_databricks(monkeypatch: pytest.
         _DummyExecutor,
     )
 
-    ctx = WorkspaceContextBuilder().build("ws-1")
+    ctx = WorkspaceSqlContextBuilder().build("ws-1")
     assert ctx.workspace_url == "https://adb-1.azuredatabricks.net"
     assert ctx.warehouse_id == "wh-1"
     assert isinstance(ctx.sql_exec, _DummyExecutor)
@@ -170,7 +170,7 @@ def test_build_context_uses_workspace_datasource_non_databricks(monkeypatch: pyt
         lambda *_args, **_kwargs: _DummyAnalyticsExecutor(),
     )
 
-    ctx = WorkspaceContextBuilder().build("ws-1")
+    ctx = WorkspaceSqlContextBuilder().build("ws-1")
     assert ctx.workspace_url == ""
     assert ctx.warehouse_id == ""
 
@@ -200,7 +200,7 @@ def test_build_context_rejects_unsupported_datasource_type(monkeypatch: pytest.M
         ),
     )
     with pytest.raises(ForgeError) as exc:
-        WorkspaceContextBuilder().build("ws-1")
+        WorkspaceSqlContextBuilder().build("ws-1")
     assert exc.value.status_code == 400
 
 
@@ -246,7 +246,7 @@ def test_build_context_injects_secret_for_mysql_datasource(monkeypatch: pytest.M
         lambda ds_type, cfg: captured.update({"type": ds_type, "cfg": dict(cfg)}) or _DummyAnalyticsExecutor(),
     )
 
-    ctx = WorkspaceContextBuilder().build("ws-1")
+    ctx = WorkspaceSqlContextBuilder().build("ws-1")
     assert ctx.workspace_id == "ws-1"
     assert captured["type"] == "mysql"
     assert captured["cfg"]["password"] == "pw-123"

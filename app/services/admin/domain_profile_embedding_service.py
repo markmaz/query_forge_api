@@ -13,7 +13,7 @@ from app.config.llm_resolver import build_llm_client_for_role
 from app.constants.llm_roles import LLMRole
 from app.exceptions.forge_error import ForgeError
 from app.infra.embedding_model import EmbeddingModel
-from app.models.domain_profile import DomainProfileBase, compute_content_hash, _build_embedding_text
+from app.models.domain.domain_profile import DomainProfileBase, compute_content_hash, _build_embedding_text
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.admin.domain_profile_builder import DomainProfileBuilder
 from app.services.llm.llm_client import LLMClient

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import app.routes.user_routes as user_routes
-from app.models.user import User
+from app.models.tenancy.user import User
 
 
 def test_users_get_success(client, auth_headers, monkeypatch):

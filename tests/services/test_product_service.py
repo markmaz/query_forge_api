@@ -4,9 +4,9 @@ import pytest
 from sqlalchemy import exc
 
 from app.exceptions.forge_error import ForgeError
-from app.models.product import Product
-from app.models.product_role import ProductRole
-from app.models.role import Role
+from app.models.tenancy.product import Product
+from app.models.tenancy.role import ProductRole
+from app.models.tenancy.role import Role
 from app.services.product_service import ProductService
 from tests._support.fakes import FakeForgeQueryPort
 

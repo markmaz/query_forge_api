@@ -8,6 +8,7 @@ from flask_restx import Namespace, fields
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.services.planner.semantic_extract_service import SemanticExtractService
 
@@ -26,6 +27,7 @@ extract_model = planner_ns.model(
 @planner_ns.route("/extract")
 class PlannerExtract(ForgeResource):
     @token_required
+    @require_access("planner")
     @planner_ns.expect(extract_model, validate=False)
     def post(self):
         try:

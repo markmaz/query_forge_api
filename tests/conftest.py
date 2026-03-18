@@ -14,11 +14,6 @@ from tests._auth import (
 
 _AUTH_CACHE: Dict[str, Any] = {}
 
-class _DummyForgeTokenPort:
-    def start_auto_refresh(self) -> None:
-        return None
-
-
 class _DummyValkeyClient:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.args = args
@@ -36,8 +31,6 @@ class _DummyValkeyModule:
 def app(monkeypatch: pytest.MonkeyPatch):
     from app import factory
 
-    monkeypatch.setattr(factory, "DatabricksForgeTokenPort", _DummyForgeTokenPort)
-    monkeypatch.setattr(factory, "ForgeTokenManager", _DummyForgeTokenPort)
     monkeypatch.setattr(factory, "valkey", _DummyValkeyModule)
     monkeypatch.setattr(factory, "LLM_INSTANCE_ID", "i-test-llm")
     monkeypatch.setattr(factory, "AWS_REGION", "us-east-1")

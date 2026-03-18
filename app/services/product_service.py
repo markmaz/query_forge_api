@@ -9,10 +9,10 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
-from app.models.product import Product
-from app.models.product_role import ProductRole
-from app.models.role import Role
-from app.models.status_enum import ProductStatus
+from app.models.tenancy.product import Product
+from app.models.tenancy.role import ProductRole
+from app.models.tenancy.role import Role
+from app.models.tenancy.status_enum import ProductStatus
 from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)

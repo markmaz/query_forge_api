@@ -4,7 +4,7 @@ from copy import deepcopy
 from typing import Any, Dict, Iterable, Optional
 from uuid import uuid4
 
-from app.models.ai_suggest import EditOperation, SqlColumnKey
+from app.models.query.ai_suggest import EditOperation, SqlColumnKey
 
 
 def _new_id() -> str:

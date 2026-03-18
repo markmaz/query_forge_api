@@ -9,6 +9,7 @@ from flask_restx import Namespace, fields
 from pydantic import ValidationError
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.forge_resource import ForgeResource
 from app.routes.request_helpers import extract_workspace_id, int_arg, require_user_id
@@ -114,6 +115,7 @@ _cancel_response_model = forge_match_ns.model(
 @forge_match_ns.route("")
 class ForgeMatchSessionList(ForgeResource):
     @token_required
+    @require_access("forge_match")
     @forge_match_ns.doc(
         params={
             "page": "Page number (default 1)",
@@ -148,6 +150,7 @@ class ForgeMatchSessionList(ForgeResource):
 @forge_match_ns.route("/upload")
 class ForgeMatchUpload(ForgeResource):
     @token_required
+    @require_access("forge_match")
     def post(self):
         try:
             workspace_id = extract_workspace_id()
@@ -174,6 +177,7 @@ class ForgeMatchUpload(ForgeResource):
 @forge_match_ns.route("/<string:session_id>/analyze")
 class ForgeMatchAnalyze(ForgeResource):
     @token_required
+    @require_access("forge_match")
     @forge_match_ns.expect(_analyze_model, validate=False)
     def post(self, session_id: str):
         try:
@@ -204,6 +208,7 @@ class ForgeMatchAnalyze(ForgeResource):
 @forge_match_ns.route("/<string:session_id>/analyze/start")
 class ForgeMatchAnalyzeStart(ForgeResource):
     @token_required
+    @require_access("forge_match")
     @forge_match_ns.expect(_analyze_model, validate=False)
     @forge_match_ns.response(202, "Analyze job queued", _run_job_response)
     def post(self, session_id: str):
@@ -278,6 +283,7 @@ class ForgeMatchAnalyzeStart(ForgeResource):
 @forge_match_ns.route("/status/<string:job_id>")
 class ForgeMatchAnalyzeStatus(ForgeResource):
     @token_required
+    @require_access("forge_match")
     @forge_match_ns.response(200, "Analyze run status", _run_status_model)
     def get(self, job_id: str):
         try:
@@ -295,6 +301,7 @@ class ForgeMatchAnalyzeStatus(ForgeResource):
 @forge_match_ns.route("/cancel/<string:job_id>")
 class ForgeMatchAnalyzeCancel(ForgeResource):
     @token_required
+    @require_access("forge_match")
     @forge_match_ns.response(200, "Analyze run cancel status", _cancel_response_model)
     def post(self, job_id: str):
         try:
@@ -317,6 +324,7 @@ class ForgeMatchAnalyzeCancel(ForgeResource):
 @forge_match_ns.route("/history")
 class ForgeMatchAnalyzeHistory(ForgeResource):
     @token_required
+    @require_access("forge_match")
     @forge_match_ns.doc(params={"limit": "Max rows (default 20, max 200)"})
     @forge_match_ns.response(200, "Analyze run history", [_run_status_model])
     def get(self):
@@ -336,6 +344,7 @@ class ForgeMatchAnalyzeHistory(ForgeResource):
 @forge_match_ns.route("/<string:session_id>")
 class ForgeMatchSession(ForgeResource):
     @token_required
+    @require_access("forge_match")
     def get(self, session_id: str):
         try:
             workspace_id = extract_workspace_id()
@@ -363,6 +372,7 @@ class ForgeMatchSession(ForgeResource):
 @forge_match_ns.route("/<string:session_id>/mappings")
 class ForgeMatchMappings(ForgeResource):
     @token_required
+    @require_access("forge_match")
     @forge_match_ns.expect(_patch_model, validate=False)
     def patch(self, session_id: str):
         try:
@@ -391,6 +401,7 @@ class ForgeMatchMappings(ForgeResource):
 @forge_match_ns.route("/<string:session_id>/export")
 class ForgeMatchExport(ForgeResource):
     @token_required
+    @require_access("forge_match")
     def get(self, session_id: str):
         try:
             workspace_id = extract_workspace_id()
@@ -418,6 +429,7 @@ class ForgeMatchExport(ForgeResource):
 @forge_match_ns.route("/<string:session_id>/create-view-draft")
 class ForgeMatchCreateViewDraft(ForgeResource):
     @token_required
+    @require_access("forge_match")
     @forge_match_ns.expect(_draft_model, validate=False)
     def post(self, session_id: str):
         try:
@@ -443,6 +455,7 @@ class ForgeMatchCreateViewDraft(ForgeResource):
 @forge_match_ns.route("/<string:session_id>/create-domain-draft")
 class ForgeMatchCreateDomainDraft(ForgeResource):
     @token_required
+    @require_access("forge_match")
     @forge_match_ns.expect(_draft_model, validate=False)
     def post(self, session_id: str):
         try:

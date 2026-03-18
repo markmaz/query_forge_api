@@ -12,8 +12,8 @@ from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import DATABRICKS_WORKSPACE_USERS_URL
 from app.decorators.validate import validate_params
 from app.exceptions.forge_error import ForgeError
-from app.models.user import User
-from app.models.workspace import Workspace
+from app.models.tenancy.user import User
+from app.models.tenancy.workspace import Workspace
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.base_service import build_url, process_response
 from app.services.tenancy.datasource_resolver_service import WorkspaceDatasourceResolverService

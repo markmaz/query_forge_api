@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pyarrow as pa
 
-from app.adapters.databricks_sql_executor import DatabricksForgeQueryPort
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
 
@@ -21,7 +20,7 @@ def _qf_safe_ident(s: str) -> str:
     return s
 
 
-def _discover_default_catalog_schema(sql: DatabricksForgeQueryPort) -> Tuple[str, str]:
+def _discover_default_catalog_schema(sql: ForgeQueryPort) -> Tuple[str, str]:
     response = sql.submit_statement(
         "SELECT current_catalog() AS catalog, current_schema() AS schema",
         qf_result_fmt="ARROW_STREAM",
@@ -122,7 +121,7 @@ class WorkspaceSnapshotService:
       - workspace_table.model_table_id remains nullable for unmapped tables
     """
 
-    def __init__(self, *, sql: DatabricksForgeQueryPort, mysql: Optional[ForgeQueryPort] = None):
+    def __init__(self, *, sql: ForgeQueryPort, mysql: Optional[ForgeQueryPort] = None):
         self._sql = sql
         self._mysql = mysql or ForgeMetaSQL()
 

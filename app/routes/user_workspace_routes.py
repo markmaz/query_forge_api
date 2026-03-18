@@ -8,6 +8,7 @@ from flask_restx import Namespace, fields, reqparse
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_admin
 from app.services.user_service import UserService
 
 _parser = reqparse.RequestParser()
@@ -46,6 +47,7 @@ def _json_payload() -> dict[str, Any]:
 @user_workspace_ns.doc()
 class UserWorkspaceMap(ForgeResource):
     @token_required
+    @require_admin()
     @user_workspace_ns.expect(mapping_model)
     @user_workspace_ns.response(201, "Mapping created successfully", connection_response)
     @user_workspace_ns.response(400, "Invalid input")
@@ -61,6 +63,7 @@ class UserWorkspaceMap(ForgeResource):
         return _user_service().map_user_workspace(user_id, workspace_id, is_default)
 
     @token_required
+    @require_admin()
     @user_workspace_ns.expect(_parser)
     @user_workspace_ns.response(200, "Mapping deleted successfully", connection_response)
     @user_workspace_ns.response(400, "Missing required query parameter")
@@ -77,6 +80,7 @@ class UserWorkspaceMap(ForgeResource):
         return _user_service().delete_user_workspace(quote(user_id), quote(workspace_id))
 
     @token_required
+    @require_admin()
     @user_workspace_ns.expect(_parser)
     @user_workspace_ns.response(200, "Connection retrieved successfully", connection_response)
     @user_workspace_ns.response(400, "Missing required query parameter")

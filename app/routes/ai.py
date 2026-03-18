@@ -9,8 +9,9 @@ from app.routes.forge_resource import ForgeResource
 from pydantic import ValidationError
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access, public
 from app.exceptions.forge_error import ForgeError
-from app.models.ai_suggest import SuggestAPIResponse, SuggestRequest
+from app.models.query.ai_suggest import SuggestAPIResponse, SuggestRequest
 from app.routes.request_helpers import extract_workspace_id
 from app.services.embedding.embedding_search_service import EmbeddingSearchService
 from app.services.ai_suggest_service import AISuggestService, InvalidModelResponseError
@@ -315,6 +316,7 @@ def _legacy_suggest_response(suggest_request: SuggestRequest) -> SuggestAPIRespo
 @ai_ns.route("/suggest")
 class AISuggest(ForgeResource):
     @token_required
+    @require_access("ai")
     def post(self) -> tuple[dict, int]:
         workspace_id = extract_workspace_id()
         body = request.get_json(silent=True) or {}
@@ -506,6 +508,7 @@ def _sqljson_to_suggest_edits(sqljson: object) -> list[dict]:
 @ai_ns.route("/suggest-semantic-adapter")
 class AISuggestSemanticAdapter(ForgeResource):
     @token_required
+    @require_access("ai")
     def post(self) -> tuple[dict, int]:
         workspace_id = extract_workspace_id()
         body = request.get_json(silent=True) or {}
@@ -537,6 +540,7 @@ class AISuggestSemanticAdapter(ForgeResource):
 
 @ai_ns.route("/health")
 class AIHealth(ForgeResource):
+    @public
     def get(self) -> tuple[dict, int]:
         service = _build_service()
         try:

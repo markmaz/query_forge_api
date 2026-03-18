@@ -2,22 +2,18 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
 
 from flask import g, request
 from flask_restx import Namespace, fields
 from app.routes.forge_resource import ForgeResource
 from sqlalchemy import text
 
-from app.adapters.databricke_workspace_token_manager import DatabricksWorkspaceForgeTokenPort
 from app.adapters.mysql_sql_executor import engine
-from app.config import DEFAULT_SQL_WAREHOUSE
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access, require_admin
 from app.exceptions.forge_error import ForgeError
-from app.models.warehouse import Warehouse
 from app.routes.user_routes import user_model
-from app.services.warehouse_service import WarehouseService
-from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
+from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 from app.services.workspace_access_service import WorkspaceAccessService
 from app.services.workspace_service import WorkspaceService
 from app.services.workspace_user_read_service import WorkspaceUserReadService
@@ -35,12 +31,6 @@ workspace_model = workspace_ns.model(
     },
 )
 workspace_ns.add_model("User", user_model)
-workspace_ns.add_model("Warehouse", Warehouse.warehouse_model)
-workspace_ns.add_model("ODBCParams", Warehouse.odbc_params_model)
-
-
-def json_to_warehouse(json_dict: dict[str, Any]) -> Warehouse:
-    return Warehouse(**json_dict)
 
 
 def _workspace_service() -> WorkspaceService:
@@ -64,30 +54,12 @@ def _int_arg(name: str, default: int) -> int:
         raise ForgeError(f"Invalid integer for '{name}'", status_code=400) from exc
 
 
-def _build_workspace_token_manager(workspace_id: str) -> DatabricksWorkspaceForgeTokenPort:
-    workspace = _workspace_service().get_workspace(workspace_id)
-    if isinstance(workspace, dict):
-        server = workspace.get("server") or workspace.get("host_url") or workspace.get("workspace_url")
-    else:
-        server = getattr(workspace, "server", None) or getattr(workspace, "host_url", None) or getattr(workspace, "workspace_url", None)
-
-    if not server:
-        raise ForgeError(f"Workspace {workspace_id} has no associated server.", status_code=404)
-
-    return DatabricksWorkspaceForgeTokenPort(
-        workspace_host=str(server).rstrip("/"),
-        workspace_id=str(workspace_id),
-    )
-
-
-def _warehouse_service(workspace_id: str) -> WarehouseService:
-    return WarehouseService(token_manager=_build_workspace_token_manager(workspace_id))
-
 
 @workspace_ns.route("/", methods=["GET"])
 class Workspaces(ForgeResource):
     @workspace_ns.marshal_list_with(workspace_model)
     @token_required
+    @require_access("workspaces")
     def get(self):
         logger.info("Get all workspaces")
         return _workspace_service().get_all_workspaces()
@@ -98,6 +70,7 @@ class WorkSpaceDetails(ForgeResource):
     @workspace_ns.marshal_list_with(workspace_model)
     @workspace_ns.doc(params={"workspace_id": "The ID of the workspace to fetch"})
     @token_required
+    @require_access("workspaces")
     def get(self, workspace_id: str):
         return _workspace_service().get_workspace(workspace_id)
 
@@ -107,70 +80,23 @@ class WorkspaceUsers(ForgeResource):
     @workspace_ns.marshal_list_with(user_model)
     @workspace_ns.doc(params={"workspace_id": "The ID of the workspace"})
     @token_required
+    @require_admin()
     def get(self, workspace_id: str):
         return _workspace_service().get_workspace_users_from_dbx(workspace_id)
 
-
-@workspace_ns.route("/<string:workspace_id>/warehouses")
-class WorkspaceAndWarehouseList(ForgeResource):
-    @workspace_ns.marshal_list_with(Warehouse.warehouse_model)
-    @workspace_ns.doc(params={"workspace_id": "The ID of the workspace"})
-    @token_required
-    def get(self, workspace_id: str):
-        return _warehouse_service(workspace_id).get_all_warehouses(workspace_id)
-
-    @workspace_ns.expect(Warehouse.warehouse_model)
-    @workspace_ns.response(201, "Warehouse created")
-    @workspace_ns.doc(security="BearerAuth")
-    @token_required
-    def post(self, workspace_id: str):
-        warehouse = Warehouse(**(request.json or {}))
-        if not warehouse:
-            return 500
-        return _warehouse_service(workspace_id).create_warehouse(workspace_id=workspace_id, warehouse=warehouse), 200
-
-
-@workspace_ns.route("/<string:workspace_id>/warehouses/default")
-class GetDefaultWorkspace(ForgeResource):
-    @token_required
-    def get(self, workspace_id: str):
-        warehouse = _warehouse_service(workspace_id).get_warehouse_by_name(
-            workspace_id=workspace_id,
-            warehouse_name=DEFAULT_SQL_WAREHOUSE,
-        )
-        if hasattr(warehouse, "to_dict"):
-            return warehouse.to_dict(), 200
-        return warehouse, 200
-
-
-@workspace_ns.route("/<string:workspace_id>/warehouses/<string:warehouse_id>")
-class WorkspaceAndWarehouseDetail(ForgeResource):
-    @workspace_ns.marshal_list_with(Warehouse.warehouse_model)
-    @workspace_ns.doc(params={"workspace_id": "The ID of the workspace", "warehouse_id": "The ID of the warehouse"})
-    @token_required
-    def get(self, workspace_id: str, warehouse_id: str):
-        return _warehouse_service(workspace_id).get_warehouses_for_workspace(
-            workspace_id=workspace_id,
-            warehouse_id=warehouse_id,
-        )
-
-    @workspace_ns.response(200, "Warehouse deleted")
-    @workspace_ns.doc(security="BearerAuth")
-    @token_required
-    def delete(self, workspace_id: str, warehouse_id: str):
-        return _warehouse_service(workspace_id).delete_warehouse(workspace_id, warehouse_id)
 
 
 @workspace_ns.route("/<string:workspace_id>/namespaces")
 class WorkspaceNamespaces(ForgeResource):
     @token_required
+    @require_access("workspaces")
     def get(self, workspace_id: str):
         try:
             catalog_name = (request.args.get("catalog_name") or "").strip() or None
             if catalog_name and not re.match(r"^[A-Za-z0-9_]+$", catalog_name):
                 raise ForgeError("Invalid catalog_name", status_code=400)
 
-            sql_exec = WorkspaceContextBuilder().build(workspace_id).sql_exec
+            sql_exec = WorkspaceSqlContextBuilder().build(workspace_id).sql_exec
 
             catalogs: list[str] = []
             try:
@@ -222,6 +148,7 @@ class WorkspaceNamespaces(ForgeResource):
 @workspace_ns.route("/users")
 class GetWorkspaceUsersFromSystem(ForgeResource):
     @token_required
+    @require_admin()
     def get(self):
         try:
             rows = WorkspaceUserReadService().list_workspace_users(
@@ -242,6 +169,7 @@ class GetWorkspaceUsersFromSystem(ForgeResource):
 @workspace_ns.route("/<string:workspace_id>/external-links")
 class WorkspaceExternalLinks(ForgeResource):
     @token_required
+    @require_access("workspaces")
     def get(self, workspace_id: str):
         try:
             user_id = str(getattr(g, "user_id", "") or "").strip()

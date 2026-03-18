@@ -25,8 +25,9 @@ from flask import g, request
 from flask_restx import Namespace, Resource, fields
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.extensions import db
-from app.models.destinations import (
+from app.models.domain.destinations import (
     DESTINATION_CONFIG_SCHEMAS,
     DESTINATION_TYPES,
     WorkspaceDestination,
@@ -65,6 +66,7 @@ destination_update_model = destinations_ns.model("DestinationUpdate", {
 @destinations_ns.route("/types")
 class DestinationTypeList(Resource):
     @token_required
+    @require_access("skills")
     def get(self, workspace_id: str = ""):
         """Return all destination types with their config schemas. Available to all users."""
         workspace_id = extract_workspace_id()
@@ -87,6 +89,7 @@ class DestinationTypeList(Resource):
 @destinations_ns.route("/")
 class DestinationList(Resource):
     @token_required
+    @require_access("skills")
     def get(self, workspace_id: str = ""):
         """
         List all active destinations for the workspace.
@@ -108,6 +111,7 @@ class DestinationList(Resource):
         }, 200
 
     @token_required
+    @require_access("skills", role="admin")
     def post(self, workspace_id: str = ""):
         """Create a destination. Admin only."""
         _require_admin()
@@ -151,12 +155,14 @@ class DestinationList(Resource):
 @destinations_ns.route("/<int:destination_id>")
 class DestinationDetail(Resource):
     @token_required
+    @require_access("skills")
     def get(self, workspace_id: str = "", destination_id: int = 0):
         """Get a single destination. Config is masked."""
         dest = _get_dest_or_404(destination_id)
         return {**dest.to_dict(), "usage": dest.get_usage_summary()}, 200
 
     @token_required
+    @require_access("skills", role="admin")
     def put(self, workspace_id: str = "", destination_id: int = 0):
         """Update a destination. Admin only."""
         _require_admin()
@@ -197,6 +203,7 @@ class DestinationDetail(Resource):
         return dest.to_dict(), 200
 
     @token_required
+    @require_access("skills", role="admin")
     def delete(self, workspace_id: str = "", destination_id: int = 0):
         """
         Delete a destination. Admin only.
@@ -227,6 +234,7 @@ class DestinationDetail(Resource):
 @destinations_ns.route("/<int:destination_id>/test")
 class DestinationTest(Resource):
     @token_required
+    @require_access("skills", role="admin")
     def post(self, workspace_id: str = "", destination_id: int = 0):
         """
         Send a test message to the destination. Admin only.

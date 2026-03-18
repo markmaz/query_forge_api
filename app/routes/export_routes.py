@@ -15,6 +15,7 @@ from openpyxl import Workbook
 
 from app.config import VALKEY_ADDRESS, VALKEY_PORT
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import extract_workspace_id
 from app.services.domain_resolver import DomainResolver
@@ -27,7 +28,7 @@ from app.services.exports.export_policy import (
 )
 from app.services.query_forge_service import QueryForgeService
 from app.services.sql_guard_service import assert_no_disallowed_client_sql_fields, assert_read_only_sql_statement
-from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
+from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 
 logger = logging.getLogger(__name__)
 exports_ns = Namespace("exports", description="Exports")
@@ -103,6 +104,7 @@ def _table_to_excel_bytes(table: pa.Table) -> bytes:
 @exports_ns.route("/excel")
 class ExcelExport(ForgeResource):
     @token_required
+    @require_access("exports")
     def post(self):
         try:
             workspace_id = extract_workspace_id()
@@ -121,7 +123,7 @@ class ExcelExport(ForgeResource):
             if not isinstance(sql_json, dict):
                 raise ForgeError("sqlJson must be an object", status_code=400)
 
-            ctx = WorkspaceContextBuilder().build(workspace_id)
+            ctx = WorkspaceSqlContextBuilder().build(workspace_id)
             domain_resolver = DomainResolver(workspace_id=workspace_id)
             svc = QueryForgeService(executor=ctx.sql_exec, domain_resolver=domain_resolver)
             normalized = svc.normalize(sql_json)
@@ -183,6 +185,7 @@ class ExcelExport(ForgeResource):
 @exports_ns.route("/excel/<string:token>")
 class ExcelDownload(ForgeResource):
     @token_required
+    @require_access("exports")
     def get(self, token: str):
         try:
             workspace_id = extract_workspace_id()
@@ -202,7 +205,7 @@ class ExcelDownload(ForgeResource):
 
             assert_read_only_sql_statement(sql, context="Stored export SQL statement")
 
-            ctx = WorkspaceContextBuilder().build(workspace_id)
+            ctx = WorkspaceSqlContextBuilder().build(workspace_id)
             data_resp = ctx.sql_exec.submit_statement(
                 sql,
                 parameters=params,

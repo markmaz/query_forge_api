@@ -8,6 +8,7 @@ from flask_restx import Namespace, fields
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import int_arg
 from app.services.semantic.semantic_registry_service import SemanticRegistryService
@@ -44,6 +45,7 @@ semantic_registry_entry_model = semantic_registry_ns.model(
 @semantic_registry_ns.route("")
 class SemanticRegistryCollection(ForgeResource):
     @token_required
+    @require_access("semantic")
     @semantic_registry_ns.doc(
         params={
             "vertical": "Filter by vertical scope",
@@ -72,6 +74,7 @@ class SemanticRegistryCollection(ForgeResource):
             return {"error": "semantic registry list failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_registry_ns.expect(semantic_registry_entry_model, validate=False)
     def post(self):
         try:
@@ -88,6 +91,7 @@ class SemanticRegistryCollection(ForgeResource):
 @semantic_registry_ns.route("/<int:entry_id>")
 class SemanticRegistryById(ForgeResource):
     @token_required
+    @require_access("semantic")
     def get(self, entry_id: int):
         try:
             row = SemanticRegistryService().get_entry(entry_id)
@@ -99,6 +103,7 @@ class SemanticRegistryById(ForgeResource):
             return {"error": "semantic registry get failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_registry_ns.expect(semantic_registry_entry_model, validate=False)
     def patch(self, entry_id: int):
         try:
@@ -112,6 +117,7 @@ class SemanticRegistryById(ForgeResource):
             return {"error": "semantic registry update failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     def delete(self, entry_id: int):
         try:
             SemanticRegistryService().delete_entry(entry_id)

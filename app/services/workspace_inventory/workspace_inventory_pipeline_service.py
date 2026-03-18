@@ -3,17 +3,17 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from app.adapters.databricks_sql_executor import DatabricksForgeQueryPort
-from app.services.models.model_sample_write_service import ModelSampleService
+from app.ports.sql_executor import ForgeQueryPort
+from app.services.workspace_inventory.column_sample_write_service import ColumnSampleWriteService
 from app.services.workspace_inventory.workspace_snapshot_service import SnapshotResult, WorkspaceSnapshotService
 
 
 class WorkspacePipelineService:
     """Coordinate workspace snapshot refresh operations."""
 
-    def __init__(self, *, sql: DatabricksForgeQueryPort):
+    def __init__(self, *, sql: ForgeQueryPort):
         self._snapshot_service = WorkspaceSnapshotService(sql=sql)
-        self._sample_service = ModelSampleService(sql=sql)
+        self._sample_service = ColumnSampleWriteService(sql=sql)
         # Backward-compatible attribute names used in tests/legacy callsites.
         self._snap = self._snapshot_service
         self._samples = self._sample_service

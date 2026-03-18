@@ -8,8 +8,8 @@ from sqlalchemy import exc
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
-from app.models.product_group import ProductGroup
-from app.models.status_enum import ProductGroupStatus
+from app.models.tenancy.product_group import ProductGroup
+from app.models.tenancy.status_enum import ProductGroupStatus
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.product_service import ProductService
 

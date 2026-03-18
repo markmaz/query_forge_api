@@ -5,7 +5,7 @@ from datetime import datetime
 import pytest
 
 from app.exceptions.forge_error import ForgeError
-from app.models.tenancy_admin import (
+from app.models.tenancy.tenancy_admin import (
     DatasourceCreateRequest,
     OrganizationCreateRequest,
     WorkspaceCreateRequest,

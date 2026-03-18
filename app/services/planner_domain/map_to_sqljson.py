@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from app.models.ai_suggest import AddFilterEdit, AddGroupByEdit, AddSelectEdit, AddSortEdit, SetDomainEdit, SqlColumnKey
+from app.models.query.ai_suggest import AddFilterEdit, AddGroupByEdit, AddSelectEdit, AddSortEdit, SetDomainEdit, SqlColumnKey
 from app.services.sqljson_apply_service import apply_edits
 
 

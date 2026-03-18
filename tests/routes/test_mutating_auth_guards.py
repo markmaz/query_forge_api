@@ -7,7 +7,6 @@ import pytest
     ("method", "path", "payload"),
     [
         ("PUT", "/api/v1/users/u1", {"username": "u"}),
-        ("POST", "/api/v1/workspaces/ws-1/warehouses", {"name": "wh"}),
         ("DELETE", "/api/v1/products/p1", None),
         ("PUT", "/api/v1/products/p1", {"product_name": "x"}),
         ("POST", "/api/v1/product-groups/", {"product_group_name": "g"}),

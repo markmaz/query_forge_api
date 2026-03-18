@@ -9,6 +9,7 @@ from flask_restx import Namespace
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import extract_workspace_id, int_arg
 from app.services.domain_resolver import DomainResolver
@@ -19,7 +20,7 @@ from app.services.nlp.dictionary_ner import extract_signals as extract_dictionar
 from app.services.nlp.ed_ner import extract_signals as extract_ed_signals
 from app.services.nlp.nlp_to_vector import build_vector_search_request
 from app.services.query_forge_service import QueryForgeService
-from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
+from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 
 logger = logging.getLogger(__name__)
 query_forge_ns = Namespace("query", description="Query Forge query")
@@ -78,6 +79,7 @@ def _resolve_analytics_executor(datasource_name: str | None):
 @query_forge_ns.route("/")
 class QueryForgeRun(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def post(self):
         try:
             workspace_id = extract_workspace_id()
@@ -94,7 +96,7 @@ class QueryForgeRun(ForgeResource):
             if not isinstance(raw, dict):
                 raise ForgeError("Invalid JSON body", status_code=400)
 
-            ctx = WorkspaceContextBuilder().build(workspace_id)
+            ctx = WorkspaceSqlContextBuilder().build(workspace_id)
             domain_resolver = DomainResolver(workspace_id=workspace_id)
 
             # Determine which SQL executor to use for analytics query execution.
@@ -132,6 +134,7 @@ class QueryForgeRun(ForgeResource):
 @query_forge_ns.route("/plan")
 class QueryForgePlan(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def post(self):
         try:
             workspace_id = extract_workspace_id()

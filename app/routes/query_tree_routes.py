@@ -8,6 +8,7 @@ from flask_restx import Namespace, fields
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import require_user_id, extract_workspace_id
 from app.services.query_tree.saved_query_folder_write_service import SavedQueryFolderWriteService
@@ -111,6 +112,7 @@ def _run_route(error_message: str, fn: Callable[[], Tuple[Dict[str, Any], int]])
 @qf_tree_ns.route("/")
 class QueryTree(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def get(self):
         def _execute():
             svc = SavedQueryTreeService(
@@ -127,6 +129,7 @@ class QueryTree(ForgeResource):
 @qf_tree_ns.route("/folders")
 class Folders(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def post(self):
         def _execute():
             payload = _json_body()
@@ -146,6 +149,7 @@ class Folders(ForgeResource):
 @qf_tree_ns.route("/folders/<string:folder_id>/rename")
 class FolderRename(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def patch(self, folder_id: str):
         def _execute():
             payload = _json_body()
@@ -158,6 +162,7 @@ class FolderRename(ForgeResource):
 @qf_tree_ns.route("/folders/<string:folder_id>/move")
 class FolderMove(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def patch(self, folder_id: str):
         def _execute():
             payload = _json_body()
@@ -177,6 +182,7 @@ class FolderMove(ForgeResource):
 @qf_tree_ns.route("/folders/<string:folder_id>")
 class FolderDelete(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def delete(self, folder_id: str):
         def _execute():
             svc = SavedQueryFolderWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
@@ -188,6 +194,7 @@ class FolderDelete(ForgeResource):
 @qf_tree_ns.route("/folders/<string:folder_id>/trash")
 class FolderTrash(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def post(self, folder_id: str):
         def _execute():
             svc = SavedQueryFolderWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
@@ -199,6 +206,7 @@ class FolderTrash(ForgeResource):
 @qf_tree_ns.route("/folders/<string:folder_id>/restore")
 class FolderRestore(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def post(self, folder_id: str):
         def _execute():
             svc = SavedQueryFolderWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
@@ -210,6 +218,7 @@ class FolderRestore(ForgeResource):
 @qf_tree_ns.route("/folders/<string:folder_id>/purge")
 class FolderPurge(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def delete(self, folder_id: str):
         def _execute():
             svc = SavedQueryFolderWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
@@ -221,6 +230,7 @@ class FolderPurge(ForgeResource):
 @qf_tree_ns.route("/recent")
 class RecentQueries(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def get(self):
         def _execute():
             svc = SavedQueryReadService(
@@ -236,6 +246,7 @@ class RecentQueries(ForgeResource):
 @qf_saved_query_ns.route("/")
 class SavedQueryCreate(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def post(self):
         def _execute():
             payload = _json_body()
@@ -257,6 +268,7 @@ class SavedQueryCreate(ForgeResource):
 @qf_saved_query_ns.route("/<string:query_id>")
 class SavedQuery(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def get(self, query_id: str):
         def _execute():
             svc = SavedQueryReadService(
@@ -269,6 +281,7 @@ class SavedQuery(ForgeResource):
         return _run_route("Saved query read failed", _execute)
 
     @token_required
+    @require_access("query_studio")
     def patch(self, query_id: str):
         def _execute():
             payload = _json_body()
@@ -290,6 +303,7 @@ class SavedQuery(ForgeResource):
 @qf_saved_query_ns.route("/<string:query_id>/move")
 class SavedQueryMove(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def patch(self, query_id: str):
         def _execute():
             payload = _json_body()
@@ -302,6 +316,7 @@ class SavedQueryMove(ForgeResource):
 @qf_saved_query_ns.route("/<string:query_id>/delete")
 class SavedQueryDelete(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def post(self, query_id: str):
         def _execute():
             svc = SavedQueryWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
@@ -313,6 +328,7 @@ class SavedQueryDelete(ForgeResource):
 @qf_saved_query_ns.route("/<string:query_id>/restore")
 class SavedQueryRestore(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def post(self, query_id: str):
         def _execute():
             svc = SavedQueryWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
@@ -324,6 +340,7 @@ class SavedQueryRestore(ForgeResource):
 @qf_saved_query_ns.route("/<string:query_id>/purge")
 class SavedQueryPurge(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def delete(self, query_id: str):
         def _execute():
             svc = SavedQueryWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
@@ -335,6 +352,7 @@ class SavedQueryPurge(ForgeResource):
 @qf_saved_query_ns.route("/<string:query_id>/shares")
 class SavedQueryShares(ForgeResource):
     @token_required
+    @require_access("query_studio")
     @qf_saved_query_ns.marshal_with(share_list_response_model, code=200)
     def get(self, query_id: str):
         def _execute():
@@ -344,6 +362,7 @@ class SavedQueryShares(ForgeResource):
         return _run_route("Saved query shares fetch failed", _execute)
 
     @token_required
+    @require_access("query_studio")
     @qf_saved_query_ns.expect(share_request_model)
     @qf_saved_query_ns.marshal_with(share_response_model, code=200)
     def post(self, query_id: str):
@@ -369,6 +388,7 @@ class SavedQueryShares(ForgeResource):
         return _run_route("Saved query share failed", _execute)
 
     @token_required
+    @require_access("query_studio")
     @qf_saved_query_ns.expect(share_request_model)
     @qf_saved_query_ns.marshal_with(unshare_response_model, code=200)
     def delete(self, query_id: str):

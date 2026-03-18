@@ -8,6 +8,7 @@ from flask_restx import Namespace
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_role
 from app.exceptions.forge_error import ForgeError
 from app.services.llm_environment_service import LLMEnvironmentService
 
@@ -57,6 +58,7 @@ def _handle_service_error(e: ForgeError):
 @data_environment_ns.route("/llm/start")
 class LLMStart(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def post(self):
         logger.info("API request: start LLM environment")
         try:
@@ -68,6 +70,7 @@ class LLMStart(ForgeResource):
 @data_environment_ns.route("/llm/stop")
 class LLMStop(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def post(self):
         logger.info("API request: stop LLM environment")
         try:
@@ -79,6 +82,7 @@ class LLMStop(ForgeResource):
 @data_environment_ns.route("/llm/status")
 class LLMStatus(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def get(self):
         try:
             return _get_service().get_instance_status(), 200

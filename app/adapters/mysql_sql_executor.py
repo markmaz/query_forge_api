@@ -1,4 +1,5 @@
 import logging
+import time
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -12,6 +13,9 @@ from app.ports.sql_executor import ForgeExecResult, ForgeQueryPort, ForgeQueryTx
 
 logger = logging.getLogger(__name__)
 
+# Queries taking longer than this threshold are logged as warnings for performance monitoring.
+FORGE_SLOW_QUERY_THRESHOLD_MS: int = 1000
+
 engine = create_engine(
     DB_URI,
     poolclass=QueuePool,
@@ -20,6 +24,18 @@ engine = create_engine(
     pool_timeout=POOL_TIMEOUT,
     pool_recycle=POOL_RECYCLE,
 )
+
+
+def _forge_log_slow_query(query: str, elapsed_ms: float, label: str = "query") -> None:
+    """Emit a structured warning for queries exceeding the slow-query threshold."""
+    if elapsed_ms >= FORGE_SLOW_QUERY_THRESHOLD_MS:
+        snippet = query.strip()[:120].replace("\n", " ")
+        logger.warning(
+            "forge_slow_%s elapsed_ms=%.0f sql=%r",
+            label,
+            elapsed_ms,
+            snippet,
+        )
 
 
 def open_forge_connection() -> Connection:
@@ -44,9 +60,12 @@ def execute_query(query: str, params: dict[str, Any] = None) -> List[Tuple]:
     Returns:
         List[Tuple]: The results of the database query.
     """
+    t0 = time.monotonic()
     with open_forge_connection() as conn:
         result: Result = conn.execute(text(query), params or {})
-        return result.fetchall()
+        rows = result.fetchall()
+    _forge_log_slow_query(query, (time.monotonic() - t0) * 1000)
+    return rows
 
 
 def show_status():
@@ -54,24 +73,30 @@ def show_status():
 
 
 def execute_query_mappings(query: str, params: dict[str, Any] = None) -> List[dict[str, Any]]:
+    t0 = time.monotonic()
     with open_forge_connection() as conn:
         result: Result = conn.execute(text(query), params or {})
-        return [dict(r) for r in result.mappings().all()]
+        rows = [dict(r) for r in result.mappings().all()]
+    _forge_log_slow_query(query, (time.monotonic() - t0) * 1000)
+    return rows
 
 
 def execute_write(query: str, params: Optional[Dict[str, Any]] = None) -> int:
     """
     Executes INSERT/UPDATE/DELETE. Returns affected rowcount.
     """
+    t0 = time.monotonic()
     with open_forge_connection() as conn:
         tx = conn.begin()
         try:
             result = conn.execute(text(query), params or {})
             tx.commit()
-            return int(result.rowcount or 0)
+            rowcount = int(result.rowcount or 0)
         except Exception:
             tx.rollback()
             raise
+    _forge_log_slow_query(query, (time.monotonic() - t0) * 1000, label="write")
+    return rowcount
 
 
 class ForgeMetaSQL(ForgeQueryPort):
@@ -145,19 +170,29 @@ class _ForgeMetaTransaction(ForgeQueryTx):
         self._conn = conn
 
     def execute_write(self, query: str, params: Optional[Dict[str, Any]] = None) -> int:
+        t0 = time.monotonic()
         result = self._conn.execute(text(query), params or {})
+        _forge_log_slow_query(query, (time.monotonic() - t0) * 1000, label="tx_write")
         return int(result.rowcount or 0)
 
     def execute_query_mappings(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        t0 = time.monotonic()
         result: Result = self._conn.execute(text(query), params or {})
-        return [dict(r) for r in result.mappings().all()]
+        rows = [dict(r) for r in result.mappings().all()]
+        _forge_log_slow_query(query, (time.monotonic() - t0) * 1000, label="tx_read")
+        return rows
 
     def execute_query(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Tuple]:
+        t0 = time.monotonic()
         result: Result = self._conn.execute(text(query), params or {})
-        return result.fetchall()
+        rows = result.fetchall()
+        _forge_log_slow_query(query, (time.monotonic() - t0) * 1000, label="tx_read")
+        return rows
 
     def execute_insert(self, query: str, params: Optional[Dict[str, Any]] = None) -> ForgeExecResult:
+        t0 = time.monotonic()
         result = self._conn.execute(text(query), params or {})
+        _forge_log_slow_query(query, (time.monotonic() - t0) * 1000, label="tx_insert")
         return ForgeExecResult(rowcount=int(result.rowcount or 0), lastrowid=result.lastrowid)
 
 

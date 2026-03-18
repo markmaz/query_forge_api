@@ -6,9 +6,10 @@ from app.routes.forge_resource import ForgeResource
 from pydantic import ValidationError
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_admin
 from app.exceptions.forge_error import ForgeError
-from app.models.user import User
-from app.models.user_invitation import UserInvitation
+from app.models.tenancy.user import User
+from app.models.tenancy.user_workspace import UserInvitation
 from app.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ class UserList(ForgeResource):
     @qf_user_ns.response(201, "User invite created")
     @qf_user_ns.doc(security='BearerAuth')
     @token_required
+    @require_admin()
     def post(self):
         """
         Create a user record for an invitation
@@ -95,6 +97,7 @@ class UserList(ForgeResource):
         return result, 201
     
     @token_required
+    @require_admin()
     # @qf_user_ns.marshal_with(pagination_response)
     def get(self):
         """List users with cursor-based pagination"""
@@ -126,6 +129,7 @@ class UserUpdates(ForgeResource):
     @qf_user_ns.response(200, "User updated")
     @qf_user_ns.doc(security='BearerAuth')
     @token_required
+    @require_admin()
     def put(self, user_id):
         """
         Update an existing user
@@ -143,6 +147,7 @@ class UserUpdates(ForgeResource):
     @qf_user_ns.response(200, "User deleted")
     @qf_user_ns.doc(security='BearerAuth')
     @token_required
+    @require_admin()
     def delete(self, user_id):
         """
         Delete a user
@@ -154,6 +159,7 @@ class UserUpdates(ForgeResource):
     # @qf_user_ns.response(200, "Success", user_model)
     # @qf_user_ns.marshal_with(user_model)
     @token_required
+    @require_admin()
     def get(self, user_id):
         """
         Get a specific User
@@ -168,6 +174,7 @@ class UserUpdates(ForgeResource):
 @qf_user_ns.route("/<string:user_id>/workspaces")
 class UserWorkspaces(ForgeResource):
     @token_required
+    @require_admin()
     def get(self, user_id):
         """
         Get all the workspace organizations for a given user
@@ -180,6 +187,7 @@ class UserWorkspaces(ForgeResource):
 @qf_user_ns.route("/<string:user_id>/roles")
 class UserDirectRoles(ForgeResource):
     @token_required
+    @require_admin()
     def get(self, user_id):
         user_service = UserService()
         direct_roles = user_service.get_user_direct_roles(user_id)
@@ -191,6 +199,7 @@ class UserDirectRoles(ForgeResource):
         }, 200
 
     @token_required
+    @require_admin()
     @qf_user_ns.expect(user_role_add_model, validate=False)
     def post(self, user_id):
         data = request.get_json(silent=True) or {}
@@ -202,6 +211,7 @@ class UserDirectRoles(ForgeResource):
         return {"mapping": mapping}, 200
 
     @token_required
+    @require_admin()
     @qf_user_ns.expect(user_role_replace_model, validate=False)
     def put(self, user_id):
         data = request.get_json(silent=True) or {}
@@ -216,6 +226,7 @@ class UserDirectRoles(ForgeResource):
 @qf_user_ns.route("/<string:user_id>/roles/<string:role_id>")
 class UserDirectRoleById(ForgeResource):
     @token_required
+    @require_admin()
     @qf_user_ns.expect(user_role_update_model, validate=False)
     def patch(self, user_id, role_id):
         data = request.get_json(silent=True) or {}
@@ -227,6 +238,7 @@ class UserDirectRoleById(ForgeResource):
         return result, 200
 
     @token_required
+    @require_admin()
     def delete(self, user_id, role_id):
         user_service = UserService()
         result = user_service.remove_user_direct_role(user_id, role_id)
@@ -260,6 +272,7 @@ class UserWorkspaceDashboard(ForgeResource):
 @qf_user_ns.route("/counts")
 class UserCounts(ForgeResource):
     @token_required
+    @require_admin()
     def get(self):
         user_service = UserService()
         results = user_service.get_counts()
@@ -269,6 +282,7 @@ class UserCounts(ForgeResource):
 @qf_user_ns.route("/resend-invite")
 class ResentInvite(ForgeResource):
     @token_required
+    @require_admin()
     def post(self):
         try:
             payload = UserInvitation(**request.json)
@@ -281,6 +295,7 @@ class ResentInvite(ForgeResource):
 @qf_user_ns.route("/bulk-invite")
 class BulkInviteUsers(ForgeResource):
     @token_required
+    @require_admin()
     def post(self):
         data = request.json
 

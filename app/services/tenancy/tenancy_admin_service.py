@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
-from app.models.tenancy_admin import (
+from app.models.tenancy.tenancy_admin import (
     DatasourceCreateRequest,
     DatasourceUpdateRequest,
     OrganizationCreateRequest,

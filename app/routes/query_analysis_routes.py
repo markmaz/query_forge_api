@@ -34,6 +34,7 @@ from flask import g, request
 from flask_restx import Namespace, Resource, fields
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.routes.request_helpers import extract_workspace_id
 from app.skills.analysis_utils import (
     MAX_SAMPLE_ROWS,
@@ -74,6 +75,7 @@ analyze_request_model = query_analysis_ns.model("AnalyzeRequest", {
 @query_analysis_ns.route("/<string:query_id>/analyze")
 class QueryAnalyze(Resource):
     @token_required
+    @require_access("query_studio")
     @query_analysis_ns.expect(analyze_request_model)
     def post(self, query_id: str):
         """
@@ -194,6 +196,7 @@ analyze_inline_request_model = query_analysis_ns.model("AnalyzeInlineRequest", {
 @query_analysis_ns.route("/analyze")
 class QueryAnalyzeInline(Resource):
     @token_required
+    @require_access("query_studio")
     @query_analysis_ns.expect(analyze_inline_request_model)
     def post(self):
         """
@@ -330,7 +333,7 @@ def _run_query(query_id: str, workspace_id: str) -> dict:
     from app.adapters.mysql_sql_executor import ForgeMetaSQL
     from app.services.domain_resolver import DomainResolver
     from app.services.query_forge_service import QueryForgeService
-    from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
+    from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 
     rows_q = ForgeMetaSQL().execute_query_mappings(
         "SELECT sql_json, name FROM saved_query "
@@ -346,7 +349,7 @@ def _run_query(query_id: str, workspace_id: str) -> dict:
     sql_json = sql_json or {}
     query_name = rows_q[0].get("name", f"Query {query_id}")
 
-    ctx = WorkspaceContextBuilder().build(workspace_id)
+    ctx = WorkspaceSqlContextBuilder().build(workspace_id)
     svc = QueryForgeService(
         executor=ctx.sql_exec,
         domain_resolver=DomainResolver(workspace_id=workspace_id),

@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from cryptography.fernet import Fernet
 
-from app.models.destinations import (
+from app.models.domain.destinations import (
     DESTINATION_CONFIG_SCHEMAS,
     decrypt_config,
     encrypt_config,

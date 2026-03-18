@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from app.adapters.mysql_sql_executor import engine
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ def _handle_error(exc: ForgeError):
 @workspace_tables_ns.route("/<int:workspace_table_id>/columns")
 class WorkspaceTableColumns(ForgeResource):
     @token_required
+    @require_access("workspaces")
     def get(self, workspace_table_id: int):
         try:
             workspace_id = _workspace_id_from_header()

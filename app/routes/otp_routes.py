@@ -3,6 +3,7 @@ from flask_restx import Namespace
 from app.routes.forge_resource import ForgeResource
 
 from app.config import COOKIE_SAMESITE, COOKIE_SECURE, REFRESH_COOKIE_PATH
+from app.decorators.rbac import public
 from app.services.auth_service import AuthService
 from app.services.otp_service import verify_otp_challenge
 
@@ -10,6 +11,7 @@ otp_ns = Namespace("otp", description="A product available in Workboard")
 
 @otp_ns.route("/verify")
 class VerifyOTP(ForgeResource):
+    @public
     def post(self):
         data = request.get_json(silent=True) or {}
         challenge_id = (data.get("challenge_id") or "").strip()

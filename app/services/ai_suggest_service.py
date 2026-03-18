@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import VLLM_BASE_URL, VLLM_MODEL, VLLM_TIMEOUT
-from app.models.ai_suggest import (
+from app.models.query.ai_suggest import (
     AddAggregateEdit,
     AddGroupByEdit,
     AddSelectEdit,

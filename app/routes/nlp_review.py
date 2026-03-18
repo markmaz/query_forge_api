@@ -8,6 +8,7 @@ from flask_restx import Namespace, fields
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.nlp.tier2_spacy.pipeline import run_tier2_with_meta
 from app.routes.request_helpers import extract_workspace_id, int_arg
@@ -38,6 +39,7 @@ patch_model = nlp_review_ns.model(
 @nlp_review_ns.route("/review-queue")
 class NlpReviewQueue(ForgeResource):
     @token_required
+    @require_access("ai")
     @nlp_review_ns.expect(create_model, validate=False)
     def post(self):
         try:
@@ -68,6 +70,7 @@ class NlpReviewQueue(ForgeResource):
             return {"error": "nlp review queue enqueue failed"}, 500
 
     @token_required
+    @require_access("ai", role="admin")
     def get(self):
         try:
             workspace_id = (
@@ -92,6 +95,7 @@ class NlpReviewQueue(ForgeResource):
 @nlp_review_ns.route("/review-queue/<int:item_id>")
 class NlpReviewQueueItem(ForgeResource):
     @token_required
+    @require_access("ai", role="admin")
     @nlp_review_ns.expect(patch_model, validate=False)
     def patch(self, item_id: int):
         try:
@@ -117,6 +121,7 @@ class NlpReviewQueueItem(ForgeResource):
 @nlp_review_ns.route("/review-queue/<int:item_id>/approve")
 class NlpReviewQueueApprove(ForgeResource):
     @token_required
+    @require_access("ai", role="admin")
     def post(self, item_id: int):
         try:
             workspace_id = extract_workspace_id()
@@ -132,6 +137,7 @@ class NlpReviewQueueApprove(ForgeResource):
 @nlp_review_ns.route("/review-queue/<int:item_id>/export")
 class NlpReviewQueueExport(ForgeResource):
     @token_required
+    @require_access("ai", role="admin")
     def post(self, item_id: int):
         try:
             workspace_id = extract_workspace_id()

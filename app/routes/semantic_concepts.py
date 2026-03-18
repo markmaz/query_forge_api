@@ -8,6 +8,7 @@ from flask_restx import Namespace, fields
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import int_arg
 from app.services.embedding.semantic_concept_embedding_service import SemanticConceptEmbeddingService
@@ -113,6 +114,7 @@ concept_column_map_patch_model = semantic_concept_column_maps_ns.clone(
 @semantic_concepts_ns.route("")
 class SemanticConceptCollection(ForgeResource):
     @token_required
+    @require_access("semantic")
     @semantic_concepts_ns.doc(
         params={
             "vertical": "Filter by vertical",
@@ -141,6 +143,7 @@ class SemanticConceptCollection(ForgeResource):
             return {"error": "semantic concepts list failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_concepts_ns.expect(concept_create_model, validate=False)
     def post(self):
         try:
@@ -158,6 +161,7 @@ class SemanticConceptCollection(ForgeResource):
 @semantic_concepts_ns.route("/keys")
 class SemanticConceptKeyCollection(ForgeResource):
     @token_required
+    @require_access("semantic")
     @semantic_concepts_ns.doc(
         params={
             "vertical": "Filter by vertical",
@@ -181,6 +185,7 @@ class SemanticConceptKeyCollection(ForgeResource):
 @semantic_concepts_ns.route("/<int:concept_id>")
 class SemanticConceptById(ForgeResource):
     @token_required
+    @require_access("semantic")
     def get(self, concept_id: int):
         try:
             row = SemanticConceptService().get_concept(concept_id)
@@ -192,6 +197,7 @@ class SemanticConceptById(ForgeResource):
             return {"error": "semantic concept get failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_concepts_ns.expect(concept_patch_model, validate=False)
     def patch(self, concept_id: int):
         try:
@@ -206,6 +212,7 @@ class SemanticConceptById(ForgeResource):
             return {"error": "semantic concept patch failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     def delete(self, concept_id: int):
         try:
             _require_admin()
@@ -221,6 +228,7 @@ class SemanticConceptById(ForgeResource):
 @semantic_concepts_ns.route("/seed")
 class SemanticConceptSeed(ForgeResource):
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_concepts_ns.expect(seed_model, validate=False)
     def post(self):
         try:
@@ -241,6 +249,7 @@ class SemanticConceptSeed(ForgeResource):
 @semantic_concepts_ns.route("/rebuild-index")
 class SemanticConceptRebuildIndex(ForgeResource):
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_concepts_ns.expect(rebuild_index_model, validate=False)
     def post(self):
         try:
@@ -259,6 +268,7 @@ class SemanticConceptRebuildIndex(ForgeResource):
 @semantic_concepts_ns.route("/backfill-primary-keys")
 class SemanticConceptBackfillPrimaryKeys(ForgeResource):
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_concepts_ns.expect(backfill_primary_keys_model, validate=False)
     def post(self):
         try:
@@ -280,6 +290,7 @@ class SemanticConceptBackfillPrimaryKeys(ForgeResource):
 @semantic_concept_aliases_ns.route("")
 class SemanticConceptAliasCollection(ForgeResource):
     @token_required
+    @require_access("semantic")
     @semantic_concept_aliases_ns.doc(
         params={
             "vertical": "Filter by vertical",
@@ -302,6 +313,7 @@ class SemanticConceptAliasCollection(ForgeResource):
             return {"error": "semantic alias list failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_concept_aliases_ns.expect(alias_create_model, validate=False)
     def post(self):
         try:
@@ -319,6 +331,7 @@ class SemanticConceptAliasCollection(ForgeResource):
 @semantic_concept_aliases_ns.route("/<int:alias_id>")
 class SemanticConceptAliasById(ForgeResource):
     @token_required
+    @require_access("semantic")
     def get(self, alias_id: int):
         try:
             row = SemanticConceptService().get_alias(alias_id)
@@ -330,6 +343,7 @@ class SemanticConceptAliasById(ForgeResource):
             return {"error": "semantic alias get failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_concept_aliases_ns.expect(alias_patch_model, validate=False)
     def patch(self, alias_id: int):
         try:
@@ -344,6 +358,7 @@ class SemanticConceptAliasById(ForgeResource):
             return {"error": "semantic alias patch failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     def delete(self, alias_id: int):
         try:
             _require_admin()
@@ -359,6 +374,7 @@ class SemanticConceptAliasById(ForgeResource):
 @semantic_value_aliases_ns.route("")
 class SemanticValueAliasCollection(ForgeResource):
     @token_required
+    @require_access("semantic")
     @semantic_value_aliases_ns.doc(
         params={
             "vertical": "Filter by vertical",
@@ -385,6 +401,7 @@ class SemanticValueAliasCollection(ForgeResource):
             return {"error": "semantic value alias list failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_value_aliases_ns.expect(value_alias_create_model, validate=False)
     def post(self):
         try:
@@ -402,6 +419,7 @@ class SemanticValueAliasCollection(ForgeResource):
 @semantic_value_aliases_ns.route("/<int:value_alias_id>")
 class SemanticValueAliasById(ForgeResource):
     @token_required
+    @require_access("semantic")
     def get(self, value_alias_id: int):
         try:
             row = SemanticConceptService().get_value_alias(value_alias_id)
@@ -413,6 +431,7 @@ class SemanticValueAliasById(ForgeResource):
             return {"error": "semantic value alias get failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_value_aliases_ns.expect(value_alias_patch_model, validate=False)
     def patch(self, value_alias_id: int):
         try:
@@ -427,6 +446,7 @@ class SemanticValueAliasById(ForgeResource):
             return {"error": "semantic value alias patch failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     def delete(self, value_alias_id: int):
         try:
             _require_admin()
@@ -442,6 +462,7 @@ class SemanticValueAliasById(ForgeResource):
 @semantic_concept_column_maps_ns.route("")
 class SemanticConceptColumnMapCollection(ForgeResource):
     @token_required
+    @require_access("semantic")
     @semantic_concept_column_maps_ns.doc(
         params={
             "vertical": "Filter by vertical",
@@ -478,6 +499,7 @@ class SemanticConceptColumnMapCollection(ForgeResource):
             return {"error": "semantic concept-column map list failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_concept_column_maps_ns.expect(concept_column_map_create_model, validate=False)
     def post(self):
         try:
@@ -495,6 +517,7 @@ class SemanticConceptColumnMapCollection(ForgeResource):
 @semantic_concept_column_maps_ns.route("/<int:map_id>")
 class SemanticConceptColumnMapById(ForgeResource):
     @token_required
+    @require_access("semantic")
     def get(self, map_id: int):
         try:
             row = SemanticConceptService().get_concept_column_map(map_id)
@@ -506,6 +529,7 @@ class SemanticConceptColumnMapById(ForgeResource):
             return {"error": "semantic concept-column map get failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_concept_column_maps_ns.expect(concept_column_map_patch_model, validate=False)
     def patch(self, map_id: int):
         try:
@@ -520,6 +544,7 @@ class SemanticConceptColumnMapById(ForgeResource):
             return {"error": "semantic concept-column map patch failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     def delete(self, map_id: int):
         try:
             _require_admin()

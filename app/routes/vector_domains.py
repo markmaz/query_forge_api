@@ -8,6 +8,7 @@ from flask_restx import Namespace, fields
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import extract_workspace_id
 from app.services.vector import DomainVectorIndexService
@@ -63,6 +64,7 @@ def _parse_float(value: Any, *, default: float) -> float:
 @vector_ns.route("/domains/search")
 class DomainVectorSearch(ForgeResource):
     @token_required
+    @require_access("vector")
     @vector_ns.expect(_domain_search_request_model, validate=False)
     def post(self):
         try:

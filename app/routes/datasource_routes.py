@@ -6,6 +6,7 @@ from flask import current_app
 from flask_restx import Namespace, fields
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_role
 from app.routes.forge_resource import ForgeResource
 from app.services.tenancy.datasource_catalog_service import DatasourceCatalogService
 
@@ -32,6 +33,7 @@ class DatasourceList(ForgeResource):
     @datasource_ns.response(403, "Forbidden")
     @datasource_ns.response(503, "Registry unavailable")
     @token_required
+    @require_role("system:admin")
     def get(self):
         """Return all registered analytics datasources.
 

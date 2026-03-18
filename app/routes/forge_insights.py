@@ -9,8 +9,9 @@ from app.routes.forge_resource import ForgeResource
 from pydantic import ValidationError
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
-from app.models.forge_insights_schema import (
+from app.models.query.forge_insights_schema import (
     ForgeInsightsProjectCreateRequest,
     ForgeInsightsProjectResponse,
     ForgeInsightsProjectUpdateRequest,
@@ -74,6 +75,7 @@ def _service() -> ForgeInsightsThreadsService:
 @forge_insights_ns.route("/projects")
 class ForgeInsightsProjectsRoute(ForgeResource):
     @token_required
+    @require_access("forge_insights")
     def get(self):
         try:
             workspace_id = extract_workspace_id()
@@ -92,6 +94,7 @@ class ForgeInsightsProjectsRoute(ForgeResource):
             return {"error": "forge insights list projects failed"}, 500
 
     @token_required
+    @require_access("forge_insights")
     @forge_insights_ns.expect(_project_create_model, validate=False)
     def post(self):
         try:
@@ -121,6 +124,7 @@ class ForgeInsightsProjectsRoute(ForgeResource):
 @forge_insights_ns.route("/projects/<int:project_id>")
 class ForgeInsightsProjectRoute(ForgeResource):
     @token_required
+    @require_access("forge_insights")
     def get(self, project_id: int):
         try:
             workspace_id = extract_workspace_id()
@@ -134,6 +138,7 @@ class ForgeInsightsProjectRoute(ForgeResource):
             return {"error": "forge insights get project failed"}, 500
 
     @token_required
+    @require_access("forge_insights")
     @forge_insights_ns.expect(_project_patch_model, validate=False)
     def patch(self, project_id: int):
         try:
@@ -162,6 +167,7 @@ class ForgeInsightsProjectRoute(ForgeResource):
             return {"error": "forge insights update project failed"}, 500
 
     @token_required
+    @require_access("forge_insights")
     def delete(self, project_id: int):
         try:
             workspace_id = extract_workspace_id()
@@ -178,6 +184,7 @@ class ForgeInsightsProjectRoute(ForgeResource):
 @forge_insights_ns.route("/threads")
 class ForgeInsightsThreadsRoute(ForgeResource):
     @token_required
+    @require_access("forge_insights")
     def get(self):
         try:
             workspace_id = extract_workspace_id()
@@ -207,6 +214,7 @@ class ForgeInsightsThreadsRoute(ForgeResource):
             return {"error": "forge insights list threads failed"}, 500
 
     @token_required
+    @require_access("forge_insights")
     @forge_insights_ns.expect(_thread_create_model, validate=False)
     def post(self):
         try:
@@ -240,6 +248,7 @@ class ForgeInsightsThreadsRoute(ForgeResource):
 @forge_insights_ns.route("/threads/<int:thread_id>")
 class ForgeInsightsThreadRoute(ForgeResource):
     @token_required
+    @require_access("forge_insights")
     def get(self, thread_id: int):
         try:
             workspace_id = extract_workspace_id()
@@ -253,6 +262,7 @@ class ForgeInsightsThreadRoute(ForgeResource):
             return {"error": "forge insights get thread failed"}, 500
 
     @token_required
+    @require_access("forge_insights")
     @forge_insights_ns.expect(_thread_patch_model, validate=False)
     def patch(self, thread_id: int):
         try:
@@ -284,6 +294,7 @@ class ForgeInsightsThreadRoute(ForgeResource):
             return {"error": "forge insights update thread failed"}, 500
 
     @token_required
+    @require_access("forge_insights")
     def delete(self, thread_id: int):
         try:
             workspace_id = extract_workspace_id()

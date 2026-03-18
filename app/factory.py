@@ -12,8 +12,6 @@ from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 from flask_restx import Api
 
-from app.adapters.databricks_token_manager import DatabricksForgeTokenPort
-from app.adapters.sigma_token_manager import ForgeTokenManager
 from app.celery_app import celery, configure_forge_celery
 from app.config import (
     AWS_ACCESS_KEY_ID,
@@ -39,71 +37,15 @@ from app.config.logging_config import configure_logging
 from app.config.mail_config import ForgeMailConfig
 from app.exceptions.forge_error import ForgeError
 from app.extensions import mail
-from app.routes import planner_domain as _planner_domain  # noqa: F401
-from app.routes import planner_llm as _planner_llm  # noqa: F401
-from app.routes.admin_routes import admin_ns
-from app.routes.ai import ai_ns
-from app.routes.auth_routes import qf_auth_ns
-from app.routes.chat_minimal import chat_ns
-from app.routes.connection_routes import connection_ns
-from app.routes.data_environment import data_environment_ns
-from app.routes.datasource_routes import datasource_ns
-from app.routes.ingestion_routes import ingestion_ns
-from app.routes.domain_routes import qf_domains_ns
-from app.routes.domain_profile_embeddings import domain_profile_embeddings_ns
-from app.routes.embeddings import embeddings_ns
-from app.routes.execution_routes import executions_ns
-from app.routes.export_routes import exports_ns
-from app.routes.forge_insights import forge_insights_ns
-from app.routes.destination_routes import destinations_ns
-from app.routes.forge_match_routes import forge_match_ns
-from app.routes.query_analysis_routes import query_analysis_ns
-from app.routes.skills_routes import skills_ns
-from app.routes.model_routes import model_ns
-from app.routes.nlp_review import nlp_review_ns
-from app.routes.nlp_routes import nlp_ns
-from app.routes.nlp_tier2 import nlp_tier2_ns
-from app.routes.otp_routes import otp_ns
-from app.routes.planner_extract import planner_ns
-from app.routes.product_groups_routes import product_group_ns
-from app.routes.product_routes import product_ns
-from app.routes.prompt_feedback import prompt_feedback_ns
-from app.routes.public_sales_inquiry import public_ns
-from app.routes.query_forge_routes import query_forge_ns
-from app.routes.query_studio_routes import query_studio_ns
-from app.routes.query_tree_routes import qf_saved_query_ns, qf_tree_ns
-from app.routes.role_routes import role_ns
-from app.routes.semantic_concepts import (
-    semantic_concept_aliases_ns,
-    semantic_concept_column_maps_ns,
-    semantic_concepts_ns,
-    semantic_value_aliases_ns,
-)
-from app.routes.semantic_mappings import semantic_mappings_ns
-from app.routes.semantic_registry import semantic_registry_ns
-from app.routes.semantic_relationships import semantic_relationships_ns
-from app.routes.semantic_routes import semantic_ns
-from app.routes.semantic_suggestions import semantic_suggestions_ns
-from app.routes.user_routes import qf_user_ns
-from app.routes.user_workspace_routes import user_workspace_ns
-from app.routes.value_override_routes import value_override_ns
-from app.routes.vector_domains import vector_ns
-from app.routes.version_routes import version_ns
-from app.routes.workspace_inventory_routes import wsinv_ns
-from app.routes.workspace_llm_routes import llm_providers_ns, llm_roles_ns, workspace_llm_ns
-from app.routes.workspace_routes import workspace_ns
-from app.routes.workspace_table_routes import workspace_tables_ns
+from app.api_config import NAME, VERSION, build_url
+from app.features import register_features
 from app.services.analytics.config_loader import load_analytics_config
 from app.services.analytics.executor_factory import ExecutorFactory
 from app.services.analytics.registry import AnalyticsDatasourceRegistry
 from app.services.auth_service import AuthService
-from app.services.base_service import build_url
 from app.services.semantic.concept_seed import ConceptSeedService
 from app.services.tenancy.datasource_catalog_service import DatasourceCatalogService
 from app.services.tenancy.secret_resolver import SecretResolver
-
-NAME = "api"
-VERSION = "v1"
 
 auth_service = AuthService()
 
@@ -117,34 +59,7 @@ def _is_configured_value(value: str) -> bool:
     return bool(raw and not _is_placeholder(raw))
 
 
-def _needs_databricks_token_manager(analytics_config: dict[str, dict[str, Any]]) -> bool:
-    """Return True when a configured Databricks datasource lacks a usable static token."""
-    for cfg in analytics_config.values():
-        ds_type = str((cfg or {}).get("type") or "").strip().lower()
-        if ds_type != "databricks":
-            continue
-        host_raw = str((cfg or {}).get("host") or "").strip()
-        http_path_raw = str((cfg or {}).get("http_path") or "").strip()
-        if not (_is_configured_value(host_raw) and _is_configured_value(http_path_raw)):
-            continue
-        token_raw = str((cfg or {}).get("token") or "").strip()
-        if (not token_raw) or _is_placeholder(token_raw):
-            return True
-    return False
 
-
-def _databricks_oauth_configured() -> bool:
-    token_url = (os.getenv("DATABRICKS_TOKEN_URL") or "").strip()
-    client_id = (os.getenv("DATABRICKS_CLIENT_ID") or "").strip()
-    client_secret = (os.getenv("DATABRICKS_CLIENT_SECRET") or "").strip()
-    return bool(token_url.startswith(("http://", "https://")) and client_id and client_secret)
-
-
-def _sigma_oauth_configured() -> bool:
-    token_url = (os.getenv("SIGMA_TOKEN_URL") or "").strip()
-    client_id = (os.getenv("SIGMA_CLIENT_ID") or "").strip()
-    client_secret = (os.getenv("SIGMA_CLIENT_SECRET") or "").strip()
-    return bool(token_url.startswith(("http://", "https://")) and client_id and client_secret)
 
 
 def _register_analytics_registry(
@@ -294,59 +209,7 @@ def create_app():
         expose_headers=["Content-Disposition"],
     )
 
-    api.add_namespace(qf_auth_ns, path=build_url("/", NAME, VERSION, "auth"))
-    api.add_namespace(qf_user_ns, path=build_url("/", NAME, VERSION, "users"))
-    api.add_namespace(workspace_ns, path=build_url("/", NAME, VERSION, "workspaces"))
-    api.add_namespace(workspace_tables_ns, path=build_url("/", NAME, VERSION, "workspace-tables"))
-    api.add_namespace(connection_ns, path=build_url("/", NAME, VERSION, "connections"))
-    api.add_namespace(user_workspace_ns, path=build_url("/", NAME, VERSION, "user-workspaces"))
-    api.add_namespace(role_ns, path=build_url("/", NAME, VERSION, "roles"))
-    api.add_namespace(admin_ns, path=build_url("/", NAME, VERSION, "admin"))
-    api.add_namespace(product_ns, path=build_url("/", NAME, VERSION, "products"))
-    api.add_namespace(planner_ns, path=build_url("/", NAME, VERSION, "planner"))
-    api.add_namespace(otp_ns, path=build_url("/", NAME, VERSION, "otp"))
-    api.add_namespace(product_group_ns, path=build_url("/", NAME, VERSION, "product-groups"))
-    api.add_namespace(value_override_ns, path=build_url("/", NAME, VERSION, "value_overrides"))
-    api.add_namespace(version_ns, path=build_url("/", NAME, VERSION, "version"))
-    api.add_namespace(public_ns, path=build_url("/", NAME, VERSION, "public"))
-    api.add_namespace(qf_domains_ns, path=build_url("/", NAME, VERSION, "domains"))
-    api.add_namespace(domain_profile_embeddings_ns, path=build_url("/", NAME, VERSION, "domain-profiles"))
-    api.add_namespace(embeddings_ns, path=build_url("/", NAME, VERSION, "embeddings"))
-    api.add_namespace(executions_ns, path=build_url("/", NAME, VERSION, "executions"))
-    api.add_namespace(exports_ns, path=build_url("/", NAME, VERSION, "exports"))
-    api.add_namespace(wsinv_ns, path=build_url("/", NAME, VERSION, "workspace-inventory"))
-    api.add_namespace(model_ns, path=build_url("/", NAME, VERSION, "models"))
-    api.add_namespace(nlp_ns, path=build_url("/", NAME, VERSION, "nlp"))
-    api.add_namespace(nlp_tier2_ns, path=build_url("/", NAME, VERSION, "nlp"))
-    api.add_namespace(nlp_review_ns, path=build_url("/", NAME, VERSION, "nlp"))
-    api.add_namespace(query_forge_ns, path=build_url("/", NAME, VERSION, "query"))
-    api.add_namespace(query_studio_ns, path=build_url("/", NAME, VERSION, "query-studio"))
-    api.add_namespace(qf_tree_ns, path=build_url("/", NAME, VERSION, "query-tree"))
-    api.add_namespace(qf_saved_query_ns, path=build_url("/", NAME, VERSION, "saved-queries"))
-    api.add_namespace(ai_ns, path=build_url("/", NAME, VERSION, "ai"))
-    api.add_namespace(prompt_feedback_ns, path=build_url("/", NAME, VERSION, "prompt-feedback"))
-    api.add_namespace(forge_insights_ns, path=build_url("/", NAME, VERSION, "forge-insights"))
-    api.add_namespace(destinations_ns, path=build_url("/", NAME, VERSION, "workspaces") + "/<workspace_id>/destinations")
-    api.add_namespace(forge_match_ns, path=build_url("/", NAME, VERSION, "forge-match"))
-    api.add_namespace(query_analysis_ns, path=build_url("/", NAME, VERSION, "queries"))
-    api.add_namespace(skills_ns, path=build_url("/", NAME, VERSION, "skills"))
-    api.add_namespace(chat_ns, path=build_url("/", NAME, VERSION, "chat"))
-    api.add_namespace(semantic_concepts_ns, path=build_url("/", NAME, VERSION, "semantic", "concepts"))
-    api.add_namespace(semantic_concept_aliases_ns, path=build_url("/", NAME, VERSION, "semantic", "concept-aliases"))
-    api.add_namespace(semantic_value_aliases_ns, path=build_url("/", NAME, VERSION, "semantic", "value-aliases"))
-    api.add_namespace(semantic_concept_column_maps_ns, path=build_url("/", NAME, VERSION, "semantic", "concept-column-maps"))
-    api.add_namespace(semantic_registry_ns, path=build_url("/", NAME, VERSION, "semantic", "registry"))
-    api.add_namespace(semantic_mappings_ns, path=build_url("/", NAME, VERSION, "semantic", "mappings"))
-    api.add_namespace(semantic_relationships_ns, path=build_url("/", NAME, VERSION, "semantic", "relationships"))
-    api.add_namespace(semantic_suggestions_ns, path=build_url("/", NAME, VERSION, "semantic", "suggestions"))
-    api.add_namespace(semantic_ns, path=build_url("/", NAME, VERSION, "semantic"))
-    api.add_namespace(vector_ns, path=build_url("/", NAME, VERSION, "vector"))
-    api.add_namespace(data_environment_ns, path=f"/{NAME}/{VERSION}/data-environment")
-    api.add_namespace(datasource_ns, path=build_url("/", NAME, VERSION, "datasources"))
-    api.add_namespace(ingestion_ns, path=build_url("/", NAME, VERSION, "ingestion"))
-    api.add_namespace(llm_roles_ns, path=build_url("/", NAME, VERSION, "llm-roles"))
-    api.add_namespace(llm_providers_ns, path=build_url("/", NAME, VERSION, "llm-providers"))
-    api.add_namespace(workspace_llm_ns, path=build_url("/", NAME, VERSION))
+    register_features(api)
 
     configure_logging()
     logger = logging.getLogger(__name__)
@@ -359,32 +222,7 @@ def create_app():
         except Exception:
             logger.exception("Semantic concept startup seed failed")
 
-    bootstrap_analytics_config: dict[str, dict[str, Any]] | None = None
-    try:
-        bootstrap_analytics_config = load_analytics_config()
-    except Exception:
-        logger.exception("Failed to load analytics config for token-manager bootstrap")
 
-    if bootstrap_analytics_config is None:
-        logger.warning("Databricks token manager bootstrap skipped: analytics config could not be loaded")
-    elif _needs_databricks_token_manager(bootstrap_analytics_config):
-        if _databricks_oauth_configured():
-            databricks_token_manager = DatabricksForgeTokenPort()
-            databricks_token_manager.start_auto_refresh()
-            app.config["DATABRICKS_TOKEN_MANAGER"] = databricks_token_manager
-        else:
-            logger.warning(
-                "Databricks token manager not started: OAuth env is incomplete for configured Databricks datasource(s)"
-            )
-    else:
-        logger.info("Databricks token manager not started: no Databricks datasource needs token refresh")
-
-    if _sigma_oauth_configured():
-        sigma_token_manager = ForgeTokenManager()
-        sigma_token_manager.start_auto_refresh()
-        app.config["SIGMA_TOKEN_MANAGER"] = sigma_token_manager
-    else:
-        logger.info("Sigma token manager not started: SIGMA OAuth env is incomplete")
 
     valkey_client = valkey.StrictValkey(host=VALKEY_ADDRESS, port=VALKEY_PORT, decode_responses=True)
 
@@ -423,6 +261,15 @@ def create_app():
         response.status_code = error.status_code
         return response
 
+    bootstrap_analytics_config: dict[str, dict[str, Any]] | None = None
+    try:
+        bootstrap_analytics_config = load_analytics_config()
+    except Exception:
+        logger.exception("Failed to load analytics config")
+
     _register_analytics_registry(app, config=bootstrap_analytics_config)
+
+    from app.commands.create_superuser import create_superuser_command
+    app.cli.add_command(create_superuser_command)
 
     return app

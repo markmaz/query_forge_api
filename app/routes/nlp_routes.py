@@ -7,6 +7,7 @@ from flask_restx import Namespace
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.services.embedding.embedding_search_service import EmbeddingSearchService
 from app.services.nlp.dictionary_ner import extract_signals as extract_dictionary_signals
 from app.services.nlp.ed_ner import extract_signals as extract_ed_signals
@@ -20,6 +21,7 @@ nlp_ns = Namespace("nlp", description="NLP extraction")
 @nlp_ns.route("/extract")
 class NlpExtract(ForgeResource):
     @token_required
+    @require_access("ai")
     def post(self):
         body = request.get_json(silent=True) or {}
         response, error = _run_nlp_extract(body)
@@ -31,6 +33,7 @@ class NlpExtract(ForgeResource):
 @nlp_ns.route("/extract-and-search")
 class NlpExtractAndSearch(ForgeResource):
     @token_required
+    @require_access("ai")
     def post(self):
         body = request.get_json(silent=True) or {}
         response, error = _run_nlp_extract(body)

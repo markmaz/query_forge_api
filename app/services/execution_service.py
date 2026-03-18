@@ -14,7 +14,7 @@ from app.services.domain_resolver import DomainResolver
 from app.services.analytics.executor_adapter import AnalyticsExecutorForgeAdapter
 from app.services.query_forge_service import QueryForgeService
 from app.services.sql_guard_service import assert_no_disallowed_client_sql_fields, assert_read_only_sql_statement
-from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
+from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -221,8 +221,8 @@ def _build_assistant_result_message(
 
 
 class ExecutionService:
-    def __init__(self, context_builder: Optional[WorkspaceContextBuilder] = None):
-        self._builder = context_builder or WorkspaceContextBuilder()
+    def __init__(self, context_builder: Optional[WorkspaceSqlContextBuilder] = None):
+        self._builder = context_builder or WorkspaceSqlContextBuilder()
 
     def start(self, workspace_id: str, payload: Dict[str, Any], query_args: Dict[str, Any]) -> tuple[Dict[str, Any], int]:
         assert_no_disallowed_client_sql_fields(payload)

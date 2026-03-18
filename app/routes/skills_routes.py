@@ -10,6 +10,8 @@ from flask import g, request
 from flask_restx import Namespace, fields
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
+from app.decorators.ownership import require_ownership
 from app.exceptions.forge_error import ForgeError
 from app.routes.forge_resource import ForgeResource
 from app.routes.request_helpers import extract_workspace_id, int_arg, require_user_id
@@ -90,6 +92,7 @@ _execute_response_model = skills_ns.model(
 @skills_ns.route("")
 class SkillList(ForgeResource):
     @token_required
+    @require_access("skills")
     @skills_ns.doc(params={"page": "Page number (default 1)", "page_size": "Page size (default 20, max 100)"})
     def get(self):
         try:
@@ -130,6 +133,7 @@ class SkillList(ForgeResource):
             return {"error": "skills list failed"}, 500
 
     @token_required
+    @require_access("skills", role="admin")
     @skills_ns.expect(_skill_create_model, validate=False)
     def post(self):
         try:
@@ -186,6 +190,8 @@ class SkillList(ForgeResource):
 @skills_ns.route("/<string:skill_id>")
 class SkillDetail(ForgeResource):
     @token_required
+    @require_access("skills")
+    @require_ownership("QuerySkill", "skill_id", "skills:admin", check_read=True)
     def get(self, skill_id: str):
         try:
             workspace_id = extract_workspace_id()
@@ -212,6 +218,8 @@ class SkillDetail(ForgeResource):
             return {"error": "skills get failed"}, 500
 
     @token_required
+    @require_access("skills", role="admin")
+    @require_ownership("QuerySkill", "skill_id", "skills:admin", check_read=True)
     @skills_ns.expect(_skill_update_model, validate=False)
     def put(self, skill_id: str):
         try:
@@ -263,6 +271,8 @@ class SkillDetail(ForgeResource):
             return {"error": "skills update failed"}, 500
 
     @token_required
+    @require_access("skills", role="admin")
+    @require_ownership("QuerySkill", "skill_id", "skills:admin", check_read=True)
     def delete(self, skill_id: str):
         try:
             workspace_id = extract_workspace_id()
@@ -290,6 +300,8 @@ class SkillDetail(ForgeResource):
 @skills_ns.route("/<string:skill_id>/execute")
 class SkillExecute(ForgeResource):
     @token_required
+    @require_access("skills")
+    @require_ownership("QuerySkill", "skill_id", "skills:admin", check_read=True)
     @skills_ns.response(201, "Execution queued", _execute_response_model)
     def post(self, skill_id: str):
         try:
@@ -350,6 +362,8 @@ class SkillExecute(ForgeResource):
 @skills_ns.route("/<string:skill_id>/executions")
 class SkillExecutionList(ForgeResource):
     @token_required
+    @require_access("skills")
+    @require_ownership("QuerySkill", "skill_id", "skills:admin", check_read=True)
     @skills_ns.doc(params={"page": "Page number (default 1)", "page_size": "Page size (default 20, max 100)"})
     def get(self, skill_id: str):
         try:
@@ -393,6 +407,7 @@ class SkillExecutionList(ForgeResource):
 @skills_ns.route("/schedules")
 class SkillScheduleList(ForgeResource):
     @token_required
+    @require_access("skills")
     @skills_ns.doc(params={"page": "Page number (default 1)", "page_size": "Page size (default 20, max 100)"})
     def get(self):
         try:
@@ -436,6 +451,8 @@ class SkillScheduleList(ForgeResource):
 @skills_ns.route("/<string:skill_id>/schedules")
 class SkillScheduleCreate(ForgeResource):
     @token_required
+    @require_access("skills", role="admin")
+    @require_ownership("QuerySkill", "skill_id", "skills:admin", check_read=True)
     @skills_ns.expect(_schedule_create_model, validate=False)
     def post(self, skill_id: str):
         try:
@@ -491,6 +508,7 @@ class SkillScheduleCreate(ForgeResource):
 @skills_ns.route("/schedules/<string:schedule_id>")
 class SkillScheduleDetail(ForgeResource):
     @token_required
+    @require_access("skills", role="admin")
     @skills_ns.expect(_schedule_update_model, validate=False)
     def put(self, schedule_id: str):
         try:
@@ -541,6 +559,7 @@ class SkillScheduleDetail(ForgeResource):
 @skills_ns.route("/scheduler/status")
 class SchedulerStatus(ForgeResource):
     @token_required
+    @require_access("skills", role="admin")
     def get(self):
         """
         Return Beat scheduler health. Used by ops dashboards and
@@ -558,6 +577,7 @@ class SchedulerStatus(ForgeResource):
 @skills_ns.route("/<string:skill_id>/schedule/upcoming")
 class SkillScheduleUpcoming(ForgeResource):
     @token_required
+    @require_access("skills")
     def get(self, skill_id: str):
         """
         Return the next N scheduled run times for a skill.
@@ -606,6 +626,8 @@ class SkillScheduleUpcoming(ForgeResource):
 @skills_ns.route("/<string:skill_id>/acknowledge")
 class SkillAlertAcknowledge(ForgeResource):
     @token_required
+    @require_access("skills")
+    @require_ownership("QuerySkill", "skill_id", "skills:admin", check_read=True)
     def post(self, skill_id: str):
         """
         Manually acknowledge an alert. Sets alert_acknowledged_at to now.
@@ -642,6 +664,7 @@ class SkillAlertAcknowledge(ForgeResource):
 @skills_ns.route("/schedule/validate")
 class ScheduleValidate(ForgeResource):
     @token_required
+    @require_access("skills")
     def post(self):
         """
         Validate a cron expression and return next 5 run times.

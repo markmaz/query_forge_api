@@ -309,7 +309,7 @@ class AISummaryDigestSkill(BaseSkill):
 
     def _load_snapshot(self, context: SkillContext) -> dict | None:
         try:
-            from app.models.skills import QuerySkill
+            from app.models.query.skills import QuerySkill
             skill = QuerySkill.query.filter_by(
                 query_id=context.query_id,
                 workspace_id=context.workspace_id,
@@ -323,7 +323,7 @@ class AISummaryDigestSkill(BaseSkill):
     def _save_snapshot(self, context: SkillContext, digest: dict) -> None:
         try:
             from app.extensions import db
-            from app.models.skills import QuerySkill
+            from app.models.query.skills import QuerySkill
             skill = QuerySkill.query.filter_by(
                 query_id=context.query_id,
                 workspace_id=context.workspace_id,
