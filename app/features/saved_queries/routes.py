@@ -1,0 +1,2 @@
+from app.routes.query_tree_routes import qf_saved_query_ns
+from app.routes.query_analysis_routes import query_analysis_ns
