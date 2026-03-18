@@ -5,6 +5,25 @@
 
 ---
 
+## Task 2 — patch_table service method and PATCH /dictionary/tables/:id route (2026-03-17)
+
+### Files Changed
+- `app/services/dictionary/dictionary_service.py` — added `_ALLOWED_TABLE_PATCH_FIELDS` and `patch_table` method after `patch_column`
+- `app/routes/dictionary_routes.py` — added `DictionaryTableDetail` class with `PATCH /tables/<int:table_id>` after `DictionaryTables`
+- `tests/services/test_dictionary_service.py` — appended 3 tests: `test_patch_table_updates_description`, `test_patch_table_404_for_wrong_workspace`, `test_patch_table_400_for_empty_patch`
+- `tests/routes/test_dictionary_routes.py` — appended 2 tests: `test_patch_table_success`, `test_patch_table_400_on_empty_body`
+
+### Completed Work
+- `patch_table` uses the two-connect pattern (UPDATE in one block, SELECT re-fetch in another)
+- Returns all 6 DictionaryTableRow fields: `id`, `table_name`, `full_name`, `schema_name`, `catalog_name`, `description`
+- 404 when `rowcount == 0` (wrong workspace or nonexistent table)
+- 400 when patch dict is empty or has no recognized fields
+- Route handler uses `if "description" in body:` extraction + `if not patch: raise 400`
+- Final count: 16 service tests passed, 14 route tests skipped (no auth env vars)
+- Committed on `llm_analysis` branch: `92469b5`
+
+---
+
 ## Task 4b — dictionary_routes.py hardening (2026-03-17)
 
 ### Files Changed

@@ -59,7 +59,6 @@ from app.routes.destination_routes import destinations_ns
 from app.routes.forge_match_routes import forge_match_ns
 from app.routes.query_analysis_routes import query_analysis_ns
 from app.routes.skills_routes import skills_ns
-from app.routes.model_routes import model_ns
 from app.routes.nlp_review import nlp_review_ns
 from app.routes.nlp_routes import nlp_ns
 from app.routes.nlp_tier2 import nlp_tier2_ns
@@ -317,7 +316,6 @@ def create_app():
     api.add_namespace(executions_ns, path=build_url("/", NAME, VERSION, "executions"))
     api.add_namespace(exports_ns, path=build_url("/", NAME, VERSION, "exports"))
     api.add_namespace(wsinv_ns, path=build_url("/", NAME, VERSION, "workspace-inventory"))
-    api.add_namespace(model_ns, path=build_url("/", NAME, VERSION, "models"))
     api.add_namespace(nlp_ns, path=build_url("/", NAME, VERSION, "nlp"))
     api.add_namespace(nlp_tier2_ns, path=build_url("/", NAME, VERSION, "nlp"))
     api.add_namespace(nlp_review_ns, path=build_url("/", NAME, VERSION, "nlp"))
