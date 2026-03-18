@@ -10,11 +10,10 @@ from flask import g, request, send_file
 from flask_restx import Namespace
 from app.routes.forge_resource import ForgeResource
 
-from app.adapters.databricke_workspace_token_manager import DatabricksWorkspaceForgeTokenPort
-from app.adapters.databricks_sql_executor import DatabricksForgeQueryPort
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
+from app.ports.sql_executor import ForgeQueryPort
 from app.routes.request_helpers import require_user_id
 from app.services.value_overrides.value_override_meta_writer import ValueOverrideMetaWriter
 from app.services.value_overrides.value_override_visibility_service import ValueOverrideVisibilityService
@@ -22,10 +21,7 @@ from app.services.value_overrides.list_read_service import ForgeListReadService
 from app.services.value_overrides.list_template_service import ForgeListTemplateService
 from app.services.value_overrides.list_upload_service import ForgeListUploadService
 from app.services.value_overrides.list_writer import ForgeListWriter
-from app.services.shared.request_context import resolve_request_username
-from app.services.tenancy.datasource_resolver_service import WorkspaceDatasourceResolverService
 from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
-from app.services.workspace_service import WorkspaceService
 
 logger = logging.getLogger(__name__)
 
@@ -37,13 +33,13 @@ value_override_ns = Namespace("value_overrides", description="ValueOverrides (li
 # ----------------------------
 
 @dataclass(frozen=True)
-class DatabricksContext:
+class ValueOverrideContext:
     workspace_id: str
     workspace_url: str
     warehouse_id: str
     user_name: str
     user_id: str
-    sql_exec: DatabricksForgeQueryPort
+    sql_exec: ForgeQueryPort
     list_writer: ForgeListWriter
     qf_list_reader: ForgeListReadService
     meta_writer: ValueOverrideMetaWriter
@@ -132,85 +128,28 @@ def _extract_workspace_id() -> str:
     return workspace_id
 
 
-def _resolve_workspace_url(workspace_id: str) -> str:
-    ws = WorkspaceService().get_workspace(workspace_id=workspace_id)
-
-    if isinstance(ws, dict):
-        url = ws.get("server") or ws.get("host_url") or ws.get("workspace_url")
-    else:
-        url = (
-            getattr(ws, "server", None)
-            or getattr(ws, "host_url", None)
-            or getattr(ws, "workspace_url", None)
-        )
-
-    if not url:
-        raise ForgeError(
-            f"Workspace '{workspace_id}' did not resolve to a server URL",
-            status_code=400,
-        )
-
-    return str(url).rstrip("/")
-
-
-def _resolve_default_warehouse_id(workspace_id: str) -> str:
-    resolved = WorkspaceDatasourceResolverService().resolve_for_workspace(
-        workspace_id=workspace_id,
-        require_active=True,
-    )
-    config = dict(resolved.config_json or {})
-    warehouse_id = str(
-        config.get("warehouse_id")
-        or config.get("default_warehouse_id")
-        or WorkspaceSqlContextBuilder._warehouse_from_http_path(config.get("http_path"))
-        or ""
-    ).strip()
-    if not warehouse_id:
-        raise ForgeError(
-            f"Workspace '{workspace_id}' datasource is missing warehouse_id",
-            status_code=400,
-        )
-    return warehouse_id
-
-
-def _build_databricks_context() -> DatabricksContext:
+def _build_context() -> ValueOverrideContext:
     workspace_id = _extract_workspace_id()
-    workspace_url = _resolve_workspace_url(workspace_id)
-    warehouse_id = _resolve_default_warehouse_id(workspace_id)
-
-    user_name = resolve_request_username()
     user_id = require_user_id()
 
-    token_manager = DatabricksWorkspaceForgeTokenPort(
-        workspace_host=workspace_url,
-        workspace_id=workspace_id,
-    )
-    sql_exec = DatabricksForgeQueryPort(
-        base_url=workspace_url,
-        token_provider=token_manager,
-        default_warehouse_id=warehouse_id,
-    )
+    catalog_ctx = WorkspaceSqlContextBuilder().build(workspace_id)
 
-    list_writer = ForgeListWriter(sql=sql_exec)
     mysql_exec = ForgeMetaSQL()
-    qf_list_reader = ForgeListReadService(
-        mysql=mysql_exec,
-        dbx=sql_exec,
+    return ValueOverrideContext(
         workspace_id=workspace_id,
+        workspace_url=catalog_ctx.workspace_url,
+        warehouse_id=catalog_ctx.warehouse_id,
+        user_name=catalog_ctx.user_name,
         user_id=user_id,
-    )
-    meta_writer = ValueOverrideMetaWriter(mysql_exec)
-
-    return DatabricksContext(
-        workspace_id=workspace_id,
-        workspace_url=workspace_url,
-        warehouse_id=warehouse_id,
-        user_name=user_name,
-        user_id=user_id,
-        sql_exec=sql_exec,
-        list_writer=list_writer,
-        qf_list_reader=qf_list_reader,
-        meta_writer=meta_writer,
+        sql_exec=catalog_ctx.sql_exec,
+        list_writer=ForgeListWriter(sql=catalog_ctx.sql_exec),
+        qf_list_reader=ForgeListReadService(
+            mysql=mysql_exec,
+            dbx=catalog_ctx.sql_exec,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        ),
+        meta_writer=ValueOverrideMetaWriter(mysql_exec),
     )
 
 
@@ -242,7 +181,7 @@ class ValueOverrideIndex(ForgeResource):
         qf_include_expired = _bool_arg("qf_include_expired", default=False)
 
         try:
-            ctx = _build_databricks_context()
+            ctx = _build_context()
             index = ctx.qf_list_reader.get_index(qf_include_expired=qf_include_expired)
             return _qf_camelize(_to_dict(index)), 200
 
@@ -267,7 +206,7 @@ class ValueOverridePreview(ForgeResource):
 
         try:
             value_override_type = _validate_value_override_type(value_override_type)
-            ctx = _build_databricks_context()
+            ctx = _build_context()
 
             details = ctx.qf_list_reader.get_preview_by_id(
                 list_type=value_override_type,
@@ -341,7 +280,7 @@ class ValueOverrideUpload(ForgeResource):
             if not list_name:
                 raise ForgeError("list_name is required", status_code=400)
 
-            ctx = _build_databricks_context()
+            ctx = _build_context()
 
             svc = ForgeListUploadService(db_writer=ctx.list_writer, meta_writer=ctx.meta_writer)
 
@@ -416,7 +355,7 @@ class ValueOverrideDetail(ForgeResource):
 
             is_shared = _coerce_bool(payload.get("isShared"), field_name="isShared")
 
-            ctx = _build_databricks_context()
+            ctx = _build_context()
             ctx.qf_list_reader.assert_owner(list_type=value_override_type, list_id=list_id)
 
             ctx.meta_writer.set_shared(
@@ -439,7 +378,7 @@ class ValueOverrideDetail(ForgeResource):
             return {"error": "Invalid value_override_type"}, 400
 
         try:
-            ctx = _build_databricks_context()
+            ctx = _build_context()
             ctx.qf_list_reader.assert_owner(
                 list_type=value_override_type,  # type: ignore[arg-type]
                 list_id=list_id,

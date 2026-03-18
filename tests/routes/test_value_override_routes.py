@@ -79,7 +79,7 @@ def test_value_override_patch_forbidden_when_not_owner(client, monkeypatch):
         qf_list_reader = _Reader()
         meta_writer = _MetaWriter()
 
-    monkeypatch.setattr(value_override_routes, "_build_databricks_context", lambda: _Ctx())
+    monkeypatch.setattr(value_override_routes, "_build_context", lambda: _Ctx())
 
     resp = client.patch(
         "/api/v1/value_overrides/regions/list-1",
@@ -106,7 +106,7 @@ def test_value_override_delete_forbidden_when_not_owner(client, monkeypatch):
         qf_list_reader = _Reader()
         meta_writer = _MetaWriter()
 
-    monkeypatch.setattr(value_override_routes, "_build_databricks_context", lambda: _Ctx())
+    monkeypatch.setattr(value_override_routes, "_build_context", lambda: _Ctx())
 
     resp = client.delete(
         "/api/v1/value_overrides/regions/list-1",
