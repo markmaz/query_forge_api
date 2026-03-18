@@ -8,8 +8,7 @@ from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
-from app.routes.request_helpers import bool_arg, extract_workspace_id, int_arg
-from app.services.workspace_inventory.catalog_snapshot_import_service import CatalogSnapshotImportService
+from app.routes.request_helpers import extract_workspace_id, int_arg
 from app.services.recon.workspace_recon_read_service import WorkspaceReconReadService
 from app.services.recon.workspace_recon_service import ReconQuery, WorkspaceReconService
 from app.services.workspace_inventory.unmapped_workspace_tables_read_service import UnmappedWorkspaceTablesReadService
@@ -39,20 +38,13 @@ class WorkspaceInventorySync(ForgeResource):
 
             schema_name = (request.args.get("schema") or "asset").strip()
             catalog_name = (request.args.get("catalog") or "").strip() or None
-            force_snapshot = bool_arg("force", default=False)
 
-            snapshot_result = None
-            if force_snapshot:
-                snapshot_result = WorkspacePipelineService(sql=context.sql_exec).sync_snapshot(
-                    workspace_id=workspace_id,
-                    schema_name=schema_name,
-                    catalog_name=catalog_name,
-                )
-
-            import_result = CatalogSnapshotImportService(sql=context.sql_exec).import_snapshot(
-                deactivate_missing=True
+            snapshot_result = WorkspacePipelineService(sql=context.sql_exec).sync_snapshot(
+                workspace_id=workspace_id,
+                schema_name=schema_name,
+                catalog_name=catalog_name,
             )
-            return {"ok": True, "workspaceSnapshot": snapshot_result, **import_result.__dict__}
+            return {"ok": True, "workspaceSnapshot": snapshot_result}
         except ForgeError as exc:
             return _handle_service_error(exc)
         except Exception:
