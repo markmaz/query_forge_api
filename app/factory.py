@@ -12,7 +12,6 @@ from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 from flask_restx import Api
 
-from app.adapters.databricks_token_manager import DatabricksForgeTokenPort
 from app.celery_app import celery, configure_forge_celery
 from app.config import (
     AWS_ACCESS_KEY_ID,
@@ -115,27 +114,6 @@ def _is_configured_value(value: str) -> bool:
     return bool(raw and not _is_placeholder(raw))
 
 
-def _needs_databricks_token_manager(analytics_config: dict[str, dict[str, Any]]) -> bool:
-    """Return True when a configured Databricks datasource lacks a usable static token."""
-    for cfg in analytics_config.values():
-        ds_type = str((cfg or {}).get("type") or "").strip().lower()
-        if ds_type != "databricks":
-            continue
-        host_raw = str((cfg or {}).get("host") or "").strip()
-        http_path_raw = str((cfg or {}).get("http_path") or "").strip()
-        if not (_is_configured_value(host_raw) and _is_configured_value(http_path_raw)):
-            continue
-        token_raw = str((cfg or {}).get("token") or "").strip()
-        if (not token_raw) or _is_placeholder(token_raw):
-            return True
-    return False
-
-
-def _databricks_oauth_configured() -> bool:
-    token_url = (os.getenv("DATABRICKS_TOKEN_URL") or "").strip()
-    client_id = (os.getenv("DATABRICKS_CLIENT_ID") or "").strip()
-    client_secret = (os.getenv("DATABRICKS_CLIENT_SECRET") or "").strip()
-    return bool(token_url.startswith(("http://", "https://")) and client_id and client_secret)
 
 
 
@@ -350,25 +328,6 @@ def create_app():
         except Exception:
             logger.exception("Semantic concept startup seed failed")
 
-    bootstrap_analytics_config: dict[str, dict[str, Any]] | None = None
-    try:
-        bootstrap_analytics_config = load_analytics_config()
-    except Exception:
-        logger.exception("Failed to load analytics config for token-manager bootstrap")
-
-    if bootstrap_analytics_config is None:
-        logger.warning("Databricks token manager bootstrap skipped: analytics config could not be loaded")
-    elif _needs_databricks_token_manager(bootstrap_analytics_config):
-        if _databricks_oauth_configured():
-            databricks_token_manager = DatabricksForgeTokenPort()
-            databricks_token_manager.start_auto_refresh()
-            app.config["DATABRICKS_TOKEN_MANAGER"] = databricks_token_manager
-        else:
-            logger.warning(
-                "Databricks token manager not started: OAuth env is incomplete for configured Databricks datasource(s)"
-            )
-    else:
-        logger.info("Databricks token manager not started: no Databricks datasource needs token refresh")
 
 
     valkey_client = valkey.StrictValkey(host=VALKEY_ADDRESS, port=VALKEY_PORT, decode_responses=True)
@@ -407,6 +366,12 @@ def create_app():
         response = jsonify(error.to_dict())
         response.status_code = error.status_code
         return response
+
+    bootstrap_analytics_config: dict[str, dict[str, Any]] | None = None
+    try:
+        bootstrap_analytics_config = load_analytics_config()
+    except Exception:
+        logger.exception("Failed to load analytics config")
 
     _register_analytics_registry(app, config=bootstrap_analytics_config)
 
