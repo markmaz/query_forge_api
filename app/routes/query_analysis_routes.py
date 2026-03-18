@@ -34,6 +34,7 @@ from flask import g, request
 from flask_restx import Namespace, Resource, fields
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.routes.request_helpers import extract_workspace_id
 from app.skills.analysis_utils import (
     MAX_SAMPLE_ROWS,
@@ -74,6 +75,7 @@ analyze_request_model = query_analysis_ns.model("AnalyzeRequest", {
 @query_analysis_ns.route("/<string:query_id>/analyze")
 class QueryAnalyze(Resource):
     @token_required
+    @require_access("query_studio")
     @query_analysis_ns.expect(analyze_request_model)
     def post(self, query_id: str):
         """
@@ -194,6 +196,7 @@ analyze_inline_request_model = query_analysis_ns.model("AnalyzeInlineRequest", {
 @query_analysis_ns.route("/analyze")
 class QueryAnalyzeInline(Resource):
     @token_required
+    @require_access("query_studio")
     @query_analysis_ns.expect(analyze_inline_request_model)
     def post(self):
         """

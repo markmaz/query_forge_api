@@ -9,6 +9,7 @@ from app.routes.forge_resource import ForgeResource
 
 from app.config import QF_PLANNER_LLM_ENABLED
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import extract_workspace_id
 from app.routes.planner_extract import planner_ns
@@ -32,6 +33,7 @@ plan_llm_request_model = planner_ns.model(
 @planner_ns.route("/plan_llm")
 class PlannerPlanLLM(ForgeResource):
     @token_required
+    @require_access("planner")
     @planner_ns.expect(plan_llm_request_model, validate=False)
     def post(self):
         if not QF_PLANNER_LLM_ENABLED:

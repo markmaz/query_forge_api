@@ -10,8 +10,19 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.semantic.semantic_registry import SemanticBase
 
 
+class _QueryProperty:
+    """Enables Model.query.filter_by(...) syntax using the shared DB session."""
+
+    def __get__(self, obj, cls):
+        from app.extensions import db as _db
+        return _db.session.query(cls)
+
+
 class QuerySkill(SemanticBase):
     __tablename__ = "query_skills"
+
+    query = _QueryProperty()
+
     __table_args__ = (
         Index("idx_query_skills_workspace_active", "workspace_id", "is_active"),
         Index("idx_query_skills_skill_type", "skill_type"),
@@ -25,6 +36,7 @@ class QuerySkill(SemanticBase):
     config_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_shared: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     last_alert_state: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     alert_acknowledged_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"))

@@ -1,0 +1,292 @@
+"""
+tests/test_rbac.py
+
+Tests for RBAC role resolution, caching, and decorators.
+Run with: pytest tests/test_rbac.py -v
+"""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from app.services.rbac_service import (
+    get_effective_roles,
+    user_has_role,
+    workspace_has_feature,
+)
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def mock_no_cache():
+    """Simulate empty cache — forces DB load path."""
+    with patch("app.services.rbac_service._valkey") as mock:
+        client = MagicMock()
+        client.smembers.return_value = set()
+        mock.return_value = client
+        yield client
+
+
+def _mock_user_roles(role_names: list[str]):
+    """Helper: mock UserRole DB query to return given role names."""
+    mock_roles = []
+    for name in role_names:
+        ur = MagicMock()
+        ur.role = MagicMock()
+        ur.role.name = name
+        mock_roles.append(ur)
+    return mock_roles
+
+
+# ---------------------------------------------------------------------------
+# Role resolution — basic
+# ---------------------------------------------------------------------------
+
+
+def test_user_with_no_roles_has_empty_effective_roles(mock_no_cache):
+    with patch("app.services.rbac_service.UserRole") as MockUR:
+        MockUR.query.filter_by.return_value.all.return_value = []
+        roles = get_effective_roles(user_id=1)
+    assert roles == set()
+
+
+def test_user_with_explicit_role(mock_no_cache):
+    with patch("app.services.rbac_service.UserRole") as MockUR:
+        MockUR.query.filter_by.return_value.all.return_value = \
+            _mock_user_roles(["forge_match:user"])
+        roles = get_effective_roles(user_id=1)
+    assert "forge_match:user" in roles
+
+
+# ---------------------------------------------------------------------------
+# Role resolution — implied roles
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_admin_implies_all_feature_user_roles(mock_no_cache):
+    with patch("app.services.rbac_service.UserRole") as MockUR:
+        MockUR.query.filter_by.return_value.all.return_value = \
+            _mock_user_roles(["workspace_admin"])
+        roles = get_effective_roles(user_id=1)
+
+    from app.models.rbac import FEATURE_KEYS
+    for fk in FEATURE_KEYS:
+        assert f"{fk}:user" in roles, f"Expected {fk}:user implied by workspace_admin"
+
+
+def test_workspace_admin_does_not_imply_feature_admin_roles(mock_no_cache):
+    with patch("app.services.rbac_service.UserRole") as MockUR:
+        MockUR.query.filter_by.return_value.all.return_value = \
+            _mock_user_roles(["workspace_admin"])
+        roles = get_effective_roles(user_id=1)
+
+    assert "forge_match:admin" not in roles
+
+
+def test_feature_admin_implies_feature_user(mock_no_cache):
+    with patch("app.services.rbac_service.UserRole") as MockUR:
+        MockUR.query.filter_by.return_value.all.return_value = \
+            _mock_user_roles(["forge_match:admin"])
+        roles = get_effective_roles(user_id=1)
+
+    assert "forge_match:user" in roles
+    assert "forge_match:admin" in roles
+
+
+def test_feature_admin_does_not_imply_other_feature_user(mock_no_cache):
+    with patch("app.services.rbac_service.UserRole") as MockUR:
+        MockUR.query.filter_by.return_value.all.return_value = \
+            _mock_user_roles(["forge_match:admin"])
+        roles = get_effective_roles(user_id=1)
+
+    assert "query_studio:user" not in roles
+    assert "skills:user" not in roles
+
+
+def test_super_admin_has_all_roles(mock_no_cache):
+    with patch("app.services.rbac_service.UserRole") as MockUR:
+        MockUR.query.filter_by.return_value.all.return_value = \
+            _mock_user_roles(["super_admin"])
+        roles = get_effective_roles(user_id=1)
+
+    from app.models.rbac import FEATURE_KEYS
+    for fk in FEATURE_KEYS:
+        assert f"{fk}:user" in roles
+        assert f"{fk}:admin" in roles
+    assert "workspace_admin" in roles
+
+
+# ---------------------------------------------------------------------------
+# user_has_role
+# ---------------------------------------------------------------------------
+
+
+def test_user_has_role_true(mock_no_cache):
+    with patch("app.services.rbac_service.UserRole") as MockUR:
+        MockUR.query.filter_by.return_value.all.return_value = \
+            _mock_user_roles(["skills:user"])
+        assert user_has_role(1, "skills:user") is True
+
+
+def test_user_has_role_false(mock_no_cache):
+    with patch("app.services.rbac_service.UserRole") as MockUR:
+        MockUR.query.filter_by.return_value.all.return_value = \
+            _mock_user_roles(["skills:user"])
+        assert user_has_role(1, "skills:admin") is False
+
+
+def test_user_has_role_implied(mock_no_cache):
+    with patch("app.services.rbac_service.UserRole") as MockUR:
+        MockUR.query.filter_by.return_value.all.return_value = \
+            _mock_user_roles(["skills:admin"])
+        assert user_has_role(1, "skills:user") is True
+
+
+# ---------------------------------------------------------------------------
+# workspace_has_feature
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_has_active_feature(mock_no_cache):
+    with patch("app.services.rbac_service.WorkspaceFeature") as MockWF:
+        MockWF.query.filter_by.return_value.all.return_value = [
+            MagicMock(feature_key="forge_match"),
+            MagicMock(feature_key="skills"),
+        ]
+        assert workspace_has_feature(workspace_id=1, feature_key="forge_match") is True
+
+
+def test_workspace_missing_feature(mock_no_cache):
+    with patch("app.services.rbac_service.WorkspaceFeature") as MockWF:
+        MockWF.query.filter_by.return_value.all.return_value = [
+            MagicMock(feature_key="forge_match"),
+        ]
+        assert workspace_has_feature(workspace_id=1, feature_key="skills") is False
+
+
+# ---------------------------------------------------------------------------
+# Decorators
+# ---------------------------------------------------------------------------
+
+
+def test_require_role_passes_with_correct_role(app):
+    from app.decorators.rbac import require_role
+    with app.test_request_context("/"):
+        from flask import g
+        g.user_id = 1
+        g.effective_roles = {"forge_match:user"}
+
+        @require_role("forge_match:user")
+        def view():
+            return "ok"
+
+        assert view() == "ok"
+
+
+def test_require_role_fails_with_wrong_role(app):
+    from app.decorators.rbac import require_role
+    with app.test_request_context("/"):
+        from flask import g
+        g.user_id = 1
+        g.effective_roles = {"skills:user"}
+
+        @require_role("forge_match:user")
+        def view():
+            return "ok"
+
+        with pytest.raises(Exception) as exc_info:
+            view()
+        assert "403" in str(exc_info.value) or "Forbidden" in str(exc_info.value)
+
+
+def test_require_role_super_admin_bypasses(app):
+    from app.decorators.rbac import require_role
+    with app.test_request_context("/"):
+        from flask import g
+        g.user_id = 1
+        g.effective_roles = {"super_admin", "forge_match:user", "forge_match:admin"}
+
+        @require_role("forge_match:admin")
+        def view():
+            return "ok"
+
+        assert view() == "ok"
+
+
+def test_require_feature_bypassed_for_workspace_admin(app):
+    from app.decorators.rbac import require_feature
+    with app.test_request_context("/"):
+        from flask import g
+        g.user_id = 1
+        g.workspace_id = 5
+        g.effective_roles = {"workspace_admin", "forge_match:user"}
+
+        @require_feature("skills")
+        def view():
+            return "ok"
+
+        # workspace_admin bypasses feature check even if skills not in workspace
+        assert view() == "ok"
+
+
+def test_require_feature_fails_for_regular_user(app):
+    from app.decorators.rbac import require_feature
+    with app.test_request_context("/"):
+        from flask import g
+        g.user_id = 1
+        g.workspace_id = 5
+        g.effective_roles = {"forge_match:user"}
+
+        with patch("app.decorators.rbac.workspace_has_feature", return_value=False):
+            @require_feature("skills")
+            def view():
+                return "ok"
+
+            with pytest.raises(Exception) as exc_info:
+                view()
+            assert "403" in str(exc_info.value) or "Forbidden" in str(exc_info.value)
+
+
+def test_require_access_shortcut(app):
+    from app.decorators.rbac import require_access
+    with app.test_request_context("/"):
+        from flask import g
+        g.user_id = 1
+        g.workspace_id = 5
+        g.effective_roles = {"forge_match:user"}
+
+        with patch("app.decorators.rbac.workspace_has_feature", return_value=True):
+            @require_access("forge_match")
+            def view():
+                return "ok"
+
+            assert view() == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Cache invalidation
+# ---------------------------------------------------------------------------
+
+
+def test_invalidate_clears_user_cache():
+    from app.services.rbac_service import invalidate_user_roles
+    with patch("app.services.rbac_service._valkey") as mock:
+        client = MagicMock()
+        mock.return_value = client
+        invalidate_user_roles(user_id=42)
+        client.delete.assert_called_once_with("qf:roles:user:42")
+
+
+def test_invalidate_clears_workspace_feature_cache():
+    from app.services.rbac_service import invalidate_workspace_features
+    with patch("app.services.rbac_service._valkey") as mock:
+        client = MagicMock()
+        mock.return_value = client
+        invalidate_workspace_features(workspace_id=7)
+        client.delete.assert_called_once_with("qf:features:workspace:7")

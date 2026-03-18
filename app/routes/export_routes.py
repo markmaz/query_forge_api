@@ -15,6 +15,7 @@ from openpyxl import Workbook
 
 from app.config import VALKEY_ADDRESS, VALKEY_PORT
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import extract_workspace_id
 from app.services.domain_resolver import DomainResolver
@@ -103,6 +104,7 @@ def _table_to_excel_bytes(table: pa.Table) -> bytes:
 @exports_ns.route("/excel")
 class ExcelExport(ForgeResource):
     @token_required
+    @require_access("exports")
     def post(self):
         try:
             workspace_id = extract_workspace_id()
@@ -183,6 +185,7 @@ class ExcelExport(ForgeResource):
 @exports_ns.route("/excel/<string:token>")
 class ExcelDownload(ForgeResource):
     @token_required
+    @require_access("exports")
     def get(self, token: str):
         try:
             workspace_id = extract_workspace_id()

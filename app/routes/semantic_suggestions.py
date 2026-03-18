@@ -8,6 +8,7 @@ from flask_restx import Namespace, fields
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import bool_arg, int_arg
 from app.services.semantic.semantic_suggestion_service import SemanticSuggestionService
@@ -51,6 +52,7 @@ item_patch_model = semantic_suggestions_ns.model(
 @semantic_suggestions_ns.route("/runs")
 class SuggestionRuns(ForgeResource):
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_suggestions_ns.expect(run_model, validate=False)
     def post(self):
         try:
@@ -68,6 +70,7 @@ class SuggestionRuns(ForgeResource):
 @semantic_suggestions_ns.route("/runs/<int:run_id>/execute")
 class SuggestionRunExecute(ForgeResource):
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_suggestions_ns.doc(params={"llm_id": "Optional workspace LLM id override"})
     def post(self, run_id: int):
         try:
@@ -84,6 +87,7 @@ class SuggestionRunExecute(ForgeResource):
 @semantic_suggestions_ns.route("/runs/<int:run_id>")
 class SuggestionRunById(ForgeResource):
     @token_required
+    @require_access("semantic")
     def get(self, run_id: int):
         try:
             run = SemanticSuggestionService().get_run(run_id)
@@ -98,6 +102,7 @@ class SuggestionRunById(ForgeResource):
 @semantic_suggestions_ns.route("/items")
 class SuggestionItems(ForgeResource):
     @token_required
+    @require_access("semantic")
     @semantic_suggestions_ns.doc(
         params={
             "run_id": "Filter by run id",
@@ -133,6 +138,7 @@ class SuggestionItems(ForgeResource):
 @semantic_suggestions_ns.route("/items/<int:item_id>")
 class SuggestionItemById(ForgeResource):
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_suggestions_ns.expect(item_patch_model, validate=False)
     def patch(self, item_id: int):
         try:
@@ -149,6 +155,7 @@ class SuggestionItemById(ForgeResource):
 @semantic_suggestions_ns.route("/runs/<int:run_id>/apply")
 class SuggestionRunApply(ForgeResource):
     @token_required
+    @require_access("semantic", role="admin")
     def post(self, run_id: int):
         try:
             run = SemanticSuggestionService().apply_approved(run_id)

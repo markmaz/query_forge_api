@@ -8,6 +8,7 @@ from app.routes.forge_resource import ForgeResource
 
 from app.config import COOKIE_SAMESITE, COOKIE_SECURE, REFRESH_COOKIE_PATH
 from app.decorators.security import token_required
+from app.decorators.rbac import public
 from app.exceptions.forge_error import ForgeError
 from app.models.tenancy.status_enum import UserStatus
 from app.models.tenancy.user import User
@@ -93,6 +94,7 @@ def _extract_invite_token(body: Dict[str, Any]) -> str:
 @qf_auth_ns.route('/auth')
 @qf_auth_ns.expect(login_model)
 class Authenticate(ForgeResource):
+    @public
     def post(self):
         data = request.json
         username = data.get("username")
@@ -148,6 +150,7 @@ class Login(ForgeResource):
             "- `401`: Invalid username or password"
         )
     )
+    @public
     def post(self):
         """Step 1: credential authentication and OTP challenge issuance"""
         data = request.get_json(silent=True) or {}
@@ -226,6 +229,7 @@ class ConfirmTotpEnrollment(ForgeResource):
 class VerifyTotpChallenge(ForgeResource):
     @qf_auth_ns.expect(totp_verify_model, validate=False)
     @qf_auth_ns.doc(security=[])
+    @public
     def post(self):
         data = request.get_json(silent=True) or {}
         challenge_id = str(data.get("challenge_id") or "").strip()
@@ -327,6 +331,7 @@ def _get_refresh_from_request() -> str | None:
 
 @qf_auth_ns.route("/refresh")
 class Refresh(ForgeResource):
+    @public
     def post(self):
         token = _get_refresh_from_request()
         if not token:
@@ -370,6 +375,7 @@ class Refresh(ForgeResource):
 
 @qf_auth_ns.route("/logout")
 class Logout(ForgeResource):
+    @token_required
     def post(self):
         auth = AuthService()
         refresh_token = request.cookies.get("refresh_token")
@@ -409,6 +415,7 @@ class Logout(ForgeResource):
 
 @qf_auth_ns.route("/invite/validate/<string:token>")
 class InviteValidationResource(ForgeResource):
+    @public
     def get(self, token):
         if not token:
             return {"error": "Missing token"}, 400
@@ -426,6 +433,7 @@ class InviteValidationResource(ForgeResource):
 class InviteAcceptResource(ForgeResource):
     @qf_auth_ns.expect(invite_accept_model, validate=False)
     @qf_auth_ns.doc(security=[])
+    @public
     def post(self):
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict):
@@ -494,6 +502,7 @@ class InviteAcceptResource(ForgeResource):
 
 @qf_auth_ns.route("/reset/request")
 class ResetPasswordRequest(ForgeResource):
+    @public
     def post(self):
         email = request.json["email"]
         auth = AuthService()
@@ -502,6 +511,7 @@ class ResetPasswordRequest(ForgeResource):
     
 @qf_auth_ns.route("/reset/validate")
 class ResetPasswordValidate(ForgeResource):
+    @public
     def post(self):
         token = request.json["token"]
         
@@ -518,6 +528,7 @@ class ResetPasswordValidate(ForgeResource):
 
 @qf_auth_ns.route("/reset/password")
 class ResetPassword(ForgeResource):
+    @public
     def post(self):
         token_hash = request.cookies.get("reset_session")
 

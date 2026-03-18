@@ -8,6 +8,7 @@ from flask_restx import Namespace, fields
 from app.routes.forge_resource import ForgeResource
 
 from app.config import ERROR_SERVER_URL, ERROR_VALIDATION_URL, THANK_YOU_REDIRECT
+from app.decorators.rbac import public
 from app.services.sales_inquiry_service import SalesInquiryService
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ def _get_client_ip() -> Optional[str]:
 class SalesInquiry(ForgeResource):
     @public_ns.expect(sales_inquiry_model, validate=False)
     @public_ns.doc(security=[])
+    @public
     def post(self):
         data = request.form.to_dict(flat=True)
         if not data:

@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import public, require_role
 from app.exceptions.forge_error import ForgeError
 from app.models.domain.domain_profile import (
     DomainProfileCreateRequest,
@@ -244,6 +245,7 @@ tenancy_bootstrap_model = admin_ns.model(
 
 @admin_ns.route("/healthz")
 class ShowHealth(ForgeResource):
+    @public
     def get(self):
         return "OK", 200
 
@@ -251,6 +253,7 @@ class ShowHealth(ForgeResource):
 @admin_ns.route("/health/detailed")
 class DetailedHealth(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def get(self):
         try:
             _require_admin()
@@ -266,6 +269,7 @@ class DetailedHealth(ForgeResource):
 @admin_ns.route("/health/broker")
 class BrokerHealth(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def get(self):
         try:
             _require_admin()
@@ -285,6 +289,7 @@ class BrokerHealth(ForgeResource):
 @admin_ns.route("/pipeline-profiles")
 class PipelineProfileList(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def get(self):
         try:
             _require_admin()
@@ -307,6 +312,7 @@ class PipelineProfileList(ForgeResource):
 @admin_ns.route("/prompt-feedback")
 class AdminPromptFeedbackList(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def get(self):
         try:
             _require_admin()
@@ -344,6 +350,7 @@ class AdminPromptFeedbackList(ForgeResource):
 @admin_ns.route("/prompt-feedback/<int:feedback_id>")
 class AdminPromptFeedbackDelete(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def delete(self, feedback_id: int):
         try:
             _require_admin()
@@ -367,6 +374,7 @@ class AdminPromptFeedbackDelete(ForgeResource):
 @admin_ns.route("/vector/semantic-concepts/rebuild")
 class RebuildSemanticConceptVectors(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def post(self):
         try:
             _require_admin()
@@ -383,6 +391,7 @@ class RebuildSemanticConceptVectors(ForgeResource):
 @admin_ns.route("/vector/domains/reindex")
 class ReindexDomainVectors(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def post(self):
         try:
             _require_admin()
@@ -413,6 +422,7 @@ class ReindexDomainVectors(ForgeResource):
 @admin_ns.route("/vector/embeddings/rebuild")
 class RebuildEmbeddingVectors(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def post(self):
         try:
             _require_admin()
@@ -442,6 +452,7 @@ class RebuildEmbeddingVectors(ForgeResource):
 @admin_ns.route("/vector/rebuild-all")
 class RebuildAllVectors(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def post(self):
         """Rebuild all vector indexes in the correct order."""
         try:
@@ -508,6 +519,7 @@ class RebuildAllVectors(ForgeResource):
 @admin_ns.route("/domain-profiles")
 class DomainProfileList(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def get(self):
         try:
             _require_admin()
@@ -521,6 +533,7 @@ class DomainProfileList(ForgeResource):
             return {"error": "domain profile list failed"}, 500
 
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(domain_profile_model, validate=False)
     def post(self):
         try:
@@ -541,6 +554,7 @@ class DomainProfileList(ForgeResource):
 @admin_ns.route("/domain-profiles/<int:domain_id>")
 class DomainProfileDetail(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def get(self, domain_id: int):
         try:
             _require_admin()
@@ -554,6 +568,7 @@ class DomainProfileDetail(ForgeResource):
             return {"error": "domain profile get failed"}, 500
 
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(domain_profile_model, validate=False)
     def put(self, domain_id: int):
         try:
@@ -570,6 +585,7 @@ class DomainProfileDetail(ForgeResource):
             return {"error": "domain profile update failed"}, 500
 
     @token_required
+    @require_role("system:admin")
     def delete(self, domain_id: int):
         try:
             _require_admin()
@@ -586,6 +602,7 @@ class DomainProfileDetail(ForgeResource):
 @admin_ns.route("/domain-profiles/<int:domain_id>/generate")
 class DomainProfileGenerateOne(ForgeResource):
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(domain_profile_generate_one_model, validate=False)
     def post(self, domain_id: int):
         try:
@@ -612,6 +629,7 @@ class DomainProfileGenerateOne(ForgeResource):
 @admin_ns.route("/domain-profiles/generate")
 class DomainProfileGenerateBatch(ForgeResource):
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(domain_profile_generate_batch_model, validate=False)
     def post(self):
         try:
@@ -638,6 +656,7 @@ class DomainProfileGenerateBatch(ForgeResource):
 @admin_ns.route("/domain-profiles/generate-all")
 class DomainProfileGenerateAll(ForgeResource):
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(domain_profile_generate_all_model, validate=False)
     def post(self):
         try:
@@ -668,6 +687,7 @@ class DomainProfileGenerateAll(ForgeResource):
 @admin_ns.route("/semantic-catalog/build")
 class SemanticCatalogBuild(ForgeResource):
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(semantic_catalog_build_model, validate=False)
     def post(self):
         try:
@@ -710,6 +730,7 @@ class SemanticCatalogBuild(ForgeResource):
 @admin_ns.route("/tenancy/bootstrap")
 class TenancyBootstrap(ForgeResource):
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(tenancy_bootstrap_model, validate=False)
     def post(self):
         try:
@@ -744,6 +765,7 @@ class TenancyBootstrap(ForgeResource):
 @admin_ns.route("/organizations")
 class OrganizationListCreate(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def get(self):
         try:
             _require_admin()
@@ -764,6 +786,7 @@ class OrganizationListCreate(ForgeResource):
             return {"error": "organization list failed"}, 500
 
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(organization_create_model, validate=False)
     def post(self):
         try:
@@ -781,6 +804,7 @@ class OrganizationListCreate(ForgeResource):
 @admin_ns.route("/organizations/<string:organization_id>")
 class OrganizationDetail(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def get(self, organization_id: str):
         try:
             _require_admin()
@@ -792,6 +816,7 @@ class OrganizationDetail(ForgeResource):
             return {"error": "organization get failed"}, 500
 
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(organization_update_model, validate=False)
     def patch(self, organization_id: str):
         try:
@@ -806,6 +831,7 @@ class OrganizationDetail(ForgeResource):
             return {"error": "organization update failed"}, 500
 
     @token_required
+    @require_role("system:admin")
     def delete(self, organization_id: str):
         try:
             _require_admin()
@@ -822,6 +848,7 @@ class OrganizationDetail(ForgeResource):
 @admin_ns.route("/organizations/<string:organization_id>/memberships")
 class OrganizationMembershipListCreate(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def get(self, organization_id: str):
         try:
             _require_admin()
@@ -842,6 +869,7 @@ class OrganizationMembershipListCreate(ForgeResource):
             return {"error": "organization membership list failed"}, 500
 
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(organization_membership_create_model, validate=False)
     def post(self, organization_id: str):
         try:
@@ -862,6 +890,7 @@ class OrganizationMembershipListCreate(ForgeResource):
 @admin_ns.route("/organizations/<string:organization_id>/memberships/<int:membership_id>")
 class OrganizationMembershipDetail(ForgeResource):
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(organization_membership_update_model, validate=False)
     def patch(self, organization_id: str, membership_id: int):
         try:
@@ -880,6 +909,7 @@ class OrganizationMembershipDetail(ForgeResource):
             return {"error": "organization membership update failed"}, 500
 
     @token_required
+    @require_role("system:admin")
     def delete(self, organization_id: str, membership_id: int):
         try:
             _require_admin()
@@ -898,6 +928,7 @@ class OrganizationMembershipDetail(ForgeResource):
 @admin_ns.route("/organizations/<string:organization_id>/datasources")
 class OrganizationDatasourceListCreate(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def get(self, organization_id: str):
         try:
             _require_admin()
@@ -918,6 +949,7 @@ class OrganizationDatasourceListCreate(ForgeResource):
             return {"error": "organization datasource list failed"}, 500
 
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(datasource_create_model, validate=False)
     def post(self, organization_id: str):
         try:
@@ -935,6 +967,7 @@ class OrganizationDatasourceListCreate(ForgeResource):
 @admin_ns.route("/datasources/<int:datasource_id>")
 class DatasourceDetail(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def get(self, datasource_id: int):
         try:
             _require_admin()
@@ -946,6 +979,7 @@ class DatasourceDetail(ForgeResource):
             return {"error": "datasource get failed"}, 500
 
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(datasource_update_model, validate=False)
     def patch(self, datasource_id: int):
         try:
@@ -960,6 +994,7 @@ class DatasourceDetail(ForgeResource):
             return {"error": "datasource update failed"}, 500
 
     @token_required
+    @require_role("system:admin")
     def delete(self, datasource_id: int):
         try:
             _require_admin()
@@ -976,6 +1011,7 @@ class DatasourceDetail(ForgeResource):
 @admin_ns.route("/datasources/<int:datasource_id>/test")
 class DatasourceConnectionTest(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def post(self, datasource_id: int):
         try:
             _require_admin()
@@ -991,6 +1027,7 @@ class DatasourceConnectionTest(ForgeResource):
 @admin_ns.route("/workspaces")
 class WorkspaceBindingList(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def get(self):
         try:
             _require_admin()
@@ -1012,6 +1049,7 @@ class WorkspaceBindingList(ForgeResource):
             return {"error": "workspace binding list failed"}, 500
 
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(workspace_create_model, validate=False)
     def post(self):
         try:
@@ -1029,6 +1067,7 @@ class WorkspaceBindingList(ForgeResource):
 @admin_ns.route("/workspaces/<string:workspace_id>/binding")
 class WorkspaceBindingDetail(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def get(self, workspace_id: str):
         try:
             _require_admin()
@@ -1040,6 +1079,7 @@ class WorkspaceBindingDetail(ForgeResource):
             return {"error": "workspace binding get failed"}, 500
 
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(workspace_binding_update_model, validate=False)
     def patch(self, workspace_id: str):
         try:
@@ -1057,6 +1097,7 @@ class WorkspaceBindingDetail(ForgeResource):
 @admin_ns.route("/workspaces/<string:workspace_id>/memberships")
 class WorkspaceMembershipListCreate(ForgeResource):
     @token_required
+    @require_role("system:admin")
     def get(self, workspace_id: str):
         try:
             _require_admin()
@@ -1077,6 +1118,7 @@ class WorkspaceMembershipListCreate(ForgeResource):
             return {"error": "workspace membership list failed"}, 500
 
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(workspace_membership_create_model, validate=False)
     def post(self, workspace_id: str):
         try:
@@ -1094,6 +1136,7 @@ class WorkspaceMembershipListCreate(ForgeResource):
 @admin_ns.route("/workspaces/<string:workspace_id>/memberships/<int:membership_id>")
 class WorkspaceMembershipDetail(ForgeResource):
     @token_required
+    @require_role("system:admin")
     @admin_ns.expect(workspace_membership_update_model, validate=False)
     def patch(self, workspace_id: str, membership_id: int):
         try:
@@ -1112,6 +1155,7 @@ class WorkspaceMembershipDetail(ForgeResource):
             return {"error": "workspace membership update failed"}, 500
 
     @token_required
+    @require_role("system:admin")
     def delete(self, workspace_id: str, membership_id: int):
         try:
             _require_admin()

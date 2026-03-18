@@ -8,6 +8,7 @@ from flask_restx import fields
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import require_user_id, extract_workspace_id
 from app.routes.planner_extract import planner_ns
@@ -52,6 +53,7 @@ next_actions_request_model = planner_ns.model(
 @planner_ns.route("/plan_domain")
 class PlannerPlanDomain(ForgeResource):
     @token_required
+    @require_access("planner")
     @planner_ns.expect(plan_domain_request_model, validate=False)
     def post(self):
         body: Dict[str, Any] = {}
@@ -97,6 +99,7 @@ class PlannerPlanDomain(ForgeResource):
 @planner_ns.route("/plan_domain/profile/<string:trace_id>")
 class PlannerPlanDomainProfile(ForgeResource):
     @token_required
+    @require_access("planner")
     def get(self, trace_id: str):
         try:
             workspace_id = extract_workspace_id()
@@ -117,6 +120,7 @@ class PlannerPlanDomainProfile(ForgeResource):
 @planner_ns.route("/plan_domain/next_actions")
 class PlannerPlanDomainNextActions(ForgeResource):
     @token_required
+    @require_access("planner")
     @planner_ns.expect(next_actions_request_model, validate=False)
     def post(self):
         try:

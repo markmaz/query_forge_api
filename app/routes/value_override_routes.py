@@ -12,6 +12,7 @@ from app.routes.forge_resource import ForgeResource
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
 from app.routes.request_helpers import require_user_id
@@ -172,6 +173,7 @@ def _validate_value_override_type(value_override_type: str) -> str:
 @value_override_ns.route("")
 class ValueOverrideIndex(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         """
         GET /value_overrides
@@ -195,6 +197,7 @@ class ValueOverrideIndex(ForgeResource):
 @value_override_ns.route("/<string:value_override_type>/<string:list_id>/preview")
 class ValueOverridePreview(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self, value_override_type: str, list_id: str):
         """
         GET /value_overrides/<type>/<list_id>/preview?limit=100&offset=0
@@ -227,6 +230,7 @@ class ValueOverridePreview(ForgeResource):
 @value_override_ns.route("/visibility")
 class ValueOverrideVisibility(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         """
         GET /value_overrides/visibility?qf_include_expired=1
@@ -259,6 +263,7 @@ class ValueOverrideVisibility(ForgeResource):
 @value_override_ns.route("/<string:value_override_type>/uploads")
 class ValueOverrideUpload(ForgeResource):
     @token_required
+    @require_access("catalog")
     def post(self, value_override_type: str):
         """
         POST /value_overrides/<type>/uploads
@@ -306,6 +311,7 @@ class ValueOverrideUpload(ForgeResource):
 @value_override_ns.route("/templates/<string:value_override_type>")
 class ValueOverrideTemplateDownload(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self, value_override_type: str):
         """
         GET /value_overrides/templates/<type>
@@ -342,6 +348,7 @@ class ValueOverrideTemplateDownload(ForgeResource):
 @value_override_ns.route("/<string:value_override_type>/<string:list_id>")
 class ValueOverrideDetail(ForgeResource):
     @token_required
+    @require_access("catalog")
     def patch(self, value_override_type: str, list_id: str):
         """
         PATCH /value_overrides/<type>/<list_id>
@@ -373,6 +380,7 @@ class ValueOverrideDetail(ForgeResource):
             return {"error": "ValueOverride share update failed"}, 500
 
     @token_required
+    @require_access("catalog")
     def delete(self, value_override_type: str, list_id: str):
         if value_override_type not in ("regions", "npiCategories", "serviceLines"):
             return {"error": "Invalid value_override_type"}, 400

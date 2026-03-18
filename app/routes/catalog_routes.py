@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from app.adapters.mysql_sql_executor import engine
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.services.catalog.catalog_context import CatalogContextBuilder
 from app.services.catalog.catalog_pipeline_service import CatalogPipelineService
@@ -49,6 +50,7 @@ def _to_int(value: str | None, *, default: int) -> int:
 @catalog_ns.route("/samples")
 class CatalogSamples(ForgeResource):
     @token_required
+    @require_access("catalog", role="admin")
     def post(self):
         try:
             workspace_id = _workspace_id()
@@ -83,6 +85,7 @@ class CatalogSamples(ForgeResource):
 @catalog_ns.route("/table-sample")
 class CatalogTableSample(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         try:
             workspace_id = _workspace_id()
@@ -131,6 +134,7 @@ LIMIT 1
 @catalog_ns.route("/sync")
 class CatalogSync(ForgeResource):
     @token_required
+    @require_access("catalog", role="admin")
     def post(self):
         try:
             workspace_id = _workspace_id()
@@ -155,6 +159,7 @@ class CatalogSync(ForgeResource):
 @catalog_ns.route("/recon")
 class CatalogRecon(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         try:
             workspace_id = _workspace_id()
@@ -178,6 +183,7 @@ class CatalogRecon(ForgeResource):
 @catalog_ns.route("/recon/counts")
 class CatalogReconCounts(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         try:
             workspace_id = _workspace_id()
@@ -192,6 +198,7 @@ class CatalogReconCounts(ForgeResource):
 @catalog_ns.route("/unmapped-tables")
 class CatalogUnmappedTables(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         try:
             workspace_id = _workspace_id()

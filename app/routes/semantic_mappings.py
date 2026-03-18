@@ -8,6 +8,7 @@ from flask_restx import Namespace, fields
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import int_arg
 from app.services.semantic.semantic_mapping_service import SemanticMappingService
@@ -42,6 +43,7 @@ semantic_mapping_model = semantic_mappings_ns.model(
 @semantic_mappings_ns.route("")
 class SemanticMappingsCollection(ForgeResource):
     @token_required
+    @require_access("semantic")
     @semantic_mappings_ns.doc(
         params={
             "vertical": "Filter by vertical scope",
@@ -76,6 +78,7 @@ class SemanticMappingsCollection(ForgeResource):
             return {"error": "semantic mappings list failed"}, 500
 
     @token_required
+    @require_access("semantic", role="admin")
     @semantic_mappings_ns.expect(semantic_mapping_model, validate=False)
     def post(self):
         try:
@@ -92,6 +95,7 @@ class SemanticMappingsCollection(ForgeResource):
 @semantic_mappings_ns.route("/<int:mapping_id>")
 class SemanticMappingsById(ForgeResource):
     @token_required
+    @require_access("semantic", role="admin")
     def delete(self, mapping_id: int):
         try:
             SemanticMappingService().delete_mapping(mapping_id)

@@ -9,6 +9,7 @@ from app.routes.forge_resource import ForgeResource
 
 from app.config import QF_FORGE_INSIGHTS_ENABLED, QF_MINIMAL_CHAT_ENABLED
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import require_user_id, extract_workspace_id, int_arg
 from app.services.chat import ForgeInsightsChatService, ForgeInsightsRouterService, MinimalChatService
@@ -41,6 +42,7 @@ _chat_request_model = chat_ns.model(
 @chat_ns.route("/minimal")
 class MinimalChatRoute(ForgeResource):
     @token_required
+    @require_access("ai")
     @chat_ns.expect(_chat_request_model, validate=False)
     def post(self):
         try:
@@ -129,6 +131,7 @@ def _validate_forge_insights_enabled() -> None:
 @chat_ns.route("/forge-insights")
 class ForgeInsightsChatRoute(ForgeResource):
     @token_required
+    @require_access("forge_insights")
     @chat_ns.expect(_chat_request_model, validate=False)
     def post(self):
         try:
@@ -158,6 +161,7 @@ class ForgeInsightsChatRoute(ForgeResource):
 @chat_ns.route("/forge-insights/conversations")
 class ForgeInsightsConversationListRoute(ForgeResource):
     @token_required
+    @require_access("forge_insights")
     def get(self):
         try:
             _validate_forge_insights_enabled()
@@ -180,6 +184,7 @@ class ForgeInsightsConversationListRoute(ForgeResource):
 @chat_ns.route("/forge-insights/conversations/<string:conversation_id>")
 class ForgeInsightsConversationDetailRoute(ForgeResource):
     @token_required
+    @require_access("forge_insights")
     def get(self, conversation_id: str):
         try:
             _validate_forge_insights_enabled()
@@ -198,6 +203,7 @@ class ForgeInsightsConversationDetailRoute(ForgeResource):
             return {"error": "forge insights get conversation failed"}, 500
 
     @token_required
+    @require_access("forge_insights")
     def delete(self, conversation_id: str):
         try:
             _validate_forge_insights_enabled()

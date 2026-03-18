@@ -8,6 +8,7 @@ from flask_restx import Namespace, fields
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.nlp.tier2_spacy.pipeline import run_tier2_with_meta
 from app.routes.request_helpers import extract_workspace_id
@@ -29,6 +30,7 @@ parse_model = nlp_tier2_ns.model(
 @nlp_tier2_ns.route("/tier2/parse")
 class Tier2Parse(ForgeResource):
     @token_required
+    @require_access("ai")
     @nlp_tier2_ns.expect(parse_model, validate=False)
     def post(self):
         try:

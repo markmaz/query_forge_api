@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from app.adapters.mysql_sql_executor import engine
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access, require_admin
 from app.exceptions.forge_error import ForgeError
 from app.routes.user_routes import user_model
 from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
@@ -58,6 +59,7 @@ def _int_arg(name: str, default: int) -> int:
 class Workspaces(ForgeResource):
     @workspace_ns.marshal_list_with(workspace_model)
     @token_required
+    @require_access("workspaces")
     def get(self):
         logger.info("Get all workspaces")
         return _workspace_service().get_all_workspaces()
@@ -68,6 +70,7 @@ class WorkSpaceDetails(ForgeResource):
     @workspace_ns.marshal_list_with(workspace_model)
     @workspace_ns.doc(params={"workspace_id": "The ID of the workspace to fetch"})
     @token_required
+    @require_access("workspaces")
     def get(self, workspace_id: str):
         return _workspace_service().get_workspace(workspace_id)
 
@@ -77,6 +80,7 @@ class WorkspaceUsers(ForgeResource):
     @workspace_ns.marshal_list_with(user_model)
     @workspace_ns.doc(params={"workspace_id": "The ID of the workspace"})
     @token_required
+    @require_admin()
     def get(self, workspace_id: str):
         return _workspace_service().get_workspace_users_from_dbx(workspace_id)
 
@@ -85,6 +89,7 @@ class WorkspaceUsers(ForgeResource):
 @workspace_ns.route("/<string:workspace_id>/namespaces")
 class WorkspaceNamespaces(ForgeResource):
     @token_required
+    @require_access("workspaces")
     def get(self, workspace_id: str):
         try:
             catalog_name = (request.args.get("catalog_name") or "").strip() or None
@@ -143,6 +148,7 @@ class WorkspaceNamespaces(ForgeResource):
 @workspace_ns.route("/users")
 class GetWorkspaceUsersFromSystem(ForgeResource):
     @token_required
+    @require_admin()
     def get(self):
         try:
             rows = WorkspaceUserReadService().list_workspace_users(
@@ -163,6 +169,7 @@ class GetWorkspaceUsersFromSystem(ForgeResource):
 @workspace_ns.route("/<string:workspace_id>/external-links")
 class WorkspaceExternalLinks(ForgeResource):
     @token_required
+    @require_access("workspaces")
     def get(self, workspace_id: str):
         try:
             user_id = str(getattr(g, "user_id", "") or "").strip()

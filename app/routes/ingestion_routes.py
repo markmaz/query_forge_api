@@ -13,6 +13,7 @@ from flask_restx import Namespace, fields
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import QF_INGESTION_STALE_GUARD_ENABLED, QF_INGESTION_STALE_SECONDS
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access, require_role
 from app.routes.forge_resource import ForgeResource
 from app.services.analytics.metadata_provider_factory import MetadataProviderFactory
 from app.tasks.ingestion_tasks import (
@@ -276,6 +277,7 @@ class IngestionSync(ForgeResource):
     @ingestion_ns.response(401, "Unauthorised")
     @ingestion_ns.response(403, "Forbidden — admin role required")
     @token_required
+    @require_access("ingestion", role="admin")
     def post(self):
         # Admin-only: triggering a full metadata sync is a privileged operation.
         if not bool(getattr(g, "is_admin", False)):
@@ -398,6 +400,7 @@ class IngestionStatus(ForgeResource):
     @ingestion_ns.response(404, "Not found")
     @ingestion_ns.response(403, "Forbidden")
     @token_required
+    @require_access("ingestion", role="admin")
     def get(self, job_id: str):
         mysql = ForgeMetaSQL()
         with mysql.transaction() as tx:
@@ -419,6 +422,7 @@ class IngestionDiagnostics(ForgeResource):
     @ingestion_ns.response(403, "Forbidden — admin role required")
     @ingestion_ns.response(404, "Not found")
     @token_required
+    @require_access("ingestion", role="admin")
     def get(self, job_id: str):
         if not bool(getattr(g, "is_admin", False)):
             return {"error": "Admin role required"}, 403
@@ -444,6 +448,7 @@ class IngestionCancel(ForgeResource):
     @ingestion_ns.response(403, "Forbidden — admin role required")
     @ingestion_ns.response(404, "Not found")
     @token_required
+    @require_access("ingestion", role="admin")
     def post(self, job_id: str):
         if not bool(getattr(g, "is_admin", False)):
             return {"error": "Admin role required"}, 403
@@ -514,6 +519,7 @@ class IngestionHistory(ForgeResource):
     @ingestion_ns.response(200, "Recent runs", [_run_model])
     @ingestion_ns.response(403, "Forbidden")
     @token_required
+    @require_access("ingestion", role="admin")
     def get(self):
         mysql = ForgeMetaSQL()
         with mysql.transaction() as tx:
@@ -527,6 +533,7 @@ class IngestionHistory(ForgeResource):
 class IngestionSchemas(ForgeResource):
 
     @token_required
+    @require_access("ingestion", role="admin")
     @ingestion_ns.doc(
         "list_schemas",
         params={

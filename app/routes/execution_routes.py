@@ -8,6 +8,7 @@ from flask_restx import Namespace
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import extract_workspace_id
 from app.services.execution_service import ExecutionService
@@ -44,6 +45,7 @@ def _json_payload() -> Dict[str, Any]:
 @executions_ns.route("/start")
 class ExecutionStart(ForgeResource):
     @token_required
+    @require_access("exports")
     def post(self):
         def handler():
             workspace_id = extract_workspace_id()
@@ -57,6 +59,7 @@ class ExecutionStart(ForgeResource):
 @executions_ns.route("/<string:job_id>/status")
 class ExecutionStatus(ForgeResource):
     @token_required
+    @require_access("exports")
     def get(self, job_id: str):
         def handler():
             return _service().status(extract_workspace_id(), job_id)
@@ -67,6 +70,7 @@ class ExecutionStatus(ForgeResource):
 @executions_ns.route("/<string:job_id>/cancel")
 class ExecutionCancel(ForgeResource):
     @token_required
+    @require_access("exports")
     def post(self, job_id: str):
         def handler():
             return _service().cancel(extract_workspace_id(), job_id)
@@ -77,6 +81,7 @@ class ExecutionCancel(ForgeResource):
 @executions_ns.route("/<string:job_id>/results")
 class ExecutionResults(ForgeResource):
     @token_required
+    @require_access("exports")
     def get(self, job_id: str):
         def handler():
             return _service().results(extract_workspace_id(), job_id)

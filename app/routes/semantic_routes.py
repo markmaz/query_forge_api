@@ -8,6 +8,7 @@ from flask_restx import Namespace, fields
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import extract_workspace_id
 from app.services.semantic.plan_service import PlanService
@@ -34,6 +35,7 @@ plan_request_model = semantic_ns.model(
 @semantic_ns.route("/plan")
 class SemanticPlan(ForgeResource):
     @token_required
+    @require_access("semantic")
     @semantic_ns.expect(plan_request_model, validate=False)
     def post(self):
         try:
@@ -51,6 +53,7 @@ class SemanticPlan(ForgeResource):
 @semantic_ns.route("/suggest-columns")
 class SemanticSuggestColumns(ForgeResource):
     @token_required
+    @require_access("semantic")
     @semantic_ns.expect(plan_request_model, validate=False)
     def post(self):
         try:

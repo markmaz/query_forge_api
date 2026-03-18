@@ -7,6 +7,7 @@ from flask_restx import Namespace, fields
 
 from app.constants.llm_roles import LLMProvider, LLMRole
 from app.decorators.security import token_required
+from app.decorators.rbac import require_admin
 from app.exceptions.forge_error import ForgeError
 from app.routes.forge_resource import ForgeResource
 from app.services.tenancy.workspace_llm_service import WorkspaceLLMService
@@ -35,6 +36,7 @@ _llm_create_model = workspace_llm_ns.model(
 @llm_roles_ns.route("")
 class LLMRolesList(ForgeResource):
     @token_required
+    @require_admin()
     def get(self):
         return [
             {"value": role, "label": LLMRole.DISPLAY_NAMES.get(role, role)}
@@ -45,6 +47,7 @@ class LLMRolesList(ForgeResource):
 @llm_providers_ns.route("")
 class LLMProvidersList(ForgeResource):
     @token_required
+    @require_admin()
     def get(self):
         return [
             {"value": provider, "label": LLMProvider.DISPLAY_NAMES.get(provider, provider)}
@@ -55,6 +58,7 @@ class LLMProvidersList(ForgeResource):
 @workspace_llm_ns.route("/workspaces/<string:workspace_id>/llms")
 class WorkspaceLLMList(ForgeResource):
     @token_required
+    @require_admin()
     def get(self, workspace_id: str):
         try:
             svc = WorkspaceLLMService()
@@ -67,6 +71,7 @@ class WorkspaceLLMList(ForgeResource):
 
     @workspace_llm_ns.expect(_llm_create_model)
     @token_required
+    @require_admin()
     def post(self, workspace_id: str):
         body = request.get_json(silent=True) or {}
         try:
@@ -85,6 +90,7 @@ class WorkspaceLLMList(ForgeResource):
 @workspace_llm_ns.route("/workspaces/<string:workspace_id>/llms/<int:llm_id>")
 class WorkspaceLLMDetail(ForgeResource):
     @token_required
+    @require_admin()
     def get(self, workspace_id: str, llm_id: int):
         try:
             svc = WorkspaceLLMService()
@@ -97,6 +103,7 @@ class WorkspaceLLMDetail(ForgeResource):
             return {"error": "Failed to get workspace LLM"}, 500
 
     @token_required
+    @require_admin()
     def put(self, workspace_id: str, llm_id: int):
         body = request.get_json(silent=True) or {}
         try:
@@ -113,6 +120,7 @@ class WorkspaceLLMDetail(ForgeResource):
             return {"error": "Failed to update workspace LLM"}, 500
 
     @token_required
+    @require_admin()
     def delete(self, workspace_id: str, llm_id: int):
         try:
             svc = WorkspaceLLMService()
@@ -131,6 +139,7 @@ class WorkspaceLLMDetail(ForgeResource):
 @workspace_llm_ns.route("/workspaces/<string:workspace_id>/llms/<int:llm_id>/test")
 class WorkspaceLLMTest(ForgeResource):
     @token_required
+    @require_admin()
     def post(self, workspace_id: str, llm_id: int):
         try:
             svc = WorkspaceLLMService()

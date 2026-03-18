@@ -7,6 +7,7 @@ from flask_restx import Namespace
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.services.embedding.domain_embedding_service import DomainEmbeddingService
 from app.services.embedding.embedding_index_service import EmbeddingIndexService
@@ -68,6 +69,7 @@ def _parse_model_table_id(value):
 @embeddings_ns.route("/rebuild")
 class EmbeddingsRebuild(ForgeResource):
     @token_required
+    @require_access("vector", role="admin")
     def post(self):
         body = request.get_json(silent=True) or {}
         include_tables = _parse_bool(body.get("includeTables"), True)
@@ -92,6 +94,7 @@ class EmbeddingsRebuild(ForgeResource):
 @embeddings_ns.route("/search")
 class EmbeddingsSearch(ForgeResource):
     @token_required
+    @require_access("vector")
     def post(self):
         body = request.get_json(silent=True) or {}
         query = (body.get("query") or "").strip()
@@ -132,6 +135,7 @@ class EmbeddingsSearch(ForgeResource):
 @embeddings_ns.route("/domains/upsert")
 class EmbeddingsDomainUpsert(ForgeResource):
     @token_required
+    @require_access("vector", role="admin")
     def post(self):
         body = request.get_json(silent=True) or {}
         workspace_id = (body.get("workspace_id") or "").strip()
@@ -153,6 +157,7 @@ class EmbeddingsDomainUpsert(ForgeResource):
 @embeddings_ns.route("/columns/upsert")
 class EmbeddingsColumnUpsert(ForgeResource):
     @token_required
+    @require_access("vector", role="admin")
     def post(self):
         body = request.get_json(silent=True) or {}
         workspace_id = (body.get("workspace_id") or body.get("workspaceId") or "").strip()

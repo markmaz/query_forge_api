@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from app.config import QF_PROMPT_FEEDBACK_MAX_PAYLOAD_BYTES
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.models.query.prompt_feedback_schema import PromptFeedbackRequest, PromptFeedbackResponse
 from app.routes.request_helpers import require_user_id, extract_workspace_id
@@ -47,6 +48,7 @@ _prompt_feedback_request_model = prompt_feedback_ns.model(
 @prompt_feedback_ns.route("")
 class PromptFeedback(ForgeResource):
     @token_required
+    @require_access("ai")
     @prompt_feedback_ns.expect(_prompt_feedback_request_model, validate=False)
     def post(self):
         try:

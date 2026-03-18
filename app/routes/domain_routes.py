@@ -8,6 +8,7 @@ from flask_restx import Namespace
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access, require_admin
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import require_user_id
 from app.services.domain.builder_column_feed_service import BuilderColumnFeedService, BuilderFeedQuery
@@ -79,6 +80,7 @@ def _run(handler: Callable[[], Tuple[Any, int]], *, log_message: str, client_err
 @qf_domains_ns.route("/")
 class DomainsRoot(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         def handler() -> Tuple[Any, int]:
             rows = UserDomainReadService().list_user_domains(
@@ -90,6 +92,7 @@ class DomainsRoot(ForgeResource):
         return _run(handler, log_message="Domains fetch failed", client_error="Domains fetch failed")
 
     @token_required
+    @require_access("catalog", role="admin")
     def post(self):
         def handler() -> Tuple[Any, int]:
             workspace_id = _workspace_id()
@@ -110,6 +113,7 @@ class DomainsRoot(ForgeResource):
 @qf_domains_ns.route("/<int:domain_id>")
 class DomainById(ForgeResource):
     @token_required
+    @require_access("catalog", role="admin")
     def patch(self, domain_id: int):
         def handler() -> Tuple[Any, int]:
             body = _json_body_dict()
@@ -132,6 +136,7 @@ class DomainById(ForgeResource):
         )
 
     @token_required
+    @require_access("catalog", role="admin")
     def delete(self, domain_id: int):
         def handler() -> Tuple[Any, int]:
             res = DomainAdminWriteService().delete_domain(
@@ -151,6 +156,7 @@ class DomainById(ForgeResource):
 @qf_domains_ns.route("/column-sample")
 class ColumnSample(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         def handler() -> Tuple[Any, int]:
             workspace_table_id = (request.args.get("workspace_table_id") or "").strip()
@@ -176,6 +182,7 @@ class ColumnSample(ForgeResource):
 @qf_domains_ns.route("/workspace-tables")
 class WorkspaceTables(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         def handler() -> Tuple[Any, int]:
             rows = DomainTableReadService().list_workspace_tables(
@@ -196,6 +203,7 @@ class WorkspaceTables(ForgeResource):
 @qf_domains_ns.route("/<int:domain_id>/tables")
 class DomainTables(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self, domain_id: int):
         def handler() -> Tuple[Any, int]:
             rows = DomainTableReadService().list_domain_tables(
@@ -211,6 +219,7 @@ class DomainTables(ForgeResource):
         )
 
     @token_required
+    @require_access("catalog", role="admin")
     def post(self, domain_id: int):
         def handler() -> Tuple[Any, int]:
             body = _json_body_dict()
@@ -262,6 +271,7 @@ class DomainTables(ForgeResource):
 @qf_domains_ns.route("/<int:domain_id>/tables/<int:workspace_table_id>/primary")
 class DomainPrimaryTable(ForgeResource):
     @token_required
+    @require_access("catalog", role="admin")
     def patch(self, domain_id: int, workspace_table_id: int):
         def handler() -> Tuple[Any, int]:
             payload = _json_body_dict()
@@ -285,6 +295,7 @@ class DomainPrimaryTable(ForgeResource):
 @qf_domains_ns.route("/<int:domain_id>/joins")
 class DomainJoins(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self, domain_id: int):
         def handler() -> Tuple[Any, int]:
             rows = DomainJoinService().list_domain_joins(
@@ -300,6 +311,7 @@ class DomainJoins(ForgeResource):
         )
 
     @token_required
+    @require_access("catalog", role="admin")
     def post(self, domain_id: int):
         def handler() -> Tuple[Any, int]:
             payload = _json_body_dict()
@@ -329,6 +341,7 @@ class DomainJoins(ForgeResource):
 @qf_domains_ns.route("/<int:domain_id>/joins/<string:join_id>")
 class DomainJoin(ForgeResource):
     @token_required
+    @require_access("catalog", role="admin")
     def patch(self, domain_id: int, join_id: str):
         def handler() -> Tuple[Any, int]:
             payload = _json_body_dict()
@@ -356,6 +369,7 @@ class DomainJoin(ForgeResource):
         )
 
     @token_required
+    @require_access("catalog", role="admin")
     def delete(self, domain_id: int, join_id: str):
         def handler() -> Tuple[Any, int]:
             result = DomainJoinService().delete_join(
@@ -375,6 +389,7 @@ class DomainJoin(ForgeResource):
 @qf_domains_ns.route("/<int:domain_id>/users")
 class DomainUsers(ForgeResource):
     @token_required
+    @require_admin()
     def get(self, domain_id: int):
         def handler() -> Tuple[Any, int]:
             rows = UserDomainReadService().list_domain_users(
@@ -390,6 +405,7 @@ class DomainUsers(ForgeResource):
         )
 
     @token_required
+    @require_admin()
     def post(self, domain_id: int):
         def handler() -> Tuple[Any, int]:
             body = _json_body_dict()
@@ -431,6 +447,7 @@ class DomainUsers(ForgeResource):
 @qf_domains_ns.route("/<int:domain_id>/users/<string:tarrequire_user_id>")
 class DomainUserById(ForgeResource):
     @token_required
+    @require_admin()
     def delete(self, domain_id: int, tarrequire_user_id: str):
         def handler() -> Tuple[Any, int]:
             result = DomainUserWriteService().remove_user(
@@ -451,6 +468,7 @@ class DomainUserById(ForgeResource):
 @qf_domains_ns.route("/summary")
 class DomainSummary(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         def handler() -> Tuple[Any, int]:
             sample_size_raw = request.args.get("sample_size") or "2"
@@ -471,6 +489,7 @@ class DomainSummary(ForgeResource):
 @qf_domains_ns.route("/<int:domain_id>/capabilities")
 class DomainCapabilities(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self, domain_id: int):
         def handler() -> Tuple[Any, int]:
             vertical_norm = (request.args.get("vertical_norm") or "generic").strip().lower() or "generic"
@@ -492,6 +511,7 @@ class DomainCapabilities(ForgeResource):
 @qf_domains_ns.route("/<int:domain_id>/overlay-metrics")
 class DomainOverlayMetrics(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self, domain_id: int):
         def handler() -> Tuple[Any, int]:
             vertical_norm = (request.args.get("vertical_norm") or "generic").strip().lower() or "generic"
@@ -513,6 +533,7 @@ class DomainOverlayMetrics(ForgeResource):
 @qf_domains_ns.route("/<int:domain_id>/profile-metrics")
 class DomainProfileMetrics(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self, domain_id: int):
         def handler() -> Tuple[Any, int]:
             payload = DomainProfileMetricConfigService().get_profile_metrics(
@@ -529,6 +550,7 @@ class DomainProfileMetrics(ForgeResource):
         )
 
     @token_required
+    @require_access("catalog", role="admin")
     def put(self, domain_id: int):
         def handler() -> Tuple[Any, int]:
             body = _json_body_dict()
@@ -550,6 +572,7 @@ class DomainProfileMetrics(ForgeResource):
 @qf_domains_ns.route("/<int:domain_id>/time-policy")
 class DomainTimePolicy(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self, domain_id: int):
         def handler() -> Tuple[Any, int]:
             payload = DomainTimePolicyService().get_policy(
@@ -566,6 +589,7 @@ class DomainTimePolicy(ForgeResource):
         )
 
     @token_required
+    @require_access("catalog", role="admin")
     def put(self, domain_id: int):
         def handler() -> Tuple[Any, int]:
             body = _json_body_dict()
@@ -588,6 +612,7 @@ class DomainTimePolicy(ForgeResource):
 @qf_domains_ns.route("/tables")
 class BuilderTables(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         def handler() -> Tuple[Any, int]:
             domain_id_raw = request.args.get("domain_id")
@@ -605,6 +630,7 @@ class BuilderTables(ForgeResource):
 @qf_domains_ns.route("/columns")
 class BuilderColumns(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         def handler() -> Tuple[Any, int]:
             domain_id_raw = request.args.get("domain_id")

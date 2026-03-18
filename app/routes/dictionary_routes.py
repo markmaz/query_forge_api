@@ -9,6 +9,7 @@ from flask_restx import Namespace
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.services.dictionary.dictionary_service import DictionaryService
 
@@ -83,6 +84,7 @@ def _parse_file(file_storage) -> list[dict]:
 @dictionary_ns.route("/tables")
 class DictionaryTables(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         try:
             workspace_id = _workspace_id()
@@ -107,6 +109,7 @@ class DictionaryTables(ForgeResource):
 @dictionary_ns.route("/tables/<int:table_id>")
 class DictionaryTableDetail(ForgeResource):
     @token_required
+    @require_access("catalog", role="admin")
     def patch(self, table_id: int):
         try:
             workspace_id = _workspace_id()
@@ -134,6 +137,7 @@ class DictionaryTableDetail(ForgeResource):
 @dictionary_ns.route("/columns")
 class DictionaryColumns(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         try:
             workspace_id = _workspace_id()
@@ -161,6 +165,7 @@ class DictionaryColumns(ForgeResource):
 @dictionary_ns.route("/columns/search")
 class DictionaryColumnsSearch(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         try:
             workspace_id = _workspace_id()
@@ -188,6 +193,7 @@ class DictionaryColumnsSearch(ForgeResource):
 @dictionary_ns.route("/columns/<int:column_id>")
 class DictionaryColumn(ForgeResource):
     @token_required
+    @require_access("catalog", role="admin")
     def patch(self, column_id: int):
         try:
             workspace_id = _workspace_id()
@@ -228,6 +234,7 @@ class DictionaryColumn(ForgeResource):
 @dictionary_ns.route("/columns/import")
 class DictionaryColumnsImport(ForgeResource):
     @token_required
+    @require_access("catalog", role="admin")
     def post(self):
         try:
             workspace_id = _workspace_id()

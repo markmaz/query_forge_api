@@ -7,6 +7,7 @@ from flask_restx import Namespace, fields
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.models.domain.domain_profile_embedding import (
     DomainProfileGenerateAllRequest,
@@ -53,6 +54,7 @@ _generate_all_model = domain_profile_embeddings_ns.model(
 @domain_profile_embeddings_ns.route("/<int:domain_id>/generate")
 class DomainProfileGenerateOne(ForgeResource):
     @token_required
+    @require_access("vector", role="admin")
     @domain_profile_embeddings_ns.expect(_generate_one_model, validate=False)
     def post(self, domain_id: int):
         try:
@@ -79,6 +81,7 @@ class DomainProfileGenerateOne(ForgeResource):
 @domain_profile_embeddings_ns.route("/generate")
 class DomainProfileGenerateBatch(ForgeResource):
     @token_required
+    @require_access("vector", role="admin")
     @domain_profile_embeddings_ns.expect(_generate_batch_model, validate=False)
     def post(self):
         try:
@@ -105,6 +108,7 @@ class DomainProfileGenerateBatch(ForgeResource):
 @domain_profile_embeddings_ns.route("/generate-all")
 class DomainProfileGenerateAll(ForgeResource):
     @token_required
+    @require_access("vector", role="admin")
     @domain_profile_embeddings_ns.expect(_generate_all_model, validate=False)
     def post(self):
         try:

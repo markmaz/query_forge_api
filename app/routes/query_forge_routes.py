@@ -9,6 +9,7 @@ from flask_restx import Namespace
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import extract_workspace_id, int_arg
 from app.services.domain_resolver import DomainResolver
@@ -78,6 +79,7 @@ def _resolve_analytics_executor(datasource_name: str | None):
 @query_forge_ns.route("/")
 class QueryForgeRun(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def post(self):
         try:
             workspace_id = extract_workspace_id()
@@ -132,6 +134,7 @@ class QueryForgeRun(ForgeResource):
 @query_forge_ns.route("/plan")
 class QueryForgePlan(ForgeResource):
     @token_required
+    @require_access("query_studio")
     def post(self):
         try:
             workspace_id = extract_workspace_id()

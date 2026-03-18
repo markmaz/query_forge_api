@@ -1,7 +1,102 @@
 # Backend Agent Audit
 
 ## Date
-2026-03-17 (last updated)
+2026-03-18 (last updated)
+
+---
+
+## Task 7 — RBAC decorator retrofit, Groups 10–17 (2026-03-18)
+
+### Files Changed
+- `app/routes/planner_domain.py` — added `require_access`; applied `@require_access("planner")` to PlannerPlanDomain.post, PlannerPlanDomainProfile.get, PlannerPlanDomainNextActions.post (3 methods)
+- `app/routes/planner_llm.py` — added `require_access`; applied `@require_access("planner")` to PlannerPlanLLM.post (1 method)
+- `app/routes/planner_extract.py` — added `require_access`; applied `@require_access("planner")` to PlannerExtract.post (1 method)
+- `app/routes/ai.py` — added `require_access, public`; applied `@require_access("ai")` to AISuggest.post, AISuggestSemanticAdapter.post; applied `@public` to AIHealth.get (3 methods)
+- `app/routes/nlp_routes.py` — added `require_access`; applied `@require_access("ai")` to NlpExtract.post, NlpExtractAndSearch.post (2 methods)
+- `app/routes/nlp_tier2.py` — added `require_access`; applied `@require_access("ai")` to Tier2Parse.post (1 method)
+- `app/routes/nlp_review.py` — added `require_access`; applied `@require_access("ai")` to NlpReviewQueue.post; applied `@require_access("ai", role="admin")` to NlpReviewQueue.get, NlpReviewQueueItem.patch, NlpReviewQueueApprove.post, NlpReviewQueueExport.post (5 methods)
+- `app/routes/chat_minimal.py` — added `require_access`; applied `@require_access("ai")` to MinimalChatRoute.post; applied `@require_access("forge_insights")` to ForgeInsightsChatRoute.post, ForgeInsightsConversationListRoute.get, ForgeInsightsConversationDetailRoute.get, ForgeInsightsConversationDetailRoute.delete (5 methods)
+- `app/routes/prompt_feedback.py` — added `require_access`; applied `@require_access("ai")` to PromptFeedback.post (1 method)
+- `app/routes/execution_routes.py` — added `require_access`; applied `@require_access("exports")` to ExecutionStart.post, ExecutionStatus.get, ExecutionCancel.post, ExecutionResults.get (4 methods)
+- `app/routes/export_routes.py` — added `require_access`; applied `@require_access("exports")` to ExcelExport.post, ExcelDownload.get (2 methods)
+- `app/routes/semantic_concepts.py` — added `require_access`; applied `@require_access("semantic")` to all read methods (get); applied `@require_access("semantic", role="admin")` to all write methods (post/patch/delete) across SemanticConceptCollection, SemanticConceptKeyCollection, SemanticConceptById, SemanticConceptSeed, SemanticConceptRebuildIndex, SemanticConceptBackfillPrimaryKeys, SemanticConceptAliasCollection, SemanticConceptAliasById, SemanticValueAliasCollection, SemanticValueAliasById, SemanticConceptColumnMapCollection, SemanticConceptColumnMapById (24 methods)
+- `app/routes/semantic_routes.py` — added `require_access`; applied `@require_access("semantic")` to SemanticPlan.post, SemanticSuggestColumns.post (2 methods)
+- `app/routes/semantic_registry_routes.py` — added `require_access`; applied `@require_access("semantic")` to SemanticRegistryCollection.get, SemanticRegistryById.get; applied `@require_access("semantic", role="admin")` to SemanticRegistryCollection.post, SemanticRegistryById.patch, SemanticRegistryById.delete (5 methods)
+- `app/routes/semantic_registry.py` — added `require_access`; same pattern as semantic_registry_routes.py (5 methods)
+- `app/routes/semantic_mappings.py` — added `require_access`; applied `@require_access("semantic")` to SemanticMappingsCollection.get; applied `@require_access("semantic", role="admin")` to SemanticMappingsCollection.post, SemanticMappingsById.delete (3 methods)
+- `app/routes/semantic_relationships.py` — added `require_access`; applied `@require_access("semantic")` to SemanticRelationshipsCollection.get, SemanticRelationshipConceptLookup.get, SemanticRelationshipsById.get; applied `@require_access("semantic", role="admin")` to SemanticRelationshipsCollection.post, SemanticRelationshipsById.patch, SemanticRelationshipsById.delete (6 methods)
+- `app/routes/semantic_suggestions.py` — added `require_access`; applied `@require_access("semantic", role="admin")` to SuggestionRuns.post, SuggestionRunExecute.post, SuggestionItemById.patch, SuggestionRunApply.post; applied `@require_access("semantic")` to SuggestionRunById.get, SuggestionItems.get (6 methods)
+- `app/routes/ingestion_routes.py` — added `require_access, require_role`; applied `@require_access("ingestion", role="admin")` to IngestionSync.post, IngestionStatus.get, IngestionDiagnostics.get, IngestionCancel.post, IngestionHistory.get, IngestionSchemas.get (6 methods). Note: existing manual `g.is_admin` checks on IngestionSync.post, IngestionDiagnostics.get, IngestionCancel.post, IngestionSchemas.get were preserved.
+- `app/routes/datasource_routes.py` — added `require_role`; applied `@require_role("system:admin")` to DatasourceList.get (1 method)
+- `app/routes/vector_domains.py` — added `require_access`; applied `@require_access("vector")` to DomainVectorSearch.post (1 method)
+- `app/routes/embeddings.py` — added `require_access`; applied `@require_access("vector", role="admin")` to EmbeddingsRebuild.post, EmbeddingsDomainUpsert.post, EmbeddingsColumnUpsert.post; applied `@require_access("vector")` to EmbeddingsSearch.post (4 methods)
+- `app/routes/domain_profile_embeddings.py` — added `require_access`; applied `@require_access("vector", role="admin")` to DomainProfileGenerateOne.post, DomainProfileGenerateBatch.post, DomainProfileGenerateAll.post (3 methods)
+- `app/routes/domain_routes.py` — added `require_access, require_admin`; applied `@require_access("catalog")` to all read methods; applied `@require_access("catalog", role="admin")` to write/mutation methods; applied `@require_admin()` to DomainUsers.get, DomainUsers.post, DomainUserById.delete (28 methods total)
+- `app/routes/workspace_inventory_routes.py` — added `require_access`; applied `@require_access("catalog", role="admin")` to WorkspaceInventorySync.post; applied `@require_access("catalog")` to WorkspaceInventoryUnmapped.get, WorkspaceInventoryRecon.get, WorkspaceInventoryReconCounts.get (4 methods)
+- `app/routes/data_environment.py` — added `require_role`; applied `@require_role("system:admin")` to LLMStart.post, LLMStop.post, LLMStatus.get (3 methods)
+
+### Findings
+- No TODOs needed — all classes/methods from the audit table were present in all files.
+- No classes/methods missing from any file.
+- Decorator order maintained throughout: @token_required (outermost) → @require_access/@require_role/@require_admin/@public → @ns.expect/@ns.doc (Swagger docs).
+- AIHealth.get has no @token_required (correct: public endpoint); @public decorator added above the method.
+- ingestion_routes.py preserves all existing manual `g.is_admin` guard checks alongside the new RBAC decorators (belt-and-suspenders as instructed).
+
+### Completed Work
+- `python3 -m py_compile` passed for all 26 files: ALL GROUPS 10-17 OK
+
+---
+
+## Task 6 — RBAC decorator retrofit, Groups 6–9 (2026-03-18)
+
+### Files Changed
+- `app/routes/skills_routes.py` — added `from app.decorators.ownership import require_ownership`; applied `@require_access("skills", role="admin")` to SkillList.post; applied `@require_access("skills") + @require_ownership("QuerySkill","skill_id","skills:admin",check_read=True)` to SkillDetail.get, SkillExecute.post, SkillExecutionList.get, SkillAlertAcknowledge.post; applied `@require_access("skills", role="admin") + @require_ownership(...)` to SkillDetail.put, SkillDetail.delete, SkillScheduleCreate.post; applied `@require_access("skills")` to SkillScheduleList.get, SkillScheduleUpcoming.get, ScheduleValidate.post; applied `@require_access("skills", role="admin")` to SkillScheduleDetail.put, SchedulerStatus.get. Note: SkillScheduleList (at /schedules) and SkillScheduleDetail (at /schedules/<schedule_id>) have no skill_id URL param so ownership decorator was not applied to those two despite audit table — applied require_access only.
+- `app/routes/destination_routes.py` — added `from app.decorators.rbac import require_access`; applied `@require_access("skills")` to DestinationTypeList.get, DestinationList.get, DestinationDetail.get; applied `@require_access("skills", role="admin")` to DestinationList.post, DestinationDetail.put, DestinationDetail.delete, DestinationTest.post.
+- `app/routes/query_forge_routes.py` — added `from app.decorators.rbac import require_access`; applied `@require_access("query_studio")` to QueryForgeRun.post, QueryForgePlan.post.
+- `app/routes/query_studio_routes.py` — added `from app.decorators.rbac import require_access`; applied `@require_access("query_studio")` to QueryStudioDomains.get, QueryStudioDomainExplorer.get.
+- `app/routes/query_tree_routes.py` — added `from app.decorators.rbac import require_access`; applied `@require_access("query_studio")` to all 23 methods across QueryTree, Folders, FolderRename, FolderMove, FolderDelete, FolderTrash, FolderRestore, FolderPurge, RecentQueries, SavedQueryCreate, SavedQuery (get+patch), SavedQueryMove, SavedQueryDelete, SavedQueryRestore, SavedQueryPurge, SavedQueryShares (get+post+delete).
+- `app/routes/query_analysis_routes.py` — added `from app.decorators.rbac import require_access`; applied `@require_access("query_studio")` to QueryAnalyze.post, QueryAnalyzeInline.post.
+- `app/routes/forge_match_routes.py` — added `from app.decorators.rbac import require_access`; applied `@require_access("forge_match")` to all 12 methods: ForgeMatchSessionList.get, ForgeMatchUpload.post, ForgeMatchAnalyze.post, ForgeMatchAnalyzeStart.post, ForgeMatchAnalyzeStatus.get, ForgeMatchAnalyzeCancel.post, ForgeMatchAnalyzeHistory.get, ForgeMatchSession.get, ForgeMatchMappings.patch, ForgeMatchExport.get, ForgeMatchCreateViewDraft.post, ForgeMatchCreateDomainDraft.post.
+- `app/routes/forge_insights.py` — added `from app.decorators.rbac import require_access`; applied `@require_access("forge_insights")` to all 11 methods across ForgeInsightsProjectsRoute (get+post), ForgeInsightsProjectRoute (get+patch+delete), ForgeInsightsThreadsRoute (get+post), ForgeInsightsThreadRoute (get+patch+delete).
+
+### Findings
+- No TODOs needed — all classes/methods from the audit table were present in the files.
+- SkillScheduleList and SkillScheduleDetail have no skill_id URL param; ownership decorator skipped for these two as it would cause a runtime KeyError. Applied require_access only (consistent with the access control intent).
+- Decorator order maintained throughout: @token_required (outermost) → @require_access → @require_ownership (innermost, skills only) → @ns.expect/@ns.response (Swagger docs).
+
+### Completed Work
+- `python3 -m py_compile` passed for all 8 files: ALL OK groups 6-9
+
+---
+
+## Task 5 — RBAC decorator retrofit, Groups 1–5 (2026-03-18)
+
+### Files Changed
+- `app/routes/auth_routes.py` — added `from app.decorators.rbac import public`; added `@public` to Authenticate.post, Login.post, VerifyTotpChallenge.post, Refresh.post, InviteValidationResource.get, InviteAcceptResource.post, ResetPasswordRequest.post, ResetPasswordValidate.post, ResetPassword.post; added `@token_required` to Logout.post (previously undecorated)
+- `app/routes/otp_routes.py` — added `from app.decorators.rbac import public`; added `@public` to VerifyOTP.post
+- `app/routes/public_sales_inquiry.py` — added `from app.decorators.rbac import public`; added `@public` to SalesInquiry.post
+- `app/routes/user_routes.py` — added `from app.decorators.rbac import require_admin`; added `@require_admin()` to all UserList, UserUpdates, UserWorkspaces, UserDirectRoles, UserDirectRoleById, UserCounts, ResentInvite, BulkInviteUsers methods; UserWorkspaceDashboard.get left as `@token_required` only; added `@token_required` to ProductCounts.get (previously undecorated)
+- `app/routes/user_workspace_routes.py` — added `from app.decorators.rbac import require_admin`; added `@require_admin()` to all 3 UserWorkspaceMap methods
+- `app/routes/role_routes.py` — added `from app.decorators.rbac import require_admin`; added `@require_admin()` to all 4 RoleList/RoleDetails methods
+- `app/routes/workspace_routes.py` — added `from app.decorators.rbac import require_access, require_admin`; added `@require_access("workspaces")` to Workspaces.get, WorkSpaceDetails.get, WorkspaceNamespaces.get, WorkspaceExternalLinks.get; added `@require_admin()` to WorkspaceUsers.get, GetWorkspaceUsersFromSystem.get
+- `app/routes/workspace_table_routes.py` — added `from app.decorators.rbac import require_access`; added `@require_access("workspaces")` to WorkspaceTableColumns.get
+- `app/routes/workspace_llm_routes.py` — added `from app.decorators.rbac import require_admin`; added `@require_admin()` to all 7 methods across LLMRolesList, LLMProvidersList, WorkspaceLLMList, WorkspaceLLMDetail, WorkspaceLLMTest
+- `app/routes/admin_routes.py` — added `from app.decorators.rbac import public, require_role`; added `@public` to ShowHealth.get; added `@require_role("system:admin")` to all other 34 methods
+- `app/routes/version_routes.py` — added `from app.decorators.rbac import public`; added `@public` to VersionInfo.get
+- `app/routes/product_routes.py` — added `from app.decorators.rbac import require_access, require_admin`; mixed decorators per audit table; added `@token_required` + `@require_access("catalog")` to ProductCounts.get (previously undecorated)
+- `app/routes/product_groups_routes.py` — added `from app.decorators.rbac import require_access`; mixed `@require_access("catalog")` / `@require_access("catalog", role="admin")` per audit table
+- `app/routes/value_override_routes.py` — added `from app.decorators.rbac import require_access`; added `@require_access("catalog")` to all 7 methods
+- `app/routes/catalog_routes.py` — added `from app.decorators.rbac import require_access`; mixed `@require_access("catalog")` / `@require_access("catalog", role="admin")` per audit table
+- `app/routes/dictionary_routes.py` — added `from app.decorators.rbac import require_access`; mixed `@require_access("catalog")` / `@require_access("catalog", role="admin")` per audit table
+
+### Findings
+- No classes/methods in the audit table were missing from the actual files — all applied successfully.
+- `ProductCounts.get` and `VerifyTotpChallenge.post` / `Refresh.post` etc. had no `@token_required` currently — handled correctly per decision (public routes got `@public` only; authenticated-but-undecorated route `ProductCounts.get` got `@token_required` added first).
+- `Logout.post` had no `@token_required` but decision was `@token_required only` — decorator added.
+
+### Completed Work
+- `python3 -m py_compile` passed for all 16 files: ALL OK
+- Decorator order maintained throughout: `@token_required` (outermost) → RBAC decorator (innermost)
 
 ---
 

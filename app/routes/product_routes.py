@@ -7,6 +7,7 @@ from flask_restx import Namespace, reqparse
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access, require_admin
 from app.models.tenancy.product import Product
 from app.services.product_service import ProductService
 from app.services.role_service import RoleService
@@ -38,6 +39,7 @@ def _role_service() -> RoleService:
 @product_ns.route("/")
 class ProductList(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         args = _product_query.parse_args()
         products, next_cursor, prev_cursor, total_count = _product_service().get_products(
@@ -54,6 +56,7 @@ class ProductList(ForgeResource):
         }, 200
 
     @token_required
+    @require_access("catalog", role="admin")
     def post(self):
         data = request.get_json(silent=True) or {}
         return _product_service().create_product(
@@ -65,6 +68,8 @@ class ProductList(ForgeResource):
 
 @product_ns.route("/counts")
 class ProductCounts(ForgeResource):
+    @token_required
+    @require_access("catalog")
     def get(self):
         return _product_service().get_counts(), 200
 
@@ -72,14 +77,17 @@ class ProductCounts(ForgeResource):
 @product_ns.route("/<string:product_id>")
 class ProductStandard(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self, product_id: str):
         return _product_service().get_product(product_id).model_dump(mode="json")
 
     @token_required
+    @require_access("catalog", role="admin")
     def delete(self, product_id: str):
         return _product_service().delete(product_id)
 
     @token_required
+    @require_access("catalog", role="admin")
     def put(self, product_id: str):
         payload: dict[str, Any] = request.get_json(force=True) or {}
         updated = _product_service().update_product(product_id, Product(**payload))
@@ -89,11 +97,13 @@ class ProductStandard(ForgeResource):
 @product_ns.route("/<string:product_id>/roles")
 class ProductRoles(ForgeResource):
     @token_required
+    @require_admin()
     def get(self, product_id: str):
         del product_id
         return None
 
     @token_required
+    @require_admin()
     def put(self, product_id: str):
         data = request.get_json(silent=True) or {}
         return _role_service().map_product_to_role(
@@ -105,6 +115,7 @@ class ProductRoles(ForgeResource):
 @product_ns.route("/<string:product_id>/roles/<string:role_id>")
 class DeleteProductRoles(ForgeResource):
     @token_required
+    @require_admin()
     def delete(self, product_id: str, role_id: str):
         return _role_service().remove_role_from_product(product_id, role_id=role_id)
 

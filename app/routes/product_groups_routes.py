@@ -7,6 +7,7 @@ from flask_restx import Namespace
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.services.product_groups_service import ProductGroupService
 
@@ -42,6 +43,7 @@ def _to_json_rows(items: List[Any]) -> List[Dict[str, Any]]:
 @product_group_ns.route("/")
 class ProductGroupList(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         status = (request.args.get("status") or "All").strip() or "All"
         # Keep parser-compatible args available for future service expansion.
@@ -54,6 +56,7 @@ class ProductGroupList(ForgeResource):
         return _to_json_rows(groups)
 
     @token_required
+    @require_access("catalog", role="admin")
     def post(self):
         service = ProductGroupService()
         payload = _safe_body_dict()
@@ -68,12 +71,14 @@ class ProductGroupList(ForgeResource):
 @product_group_ns.route("/<string:product_group_id>")
 class ProductGroupStandard(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self, product_group_id: str):
         service = ProductGroupService()
         product_group = service.get_product_group(product_group_id)
         return product_group.model_dump(mode="json")
 
     @token_required
+    @require_access("catalog", role="admin")
     def delete(self, product_group_id: str):
         service = ProductGroupService()
         return service.delete_product_group(product_group_id)
@@ -82,12 +87,14 @@ class ProductGroupStandard(ForgeResource):
 @product_group_ns.route("/<string:product_group_id>/products/<string:product_id>")
 class ProductGroupMembership(ForgeResource):
     @token_required
+    @require_access("catalog", role="admin")
     def put(self, product_group_id: str, product_id: str):
         service = ProductGroupService()
         mapped = service.add_product_to_group(product_id, product_group_id)
         return mapped.model_dump(mode="json")
 
     @token_required
+    @require_access("catalog", role="admin")
     def delete(self, product_group_id: str, product_id: str):
         service = ProductGroupService()
         removed = service.remove_product_from_group(product_id, product_group_id)

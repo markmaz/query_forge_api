@@ -7,6 +7,7 @@ from flask_restx import Namespace
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
+from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import extract_workspace_id, int_arg
 from app.services.recon.workspace_recon_read_service import WorkspaceReconReadService
@@ -31,6 +32,7 @@ def _recon_service() -> WorkspaceReconReadService:
 @wsinv_ns.route("/sync")
 class WorkspaceInventorySync(ForgeResource):
     @token_required
+    @require_access("catalog", role="admin")
     def post(self):
         try:
             workspace_id = extract_workspace_id()
@@ -55,6 +57,7 @@ class WorkspaceInventorySync(ForgeResource):
 @wsinv_ns.route("/unmapped-tables")
 class WorkspaceInventoryUnmapped(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         try:
             workspace_id = extract_workspace_id()
@@ -76,6 +79,7 @@ class WorkspaceInventoryUnmapped(ForgeResource):
 @wsinv_ns.route("/recon")
 class WorkspaceInventoryRecon(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         try:
             workspace_id = extract_workspace_id()
@@ -103,6 +107,7 @@ class WorkspaceInventoryRecon(ForgeResource):
 @wsinv_ns.route("/recon/counts")
 class WorkspaceInventoryReconCounts(ForgeResource):
     @token_required
+    @require_access("catalog")
     def get(self):
         try:
             workspace_id = extract_workspace_id()

@@ -86,6 +86,26 @@ def token_required(f):
                 user_id=user_id,
                 workspace_id=workspace_id,
             )
+        g.workspace_id = workspace_id or None
+
+        # Pre-load effective roles — graceful: falls back to empty set on any error
+        # (e.g., DB unavailable, tables not yet migrated in test env)
+        try:
+            from app.services.rbac_service import get_effective_roles
+            g.effective_roles = get_effective_roles(user_id)
+            # Backwards compat: token-level is_admin maps to super_admin when
+            # DB has no RBAC rows yet (e.g. pre-migration or test environments)
+            if is_admin and not g.effective_roles:
+                g.effective_roles = {"super_admin"}
+            # Maintain backwards compat: g.is_admin also true if DB roles say so
+            g.is_admin = is_admin or (
+                "super_admin" in g.effective_roles
+                or "workspace_admin" in g.effective_roles
+            )
+        except Exception:
+            # DB unavailable — fall back gracefully, preserving token-level claim
+            g.effective_roles = {"super_admin"} if is_admin else set()
+            g.is_admin = is_admin
 
         return f(*args, **kwargs)
 
