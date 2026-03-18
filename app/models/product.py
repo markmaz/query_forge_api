@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.product_role import ProductRole
+from app.models.role import ProductRole
 
 
 class Product(BaseModel):

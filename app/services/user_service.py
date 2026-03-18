@@ -11,12 +11,12 @@ from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.decorators.validate import validate_params
 from app.exceptions.forge_error import ForgeError
 from app.models.product import Product
-from app.models.product_role import ProductRole
+from app.models.role import ProductRole
 from app.models.role import Role
 from app.models.status_enum import UserStatus
 from app.models.user import User
 from app.models.user_invitation import UserInvitation
-from app.models.user_workspace import Workspace
+from app.models.user_workspace import UserWorkspace
 from app.ports.sql_executor import ForgeQueryPort, ForgeQueryTx
 from app.services.password_service import generate_otp_secret, validate_password_policy
 
@@ -507,7 +507,7 @@ class UserService:
             if not result:
                 return None
             user = self.map_user_with_products(result)
-            user.workspaces = [Workspace(**row) for row in self.get_user_workspaces(str(user.user_id))]
+            user.workspaces = [UserWorkspace(**row) for row in self.get_user_workspaces(str(user.user_id))]
             direct_roles = self._to_role_models(self.get_user_direct_roles(str(user.user_id)))
             user.rbac_roles = direct_roles
             user.rbac_role_ids = [role.role_id for role in direct_roles]
@@ -565,7 +565,7 @@ class UserService:
                 logger.error(f"User not found {user_id}")
                 raise ForgeError("User not found", 404)
             user = self.map_user_with_products(result)
-            user.workspaces = [Workspace(**row) for row in self.get_user_workspaces(str(user.user_id))]
+            user.workspaces = [UserWorkspace(**row) for row in self.get_user_workspaces(str(user.user_id))]
             direct_roles = self._to_role_models(self.get_user_direct_roles(str(user.user_id)))
             user.rbac_roles = direct_roles
             user.rbac_role_ids = [role.role_id for role in direct_roles]
@@ -667,7 +667,7 @@ class UserService:
 
             # Workspaces
             workspaces = [
-                Workspace(workspace_id=row.get("workspace_id"), is_default=bool(row.get("is_default")))
+                UserWorkspace(workspace_id=row.get("workspace_id"), is_default=bool(row.get("is_default")))
                 for row in workspace_map.get(str(uid), [])
             ]
 
@@ -1449,7 +1449,7 @@ class UserService:
         for row in rows:
             org_id = row.get("workspace_id")
             if org_id and org_id not in seen_workspace_ids:
-                workspaces.append(Workspace(
+                workspaces.append(UserWorkspace(
                     workspace_id=org_id,
                     is_default=row.get("is_default", False)
                 ))

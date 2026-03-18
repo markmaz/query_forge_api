@@ -6,11 +6,11 @@ import pytest
 
 from app.exceptions.forge_error import ForgeError
 from app.models.product import Product
-from app.models.product_role import ProductRole
+from app.models.role import ProductRole
 from app.models.role import Role
 from app.models.user import User
 from app.models.user_invitation import UserInvitation
-from app.models.user_workspace import Workspace
+from app.models.user_workspace import UserWorkspace
 from app.services import user_service as user_service_mod
 from app.services.user_service import UserService
 from tests._support.fakes import FakeForgeQueryPort
@@ -157,7 +157,7 @@ def test_create_invite_success(monkeypatch: pytest.MonkeyPatch) -> None:
     invite = UserInvitation(
         email="a@example.com",
         products=[Product(product_id="p1", roles=[ProductRole(product_role_id="r1", role=Role(role_id="r1", role_name="R"))])],
-        workspaces=[Workspace(workspace_id="ws1", is_default=True)],
+        workspaces=[UserWorkspace(workspace_id="ws1", is_default=True)],
     )
     resp = svc.create_invite(invite)
     assert resp["email"] == "a@example.com"

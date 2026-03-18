@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, computed_field
 
 from app.models.product import Product
 from app.models.role import Role
-from app.models.user_workspace import Workspace
+from app.models.user_workspace import UserWorkspace
 
 
 class User(BaseModel):
@@ -21,7 +21,7 @@ class User(BaseModel):
     otp_secret: Optional[str] = None
     two_factor_preference: Optional[str] = "Email"
     products: Optional[List[Product]] = []
-    workspaces: Optional[List[Workspace]] = []
+    workspaces: Optional[List[UserWorkspace]] = []
     rbac_roles: Optional[List[Role]] = []
     rbac_role_ids: Optional[List[str]] = []
     last_log_in: Optional[datetime] = None
