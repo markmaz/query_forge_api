@@ -13,7 +13,6 @@ from app.routes.forge_resource import ForgeResource
 from app.adapters.databricke_workspace_token_manager import DatabricksWorkspaceForgeTokenPort
 from app.adapters.databricks_sql_executor import DatabricksForgeQueryPort
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
-from app.config import DEFAULT_SQL_WAREHOUSE
 from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import require_user_id
@@ -24,7 +23,8 @@ from app.services.value_overrides.list_template_service import ForgeListTemplate
 from app.services.value_overrides.list_upload_service import ForgeListUploadService
 from app.services.value_overrides.list_writer import ForgeListWriter
 from app.services.shared.request_context import resolve_request_username
-from app.services.warehouse_service import WarehouseService
+from app.services.tenancy.datasource_resolver_service import WorkspaceDatasourceResolverService
+from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 from app.services.workspace_service import WorkspaceService
 
 logger = logging.getLogger(__name__)
@@ -154,20 +154,23 @@ def _resolve_workspace_url(workspace_id: str) -> str:
 
 
 def _resolve_default_warehouse_id(workspace_id: str) -> str:
-    wh = WarehouseService().get_warehouse_by_name(
+    resolved = WorkspaceDatasourceResolverService().resolve_for_workspace(
         workspace_id=workspace_id,
-        warehouse_name=DEFAULT_SQL_WAREHOUSE,
+        require_active=True,
     )
-
-    warehouse_id = wh.get("warehouse_id") if isinstance(wh, dict) else getattr(wh, "warehouse_id", None)
-
+    config = dict(resolved.config_json or {})
+    warehouse_id = str(
+        config.get("warehouse_id")
+        or config.get("default_warehouse_id")
+        or WorkspaceSqlContextBuilder._warehouse_from_http_path(config.get("http_path"))
+        or ""
+    ).strip()
     if not warehouse_id:
         raise ForgeError(
-            f"Default warehouse '{DEFAULT_SQL_WAREHOUSE}' not found for workspace '{workspace_id}'",
+            f"Workspace '{workspace_id}' datasource is missing warehouse_id",
             status_code=400,
         )
-
-    return str(warehouse_id)
+    return warehouse_id
 
 
 def _build_databricks_context() -> DatabricksContext:
