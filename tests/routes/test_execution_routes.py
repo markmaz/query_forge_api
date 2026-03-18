@@ -72,7 +72,7 @@ def test_execution_start_status_cancel(client, auth_headers, monkeypatch):
         def build(self, workspace_id: str):
             return _Ctx()
 
-    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+    monkeypatch.setattr(execution_service, "WorkspaceSqlContextBuilder", _Builder)
 
     resp = client.post(
         "/api/v1/executions/start",
@@ -100,7 +100,7 @@ def test_execution_start_validation_error(client, auth_headers, monkeypatch):
         def build(self, workspace_id: str):
             raise AssertionError("Builder should not be called")
 
-    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+    monkeypatch.setattr(execution_service, "WorkspaceSqlContextBuilder", _Builder)
 
     resp = client.post(
         "/api/v1/executions/start",
@@ -117,7 +117,7 @@ def test_execution_status_not_found(client, auth_headers, monkeypatch):
         def build(self, workspace_id: str):
             raise AssertionError("Builder should not be called")
 
-    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+    monkeypatch.setattr(execution_service, "WorkspaceSqlContextBuilder", _Builder)
 
     resp = client.get("/api/v1/executions/missing/status", headers=auth_headers)
     assert resp.status_code == 404
@@ -152,7 +152,7 @@ def test_execution_results_success(client, auth_headers, monkeypatch):
         def build(self, workspace_id: str):
             return _Ctx()
 
-    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+    monkeypatch.setattr(execution_service, "WorkspaceSqlContextBuilder", _Builder)
 
     resp = client.post(
         "/api/v1/executions/start",
@@ -205,7 +205,7 @@ def test_execution_results_running(client, auth_headers, monkeypatch):
         def build(self, workspace_id: str):
             return _Ctx()
 
-    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+    monkeypatch.setattr(execution_service, "WorkspaceSqlContextBuilder", _Builder)
 
     resp = client.post(
         "/api/v1/executions/start",
@@ -239,7 +239,7 @@ def test_execution_results_failed(client, auth_headers, monkeypatch):
         def build(self, workspace_id: str):
             return _Ctx()
 
-    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+    monkeypatch.setattr(execution_service, "WorkspaceSqlContextBuilder", _Builder)
 
     resp = client.post(
         "/api/v1/executions/start",
@@ -288,7 +288,7 @@ def test_execution_start_sql_json(client, auth_headers, monkeypatch):
         def build(self, workspace_id: str):
             return _Ctx()
 
-    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+    monkeypatch.setattr(execution_service, "WorkspaceSqlContextBuilder", _Builder)
     monkeypatch.setattr(execution_service, "QueryForgeService", _NoCodeService)
     monkeypatch.setattr(execution_service, "DomainResolver", lambda workspace_id: object())
 
@@ -316,7 +316,7 @@ def test_execution_start_rejects_raw_sql_fields(client, auth_headers, monkeypatc
         def build(self, workspace_id: str):
             raise AssertionError("Builder should not be called")
 
-    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+    monkeypatch.setattr(execution_service, "WorkspaceSqlContextBuilder", _Builder)
 
     resp = client.post(
         "/api/v1/executions/start",
@@ -350,7 +350,7 @@ def test_execution_status_and_results_use_inline_snapshot_for_sync_adapter(clien
         def build(self, workspace_id: str):
             return _Ctx()
 
-    monkeypatch.setattr(execution_service, "WorkspaceContextBuilder", _Builder)
+    monkeypatch.setattr(execution_service, "WorkspaceSqlContextBuilder", _Builder)
     monkeypatch.setattr(execution_service, "AnalyticsExecutorForgeAdapter", _SqlExec)
 
     start = client.post(

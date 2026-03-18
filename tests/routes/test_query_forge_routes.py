@@ -29,7 +29,7 @@ def test_query_forge_post_success(client, auth_headers, monkeypatch):
                 offset=offset,
             )
 
-    monkeypatch.setattr(query_forge_routes, "WorkspaceContextBuilder", _Builder)
+    monkeypatch.setattr(query_forge_routes, "WorkspaceSqlContextBuilder", _Builder)
     monkeypatch.setattr(query_forge_routes, "QueryForgeService", _Svc)
 
     resp = client.post("/api/v1/query/?mode=preview", headers=auth_headers, json={"version": 1})
@@ -48,7 +48,7 @@ def test_query_forge_invalid_body(client, auth_headers, monkeypatch):
         def build(self, workspace_id: str):
             return _Ctx()
 
-    monkeypatch.setattr(query_forge_routes, "WorkspaceContextBuilder", _Builder)
+    monkeypatch.setattr(query_forge_routes, "WorkspaceSqlContextBuilder", _Builder)
 
     resp = client.post("/api/v1/query/", headers=auth_headers, json="not-json")
     assert resp.status_code == 400

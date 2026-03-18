@@ -76,7 +76,7 @@ def test_excel_export_blocks_over_limit(client, auth_headers, monkeypatch):
     _install_nocode_compile(monkeypatch)
     monkeypatch.setattr(
         export_routes,
-        "WorkspaceContextBuilder",
+        "WorkspaceSqlContextBuilder",
         lambda: _Builder(QF_EXCEL_MAX_ROWS + 5, [{"a": 1}]),
     )
 
@@ -99,7 +99,7 @@ def test_excel_export_allows_under_limit(client, auth_headers, monkeypatch):
     _install_nocode_compile(monkeypatch)
     monkeypatch.setattr(
         export_routes,
-        "WorkspaceContextBuilder",
+        "WorkspaceSqlContextBuilder",
         lambda: _Builder(2, [{"a": 1}, {"a": 2}]),
     )
 
@@ -130,7 +130,7 @@ def test_excel_export_download_requires_auth(client, auth_headers, monkeypatch):
     _install_nocode_compile(monkeypatch)
     monkeypatch.setattr(
         export_routes,
-        "WorkspaceContextBuilder",
+        "WorkspaceSqlContextBuilder",
         lambda: _Builder(1, [{"a": 1}]),
     )
 
@@ -152,7 +152,7 @@ def test_excel_export_download_wrong_workspace(client, auth_headers, monkeypatch
     _install_nocode_compile(monkeypatch)
     monkeypatch.setattr(
         export_routes,
-        "WorkspaceContextBuilder",
+        "WorkspaceSqlContextBuilder",
         lambda: _Builder(1, [{"a": 1}]),
     )
 

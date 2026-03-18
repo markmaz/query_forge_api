@@ -19,7 +19,7 @@ from app.services.nlp.dictionary_ner import extract_signals as extract_dictionar
 from app.services.nlp.ed_ner import extract_signals as extract_ed_signals
 from app.services.nlp.nlp_to_vector import build_vector_search_request
 from app.services.query_forge_service import QueryForgeService
-from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
+from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 
 logger = logging.getLogger(__name__)
 query_forge_ns = Namespace("query", description="Query Forge query")
@@ -94,7 +94,7 @@ class QueryForgeRun(ForgeResource):
             if not isinstance(raw, dict):
                 raise ForgeError("Invalid JSON body", status_code=400)
 
-            ctx = WorkspaceContextBuilder().build(workspace_id)
+            ctx = WorkspaceSqlContextBuilder().build(workspace_id)
             domain_resolver = DomainResolver(workspace_id=workspace_id)
 
             # Determine which SQL executor to use for analytics query execution.

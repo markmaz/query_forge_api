@@ -38,7 +38,7 @@ class CatalogContext:
     sql_exec: ForgeQueryPort
 
 
-class WorkspaceContextBuilder:
+class WorkspaceSqlContextBuilder:
     """
     Mirrors your ValueOverride pattern, but for catalog admin.
     """

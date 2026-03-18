@@ -161,13 +161,13 @@ def _run_execute(
 def _execute_skill_query(*, workspace_id: str, query_id: str):
     """
     Execute the saved query and return (rows, columns).
-    Seam: ForgeMetaSQL -> saved_query.sql_json -> WorkspaceContextBuilder -> QueryForgeService
+    Seam: ForgeMetaSQL -> saved_query.sql_json -> WorkspaceSqlContextBuilder -> QueryForgeService
     """
     import json
     from app.adapters.mysql_sql_executor import ForgeMetaSQL
     from app.services.domain_resolver import DomainResolver
     from app.services.query_forge_service import QueryForgeService
-    from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
+    from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 
     sql = ForgeMetaSQL()
     rows_q = sql.execute_query_mappings(
@@ -184,7 +184,7 @@ def _execute_skill_query(*, workspace_id: str, query_id: str):
         sql_json = json.loads(sql_json)
     sql_json = sql_json or {}
 
-    ctx = WorkspaceContextBuilder().build(workspace_id)
+    ctx = WorkspaceSqlContextBuilder().build(workspace_id)
     svc = QueryForgeService(
         executor=ctx.sql_exec,
         domain_resolver=DomainResolver(workspace_id=workspace_id),

@@ -17,7 +17,7 @@ from app.exceptions.forge_error import ForgeError
 from app.models.warehouse import Warehouse
 from app.routes.user_routes import user_model
 from app.services.warehouse_service import WarehouseService
-from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
+from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 from app.services.workspace_access_service import WorkspaceAccessService
 from app.services.workspace_service import WorkspaceService
 from app.services.workspace_user_read_service import WorkspaceUserReadService
@@ -170,7 +170,7 @@ class WorkspaceNamespaces(ForgeResource):
             if catalog_name and not re.match(r"^[A-Za-z0-9_]+$", catalog_name):
                 raise ForgeError("Invalid catalog_name", status_code=400)
 
-            sql_exec = WorkspaceContextBuilder().build(workspace_id).sql_exec
+            sql_exec = WorkspaceSqlContextBuilder().build(workspace_id).sql_exec
 
             catalogs: list[str] = []
             try:

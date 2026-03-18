@@ -27,7 +27,7 @@ from app.services.exports.export_policy import (
 )
 from app.services.query_forge_service import QueryForgeService
 from app.services.sql_guard_service import assert_no_disallowed_client_sql_fields, assert_read_only_sql_statement
-from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
+from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 
 logger = logging.getLogger(__name__)
 exports_ns = Namespace("exports", description="Exports")
@@ -121,7 +121,7 @@ class ExcelExport(ForgeResource):
             if not isinstance(sql_json, dict):
                 raise ForgeError("sqlJson must be an object", status_code=400)
 
-            ctx = WorkspaceContextBuilder().build(workspace_id)
+            ctx = WorkspaceSqlContextBuilder().build(workspace_id)
             domain_resolver = DomainResolver(workspace_id=workspace_id)
             svc = QueryForgeService(executor=ctx.sql_exec, domain_resolver=domain_resolver)
             normalized = svc.normalize(sql_json)
@@ -202,7 +202,7 @@ class ExcelDownload(ForgeResource):
 
             assert_read_only_sql_statement(sql, context="Stored export SQL statement")
 
-            ctx = WorkspaceContextBuilder().build(workspace_id)
+            ctx = WorkspaceSqlContextBuilder().build(workspace_id)
             data_resp = ctx.sql_exec.submit_statement(
                 sql,
                 parameters=params,

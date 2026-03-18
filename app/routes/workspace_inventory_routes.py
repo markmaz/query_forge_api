@@ -12,7 +12,7 @@ from app.routes.request_helpers import extract_workspace_id, int_arg
 from app.services.recon.workspace_recon_read_service import WorkspaceReconReadService
 from app.services.recon.workspace_recon_service import ReconQuery, WorkspaceReconService
 from app.services.workspace_inventory.unmapped_workspace_tables_read_service import UnmappedWorkspaceTablesReadService
-from app.services.workspace_inventory.workspace_context import WorkspaceContextBuilder
+from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 from app.services.workspace_inventory.workspace_inventory_pipeline_service import WorkspacePipelineService
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ class WorkspaceInventorySync(ForgeResource):
     def post(self):
         try:
             workspace_id = extract_workspace_id()
-            context = WorkspaceContextBuilder().build(workspace_id)
+            context = WorkspaceSqlContextBuilder().build(workspace_id)
 
             schema_name = (request.args.get("schema") or "asset").strip()
             catalog_name = (request.args.get("catalog") or "").strip() or None
