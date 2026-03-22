@@ -199,14 +199,17 @@ class TestChecks1To7:
 
     def test_check_workspaces_pass(self):
         session, cfg = _session()
-        body = {"workspaces": [{"id": "ws-1"}]}
+        body = [{"id": "ws-1"}]
         with patch.object(session, "get", return_value=self._ok(body)):
             result = smoke.check_workspaces(session, cfg)
         assert result.status == smoke.Status.PASS
 
     def test_check_workspaces_fail_when_empty(self):
         session, cfg = _session()
-        with patch.object(session, "get", return_value=self._ok({"workspaces": []})):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = []
+        with patch.object(session, "get", return_value=mock_resp):
             result = smoke.check_workspaces(session, cfg)
         assert result.status == smoke.Status.FAIL
 
@@ -299,6 +302,7 @@ class TestChecks10To16:
             smoke.check_saved_queries,
             smoke.check_skills,
             smoke.check_skills_scheduler,
+            smoke.check_destinations,
             smoke.check_ai_health,
             smoke.check_datasources,
             smoke.check_pipeline_profiles,

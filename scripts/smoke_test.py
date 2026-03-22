@@ -15,6 +15,7 @@ Options:
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 from dataclasses import dataclass, field
@@ -190,7 +191,7 @@ def check_workspaces(session: requests.Session, cfg: SmokeConfig) -> CheckResult
     status, body, ms = _get(session, f"{cfg.base_url}/api/v1/workspaces")
     if status != 200:
         return CheckResult("Workspaces", "list", Status.FAIL, ms, f"HTTP {status}", body)
-    workspaces = body.get("workspaces") or []
+    workspaces = body if isinstance(body, list) else (body.get("workspaces") or [])
     if not workspaces:
         return CheckResult("Workspaces", "list", Status.FAIL, ms, "no workspaces returned", body)
     return CheckResult("Workspaces", "list", Status.PASS, ms, f"{len(workspaces)} workspace(s)")
@@ -301,7 +302,6 @@ def print_result(result: CheckResult, verbose: bool = False) -> None:
         f"{label:<42} {latency:>6}{note}"
     )
     if verbose and result.status in (Status.FAIL, Status.WARN) and result.body:
-        import json
         console.print(f"    [dim]{json.dumps(result.body, indent=2)[:500]}[/dim]")
 
 
