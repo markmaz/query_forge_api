@@ -278,5 +278,121 @@ def check_pipeline_profiles(session: requests.Session, cfg: SmokeConfig) -> Chec
     return _simple_get_check("Vector admin", "status", session, f"{cfg.base_url}/api/v1/admin/pipeline-profiles?limit=1")
 
 
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+
+def _latency_str(ms: int | None) -> str:
+    return f"{ms}ms" if ms is not None else "—"
+
+
+def print_header(cfg: SmokeConfig) -> None:
+    console.print()
+    console.print(f"[bold]QueryForge Smoke Test[/bold] — {cfg.base_url}  (workspace: {cfg.workspace_id})")
+    console.print("─" * 70)
+
+
+def print_result(result: CheckResult, verbose: bool = False) -> None:
+    label = f"{result.area} / {result.name}"
+    latency = _latency_str(result.latency_ms)
+    note = f"   {result.message}" if result.message else ""
+    console.print(
+        f"  [{result.style}]{result.symbol}[/{result.style}]  "
+        f"{label:<42} {latency:>6}{note}"
+    )
+    if verbose and result.status in (Status.FAIL, Status.WARN) and result.body:
+        import json
+        console.print(f"    [dim]{json.dumps(result.body, indent=2)[:500]}[/dim]")
+
+
+def print_summary(results: list[CheckResult], exit_code: int) -> None:
+    console.print("─" * 70)
+    passed = sum(1 for r in results if r.status == Status.PASS)
+    failed = sum(1 for r in results if r.status == Status.FAIL)
+    warned = sum(1 for r in results if r.status == Status.WARN)
+    skipped = sum(1 for r in results if r.status == Status.SKIP)
+    parts = [f"[bold]{len(results)} checks[/bold]"]
+    parts.append(f"[green]{passed} passed[/green]")
+    if failed:
+        parts.append(f"[red]{failed} failed[/red]")
+    if warned:
+        parts.append(f"[yellow]{warned} warned[/yellow]")
+    if skipped:
+        parts.append(f"[yellow]{skipped} skipped[/yellow]")
+    console.print("  " + "   ".join(parts))
+    color = "green" if exit_code == 0 else "red"
+    console.print(f"  [{color}]Exit code {exit_code}[/{color}]")
+    console.print()
+
+
+def compute_exit_code(results: list[CheckResult], *, strict: bool) -> int:
+    if any(r.status == Status.FAIL for r in results):
+        return 1
+    if strict and any(r.status == Status.WARN for r in results):
+        return 1
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def run_all(session: requests.Session, cfg: SmokeConfig, *, verbose: bool, strict: bool) -> int:
+    print_header(cfg)
+    results: list[CheckResult] = []
+
+    def run(fn, *args, **kwargs):
+        r = fn(session, cfg, *args, **kwargs)
+        print_result(r, verbose=verbose)
+        results.append(r)
+        return r
+
+    run(check_healthz)
+    run(check_health_detailed)
+    run(check_users_counts)
+    run(check_workspaces)
+    run(check_semantic_concepts)
+    run(check_semantic_registry)
+    run(check_domains)
+    planner_result, sql_json = check_planner(session, cfg)
+    print_result(planner_result, verbose=verbose)
+    results.append(planner_result)
+    run(check_query_execution, sql_json=sql_json if planner_result.status == Status.PASS else None)
+    run(check_saved_queries)
+    run(check_skills)
+    run(check_skills_scheduler)
+    run(check_destinations)
+    run(check_ai_health)
+    run(check_datasources)
+    run(check_pipeline_profiles)
+
+    exit_code = compute_exit_code(results, strict=strict)
+    print_summary(results, exit_code)
+    return exit_code
+
+
+@app.command()
+def main(
+    base_url: str = typer.Option(None, "--base-url", envvar="QF_BASE_URL", help="API root URL"),
+    username: str = typer.Option(None, "--username", envvar="QF_USERNAME", help="Login username"),
+    password: str = typer.Option(None, "--password", envvar="QF_PASSWORD", help="Login password"),
+    workspace_id: str = typer.Option(None, "--workspace-id", envvar="QF_WORKSPACE_ID", help="Workspace ID"),
+    strict: bool = typer.Option(False, "--strict", help="Treat warnings as failures"),
+    verbose: bool = typer.Option(False, "--verbose", help="Dump response body on failure"),
+) -> None:
+    cfg = load_config(base_url=base_url, username=username, password=password, workspace_id=workspace_id)
+    token = authenticate(cfg)
+
+    session = requests.Session()
+    session.headers.update({
+        "Authorization": f"Bearer {token}",
+        "X-Workspace-Id": cfg.workspace_id,
+        "Content-Type": "application/json",
+    })
+
+    exit_code = run_all(session, cfg, verbose=verbose, strict=strict)
+    raise SystemExit(exit_code)
+
+
 if __name__ == "__main__":
     app()

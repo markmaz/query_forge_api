@@ -334,3 +334,39 @@ class TestChecks10To16:
         with patch.object(session, "get", side_effect=capturing_get):
             smoke.check_destinations(session, cfg)
         assert cfg.workspace_id in captured_urls[0]
+
+
+class TestSummaryLogic:
+    def _result(self, status):
+        return smoke.CheckResult("Area", "name", smoke.Status(status), 10, "msg")
+
+    def test_exit_code_0_when_all_pass(self):
+        results = [self._result("pass")] * 5
+        code = smoke.compute_exit_code(results, strict=False)
+        assert code == 0
+
+    def test_exit_code_1_when_any_fail(self):
+        results = [self._result("pass"), self._result("fail"), self._result("pass")]
+        code = smoke.compute_exit_code(results, strict=False)
+        assert code == 1
+
+    def test_exit_code_0_for_warn_without_strict(self):
+        results = [self._result("pass"), self._result("warn")]
+        code = smoke.compute_exit_code(results, strict=False)
+        assert code == 0
+
+    def test_exit_code_1_for_warn_with_strict(self):
+        results = [self._result("pass"), self._result("warn")]
+        code = smoke.compute_exit_code(results, strict=True)
+        assert code == 1
+
+    def test_exit_code_0_for_skip_without_strict(self):
+        results = [self._result("pass"), self._result("skip")]
+        code = smoke.compute_exit_code(results, strict=False)
+        assert code == 0
+
+    def test_exit_code_0_for_skip_with_strict(self):
+        # skips are structural (dependency chain), not warnings — strict does not escalate them
+        results = [self._result("pass"), self._result("skip")]
+        code = smoke.compute_exit_code(results, strict=True)
+        assert code == 0
