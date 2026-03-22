@@ -157,5 +157,63 @@ def _post(session: requests.Session, url: str, *, json: dict[str, Any], timeout:
     return resp.status_code, body, latency
 
 
+# ---------------------------------------------------------------------------
+# Checks 1–7: Infrastructure, Users, Workspaces, Semantic, Domains
+# ---------------------------------------------------------------------------
+
+def check_healthz(session: requests.Session, cfg: SmokeConfig) -> CheckResult:
+    status, body, ms = _get(session, f"{cfg.base_url}/api/v1/admin/healthz")
+    if status == 200:
+        return CheckResult("Infrastructure", "healthz", Status.PASS, ms, "")
+    return CheckResult("Infrastructure", "healthz", Status.FAIL, ms, f"HTTP {status}", body)
+
+
+def check_health_detailed(session: requests.Session, cfg: SmokeConfig) -> CheckResult:
+    status, body, ms = _get(session, f"{cfg.base_url}/api/v1/admin/health/detailed")
+    if status != 200:
+        return CheckResult("Infrastructure", "health detailed", Status.FAIL, ms, f"HTTP {status}", body)
+    overall = body.get("overall", "")
+    if overall == "unhealthy":
+        return CheckResult("Infrastructure", "health detailed", Status.FAIL, ms, f"overall={overall}", body)
+    msg = f"note: {overall}" if overall != "healthy" else ""
+    return CheckResult("Infrastructure", "health detailed", Status.PASS, ms, msg, body)
+
+
+def check_users_counts(session: requests.Session, cfg: SmokeConfig) -> CheckResult:
+    status, body, ms = _get(session, f"{cfg.base_url}/api/v1/users/counts")
+    if status == 200 and isinstance(body, dict):
+        return CheckResult("Users", "counts", Status.PASS, ms, "")
+    return CheckResult("Users", "counts", Status.FAIL, ms, f"HTTP {status}", body)
+
+
+def check_workspaces(session: requests.Session, cfg: SmokeConfig) -> CheckResult:
+    status, body, ms = _get(session, f"{cfg.base_url}/api/v1/workspaces")
+    if status != 200:
+        return CheckResult("Workspaces", "list", Status.FAIL, ms, f"HTTP {status}", body)
+    workspaces = body.get("workspaces") or []
+    if not workspaces:
+        return CheckResult("Workspaces", "list", Status.FAIL, ms, "no workspaces returned", body)
+    return CheckResult("Workspaces", "list", Status.PASS, ms, f"{len(workspaces)} workspace(s)")
+
+
+def _simple_get_check(area: str, name: str, session: requests.Session, url: str) -> CheckResult:
+    status, body, ms = _get(session, url)
+    if status == 200:
+        return CheckResult(area, name, Status.PASS, ms, "")
+    return CheckResult(area, name, Status.FAIL, ms, f"HTTP {status}", body)
+
+
+def check_semantic_concepts(session: requests.Session, cfg: SmokeConfig) -> CheckResult:
+    return _simple_get_check("Semantic concepts", "list", session, f"{cfg.base_url}/api/v1/semantic/concepts?limit=1")
+
+
+def check_semantic_registry(session: requests.Session, cfg: SmokeConfig) -> CheckResult:
+    return _simple_get_check("Semantic registry", "list", session, f"{cfg.base_url}/api/v1/semantic/registry?limit=1")
+
+
+def check_domains(session: requests.Session, cfg: SmokeConfig) -> CheckResult:
+    return _simple_get_check("Domains", "list", session, f"{cfg.base_url}/api/v1/domains?limit=1")
+
+
 if __name__ == "__main__":
     app()

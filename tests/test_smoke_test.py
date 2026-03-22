@@ -141,3 +141,86 @@ class TestHttpHelpers:
         )
         assert r.status == smoke.Status.FAIL
         assert r.latency_ms == 12
+
+
+class TestChecks1To7:
+    def _ok(self, body=None):
+        m = MagicMock()
+        m.status_code = 200
+        m.json.return_value = body or {}
+        return m
+
+    def _err(self, code=500):
+        m = MagicMock()
+        m.status_code = code
+        m.json.return_value = {"error": "fail"}
+        return m
+
+    def test_check_healthz_pass(self):
+        session, cfg = _session()
+        with patch.object(session, "get", return_value=self._ok()):
+            result = smoke.check_healthz(session, cfg)
+        assert result.status == smoke.Status.PASS
+
+    def test_check_healthz_fail(self):
+        session, cfg = _session()
+        with patch.object(session, "get", return_value=self._err(503)):
+            result = smoke.check_healthz(session, cfg)
+        assert result.status == smoke.Status.FAIL
+
+    def test_check_health_detailed_pass(self):
+        session, cfg = _session()
+        body = {"overall": "healthy", "checks": {}}
+        with patch.object(session, "get", return_value=self._ok(body)):
+            result = smoke.check_health_detailed(session, cfg)
+        assert result.status == smoke.Status.PASS
+
+    def test_check_health_detailed_fail_when_unhealthy(self):
+        session, cfg = _session()
+        body = {"overall": "unhealthy", "checks": {}}
+        with patch.object(session, "get", return_value=self._ok(body)):
+            result = smoke.check_health_detailed(session, cfg)
+        assert result.status == smoke.Status.FAIL
+
+    def test_check_health_detailed_pass_when_degraded(self):
+        # "degraded" is not "unhealthy" — should still pass
+        session, cfg = _session()
+        body = {"overall": "degraded", "checks": {}}
+        with patch.object(session, "get", return_value=self._ok(body)):
+            result = smoke.check_health_detailed(session, cfg)
+        assert result.status == smoke.Status.PASS
+        assert "degraded" in result.message
+
+    def test_check_users_counts_pass(self):
+        session, cfg = _session()
+        with patch.object(session, "get", return_value=self._ok({"total": 5})):
+            result = smoke.check_users_counts(session, cfg)
+        assert result.status == smoke.Status.PASS
+
+    def test_check_workspaces_pass(self):
+        session, cfg = _session()
+        body = {"workspaces": [{"id": "ws-1"}]}
+        with patch.object(session, "get", return_value=self._ok(body)):
+            result = smoke.check_workspaces(session, cfg)
+        assert result.status == smoke.Status.PASS
+
+    def test_check_workspaces_fail_when_empty(self):
+        session, cfg = _session()
+        with patch.object(session, "get", return_value=self._ok({"workspaces": []})):
+            result = smoke.check_workspaces(session, cfg)
+        assert result.status == smoke.Status.FAIL
+
+    def test_simple_checks_pass_on_200(self):
+        # checks 5, 6, 7 just need HTTP 200
+        for fn in (smoke.check_semantic_concepts, smoke.check_semantic_registry, smoke.check_domains):
+            session, cfg = _session()
+            with patch.object(session, "get", return_value=self._ok()):
+                result = fn(session, cfg)
+            assert result.status == smoke.Status.PASS, f"{fn.__name__} should pass on 200"
+
+    def test_simple_checks_fail_on_non_200(self):
+        for fn in (smoke.check_semantic_concepts, smoke.check_semantic_registry, smoke.check_domains):
+            session, cfg = _session()
+            with patch.object(session, "get", return_value=self._err()):
+                result = fn(session, cfg)
+            assert result.status == smoke.Status.FAIL, f"{fn.__name__} should fail on 500"
