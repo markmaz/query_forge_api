@@ -68,15 +68,15 @@ class SemanticRegistry(SemanticBase):
 
 
 class SemanticColumnMap(SemanticBase):
-    """Mapping between semantic concepts and workspace/model columns."""
+    """Mapping between semantic concepts and workspace columns."""
 
     __tablename__ = "semantic_column_map"
     __table_args__ = (
         UniqueConstraint(
             "semantic_registry_id",
             "workspace_norm",
-            "model_column_id",
-            name="uq_map_semreg_workspace_modelcol",
+            "workspace_column_id",
+            name="uq_map_semreg_workspace_column",
         ),
         UniqueConstraint(
             "semantic_registry_id",
@@ -85,7 +85,7 @@ class SemanticColumnMap(SemanticBase):
             "column_name",
             name="uq_map_semreg_workspace_tablecol",
         ),
-        Index("idx_map_workspace_modelcol", "workspace_norm", "model_column_id"),
+        Index("idx_map_workspace_column", "workspace_norm", "workspace_column_id"),
         Index("idx_map_workspace_tablecol", "workspace_norm", "table_name", "column_name"),
     )
 
@@ -101,7 +101,7 @@ class SemanticColumnMap(SemanticBase):
         Computed("IFNULL(workspace_id, '__global__')", persisted=True),
         nullable=False,
     )
-    model_column_id: Mapped[Optional[int]] = mapped_column(BIGINT(unsigned=True), nullable=True)
+    workspace_column_id: Mapped[Optional[int]] = mapped_column(BIGINT(unsigned=True), nullable=True)
     table_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     column_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     priority_rank: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))

@@ -117,8 +117,8 @@ class WorkspaceSnapshotService:
       - workspace_column (per physical table column)
 
     Mapping rule:
-      - model_table.name represents accepted base table names
-      - workspace_table.model_table_id remains nullable for unmapped tables
+      - each discovered physical table becomes a workspace_table row
+      - base/variant handling stays local to workspace metadata only
     """
 
     def __init__(self, *, sql: ForgeQueryPort, mysql: Optional[ForgeQueryPort] = None):
@@ -162,11 +162,8 @@ class WorkspaceSnapshotService:
                 {"id": workspace_id},
             )
 
-            accepted_rows = tx.execute_query("SELECT name FROM model_table")
-            accepted_bases = {str(row[0]) for row in accepted_rows}
-
-            staged_tables, staged_columns, seen_bases = self._stage_rows(snapshot_rows, accepted_bases)
-            model_id_by_base = self._resolve_model_ids(tx, seen_bases)
+            accepted_bases: Set[str] = set()
+            staged_tables, staged_columns, _seen_bases = self._stage_rows(snapshot_rows, accepted_bases)
 
             self._mark_stale(tx, workspace_id=workspace_id, qf_schema_name=qf_schema_name)
             self._upsert_tables(
@@ -174,7 +171,6 @@ class WorkspaceSnapshotService:
                 workspace_id=workspace_id,
                 now=now,
                 staged_tables=staged_tables,
-                model_id_by_base=model_id_by_base,
             )
 
             table_id_by_full_name = self._load_current_workspace_table_ids(
@@ -242,24 +238,6 @@ class WorkspaceSnapshotService:
 
         return list(table_by_full.values()), columns, seen_bases
 
-    def _resolve_model_ids(self, tx, base_names: Set[str]) -> Dict[str, int]:
-        if not base_names:
-            return {}
-
-        names = sorted(base_names)
-        placeholders = ",".join(f":n{i}" for i in range(len(names)))
-        params = {f"n{i}": name for i, name in enumerate(names)}
-
-        rows = tx.execute_query_mappings(
-            f"""
-            SELECT id, name
-            FROM model_table
-            WHERE name IN ({placeholders})
-            """,
-            params,
-        )
-        return {str(row["name"]): int(row["id"]) for row in rows}
-
     def _mark_stale(self, tx, *, workspace_id: str, qf_schema_name: str) -> None:
         tx.execute_write(
             """
@@ -288,7 +266,6 @@ class WorkspaceSnapshotService:
         workspace_id: str,
         now: datetime,
         staged_tables: List[_TableStage],
-        model_id_by_base: Dict[str, int],
     ) -> None:
         if not staged_tables:
             return
@@ -296,7 +273,6 @@ class WorkspaceSnapshotService:
         payload = [
             {
                 "workspace_id": workspace_id,
-                "model_table_id": model_id_by_base.get(stage.qf_table_name),
                 "catalog_name": stage.qf_catalog_name,
                 "schema_name": stage.qf_schema_name,
                 "table_name": stage.qf_table_name,
@@ -311,13 +287,12 @@ class WorkspaceSnapshotService:
         tx.execute_write(
             """
             INSERT INTO workspace_table
-            (workspace_id, model_table_id, catalog_name, schema_name, table_name, full_name,
+            (workspace_id, catalog_name, schema_name, table_name, full_name,
              variant_code, is_qe, exists_in_dbx, last_seen_at, created_at)
             VALUES
-            (:workspace_id, :model_table_id, :catalog_name, :schema_name, :table_name, :full_name,
+            (:workspace_id, :catalog_name, :schema_name, :table_name, :full_name,
              :variant_code, :is_qe, 1, :last_seen_at, CURRENT_TIMESTAMP)
             ON DUPLICATE KEY UPDATE
-             model_table_id=VALUES(model_table_id),
              catalog_name=VALUES(catalog_name),
              schema_name=VALUES(schema_name),
              table_name=VALUES(table_name),

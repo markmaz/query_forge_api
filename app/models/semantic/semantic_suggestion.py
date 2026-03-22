@@ -59,7 +59,7 @@ class SemanticSuggestionRun(SemanticBase):
 class SemanticSuggestionItem(SemanticBase):
     __tablename__ = "semantic_suggestion_item"
     __table_args__ = (
-        UniqueConstraint("run_id", "model_column_id", name="uq_sem_suggestion_item_run_column"),
+        UniqueConstraint("run_id", "workspace_column_id", name="uq_sem_suggestion_item_run_column"),
         Index("idx_sem_suggestion_item_run", "run_id"),
         Index("idx_sem_suggestion_item_status", "decision_status"),
         Index("idx_sem_suggestion_item_type", "proposed_semantic_type"),
@@ -74,8 +74,8 @@ class SemanticSuggestionItem(SemanticBase):
         ForeignKey("semantic_suggestion_run.id", ondelete="CASCADE"),
         nullable=False,
     )
-    model_column_id: Mapped[int] = mapped_column(BIGINT(unsigned=True), nullable=False)
-    model_table_id: Mapped[Optional[int]] = mapped_column(BIGINT(unsigned=True), nullable=True)
+    workspace_column_id: Mapped[int] = mapped_column(BIGINT(unsigned=True), nullable=False)
+    workspace_table_id: Mapped[Optional[int]] = mapped_column(BIGINT(unsigned=True), nullable=True)
     table_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     column_name: Mapped[str] = mapped_column(String(255), nullable=False)
     data_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

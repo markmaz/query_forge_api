@@ -32,6 +32,7 @@ class ConceptToColumnService:
             return {
                 "concepts": concepts,
                 "mapped_columns": [],
+                "candidate_workspace_column_ids": [],
                 "candidate_model_column_ids": [],
                 "ranked_candidates_by_concept": {},
                 "warnings": [],
@@ -66,7 +67,7 @@ class ConceptToColumnService:
                 concept_order.get(str(r.get("concept_key") or "").upper(), len(concepts)),
                 -float(r.get("effective_weight") or r.get("final_score") or 0.0),
                 -float(r.get("base_weight") or 0.0),
-                int(r.get("model_column_id") or 0),
+                int(r.get("workspace_column_id") or r.get("model_column_id") or 0),
             )
         )
         rows = rows[: max(max_cols, len(concepts) * self.PER_CONCEPT_LIMIT)]
@@ -75,14 +76,19 @@ class ConceptToColumnService:
             self._build_intent_mismatch_warnings(rows=rows, intent_entity=intent_entity)
         )
 
-        candidate_ids: List[int] = []
-        seen = set()
+        candidate_workspace_ids: List[int] = []
+        seen_workspace = set()
+        candidate_model_ids: List[int] = []
+        seen_model = set()
         for row in rows:
+            wid = _to_int_or_none(row.get("workspace_column_id"))
+            if wid is not None and wid not in seen_workspace:
+                seen_workspace.add(wid)
+                candidate_workspace_ids.append(wid)
             mid = _to_int_or_none(row.get("model_column_id"))
-            if mid is None or mid in seen:
-                continue
-            seen.add(mid)
-            candidate_ids.append(mid)
+            if mid is not None and mid not in seen_model:
+                seen_model.add(mid)
+                candidate_model_ids.append(mid)
 
         ranked_by_concept: Dict[str, List[Dict[str, Any]]] = {}
         for row in rows:
@@ -94,7 +100,8 @@ class ConceptToColumnService:
         return {
             "concepts": concepts,
             "mapped_columns": rows,
-            "candidate_model_column_ids": candidate_ids,
+            "candidate_workspace_column_ids": candidate_workspace_ids,
+            "candidate_model_column_ids": candidate_model_ids,
             "ranked_candidates_by_concept": ranked_by_concept,
             "warnings": mapping_warnings,
         }
@@ -152,11 +159,10 @@ class ConceptToColumnService:
             ),
             scored AS (
               SELECT
-                COALESCE(wc.model_column_id, wc.id) AS model_column_id,
+                wc.id AS workspace_column_id,
                 wt.id AS workspace_table_id,
                 COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS table_name,
                 wc.column_name,
-                COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
                 sc.concept_key,
                 wc.semantic_concept_key AS authoritative_concept_key,
                 sc.entity,
@@ -194,11 +200,11 @@ class ConceptToColumnService:
                     = sc.concept_key COLLATE utf8mb4_0900_ai_ci THEN 1
                   ELSE 0
                 END AS authoritative_match
-              FROM model_column_semantic_concept_map m
+              FROM workspace_column_semantic_concept_map m
               JOIN semantic_concept sc
                 ON sc.id = m.semantic_concept_id
               JOIN workspace_column wc
-                ON wc.model_column_id = m.model_column_id
+                ON wc.id = m.workspace_column_id
                AND wc.exists_in_dbx = 1
               JOIN workspace_table wt
                 ON wt.id = wc.workspace_table_id
@@ -220,7 +226,7 @@ class ConceptToColumnService:
                   + scored.authoritative_bonus
                 ) AS final_score,
                 ROW_NUMBER() OVER (
-                  PARTITION BY scored.concept_key, scored.model_column_id
+                  PARTITION BY scored.concept_key, scored.workspace_column_id
                   ORDER BY
                     (
                       scored.base_weight
@@ -239,17 +245,16 @@ class ConceptToColumnService:
                 dedup.*,
                 ROW_NUMBER() OVER (
                   PARTITION BY dedup.concept_key
-                  ORDER BY dedup.final_score DESC, dedup.model_column_id ASC
+                  ORDER BY dedup.final_score DESC, dedup.workspace_column_id ASC
                 ) AS rn
               FROM dedup
               WHERE dedup.rn_model = 1
             )
             SELECT
-              ranked.model_column_id,
+              ranked.workspace_column_id,
               ranked.workspace_table_id,
               ranked.table_name,
               ranked.column_name,
-              ranked.model_table_name,
               ranked.concept_key,
               ranked.authoritative_concept_key,
               ranked.base_weight AS weight,
@@ -341,11 +346,10 @@ class ConceptToColumnService:
             ),
             scored AS (
               SELECT
-                COALESCE(wc.model_column_id, wc.id) AS model_column_id,
+                wc.id AS workspace_column_id,
                 wt.id AS workspace_table_id,
                 COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS table_name,
                 wc.column_name,
-                COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
                 cr.concept_key,
                 cr.entity,
                 cr.semantic_type,
@@ -398,7 +402,7 @@ class ConceptToColumnService:
                   + scored.authoritative_bonus
                 ) AS final_score,
                 ROW_NUMBER() OVER (
-                  PARTITION BY scored.concept_key, scored.model_column_id
+                  PARTITION BY scored.concept_key, scored.workspace_column_id
                   ORDER BY
                     (
                       scored.base_weight
@@ -417,17 +421,16 @@ class ConceptToColumnService:
                 dedup.*,
                 ROW_NUMBER() OVER (
                   PARTITION BY dedup.concept_key
-                  ORDER BY dedup.final_score DESC, dedup.model_column_id ASC
+                  ORDER BY dedup.final_score DESC, dedup.workspace_column_id ASC
                 ) AS rn
               FROM dedup
               WHERE dedup.rn_model = 1
             )
             SELECT
-              ranked.model_column_id,
+              ranked.workspace_column_id,
               ranked.workspace_table_id,
               ranked.table_name,
               ranked.column_name,
-              ranked.model_table_name,
               ranked.concept_key,
               ranked.authoritative_concept_key,
               ranked.base_weight AS weight,
@@ -464,11 +467,12 @@ class ConceptToColumnService:
         final_score = _to_float_or_none(row.get("final_score"))
         base_weight_value = round(float(base_weight or 0.0), 4)
         return {
-            "model_column_id": _to_int_or_none(row.get("model_column_id")),
+            "workspace_column_id": _to_int_or_none(row.get("workspace_column_id")),
+            "model_column_id": _to_int_or_none(row.get("workspace_column_id")),
             "workspace_table_id": _to_int_or_none(row.get("workspace_table_id")),
             "table_name": row.get("table_name"),
             "column_name": row.get("column_name"),
-            "model_table_name": row.get("model_table_name"),
+            "model_table_name": row.get("table_name"),
             "concept_key": concept_key,
             "entity": str(row.get("entity") or "").strip().lower() or None,
             "semantic_type": str(row.get("semantic_type") or "").strip().lower() or None,
@@ -542,7 +546,7 @@ class ConceptToColumnService:
                 key=lambda r: (
                     -float(r.get("effective_weight") or r.get("final_score") or 0.0),
                     -float(r.get("base_weight") or 0.0),
-                    int(r.get("model_column_id") or 0),
+                    int(r.get("workspace_column_id") or r.get("model_column_id") or 0),
                 )
             )
             final_rows.extend(concept_rows[: self.PER_CONCEPT_LIMIT])

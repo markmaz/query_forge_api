@@ -90,12 +90,12 @@ WITH ranked AS (
   SELECT
     wt.id,
     wt.full_name,
-    wt.model_table_id,
+    COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name, wt.full_name) AS table_group,
     wt.variant_code,
     wt.last_seen_at,
     wt.sample_ran_at,
     ROW_NUMBER() OVER (
-      PARTITION BY wt.model_table_id
+      PARTITION BY COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name, wt.full_name)
       ORDER BY
         CASE WHEN wt.variant_code IS NULL THEN 0 ELSE 1 END,
         wt.full_name
@@ -104,7 +104,6 @@ WITH ranked AS (
   WHERE wt.workspace_id = :ws
     AND wt.schema_name = :schema
     AND wt.exists_in_dbx = 1
-    AND wt.model_table_id IS NOT NULL
     AND (wt.sample_ran_at IS NULL OR wt.sample_ran_at < wt.last_seen_at)
 )
 SELECT id, full_name

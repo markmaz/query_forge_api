@@ -52,12 +52,12 @@ class SemanticMappingService:
             resolved = self._resolve_workspace_column(_coerce_positive_int(workspace_column_id, field="workspace_column_id"))
             if resolved is None:
                 return {"rows": [], "total": 0, "page": page_val, "page_size": size_val}
-            where.append("scm.model_column_id = :model_column_id")
-            params["model_column_id"] = int(resolved["model_column_id"])
+            where.append("scm.workspace_column_id = :workspace_column_id")
+            params["workspace_column_id"] = int(resolved["workspace_column_id"])
 
         if model_column_id is not None:
-            where.append("scm.model_column_id = :model_column_id")
-            params["model_column_id"] = _coerce_positive_int(model_column_id, field="model_column_id")
+            where.append("scm.workspace_column_id = :legacy_column_id")
+            params["legacy_column_id"] = _coerce_positive_int(model_column_id, field="model_column_id")
 
         if table_name is not None and str(table_name).strip() != "":
             where.append("LOWER(COALESCE(scm.table_name, '')) = :table_name")
@@ -76,8 +76,7 @@ class SemanticMappingService:
               scm.semantic_registry_id,
               scm.workspace_id,
               scm.workspace_norm,
-              scm.model_column_id,
-              wc.id AS workspace_column_id,
+              scm.workspace_column_id,
               scm.table_name,
               scm.column_name,
               scm.priority_rank,
@@ -90,7 +89,6 @@ class SemanticMappingService:
               sr.entity
             FROM semantic_column_map scm
             JOIN semantic_registry sr ON sr.id = scm.semantic_registry_id
-            LEFT JOIN workspace_column wc ON wc.model_column_id = scm.model_column_id
             {where_sql}
             ORDER BY scm.priority_rank DESC, scm.confidence_score DESC, scm.id DESC
             LIMIT :limit OFFSET :offset
@@ -103,7 +101,6 @@ class SemanticMappingService:
             SELECT COUNT(*) AS total
             FROM semantic_column_map scm
             JOIN semantic_registry sr ON sr.id = scm.semantic_registry_id
-            LEFT JOIN workspace_column wc ON wc.model_column_id = scm.model_column_id
             {where_sql}
             """,
             {k: v for k, v in params.items() if k not in {"limit", "offset"}},
@@ -126,8 +123,7 @@ class SemanticMappingService:
               scm.semantic_registry_id,
               scm.workspace_id,
               scm.workspace_norm,
-              scm.model_column_id,
-              wc.id AS workspace_column_id,
+              scm.workspace_column_id,
               scm.table_name,
               scm.column_name,
               scm.priority_rank,
@@ -140,7 +136,6 @@ class SemanticMappingService:
               sr.entity
             FROM semantic_column_map scm
             JOIN semantic_registry sr ON sr.id = scm.semantic_registry_id
-            LEFT JOIN workspace_column wc ON wc.model_column_id = scm.model_column_id
             WHERE scm.id = :id
             LIMIT 1
             """,
@@ -160,7 +155,7 @@ class SemanticMappingService:
                 INSERT INTO semantic_column_map (
                   semantic_registry_id,
                   workspace_id,
-                  model_column_id,
+                  workspace_column_id,
                   table_name,
                   column_name,
                   priority_rank,
@@ -168,7 +163,7 @@ class SemanticMappingService:
                 ) VALUES (
                   :semantic_registry_id,
                   :workspace_id,
-                  :model_column_id,
+                  :workspace_column_id,
                   :table_name,
                   :column_name,
                   :priority_rank,
@@ -222,7 +217,7 @@ class SemanticMappingService:
               scm.semantic_registry_id,
               scm.workspace_id,
               scm.workspace_norm,
-              scm.model_column_id,
+              scm.workspace_column_id,
               scm.table_name,
               scm.column_name,
               scm.priority_rank,
@@ -278,20 +273,23 @@ class SemanticMappingService:
             )
             if resolved_workspace is None:
                 return []
-            model_column_id = int(resolved_workspace["model_column_id"])
+            workspace_column_id = int(resolved_workspace["workspace_column_id"])
 
-        has_model = model_column_id is not None
+        has_workspace = workspace_column_id is not None or model_column_id is not None
         has_table_col = bool(str(table_name or "").strip()) and bool(str(column_name or "").strip())
 
-        if not has_model and not has_table_col:
+        if not has_workspace and not has_table_col:
             raise ForgeError(
-                "model_column_id or table_name+column_name is required (workspace_column_id is also accepted)",
+                "workspace_column_id or table_name+column_name is required",
                 status_code=400,
             )
 
-        if has_model:
-            where.append("scm.model_column_id = :model_column_id")
-            params["model_column_id"] = _coerce_positive_int(model_column_id, field="model_column_id")
+        if has_workspace:
+            target_column_id = workspace_column_id
+            if target_column_id is None and model_column_id is not None:
+                target_column_id = _coerce_positive_int(model_column_id, field="model_column_id")
+            where.append("scm.workspace_column_id = :workspace_column_id")
+            params["workspace_column_id"] = int(target_column_id)
         else:
             where.append("LOWER(COALESCE(scm.table_name, '')) = :table_name")
             where.append("LOWER(COALESCE(scm.column_name, '')) = :column_name")
@@ -305,8 +303,7 @@ class SemanticMappingService:
               scm.semantic_registry_id,
               scm.workspace_id,
               scm.workspace_norm,
-              scm.model_column_id,
-              wc.id AS workspace_column_id,
+              scm.workspace_column_id,
               scm.table_name,
               scm.column_name,
               scm.priority_rank,
@@ -319,7 +316,6 @@ class SemanticMappingService:
               sr.entity
             FROM semantic_column_map scm
             JOIN semantic_registry sr ON sr.id = scm.semantic_registry_id
-            LEFT JOIN workspace_column wc ON wc.model_column_id = scm.model_column_id
             WHERE {' AND '.join(where)}
             ORDER BY scm.priority_rank DESC, scm.confidence_score DESC, scm.id DESC
             """,
@@ -343,10 +339,10 @@ class SemanticMappingService:
             if workspace_id is not None and len(workspace_id) > 100:
                 raise ForgeError("workspace_id exceeds 100 characters", status_code=400)
 
-        model_column_id_raw = payload.get("model_column_id")
-        model_column_id = None
-        if model_column_id_raw not in (None, ""):
-            model_column_id = _coerce_positive_int(model_column_id_raw, field="model_column_id")
+        legacy_column_id_raw = payload.get("model_column_id")
+        legacy_column_id = None
+        if legacy_column_id_raw not in (None, ""):
+            legacy_column_id = _coerce_positive_int(legacy_column_id_raw, field="model_column_id")
 
         workspace_column_id_raw = payload.get("workspace_column_id")
         workspace_column_id = None
@@ -365,12 +361,12 @@ class SemanticMappingService:
         if column_name is not None and len(column_name) > 200:
             raise ForgeError("column_name exceeds 200 characters", status_code=400)
 
-        has_model = model_column_id is not None or workspace_column_id is not None
+        has_workspace = legacy_column_id is not None or workspace_column_id is not None
         has_table_col = table_name is not None and column_name is not None
 
-        if not has_model and not has_table_col:
+        if not has_workspace and not has_table_col:
             raise ForgeError(
-                "mapping requires model_column_id or table_name+column_name (workspace_column_id is also accepted)",
+                "mapping requires workspace_column_id or table_name+column_name",
                 status_code=400,
             )
 
@@ -378,14 +374,16 @@ class SemanticMappingService:
             resolved = self._resolve_workspace_column(workspace_column_id)
             if resolved is None:
                 raise ForgeError("workspace_column_id not found", status_code=404)
-            model_column_id = int(resolved["model_column_id"])
+            workspace_column_id = int(resolved["workspace_column_id"])
             table_name = table_name or str(resolved.get("table_name") or "").strip() or None
             column_name = column_name or str(resolved.get("column_name") or "").strip() or None
             if workspace_id is None:
                 resolved_ws = str(resolved.get("workspace_id") or "").strip() or None
                 workspace_id = resolved_ws
+        elif legacy_column_id is not None:
+            workspace_column_id = legacy_column_id
 
-        if has_model:
+        if has_workspace:
             table_name = None
             column_name = None
 
@@ -405,7 +403,6 @@ class SemanticMappingService:
         return {
             "semantic_registry_id": semantic_registry_id,
             "workspace_id": workspace_id,
-            "model_column_id": model_column_id,
             "workspace_column_id": workspace_column_id,
             "table_name": table_name,
             "column_name": column_name,
@@ -429,9 +426,11 @@ class SemanticMappingService:
     @staticmethod
     def _normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
         out = dict(row)
-        for key in ("id", "semantic_registry_id", "model_column_id", "workspace_column_id", "priority_rank"):
+        for key in ("id", "semantic_registry_id", "workspace_column_id", "priority_rank"):
             if key in out and out[key] is not None:
                 out[key] = int(out[key])
+        if out.get("workspace_column_id") is not None:
+            out["model_column_id"] = int(out["workspace_column_id"])
         if "confidence_score" in out and out["confidence_score"] is not None:
             out["confidence_score"] = float(out["confidence_score"])
         return out
@@ -441,7 +440,6 @@ class SemanticMappingService:
             """
             SELECT
               wc.id AS workspace_column_id,
-              COALESCE(wc.model_column_id, wc.id) AS model_column_id,
               wc.column_name,
               wt.workspace_id,
               COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS table_name
@@ -456,12 +454,8 @@ class SemanticMappingService:
         if not rows:
             return None
         row = rows[0]
-        model_column_id = row.get("model_column_id")
-        if model_column_id is None:
-            return None
         return {
             "workspace_column_id": int(row["workspace_column_id"]),
-            "model_column_id": int(model_column_id),
             "column_name": row.get("column_name"),
             "workspace_id": row.get("workspace_id"),
             "table_name": row.get("table_name"),

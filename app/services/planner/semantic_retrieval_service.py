@@ -149,10 +149,10 @@ class SemanticCatalogLookupRepository:
             SELECT
               m.semantic_concept_id,
               UPPER(TRIM(sc.concept_key)) AS concept_key,
-              m.model_column_id,
+              m.workspace_column_id,
               LOWER(COALESCE(m.relationship_kind, 'primary')) AS relationship_kind,
               COALESCE(m.weight, 1.0) AS weight
-            FROM model_column_semantic_concept_map m
+            FROM workspace_column_semantic_concept_map m
             JOIN semantic_concept sc ON sc.id = m.semantic_concept_id
             WHERE LOWER(COALESCE(m.vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
             ORDER BY
@@ -362,15 +362,16 @@ class SemanticRetrievalService:
             if row["parent_key"] and row["child_key"] and row["relationship_type"]
         ]
 
-        mappings_by_concept: Dict[str, List[Tuple[int, float, str]]] = defaultdict(list)
+        mappings_by_concept: Dict[str, List[Tuple[Optional[int], Optional[int], float, str]]] = defaultdict(list)
         for row in column_map_rows:
             key = _concept_key(row.get("concept_key"))
+            workspace_column_id = _to_int(row.get("workspace_column_id"))
             model_column_id = _to_int(row.get("model_column_id"))
-            if key == "" or model_column_id is None:
+            if key == "" or (workspace_column_id is None and model_column_id is None):
                 continue
             weight = _to_float(row.get("weight")) or 1.0
             rel_kind = str(row.get("relationship_kind") or "primary").strip().lower() or "primary"
-            mappings_by_concept[key].append((model_column_id, weight, rel_kind))
+            mappings_by_concept[key].append((workspace_column_id, model_column_id, weight, rel_kind))
 
         domain_candidates = _build_domain_candidates(
             concept_rows=concept_rows,
@@ -580,6 +581,7 @@ class _CapabilityIndex:
     filter_rows: List[Dict[str, Any]]
     time_rows: List[Dict[str, Any]]
     metric_alias_to_ref: Dict[str, str]
+    column_by_workspace_id: Dict[int, str]
     column_by_model_id: Dict[int, str]
     column_alias_to_key: Dict[str, str]
 
@@ -632,12 +634,16 @@ def _build_capability_index(*, capabilities_compact: Mapping[str, Any]) -> _Capa
     filter_rows = [dict(row) for row in list(capabilities_compact.get("filter_columns") or []) if isinstance(row, Mapping)]
     time_rows = [dict(row) for row in list(capabilities_compact.get("time_columns") or []) if isinstance(row, Mapping)]
 
+    column_by_workspace_id: Dict[int, str] = {}
     column_by_model_id: Dict[int, str] = {}
     column_alias_to_key: Dict[str, str] = {}
     for row in dimension_rows + filter_rows + time_rows:
         key = _column_key(row)
         if key == "":
             continue
+        workspace_id = _to_int(row.get("workspace_column_id"))
+        if workspace_id is not None and workspace_id not in column_by_workspace_id:
+            column_by_workspace_id[workspace_id] = key
         model_id = _to_int(row.get("model_column_id"))
         if model_id is not None and model_id not in column_by_model_id:
             column_by_model_id[model_id] = key
@@ -657,6 +663,7 @@ def _build_capability_index(*, capabilities_compact: Mapping[str, Any]) -> _Capa
         filter_rows=filter_rows,
         time_rows=time_rows,
         metric_alias_to_ref=metric_alias_to_ref,
+        column_by_workspace_id=column_by_workspace_id,
         column_by_model_id=column_by_model_id,
         column_alias_to_key=column_alias_to_key,
     )
@@ -893,11 +900,13 @@ def _resolve_source_column_key(
     concept_key: str,
     concept_name: str,
     aliases: Sequence[str],
-    mappings: Sequence[Tuple[int, float, str]],
+    mappings: Sequence[Tuple[Optional[int], Optional[int], float, str]],
     capability_rows: Sequence[Mapping[str, Any]],
     capability_index: _CapabilityIndex,
 ) -> Optional[str]:
-    for model_column_id, _weight, _rel_kind in mappings:
+    for workspace_column_id, model_column_id, _weight, _rel_kind in mappings:
+        if workspace_column_id is not None and workspace_column_id in capability_index.column_by_workspace_id:
+            return capability_index.column_by_workspace_id[workspace_column_id]
         if model_column_id in capability_index.column_by_model_id:
             return capability_index.column_by_model_id[model_column_id]
 

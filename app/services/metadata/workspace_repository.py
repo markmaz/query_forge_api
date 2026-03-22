@@ -369,35 +369,22 @@ class WorkspaceMetadataRepository:
         with self._sql.transaction() as tx:
             name_map = dict(cols_by_table_name or {})
             if not name_map and cols_by_table_id:
-                # Legacy compatibility: accept model_table_id mapping if passed.
+                table_rows = self._sql.execute_query_mappings(
+                    """
+                    SELECT id, table_name
+                    FROM workspace_table
+                    WHERE id IN ({table_ids})
+                    """.replace(
+                        "{table_ids}",
+                        ", ".join(f":t{i}" for i in range(len(cols_by_table_id))),
+                    ),
+                    {f"t{i}": int(table_id) for i, table_id in enumerate(cols_by_table_id.keys())},
+                )
+                id_to_name = {int(row["id"]): str(row.get("table_name") or "").strip() for row in table_rows}
                 for table_id, columns in (cols_by_table_id or {}).items():
-                    names = sorted({str(c or "").strip() for c in columns if str(c or "").strip()})
-                    if not names:
-                        continue
-                    placeholders = ", ".join(f":c{i}" for i in range(len(names)))
-                    params = {
-                        "table_id": int(table_id),
-                        "origin": str(origin or "MANUAL").upper(),
-                        **{f"c{i}": name for i, name in enumerate(names)},
-                    }
-                    total += int(
-                        tx.execute_write(
-                            f"""
-                            UPDATE workspace_column wc
-                            JOIN workspace_table wt ON wt.id = wc.workspace_table_id
-                            SET wc.is_missing_in_source = 1,
-                                wc.metadata_updated_at = CURRENT_TIMESTAMP,
-                                wc.updated_at = CURRENT_TIMESTAMP
-                            WHERE wt.model_table_id = :table_id
-                              AND wc.origin = :origin
-                              AND wc.is_missing_in_source = 0
-                              AND wc.column_name NOT IN ({placeholders})
-                            """,
-                            params,
-                        )
-                        or 0
-                    )
-                return total
+                    table_name = id_to_name.get(int(table_id))
+                    if table_name:
+                        name_map[table_name] = columns
 
             for table_name, columns in name_map.items():
                 names = sorted({str(c or "").strip() for c in columns if str(c or "").strip()})
@@ -428,11 +415,10 @@ class WorkspaceMetadataRepository:
                 )
         return total
 
-    def patch_table_by_model_table_id(self, *, model_table_id: int, updates: Mapping[str, Any]) -> int:
-        if int(model_table_id) <= 0 or not updates:
+    def patch_table_by_id(self, *, workspace_table_id: int, updates: Mapping[str, Any]) -> int:
+        if int(workspace_table_id) <= 0 or not updates:
             return 0
         normalized_updates = dict(updates)
-        # Backward-compatible alias from legacy payloads.
         if "qf_table_name" in normalized_updates and "table_name" not in normalized_updates:
             normalized_updates["table_name"] = normalized_updates["qf_table_name"]
         allowed = {
@@ -446,7 +432,7 @@ class WorkspaceMetadataRepository:
             "sample_error",
         }
         sets: List[str] = []
-        params: Dict[str, Any] = {"model_table_id": int(model_table_id)}
+        params: Dict[str, Any] = {"workspace_table_id": int(workspace_table_id)}
         for key, value in normalized_updates.items():
             if key not in allowed:
                 continue
@@ -461,18 +447,17 @@ class WorkspaceMetadataRepository:
                 f"""
                 UPDATE workspace_table
                 SET {", ".join(sets)}
-                WHERE model_table_id = :model_table_id
+                WHERE id = :workspace_table_id
                 """,
                 params,
             )
             or 0
         )
 
-    def patch_column_by_model_column_id(self, *, model_column_id: int, updates: Mapping[str, Any]) -> int:
-        if int(model_column_id) <= 0 or not updates:
+    def patch_column_by_id(self, *, workspace_column_id: int, updates: Mapping[str, Any]) -> int:
+        if int(workspace_column_id) <= 0 or not updates:
             return 0
         normalized_updates = dict(updates)
-        # Backward-compatible alias from legacy payloads.
         if "qf_ordinal_position" in normalized_updates and "ordinal_position" not in normalized_updates:
             normalized_updates["ordinal_position"] = normalized_updates["qf_ordinal_position"]
         allowed = {
@@ -499,7 +484,7 @@ class WorkspaceMetadataRepository:
             "ordinal_position",
         }
         sets: List[str] = []
-        params: Dict[str, Any] = {"model_column_id": int(model_column_id)}
+        params: Dict[str, Any] = {"workspace_column_id": int(workspace_column_id)}
         for key, value in normalized_updates.items():
             if key not in allowed:
                 continue
@@ -514,24 +499,23 @@ class WorkspaceMetadataRepository:
                 f"""
                 UPDATE workspace_column
                 SET {", ".join(sets)}
-                WHERE model_column_id = :model_column_id
+                WHERE id = :workspace_column_id
                 """,
                 params,
             )
             or 0
         )
 
-    def patch_column_by_model_table_and_name(
+    def patch_column_by_table_and_name(
         self,
         *,
-        model_table_id: int,
+        workspace_table_id: int,
         column_name: str,
         updates: Mapping[str, Any],
     ) -> int:
-        if int(model_table_id) <= 0 or not str(column_name or "").strip() or not updates:
+        if int(workspace_table_id) <= 0 or not str(column_name or "").strip() or not updates:
             return 0
         normalized_updates = dict(updates)
-        # Backward-compatible alias from legacy payloads.
         if "qf_ordinal_position" in normalized_updates and "ordinal_position" not in normalized_updates:
             normalized_updates["ordinal_position"] = normalized_updates["qf_ordinal_position"]
         allowed = {
@@ -558,7 +542,7 @@ class WorkspaceMetadataRepository:
         }
         sets: List[str] = []
         params: Dict[str, Any] = {
-            "model_table_id": int(model_table_id),
+            "workspace_table_id": int(workspace_table_id),
             "column_name": str(column_name).strip(),
         }
         for key, value in normalized_updates.items():
@@ -576,7 +560,7 @@ class WorkspaceMetadataRepository:
                 UPDATE workspace_column wc
                 JOIN workspace_table wt ON wt.id = wc.workspace_table_id
                 SET {", ".join(sets)}
-                WHERE wt.model_table_id = :model_table_id
+                WHERE wt.id = :workspace_table_id
                   AND wc.column_name = :column_name
                 """,
                 params,
@@ -587,17 +571,17 @@ class WorkspaceMetadataRepository:
     def deactivate_columns_not_in(
         self,
         *,
-        model_table_id: int,
+        workspace_table_id: int,
         keep_column_names: Iterable[str],
         origin: Optional[str] = None,
         only_not_missing: bool = False,
     ) -> int:
         names = sorted({str(c or "").strip() for c in keep_column_names if str(c or "").strip()})
-        if int(model_table_id) <= 0 or not names:
+        if int(workspace_table_id) <= 0 or not names:
             return 0
         placeholders = ",".join(f":c{i}" for i in range(len(names)))
         params = {
-            "model_table_id": int(model_table_id),
+            "workspace_table_id": int(workspace_table_id),
             "origin": str(origin).upper() if origin is not None else None,
             **{f"c{i}": name for i, name in enumerate(names)},
         }
@@ -614,7 +598,7 @@ class WorkspaceMetadataRepository:
                 SET wc.is_active = 0,
                     wc.metadata_updated_at = CURRENT_TIMESTAMP,
                     wc.updated_at = CURRENT_TIMESTAMP
-                WHERE wt.model_table_id = :model_table_id
+                WHERE wt.id = :workspace_table_id
                   AND wc.is_active = 1
                   {extra_where}
                   AND wc.column_name NOT IN ({placeholders})
@@ -623,47 +607,5 @@ class WorkspaceMetadataRepository:
             )
             or 0
         )
-
-    def clear_model_column_reference(self, *, model_column_id: int) -> int:
-        if int(model_column_id) <= 0:
-            return 0
-        return int(
-            self._sql.execute_write(
-                """
-                UPDATE workspace_column
-                SET model_column_id = NULL,
-                    is_active = 0,
-                    metadata_updated_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE model_column_id = :model_column_id
-                """,
-                {"model_column_id": int(model_column_id)},
-            )
-            or 0
-        )
-
-    def clear_model_table_reference(self, *, model_table_id: int) -> int:
-        if int(model_table_id) <= 0:
-            return 0
-        return int(
-            self._sql.execute_write(
-                """
-                UPDATE workspace_table
-                SET model_table_id = NULL,
-                    is_missing_in_source = 1,
-                    metadata_updated_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE model_table_id = :model_table_id
-                """,
-                {"model_table_id": int(model_table_id)},
-            )
-            or 0
-        )
-
-    def mirror_primary_semantic_keys_from_model(self, *, workspace_id: Optional[str] = None) -> int:
-        # Workspace metadata is now authoritative; legacy model mirroring is intentionally disabled.
-        del workspace_id
-        return 0
-
 
 __all__ = ["WorkspaceMetadataRepository"]

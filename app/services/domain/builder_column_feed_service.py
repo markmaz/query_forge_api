@@ -60,8 +60,7 @@ class BuilderColumnFeedService:
             """
             SELECT DISTINCT
               wt.id AS workspace_table_id,
-              NULL AS model_table_id,
-              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
+              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS table_label,
               wt.catalog_name,
               wt.schema_name,
               wt.table_name,
@@ -89,7 +88,13 @@ class BuilderColumnFeedService:
                 "domain_id": int(domain_id) if domain_id is not None else None,
             },
         )
-        return {"rows": serialize_result_rows([dict(row) for row in rows])}
+        payload_rows = []
+        for row in rows:
+            shaped = dict(row)
+            shaped["model_table_id"] = shaped.get("workspace_table_id")
+            shaped["model_table_name"] = shaped.get("table_label")
+            payload_rows.append(shaped)
+        return {"rows": serialize_result_rows(payload_rows)}
 
     def list_available_columns(self, q: BuilderFeedQuery) -> Dict[str, Any]:
         params = self._build_params(q)
@@ -100,7 +105,11 @@ class BuilderColumnFeedService:
         total = int(total_rows[0][0]) if total_rows else 0
 
         rows = self._sql.execute_query_mappings(sql_pack.rows_sql, params)
-        camel_rows = [_camelize_row(dict(row)) for row in rows]
+        camel_rows = []
+        for row in rows:
+            shaped = _camelize_row(dict(row))
+            shaped["modelColumnId"] = shaped.get("workspaceColumnId")
+            camel_rows.append(shaped)
 
         return {
             "rows": serialize_result_rows(camel_rows),
@@ -146,7 +155,6 @@ class BuilderColumnFeedService:
               wc.data_type,
               wc.nullable,
               wc.ordinal_position,
-              wc.id                    AS model_column_id,
               wc.description             AS description,
               wc.sample_values_json      AS sample_values_json,
               wc.sample_stats_json       AS sample_stats_json,

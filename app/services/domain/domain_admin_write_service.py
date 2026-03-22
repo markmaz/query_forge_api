@@ -84,10 +84,10 @@ class _DomainAdminStore:
             result = tx.execute_insert(
                 """
                 INSERT INTO domain (
-                    workspace_id, name, kind, description, model_table_id,
+                    workspace_id, name, kind, description,
                     column_name_policy, is_active, created_at
                 )
-                VALUES (:ws, :name, :kind, :desc, NULL, :policy, 1, CURRENT_TIMESTAMP)
+                VALUES (:ws, :name, :kind, :desc, :policy, 1, CURRENT_TIMESTAMP)
                 """,
                 {
                     "ws": workspace_id,
@@ -136,7 +136,6 @@ class _DomainAdminStore:
               d.name,
               d.kind,
               d.description,
-              NULL AS model_table_id,
               d.column_name_policy,
               (
                 SELECT COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name)
@@ -145,7 +144,7 @@ class _DomainAdminStore:
                 WHERE dwt2.domain_id = d.id
                 ORDER BY dwt2.is_primary DESC, dwt2.sort_order ASC, wt.id ASC
                 LIMIT 1
-              ) AS model_table_name,
+              ) AS primary_table_name,
               d.is_active,
               d.created_at,
               d.updated_at
@@ -154,7 +153,12 @@ class _DomainAdminStore:
             """,
             {"ws": workspace_id, "did": int(domain_id)},
         )
-        return dict(rows[0]) if rows else None
+        if not rows:
+            return None
+        row = dict(rows[0])
+        row["model_table_id"] = None
+        row["model_table_name"] = row.get("primary_table_name")
+        return row
 
     def delete_domain(self, *, workspace_id: str, domain_id: int) -> int:
         with self._sql.transaction() as tx:

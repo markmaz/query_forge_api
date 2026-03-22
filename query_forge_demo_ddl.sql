@@ -105,14 +105,11 @@ CREATE TABLE `domain` (
   `is_active` tinyint(1) NOT NULL DEFAULT '1',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-  `model_table_id` bigint unsigned DEFAULT NULL,
   `column_name_policy` enum('DEDUP_PRIMARY_FIRST','SHOW_ALL_QUALIFIED') NOT NULL DEFAULT 'DEDUP_PRIMARY_FIRST',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_domain_ws_name` (`workspace_id`,`name`),
   KEY `ix_domain_ws` (`workspace_id`),
-  KEY `ix_domain_model_table_id` (`model_table_id`),
   KEY `ix_domain_column_name_policy` (`column_name_policy`),
-  CONSTRAINT `fk_domain_model_table` FOREIGN KEY (`model_table_id`) REFERENCES `model_table` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_domain_ws` FOREIGN KEY (`workspace_id`) REFERENCES `workspace` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -506,104 +503,6 @@ CREATE TABLE `ingestion_run` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `model_column`
---
-
-DROP TABLE IF EXISTS `model_column`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `model_column` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `model_table_id` bigint unsigned NOT NULL,
-  `column_name` varchar(255) NOT NULL,
-  `data_type` longtext,
-  `description` longtext,
-  `semantic_type` varchar(100) DEFAULT NULL,
-  `ordinal_position` int NOT NULL DEFAULT '0',
-  `nullable` tinyint(1) NOT NULL DEFAULT '1',
-  `is_active` tinyint(1) NOT NULL DEFAULT '1',
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-  `sample_values_json` longtext,
-  `sample_stats_json` longtext,
-  `sample_ran_at` timestamp NULL DEFAULT NULL,
-  `sample_error` varchar(500) DEFAULT NULL,
-  `origin` varchar(16) NOT NULL DEFAULT 'DBX',
-  `is_missing_in_source` tinyint(1) NOT NULL DEFAULT '0',
-  `semantic_concept_id` bigint unsigned DEFAULT NULL,
-  `semantic_concept_key` varchar(150) DEFAULT NULL,
-  `semantic_entity` varchar(100) DEFAULT NULL,
-  `semantic_sub_type` varchar(200) DEFAULT NULL,
-  `semantic_granularity_rank` int NOT NULL DEFAULT '0',
-  `semantic_source` varchar(20) DEFAULT NULL,
-  `semantic_confidence` decimal(4,3) DEFAULT NULL,
-  `semantic_reasons_json` longtext,
-  `semantic_warnings_json` longtext,
-  `semantic_updated_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_model_col` (`model_table_id`,`column_name`),
-  KEY `ix_model_col_name` (`column_name`),
-  KEY `ix_model_col_missing` (`is_missing_in_source`),
-  KEY `ix_model_col_origin` (`origin`),
-  KEY `idx_model_column_semantic_concept_id` (`semantic_concept_id`),
-  KEY `idx_model_column_semantic_concept_key` (`semantic_concept_key`),
-  KEY `idx_model_column_table_semantic_key` (`model_table_id`,`semantic_concept_key`),
-  CONSTRAINT `fk_model_col_table` FOREIGN KEY (`model_table_id`) REFERENCES `model_table` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_model_column_semantic_concept` FOREIGN KEY (`semantic_concept_id`) REFERENCES `semantic_concept` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=931 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `model_column_semantic_concept_map`
---
-
-DROP TABLE IF EXISTS `model_column_semantic_concept_map`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `model_column_semantic_concept_map` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `vertical_norm` varchar(50) NOT NULL DEFAULT 'generic',
-  `semantic_concept_id` bigint unsigned NOT NULL,
-  `model_column_id` bigint unsigned NOT NULL,
-  `relationship_kind` varchar(30) NOT NULL DEFAULT 'primary',
-  `weight` decimal(4,3) NOT NULL DEFAULT '1.000',
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_map` (`vertical_norm`,`semantic_concept_id`,`model_column_id`,`relationship_kind`),
-  KEY `idx_map_concept` (`vertical_norm`,`semantic_concept_id`),
-  KEY `idx_map_column` (`model_column_id`),
-  KEY `fk_map_concept` (`semantic_concept_id`),
-  CONSTRAINT `fk_map_column` FOREIGN KEY (`model_column_id`) REFERENCES `model_column` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_map_concept` FOREIGN KEY (`semantic_concept_id`) REFERENCES `semantic_concept` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `model_table`
---
-
-DROP TABLE IF EXISTS `model_table`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `model_table` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `name` varchar(255) NOT NULL,
-  `source_table_name` varchar(255) DEFAULT NULL,
-  `description` text,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-  `origin` varchar(16) NOT NULL DEFAULT 'DBX',
-  `is_missing_in_source` tinyint(1) NOT NULL DEFAULT '0',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_model_table_name` (`name`),
-  UNIQUE KEY `uq_model_table_source_table_name` (`source_table_name`),
-  KEY `ix_model_table_source_table_name` (`source_table_name`),
-  KEY `ix_model_tbl_missing` (`is_missing_in_source`),
-  KEY `ix_model_tbl_origin` (`origin`)
-) ENGINE=InnoDB AUTO_INCREMENT=81 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
 -- Table structure for table `organization`
 --
 
@@ -941,16 +840,16 @@ CREATE TABLE `semantic_column_map` (
   `semantic_registry_id` bigint unsigned NOT NULL,
   `workspace_id` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `workspace_norm` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci GENERATED ALWAYS AS (ifnull(`workspace_id`,_utf8mb4'__global__')) STORED,
-  `model_column_id` bigint unsigned DEFAULT NULL,
+  `workspace_column_id` bigint unsigned DEFAULT NULL,
   `table_name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `column_name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `priority_rank` int NOT NULL DEFAULT '0',
   `confidence_score` decimal(4,3) DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_map_semreg_workspace_modelcol` (`semantic_registry_id`,`workspace_norm`,`model_column_id`),
+  UNIQUE KEY `uq_map_semreg_workspace_column` (`semantic_registry_id`,`workspace_norm`,`workspace_column_id`),
   UNIQUE KEY `uq_map_semreg_workspace_tablecol` (`semantic_registry_id`,`workspace_norm`,`table_name`,`column_name`),
-  KEY `idx_map_workspace_modelcol` (`workspace_norm`,`model_column_id`),
+  KEY `idx_map_workspace_column` (`workspace_norm`,`workspace_column_id`),
   KEY `idx_map_workspace_tablecol` (`workspace_norm`,`table_name`,`column_name`),
   CONSTRAINT `fk_semantic_map_registry` FOREIGN KEY (`semantic_registry_id`) REFERENCES `semantic_registry` (`id`) ON DELETE CASCADE,
   CONSTRAINT `chk_semantic_map_confidence` CHECK (((`confidence_score` is null) or ((`confidence_score` >= 0.000) and (`confidence_score` <= 1.000))))
@@ -1078,8 +977,8 @@ DROP TABLE IF EXISTS `semantic_suggestion_item`;
 CREATE TABLE `semantic_suggestion_item` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `run_id` bigint unsigned NOT NULL,
-  `model_column_id` bigint unsigned NOT NULL,
-  `model_table_id` bigint unsigned DEFAULT NULL,
+  `workspace_column_id` bigint unsigned NOT NULL,
+  `workspace_table_id` bigint unsigned DEFAULT NULL,
   `table_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `column_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `data_type` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -1114,7 +1013,7 @@ CREATE TABLE `semantic_suggestion_item` (
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_sem_suggestion_item_run_column` (`run_id`,`model_column_id`),
+  UNIQUE KEY `uq_sem_suggestion_item_run_column` (`run_id`,`workspace_column_id`),
   KEY `idx_sem_suggestion_item_run` (`run_id`),
   KEY `idx_sem_suggestion_item_status` (`decision_status`),
   KEY `idx_sem_suggestion_item_type` (`proposed_semantic_type`),
@@ -1403,6 +1302,30 @@ CREATE TABLE `workspace_column` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `workspace_column_semantic_concept_map`
+--
+
+DROP TABLE IF EXISTS `workspace_column_semantic_concept_map`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `workspace_column_semantic_concept_map` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `vertical_norm` varchar(50) NOT NULL DEFAULT 'generic',
+  `semantic_concept_id` bigint unsigned NOT NULL,
+  `workspace_column_id` bigint unsigned NOT NULL,
+  `relationship_kind` varchar(30) NOT NULL DEFAULT 'primary',
+  `weight` decimal(4,3) NOT NULL DEFAULT '1.000',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ws_map` (`vertical_norm`,`semantic_concept_id`,`workspace_column_id`,`relationship_kind`),
+  KEY `idx_ws_map_concept` (`vertical_norm`,`semantic_concept_id`),
+  KEY `idx_ws_map_column` (`workspace_column_id`),
+  CONSTRAINT `fk_ws_map_column` FOREIGN KEY (`workspace_column_id`) REFERENCES `workspace_column` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_ws_map_concept` FOREIGN KEY (`semantic_concept_id`) REFERENCES `semantic_concept` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `workspace_destinations`
 --
 
@@ -1516,7 +1439,6 @@ DROP TABLE IF EXISTS `workspace_table`;
 CREATE TABLE `workspace_table` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `workspace_id` varchar(128) NOT NULL,
-  `model_table_id` bigint unsigned DEFAULT NULL,
   `catalog_name` varchar(255) NOT NULL,
   `schema_name` varchar(255) NOT NULL DEFAULT 'asset',
   `table_name` varchar(255) NOT NULL,
@@ -1535,11 +1457,8 @@ CREATE TABLE `workspace_table` (
   `metadata_updated_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_ws_full` (`workspace_id`,`full_name`),
-  KEY `ix_ws_model` (`workspace_id`,`model_table_id`),
   KEY `ix_ws_variant` (`workspace_id`,`variant_code`),
-  KEY `ix_ws_unmapped` (`workspace_id`,`schema_name`,`model_table_id`,`table_name`),
-  KEY `fk_ws_table_model` (`model_table_id`),
-  CONSTRAINT `fk_ws_table_model` FOREIGN KEY (`model_table_id`) REFERENCES `model_table` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  KEY `ix_ws_unmapped` (`workspace_id`,`schema_name`,`table_name`),
   CONSTRAINT `fk_ws_table_ws` FOREIGN KEY (`workspace_id`) REFERENCES `workspace` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=533 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;

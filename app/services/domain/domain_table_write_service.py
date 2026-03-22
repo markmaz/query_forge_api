@@ -135,8 +135,7 @@ class _DomainTableStore:
             """
             SELECT
               wt.id               AS workspace_table_id,
-              NULL                AS model_table_id,
-              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
+              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS table_label,
               dwt.relation_kind   AS relation_kind,
               dwt.is_primary      AS is_primary,
               dwt.sort_order      AS sort_order,
@@ -160,7 +159,12 @@ class _DomainTableStore:
             """,
             {"ws": workspace_id, "did": int(domain_id), "wtid": int(workspace_table_id)},
         )
-        return dict(rows[0]) if rows else None
+        if not rows:
+            return None
+        row = dict(rows[0])
+        row["model_table_id"] = row.get("workspace_table_id")
+        row["model_table_name"] = row.get("table_label")
+        return row
 
     def remove_domain_table(self, *, workspace_id: str, domain_id: int, workspace_table_id: int) -> int:
         with self._sql.transaction() as tx:

@@ -2383,18 +2383,18 @@ class PlannerDomainService:
         cap_rows = list(capabilities.get("filter_columns") or []) + list(capabilities.get("dimensions") or []) + list(
             capabilities.get("time_columns") or []
         )
-        model_to_key: Dict[int, str] = {}
+        workspace_to_key: Dict[int, str] = {}
         for row in cap_rows:
             if not isinstance(row, Mapping):
                 continue
             key = _norm_key(row.get("column_key"))
-            mid = _to_int(row.get("model_column_id"))
-            if key == "" or mid is None:
+            workspace_column_id = _to_int(row.get("workspace_column_id")) or _to_int(row.get("model_column_id"))
+            if key == "" or workspace_column_id is None:
                 continue
             if row.get("filterable") is False:
                 continue
-            model_to_key[mid] = key
-        if not model_to_key:
+            workspace_to_key[workspace_column_id] = key
+        if not workspace_to_key:
             return {}
 
         params: Dict[str, Any] = {
@@ -2402,14 +2402,14 @@ class PlannerDomainService:
             "vertical_norm": _norm_vertical(vertical_norm),
         }
         placeholders: List[str] = []
-        for idx, model_column_id in enumerate(sorted(model_to_key.keys())):
-            token = f"mid_{idx}"
+        for idx, workspace_column_id in enumerate(sorted(workspace_to_key.keys())):
+            token = f"wid_{idx}"
             placeholders.append(f":{token}")
-            params[token] = int(model_column_id)
+            params[token] = int(workspace_column_id)
 
         sql = f"""
             SELECT
-              scm.model_column_id,
+              scm.workspace_column_id,
               sr.concept_key,
               sr.semantic_type,
               scm.priority_rank,
@@ -2419,7 +2419,7 @@ class PlannerDomainService:
               ON sr.id = scm.semantic_registry_id
             WHERE scm.workspace_norm IN (:workspace_norm, '__global__')
               AND sr.vertical_norm IN (:vertical_norm, 'generic')
-              AND scm.model_column_id IN ({", ".join(placeholders)})
+              AND scm.workspace_column_id IN ({", ".join(placeholders)})
             ORDER BY
               scm.priority_rank DESC,
               scm.confidence_score DESC,
@@ -2435,10 +2435,10 @@ class PlannerDomainService:
         for row in rows:
             if not isinstance(row, Mapping):
                 continue
-            model_column_id = _to_int(row.get("model_column_id"))
-            if model_column_id is None:
+            workspace_column_id = _to_int(row.get("workspace_column_id"))
+            if workspace_column_id is None:
                 continue
-            column_key = model_to_key.get(model_column_id)
+            column_key = workspace_to_key.get(workspace_column_id)
             if not column_key:
                 continue
             concept_key = str(row.get("concept_key") or "")

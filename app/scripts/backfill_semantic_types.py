@@ -59,7 +59,7 @@ def backfill_semantic_types(*, batch_size: int = BATCH_SIZE) -> Dict[str, int]:
         rows = sql.execute_query_mappings(
             """
             SELECT id, column_name, semantic_type
-            FROM model_column
+            FROM workspace_column
             WHERE id > :last_id
             ORDER BY id
             LIMIT :limit
@@ -89,7 +89,7 @@ def backfill_semantic_types(*, batch_size: int = BATCH_SIZE) -> Dict[str, int]:
                 for item in updates:
                     tx.execute_write(
                         """
-                        UPDATE model_column
+                        UPDATE workspace_column
                         SET semantic_type = :semantic_type
                         WHERE id = :id
                           AND (semantic_type IS NULL OR semantic_type = '')

@@ -29,8 +29,7 @@ class DomainTableReadService:
             """
             SELECT
               wt.id               AS workspace_table_id,
-              NULL                AS model_table_id,
-              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
+              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS table_label,
               dwt.relation_kind   AS relation_kind,
               dwt.is_primary      AS is_primary,
               dwt.sort_order      AS sort_order,
@@ -55,7 +54,13 @@ class DomainTableReadService:
             """,
             {"ws": workspace_id, "did": int(domain_id)},
         )
-        return serialize_result_rows([dict(row) for row in rows])
+        payload = []
+        for row in rows:
+            shaped = dict(row)
+            shaped["model_table_id"] = shaped.get("workspace_table_id")
+            shaped["model_table_name"] = shaped.get("table_label")
+            payload.append(shaped)
+        return serialize_result_rows(payload)
 
     def get_domain(self, *, workspace_id: str, domain_name: str) -> Dict[str, Any]:
         ws = (workspace_id or "").strip()
@@ -135,8 +140,7 @@ class DomainTableReadService:
             """
             SELECT
               wt.id               AS workspace_table_id,
-              NULL                AS model_table_id,
-              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
+              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS table_label,
               wt.catalog_name,
               wt.schema_name,
               wt.table_name,
@@ -180,7 +184,13 @@ class DomainTableReadService:
             """,
             params,
         )
-        return serialize_result_rows([dict(row) for row in rows])
+        payload = []
+        for row in rows:
+            shaped = dict(row)
+            shaped["model_table_id"] = shaped.get("workspace_table_id")
+            shaped["model_table_name"] = shaped.get("table_label")
+            payload.append(shaped)
+        return serialize_result_rows(payload)
 
     def _sync_workspace_inventory_from_registry(
         self,

@@ -103,23 +103,19 @@ class EmbeddingIndexService:
           wt.workspace_id,
           wt.id AS workspace_table_id,
           wc.id AS workspace_column_id,
-          wt.id AS model_table_id,
-          COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
+          COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS table_name,
           wt.full_name AS source_table_name,
-          wt.origin AS model_origin,
-          wt.table_name,
+          wt.origin AS origin,
           wt.full_name,
           wc.column_name,
           wc.data_type AS workspace_data_type,
-          wc.id AS model_column_id,
-          wc.data_type AS model_data_type,
           wc.description AS column_description,
           wc.semantic_type AS semantic_type,
           wc.semantic_entity AS semantic_entity,
           wc.semantic_sub_type AS semantic_sub_type,
           wc.semantic_confidence AS semantic_confidence,
           wc.semantic_reasons_json AS semantic_reasons_json,
-          wc.is_active AS model_is_active
+          wc.is_active AS is_active
         FROM workspace_table wt
         JOIN workspace_column wc ON wc.workspace_table_id = wt.id
         WHERE (wc.is_missing_in_source = 0 OR wc.is_missing_in_source IS NULL)
@@ -222,8 +218,8 @@ class EmbeddingIndexService:
 
         lines = [
             f"Workspace: {workspace_id}",
-            f"Table: {table_name} (workspace_table_id={row.get('workspace_table_id')}, model_table_id={row.get('model_table_id')})",
-            f"Column: {column} (workspace_column_id={row.get('workspace_column_id')}, model_column_id={row.get('model_column_id')})",
+            f"Table: {table_name} (workspace_table_id={row.get('workspace_table_id')})",
+            f"Column: {column} (workspace_column_id={row.get('workspace_column_id')})",
             f"Type: {data_type}",
             f"Description: {description}",
         ]
@@ -253,10 +249,10 @@ def build_workspace_column_point_id(workspace_id: Any, workspace_column_id: Any)
 def build_workspace_column_payload(row: Dict[str, Any]) -> Dict[str, Any]:
     workspace_id = str(row.get("workspace_id") or "").strip()
     table_name = _resolve_table_name(row)
-    data_type = (row.get("model_data_type") or row.get("workspace_data_type") or None)
+    data_type = row.get("workspace_data_type") or None
     description = row.get("column_description") or None
-    model_table_id = _to_int_or_none(row.get("model_table_id"))
-    model_column_id = _to_int_or_none(row.get("model_column_id"))
+    workspace_table_id = _to_int_or_none(row.get("workspace_table_id"))
+    workspace_column_id = _to_int_or_none(row.get("workspace_column_id"))
     return {
         "type": "column",
         "kind": "column",
@@ -264,8 +260,8 @@ def build_workspace_column_payload(row: Dict[str, Any]) -> Dict[str, Any]:
         "workspace_id": workspace_id,
         "workspace_table_id": int(row.get("workspace_table_id") or 0),
         "workspace_column_id": int(row.get("workspace_column_id") or 0),
-        "model_table_id": model_table_id,
-        "model_column_id": model_column_id,
+        "model_table_id": workspace_table_id,
+        "model_column_id": workspace_column_id,
         "table_name": table_name,
         "column_name": row.get("column_name"),
         "data_type": data_type,
@@ -275,14 +271,14 @@ def build_workspace_column_payload(row: Dict[str, Any]) -> Dict[str, Any]:
         "semantic_sub_type": row.get("semantic_sub_type"),
         "semantic_confidence": _to_float_or_none(row.get("semantic_confidence")),
         "semantic_reasons": _parse_json_list(row.get("semantic_reasons_json")),
-        "origin": row.get("model_origin"),
-        "is_active": _coerce_bool(row.get("model_is_active"), default=True),
+        "origin": row.get("origin"),
+        "is_active": _coerce_bool(row.get("is_active"), default=True),
     }
 
 
 def _resolve_table_name(row: Dict[str, Any]) -> str:
     return (
-        (row.get("model_table_name") or "")
+        (row.get("table_name") or "")
         or (row.get("table_name") or "")
         or (row.get("full_name") or "")
     )

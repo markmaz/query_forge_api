@@ -2945,3 +2945,21 @@ prompt=Show me all the students born in mexico
 14. Optionally polish explanation summary with LLM: 1369ms
 15. Defer next action generation (async): 0ms
 16. Persist conversation state for follow-up context: 0ms
+2026-03-22 09:46:04,443 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=2722d988-1427-4e1f-8bfd-7254b7982762 workspace_id=ws_3de8526699214b2d87830352 user_id=16167dac-606c-4843-b780-d95cd530b967 conversation_id=pdc_9879c927ed774e108991 total_ms=11933
+prompt=Show me all the students born in mexico
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 194ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 376ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 2222ms
+7. Extract intent/constraints slot hints via LLM: 1906ms
+8. Compact capabilities payload for plan generation: 4ms
+9. Generate PlanV2 with LLM: 5064ms
+10. Normalize plan and apply deterministic value/filter normalizers: 2ms
+11. Validate and repair plan against capabilities: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 2149ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms

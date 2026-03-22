@@ -86,11 +86,11 @@ class SemanticSuggestionService:
 
         vertical = _normalize_optional_text(payload.get("vertical"), max_len=50) or SEMANTIC_VERTICAL_DEFAULT
         workspace_id = _normalize_optional_text(payload.get("workspace_id"), max_len=100)
-        model_table_id = _normalize_optional_int(payload.get("model_table_id"), field="model_table_id")
+        workspace_table_id = _normalize_optional_int(payload.get("workspace_table_id"), field="workspace_table_id")
         page_size = _normalize_optional_int(payload.get("page_size"), field="page_size") or 200
 
         params = {
-            "model_table_id": model_table_id,
+            "workspace_table_id": workspace_table_id,
             "page_size": max(1, min(page_size, 1000)),
         }
 
@@ -129,7 +129,7 @@ class SemanticSuggestionService:
             raise ForgeError("Run already applied", status_code=409)
 
         params = _parse_json_obj(run.get("params_json")) or {}
-        model_table_id = _normalize_optional_int(params.get("model_table_id"), field="model_table_id")
+        workspace_table_id = _normalize_optional_int(params.get("workspace_table_id"), field="workspace_table_id")
         page_size = _normalize_optional_int(params.get("page_size"), field="page_size") or 200
         page_size = max(1, min(page_size, 1000))
         processed_columns = 0
@@ -145,7 +145,7 @@ class SemanticSuggestionService:
                 logger.exception("Failed to load known concepts/aliases for vertical=%s", vertical_norm)
                 known_concepts = []
                 alias_rules = []
-            total_columns = self._cards.count_columns(model_table_id=model_table_id)
+            total_columns = self._cards.count_columns(workspace_table_id=workspace_table_id)
             self._sql.execute_write(
                 """
                 UPDATE semantic_suggestion_run
@@ -169,7 +169,7 @@ class SemanticSuggestionService:
                 cards = self._cards.build_column_cards(
                     offset=offset,
                     limit=page_size,
-                    model_table_id=model_table_id,
+                    workspace_table_id=workspace_table_id,
                 )
                 if not cards:
                     break
@@ -357,8 +357,8 @@ class SemanticSuggestionService:
             SELECT
               ssi.id,
               ssi.run_id,
-              ssi.model_column_id,
-              ssi.model_table_id,
+              ssi.workspace_column_id,
+              ssi.workspace_table_id,
               ssi.table_name,
               ssi.column_name,
               ssi.data_type,
@@ -584,8 +584,8 @@ class SemanticSuggestionService:
             """
             INSERT INTO semantic_suggestion_item (
               run_id,
-              model_column_id,
-              model_table_id,
+              workspace_column_id,
+              workspace_table_id,
               table_name,
               column_name,
               data_type,
@@ -617,8 +617,8 @@ class SemanticSuggestionService:
               decision_status
             ) VALUES (
               :run_id,
-              :model_column_id,
-              :model_table_id,
+              :workspace_column_id,
+              :workspace_table_id,
               :table_name,
               :column_name,
               :data_type,
@@ -650,7 +650,7 @@ class SemanticSuggestionService:
               :decision_status
             )
             ON DUPLICATE KEY UPDATE
-              model_table_id = VALUES(model_table_id),
+              workspace_table_id = VALUES(workspace_table_id),
               table_name = VALUES(table_name),
               column_name = VALUES(column_name),
               data_type = VALUES(data_type),
@@ -683,8 +683,8 @@ class SemanticSuggestionService:
             """,
             {
                 "run_id": run_id,
-                "model_column_id": int(card["modelColumnId"]),
-                "model_table_id": card.get("modelTableId"),
+                "workspace_column_id": int(card["workspaceColumnId"]),
+                "workspace_table_id": card.get("workspaceTableId"),
                 "table_name": card.get("tableName"),
                 "column_name": card.get("columnName"),
                 "data_type": card.get("dataType"),
@@ -842,7 +842,7 @@ class SemanticSuggestionService:
             INSERT INTO semantic_column_map (
               semantic_registry_id,
               workspace_id,
-              model_column_id,
+              workspace_column_id,
               table_name,
               column_name,
               priority_rank,
@@ -850,7 +850,7 @@ class SemanticSuggestionService:
             ) VALUES (
               :semantic_registry_id,
               :workspace_id,
-              :model_column_id,
+              :workspace_column_id,
               :table_name,
               :column_name,
               :priority_rank,
@@ -863,7 +863,7 @@ class SemanticSuggestionService:
             {
                 "semantic_registry_id": int(semantic_registry_id),
                 "workspace_id": run.get("workspace_id"),
-                "model_column_id": int(item["model_column_id"]),
+                "workspace_column_id": int(item["workspace_column_id"]),
                 "table_name": None,
                 "column_name": None,
                 "priority_rank": int(item.get("proposed_display_priority") or 0),
@@ -887,7 +887,7 @@ class SemanticSuggestionService:
             warnings = []
 
         self._assignment.upsert_primary_semantics(
-            model_column_id=int(item["model_column_id"]),
+            workspace_column_id=int(item["workspace_column_id"]),
             semantic_concept_id=concept_id,
             key=concept_key,
             source=source,
@@ -904,7 +904,7 @@ class SemanticSuggestionService:
             if vertical_norm == "__global__":
                 vertical_norm = "generic"
             self._assignment.ensure_mapping(
-                model_column_id=int(item["model_column_id"]),
+                workspace_column_id=int(item["workspace_column_id"]),
                 semantic_concept_id=concept_id,
                 relationship_kind="primary",
                 weight=max(0.0, float(confidence or 0.0)),
@@ -1056,8 +1056,8 @@ class SemanticSuggestionService:
             "processed_columns": int(processed_columns),
         }
         if current_card:
-            progress["last_model_column_id"] = current_card.get("modelColumnId")
-            progress["last_model_table_id"] = current_card.get("modelTableId")
+            progress["last_workspace_column_id"] = current_card.get("workspaceColumnId")
+            progress["last_workspace_table_id"] = current_card.get("workspaceTableId")
             progress["last_table_name"] = current_card.get("tableName")
             progress["last_column_name"] = current_card.get("columnName")
         params_copy["progress"] = progress
@@ -1095,8 +1095,8 @@ class SemanticSuggestionService:
         int_fields = {
             "id",
             "run_id",
-            "model_column_id",
-            "model_table_id",
+            "workspace_column_id",
+            "workspace_table_id",
             "proposed_concept_id",
             "proposed_granularity_rank",
             "proposed_display_priority",
@@ -1115,6 +1115,10 @@ class SemanticSuggestionService:
         for key in int_fields:
             if out.get(key) is not None:
                 out[key] = int(out[key])
+        if out.get("workspace_column_id") is not None:
+            out["model_column_id"] = int(out["workspace_column_id"])
+        if out.get("workspace_table_id") is not None:
+            out["model_table_id"] = int(out["workspace_table_id"])
         for key in bool_fields:
             if key in out:
                 out[key] = bool(out[key])
