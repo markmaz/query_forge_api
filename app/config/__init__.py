@@ -377,3 +377,4 @@ GAZETTEER_ENABLED = os.getenv("GAZETTEER_ENABLED", "1").strip().lower() in (
 GAZETTEER_CSV_PATH = os.getenv("GAZETTEER_CSV_PATH", "data/school_districts.csv").strip() or "data/school_districts.csv"
 
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
+DESTINATION_ENCRYPTION_KEY = os.getenv("DESTINATION_ENCRYPTION_KEY", "").strip() or None

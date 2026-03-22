@@ -28,8 +28,8 @@ CREATE TABLE workspace_destinations (
     usage_count             INT NOT NULL DEFAULT 0,
 
     -- Audit
-    created_by              INT NULL,
-    updated_by              INT NULL,
+    created_by              VARCHAR(255) NULL,
+    updated_by              VARCHAR(255) NULL,
     created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 

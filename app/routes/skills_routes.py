@@ -247,6 +247,7 @@ def _runtime_config_from_meta(*, backend_skill_type: str, meta: dict[str, Any], 
         return {
             **existing_runtime,
             "channel_type": channel_type,
+            "channels": _derive_channels_from_actions(actions),
             "destination_id": destination_id,
             "webhook_url": str(cfg.get("webhook_url") or cfg.get("endpoint_url") or cfg.get("url") or "").strip(),
             "url": str(cfg.get("url") or cfg.get("endpoint_url") or cfg.get("webhook_url") or "").strip(),
@@ -430,7 +431,49 @@ def _normalize_skill_row(row: dict[str, Any]) -> dict[str, Any]:
 
 def _normalize_skill_run_row(row: dict[str, Any]) -> dict[str, Any]:
     out = _serialize_row(dict(row))
-    out["events"] = []
+    result = _json_object(out.get("result_json"))
+    data = _json_object(result.get("data"))
+    message = str(result.get("message") or "").strip()
+    if out.get("status") == "success" and data.get("skipped") is True:
+        out["status"] = "skipped"
+    if message:
+        out["message"] = message
+    events: list[dict[str, Any]] = []
+    created_at = out.get("created_at")
+    started_at = out.get("started_at")
+    finished_at = out.get("finished_at")
+    status = str(out.get("status") or "pending")
+    final_message = str(out.get("message") or "").strip()
+
+    if created_at:
+        events.append(
+            {
+                "id": f"{out.get('id')}:queued",
+                "status": "pending",
+                "timestamp": created_at,
+                "message": "Run queued.",
+            }
+        )
+    if started_at:
+        events.append(
+            {
+                "id": f"{out.get('id')}:started",
+                "status": "info",
+                "timestamp": started_at,
+                "message": "Execution started.",
+            }
+        )
+    if finished_at or final_message:
+        events.append(
+            {
+                "id": f"{out.get('id')}:finished",
+                "status": status,
+                "timestamp": finished_at or started_at or created_at,
+                "message": final_message or "Run complete.",
+            }
+        )
+
+    out["events"] = events
     return out
 
 

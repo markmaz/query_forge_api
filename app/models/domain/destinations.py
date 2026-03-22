@@ -134,8 +134,8 @@ class WorkspaceDestination(db.Model):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime)
     usage_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
-    created_by: Mapped[int | None] = mapped_column(Integer)
-    updated_by: Mapped[int | None] = mapped_column(Integer)
+    created_by: Mapped[str | None] = mapped_column(String(255))
+    updated_by: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )

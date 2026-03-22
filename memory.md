@@ -593,3 +593,275 @@ Last updated: 2026-03-19
 - Verification completed:
   - `python3 -m pytest tests/routes/test_workspace_feature_routes.py tests/routes/test_admin_routes.py tests/routes/test_user_routes.py tests/services/test_user_service.py -q`
     - Result: `92 passed, 3 skipped`
+
+## Latest Skills destination admin visibility fix
+
+- Investigated why a `workspace_admin` could not see `+ Add destination` on the Skills -> Destinations tab even though the backend destination routes already allowed workspace admins.
+- Root cause:
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/pages/SkillsPage.tsx` was deriving destination admin visibility from local role parsing instead of the app's canonical capability state
+  - this made the UI gate less reliable than the rest of the app for workspace-scoped admin sessions
+- Frontend fix implemented:
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/pages/SkillsPage.tsx`
+    - now uses `useCan()` and the canonical `skills:admin` capability / `skills` admin role to decide whether destination create/edit controls are visible
+    - removed the ad hoc token/profile admin derivation from the page
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/__tests__/SkillsPage.test.tsx`
+    - added a regression proving a `workspace_admin` session with `skills:admin` capability sees the destination creation controls
+- Verification completed:
+  - `npm test -- --run src/features/skills/__tests__/SkillsPage.test.tsx src/features/skills/__tests__/SkillBuilderDrawer.test.tsx`
+    - Result: `4 passed`
+    - Existing warning remains: `Missing VITE_API_URL`
+
+## Latest destination encryption fix
+
+- Investigated destination create failure on:
+  - `POST /api/v1/workspaces/<workspace_id>/destinations/`
+- Root cause had two parts:
+  - the runtime environment did not have `DESTINATION_ENCRYPTION_KEY` set
+  - the app was not wiring `DESTINATION_ENCRYPTION_KEY` from env into `app.config`, so destination encryption could not work even if the env var existed
+- Backend fixes implemented:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/config/__init__.py`
+    - added `DESTINATION_ENCRYPTION_KEY = os.getenv("DESTINATION_ENCRYPTION_KEY", "").strip() or None`
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/factory.py`
+    - now sets `app.config["DESTINATION_ENCRYPTION_KEY"] = DESTINATION_ENCRYPTION_KEY`
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/routes/destination_routes.py`
+    - destination create/update now catch missing-encryption-key `RuntimeError` and return a clean JSON error with HTTP 503 instead of an unhandled traceback
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/.env.example`
+    - added `DESTINATION_ENCRYPTION_KEY=`
+- Tests added/updated:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/test_destinations.py`
+    - added route coverage proving destination create returns a clear error when the key is missing
+- Verification completed:
+  - `python3 -m pytest tests/test_destinations.py -q`
+    - Result: `24 passed`
+
+## Latest workspace_destinations schema fix
+
+- Investigated destination create failure after encryption was fixed and found a database schema mismatch:
+  - `workspace_destinations.created_by` and `updated_by` were defined as `INT`
+  - the application writes actor ids as strings / UUIDs (for example `16167dac-606c-4843-b780-d95cd530b967`)
+  - MySQL was failing on insert with `Data truncated for column 'created_by'`
+- Fixes implemented:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/models/domain/destinations.py`
+    - changed `created_by` and `updated_by` from `Integer` to `String(255)`
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/migrations/20260316_add_workspace_destinations.sql`
+    - corrected the original table definition to use `VARCHAR(255)` for both columns
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/migrations/20260321_fix_workspace_destinations_actor_columns.sql`
+    - added forward migration for existing databases:
+      - `ALTER TABLE workspace_destinations MODIFY COLUMN created_by VARCHAR(255) NULL, MODIFY COLUMN updated_by VARCHAR(255) NULL`
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/query_forge_demo_ddl.sql`
+    - updated demo DDL accordingly
+- Verification completed:
+  - `python3 -m pytest tests/test_destinations.py -q`
+    - Result: `24 passed`
+
+## Latest webhook SSL fix
+
+- Investigated destination test failures returning:
+  - `Slack webhook error: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1000)>`
+- Root cause:
+  - webhook delivery used Python `urllib` with the local interpreter's default trust store
+  - on this machine, `curl` trusted the Slack certificate chain via the system store, but Python did not
+- Backend fix implemented:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/skills/delivery/__init__.py`
+    - webhook-based delivery channels now use an explicit SSL context built from `certifi.where()`
+    - applied to:
+      - `SlackDeliveryChannel`
+      - `TeamsDeliveryChannel`
+      - `GenericWebhookDeliveryChannel`
+    - added `_ssl_context()` helper
+- Tests updated:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/test_destinations.py`
+    - added coverage proving Slack delivery calls `urlopen(..., context=_ssl_context())`
+- Verification completed:
+  - `python3 -m pytest tests/test_destinations.py -q`
+    - Result: `25 passed`
+
+## Latest Skills destinations table refresh
+
+- Follow-up UI issues on the Skills -> Destinations tab:
+  - after a successful destination test, the row badge could still show `Failed` because the table status was driven by stale list data
+  - the table did not match the rest of the app's table patterns
+  - admins wanted row click to open edit, with compact icon actions for test/delete
+- Frontend changes implemented:
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/components/DestinationsTab.jsx`
+    - successful and failed test actions now patch the tested row in local state immediately:
+      - `last_test_status`
+      - `last_test_message`
+      - `last_tested_at`
+    - admin row click now opens the edit drawer
+    - action strip now uses icon buttons:
+      - test: flask icon / spinner while running
+      - deactivate: ban icon
+      - delete: trash icon for inactive rows
+    - switched the table to a more standard card + responsive table layout
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/styles/skills.css`
+    - added shared styling for destinations table rows, badges, icon actions, feedback strip, and drawer
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/__tests__/DestinationsTab.test.tsx`
+    - added regression tests proving:
+      - a successful test immediately updates the row from `Failed` to `Healthy`
+      - clicking a destination row opens the edit drawer
+- Verification completed:
+  - `npm test -- --run src/features/skills/__tests__/DestinationsTab.test.tsx src/features/skills/__tests__/SkillsPage.test.tsx src/features/skills/__tests__/SkillBuilderDrawer.test.tsx`
+    - Result: `6 passed`
+    - Existing warning remains: `Missing VITE_API_URL`
+
+## Latest saved_query title fix for skills/query analysis
+
+- Investigated skill execution failure:
+  - `(pymysql.err.OperationalError) (1054, "Unknown column 'name' in 'field list'")`
+  - failing SQL:
+    - `SELECT sql_json, name FROM saved_query ...`
+- Root cause:
+  - the current `saved_query` table uses `title`, not `name`
+  - two stale code paths were still selecting `saved_query.name`
+- Backend fixes implemented:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/tasks/skill_runner.py`
+    - changed saved query lookup to `SELECT sql_json, title AS name FROM saved_query ...`
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/routes/query_analysis_routes.py`
+    - changed query analysis lookup to `SELECT sql_json, title AS name FROM saved_query ...`
+- Tests updated:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/tasks/test_skill_runner.py`
+    - added coverage proving the aliased saved query title flows through as the query name
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/test_query_analysis.py`
+    - added coverage proving `_run_query()` uses the saved query title alias
+- Verification completed:
+  - `python3 -m pytest tests/tasks/test_skill_runner.py tests/test_query_analysis.py -q`
+    - Result: `18 passed, 6 skipped`
+
+## Latest skills run normalization and Slack skip investigation
+
+- Investigated why a skills run appeared to "work" but did not post to Slack.
+- Live execution state confirmed:
+  - latest run for skill `d7503926-b3c2-443d-8ce4-9b5c3aef7b15` was not a delivery success
+  - `skill_executions.result_json` recorded:
+    - `success: true`
+    - `message: "No rows returned — webhook skipped (send_if_empty=False)."`
+    - `data.skipped: true`
+    - `data.row_count: 0`
+  - the saved skill config also had no Slack target bound:
+    - `destination_id: null`
+    - `webhook_url: ""`
+  - a workspace destination does exist and has a successful test:
+    - `workspace_destinations.id = 1`
+    - `name = "QueryForge All Channel"`
+    - `last_test_status = "success"`
+- Backend fix implemented:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/routes/skills_routes.py`
+    - `_normalize_skill_run_row()` now:
+      - parses `result_json`
+      - remaps `status` from `success` to `skipped` when `result_json.data.skipped = true`
+      - surfaces the actual skill message from `result_json.message`
+- Tests updated:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/routes/test_skills_routes.py`
+    - added regression proving successful skip executions are returned as:
+      - `status = "skipped"`
+      - `message = "No rows returned — webhook skipped (send_if_empty=False)."`
+- Verification completed:
+  - `python3 -m pytest tests/routes/test_skills_routes.py -q`
+    - Result: `8 passed`
+
+## Latest skills builder usability and timeline refresh
+
+- User reported the Skills builder drawer was too busy, unclear about destination attachment, and had bunched footer actions.
+- UI improvements implemented in:
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/components/SkillBuilderDrawer.tsx`
+    - removed the cramped meta strip and reorganized the builder into:
+      - an onboarding-style step summary (`Set Up`, `Add Logic`, `Attach Delivery`)
+      - a top overview card with linked query, status, description, templates, and delivery readiness
+      - an always-visible delivery summary list that lets users click directly into each action to configure destinations
+    - footer actions now use a clear left/right layout instead of bunching in the lower-left corner
+    - draft saves remain permissive, while final saves still respect full validation
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/components/SkillBlockCard.tsx`
+    - action previews now show meaningful delivery state like:
+      - `Saved destination attached`
+      - `Direct webhook configured`
+      - `Needs a destination or webhook`
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/components/SkillBlockConfigPanel.tsx`
+    - generic `Block Configuration` header replaced with contextual headings and helper copy
+    - action config now explicitly explains that destinations are attached there
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/styles/skills.css`
+    - added layout and presentation styles for the new overview, stepper, delivery summary, sticky config panel, and responsive footer
+- Validation improvement implemented:
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/hooks/useSkillBuilder.ts`
+    - final save now blocks delivery actions that have neither a saved destination nor a direct target
+    - examples:
+      - email actions need destination or recipients
+      - Slack/webhook actions need destination or webhook URL
+- Timeline improvements implemented:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/routes/skills_routes.py`
+    - run normalization now synthesizes basic timeline events:
+      - queued
+      - started
+      - finished/skipped/failed
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/components/SkillRunsPanel.tsx`
+    - if a run still has no explicit events, the UI falls back to a summary timeline event from the run message
+- Verification completed:
+  - API: `python3 -m pytest tests/routes/test_skills_routes.py -q`
+    - Result: `8 passed`
+  - UI: `npm test -- --run src/features/skills/__tests__/SkillBuilderDrawer.test.tsx src/features/skills/__tests__/SkillsPage.test.tsx`
+    - Result: `4 passed`
+    - Existing warning remains: `Missing VITE_API_URL`
+
+## Latest skills run detail inspector
+
+- User asked for a way to inspect run details beyond the current summary/timeline.
+- Frontend/API client updates implemented:
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/types.ts`
+    - expanded `SkillRun` with:
+      - `createdAt`
+      - `errorMessage`
+      - `result`
+      - `triggeredBy`
+      - `jobId`
+      - `scheduleId`
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/api.ts`
+    - `listSkillRuns()` normalization now preserves detailed run fields from the backend payload, including `result_json`
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/components/SkillRunsPanel.tsx`
+    - right-hand pane now shows:
+      - outcome/status
+      - queued/started/finished timestamps
+      - duration
+      - triggered-by user
+      - job id
+      - error block when present
+      - timeline
+      - pretty-printed result payload JSON
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/styles/skills.css`
+    - added styling for run detail summary, metadata grid, error panel, and result JSON viewer
+- Tests added/updated:
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/__tests__/skillsApi.test.ts`
+    - verifies detailed run normalization
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/skills/__tests__/SkillRunsPanel.test.tsx`
+    - verifies the detail pane renders metadata and result payload
+- Verification completed:
+  - `npm test -- --run src/features/skills/__tests__/skillsApi.test.ts src/features/skills/__tests__/SkillRunsPanel.test.tsx src/features/skills/__tests__/SkillBuilderDrawer.test.tsx src/features/skills/__tests__/SkillsPage.test.tsx`
+    - Result: `14 passed`
+    - Existing warning remains: `Missing VITE_API_URL`
+
+## Latest skills saved-query lookup fix for library/global queries
+
+- User asked whether there was a way to see the query a skill ran because a skill reported `No rows returned` even though the query works interactively.
+- Runtime investigation of the exact skill/query showed:
+  - skill `d7503926-b3c2-443d-8ce4-9b5c3aef7b15` points at saved query `c3c153c8-94aa-4f4f-9103-be1bcc185ef5`
+  - that `saved_query` row exists with:
+    - `title = "Born in Mexico"`
+    - `workspace_id = NULL`
+    - `is_deleted = 0`
+  - `app/tasks/skill_runner.py::_execute_skill_query()` was still looking up:
+    - `WHERE id = :id AND workspace_id = :ws`
+  - so the skill runner treated the query as missing, logged a warning, and returned the empty fallback bundle, which then led to:
+    - `No rows returned — webhook skipped (send_if_empty=False).`
+- Backend fixes implemented:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/tasks/skill_runner.py`
+    - saved query lookup now allows library/global rows:
+      - `WHERE id = :id AND (workspace_id = :ws OR workspace_id IS NULL) AND is_deleted = 0`
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/routes/query_analysis_routes.py`
+    - applied the same fix to inline query analysis re-execution
+- Tests updated:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/tasks/test_skill_runner.py`
+    - added coverage proving global/library saved queries are accepted
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/test_query_analysis.py`
+    - added coverage proving `_run_query()` accepts global/library saved queries
+- Verification completed:
+  - `python3 -m pytest tests/tasks/test_skill_runner.py tests/test_query_analysis.py -q`
+    - Result: `20 passed, 6 skipped`

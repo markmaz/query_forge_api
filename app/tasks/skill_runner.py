@@ -186,8 +186,9 @@ def _execute_skill_query(*, workspace_id: str, query_id: str) -> Dict[str, Any]:
 
     sql = ForgeMetaSQL()
     rows_q = sql.execute_query_mappings(
-        "SELECT sql_json, name FROM saved_query "
-        "WHERE id = :id AND workspace_id = :ws AND is_deleted = 0 LIMIT 1",
+        "SELECT sql_json, title AS name FROM saved_query "
+        "WHERE id = :id AND (workspace_id = :ws OR workspace_id IS NULL) "
+        "AND is_deleted = 0 LIMIT 1",
         {"id": query_id, "ws": workspace_id},
     )
     if not rows_q:

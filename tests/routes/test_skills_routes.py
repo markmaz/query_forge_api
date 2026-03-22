@@ -310,6 +310,68 @@ def test_skills_create_persists_destination_id_in_runtime_config(client, monkeyp
     assert persisted["_qf_skill"]["actions"][0]["config"]["destination_id"] == 23
 
 
+def test_skills_create_persists_all_channels_for_mixed_delivery_actions(client, monkeypatch):
+    _install_fake_sql(monkeypatch)
+    _FakeSkillsSQL.write_calls = []
+    _FakeSkillsSQL.schedule_rows = []
+    _FakeSkillsSQL.current_row = None
+
+    resp = client.post(
+        "/api/v1/skills",
+        headers=_headers(monkeypatch),
+        json={
+            "name": "Slack and email digest",
+            "skill_type": "slack_delivery",
+            "query_id": "query-9",
+            "description": "Deliver to both channels",
+            "status": "active",
+            "trigger": {
+                "id": "trigger-1",
+                "kind": "trigger",
+                "type": "schedule",
+                "enabled": True,
+                "config": {
+                    "frequency": "daily",
+                    "time": "08:15",
+                    "timezone": "America/Chicago",
+                    "active": True,
+                },
+            },
+            "actions": [
+                {
+                    "id": "a1",
+                    "kind": "action",
+                    "type": "slack_delivery",
+                    "config": {
+                        "destination_id": 1,
+                    },
+                },
+                {
+                    "id": "a2",
+                    "kind": "action",
+                    "type": "email_report",
+                    "config": {
+                        "destination_id": 23,
+                        "subject": "Weekly",
+                    },
+                },
+            ],
+        },
+    )
+
+    assert resp.status_code == 201
+    _, write_params = next(
+        (query, params)
+        for query, params in _FakeSkillsSQL.write_calls
+        if "INSERT INTO query_skills" in " ".join(query.split())
+    )
+    persisted = json.loads(write_params["config_json"])
+    assert persisted["channels"] == [
+        {"type": "slack", "destination_id": 1},
+        {"type": "email", "destination_id": 23},
+    ]
+
+
 def test_skills_create_syncs_schedule_from_trigger(client, monkeypatch):
     _install_fake_sql(monkeypatch)
     _FakeSkillsSQL.write_calls = []
@@ -470,4 +532,44 @@ def test_skills_runs_alias_returns_execution_rows(client, monkeypatch):
     assert row["id"] == "run-1"
     assert row["duration_ms"] == 4000
     assert row["finished_at"].startswith("2026-03-19T12:00:04")
-    assert row["events"] == []
+    assert [event["message"] for event in row["events"]] == [
+        "Run queued.",
+        "Execution started.",
+        "Run complete.",
+    ]
+
+
+def test_skills_runs_alias_marks_successful_skip_as_skipped(client, monkeypatch):
+    _install_fake_sql(monkeypatch)
+    _FakeSkillsSQL.execution_rows = [
+        {
+            "id": "run-2",
+            "skill_id": "skill-3",
+            "workspace_id": "ws-1",
+            "schedule_id": None,
+            "job_id": "job-2",
+            "status": "success",
+            "triggered_by": "user-1",
+            "started_at": datetime(2026, 3, 19, 12, 5, 0),
+            "finished_at": datetime(2026, 3, 19, 12, 5, 1),
+            "duration_ms": 1000,
+            "message": "Run complete.",
+            "error_message": None,
+            "result_json": {
+                "success": True,
+                "message": "No rows returned — webhook skipped (send_if_empty=False).",
+                "data": {"skipped": True, "row_count": 0},
+                "error": None,
+            },
+            "created_at": datetime(2026, 3, 19, 12, 5, 0),
+        }
+    ]
+    _FakeSkillsSQL.total_rows = [{"cnt": 1}]
+
+    resp = client.get("/api/v1/skills/skill-3/runs", headers=_headers(monkeypatch))
+
+    assert resp.status_code == 200
+    row = resp.json["data"][0]
+    assert row["status"] == "skipped"
+    assert row["message"] == "No rows returned — webhook skipped (send_if_empty=False)."
+    assert row["events"][-1]["status"] == "skipped"

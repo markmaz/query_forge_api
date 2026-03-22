@@ -134,7 +134,7 @@ class WebhookDeliverySkill(BaseSkill):
         payload = DeliveryPayload(
             subject=subject,
             summary=subject,
-            detail_html="",        # not used by Slack/Teams channels
+            detail_html=self._build_email_html(context, subject),
             detail_text=detail_text,
             query_name=context.metadata.query_name,
             workspace_id=context.workspace_id,
@@ -143,9 +143,40 @@ class WebhookDeliverySkill(BaseSkill):
             severity=cfg.get("severity", "info"),
         )
 
-        channel_config = self._channel_config(cfg)
-
         try:
+            channels = cfg.get("channels")
+            if isinstance(channels, list) and channels:
+                results: list[dict[str, Any]] = []
+                for raw_channel in channels:
+                    if not isinstance(raw_channel, dict):
+                        continue
+                    channel_type = str(raw_channel.get("type") or "").strip().lower()
+                    if not channel_type:
+                        continue
+                    channel = get_channel(channel_type)
+                    success, message = channel.send(payload, raw_channel)
+                    results.append({
+                        "type": channel_type,
+                        "success": success,
+                        "message": message,
+                    })
+                overall_success = bool(results) and all(item["success"] for item in results)
+                message = "; ".join(
+                    f"{item['type']}: {item['message']}"
+                    for item in results
+                ) or "No delivery channels configured."
+                return SkillResult(
+                    success=overall_success,
+                    message=message,
+                    data={
+                        "row_count": context.metadata.row_count,
+                        "format": fmt,
+                        "channels": results,
+                    },
+                    error=None if overall_success else message,
+                )
+
+            channel_config = self._channel_config(cfg)
             channel = get_channel(cfg["channel_type"])
             success, message = channel.send(payload, channel_config)
         except Exception as exc:
@@ -162,6 +193,23 @@ class WebhookDeliverySkill(BaseSkill):
             },
             error=None if success else message,
         )
+
+    def _build_email_html(self, context: SkillContext, subject: str) -> str:
+        try:
+            from flask import current_app
+            from app.skills.email_delivery import EmailDeliverySkill
+
+            base_url = current_app.config.get("FRONTEND_BASE_URL", "http://localhost:3000")
+            return EmailDeliverySkill()._build_html(
+                subject,
+                "",
+                context.rows,
+                context.columns,
+                base_url,
+            )
+        except Exception:
+            logger.exception("Failed to build email HTML for webhook delivery")
+            return ""
 
     # ------------------------------------------------------------------
     # Formatters

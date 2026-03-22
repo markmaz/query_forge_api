@@ -377,7 +377,7 @@ def revoke_role(user_id: str, role_name: str, workspace_id: str | None = None) -
         raise ValueError(f"Unknown role: {role_name!r}")
 
     normalized_workspace_id = str(workspace_id or "").strip() or None
-    if role_name == "super_admin":
+    if role_name in GLOBAL_ROLES:
         normalized_workspace_id = None
     elif not normalized_workspace_id:
         raise ValueError("workspace_id is required for non-global roles.")
@@ -413,7 +413,7 @@ def revoke_role_by_id(
 
     role_name = ur.role.name if ur.role else ""
     normalized_workspace_id = str(workspace_id or "").strip() or None
-    if role_name == "super_admin":
+    if role_name in GLOBAL_ROLES:
         if ur.workspace_id is not None:
             return False
     elif ur.workspace_id != normalized_workspace_id:

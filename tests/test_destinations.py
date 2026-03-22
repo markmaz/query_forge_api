@@ -24,6 +24,34 @@ from app.models.domain.destinations import (
     WorkspaceDestination,
 )
 from app.skills.destination_resolver import resolve_channel_config, validate_destination_ref
+from app.skills.delivery import SlackDeliveryChannel, _ssl_context
+
+
+def _destination_headers(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    import app.decorators.security as security
+    import app.services.rbac_service as rbac_service
+
+    monkeypatch.setattr(
+        security.auth_service,
+        "verify_token",
+        lambda _token: {"sub": "user-1", "username": "user-1", "is_admin": True},
+    )
+    monkeypatch.setattr(
+        security.workspace_access_service,
+        "assert_workspace_access",
+        lambda *, user_id, workspace_id: workspace_id,
+    )
+    monkeypatch.setattr(
+        rbac_service,
+        "get_effective_roles",
+        lambda user_id, workspace_id=None: {"super_admin"},
+    )
+    monkeypatch.setattr(
+        rbac_service,
+        "workspace_has_feature",
+        lambda workspace_id, feature_key: True,
+    )
+    return {"Authorization": "Bearer token-1", "X-Workspace-Id": "ws-1"}
 
 
 # ---------------------------------------------------------------------------
@@ -283,3 +311,64 @@ def test_count_skills_using_destination_queries_config_json():
     assert count == 3
     assert "JSON_SEARCH(config_json, 'one', :dest_id)" in executed["query"]
     assert executed["params"] == {"ws": 9, "dest_id": "17"}
+
+
+def test_destination_create_returns_clear_error_when_encryption_key_missing(client, app, monkeypatch):
+    app.config["DESTINATION_ENCRYPTION_KEY"] = None
+
+    response = client.post(
+        "/api/v1/workspaces/ws-1/destinations/",
+        headers=_destination_headers(monkeypatch),
+        json={
+            "name": "Finance Alerts",
+            "destination_type": "slack",
+            "config": {"webhook_url": "https://hooks.slack.com/services/ABC/DEF/xyz"},
+        },
+    )
+
+    assert response.status_code == 503
+    assert "DESTINATION_ENCRYPTION_KEY" in response.json["error"]
+
+
+def test_slack_delivery_uses_certifi_ssl_context():
+    channel = SlackDeliveryChannel()
+    captured = {}
+
+    class _Response:
+        status = 200
+
+        def read(self):
+            return b"ok"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def _fake_urlopen(req, timeout=0, context=None):
+        captured["timeout"] = timeout
+        captured["context"] = context
+        return _Response()
+
+    with patch("app.skills.delivery.urllib_request.urlopen", side_effect=_fake_urlopen):
+        success, message = channel.send(
+            type(
+                "_Payload",
+                (),
+                {
+                    "subject": "Test",
+                    "detail_text": "hello",
+                    "conditions_failed": [],
+                    "query_name": "Test Query",
+                    "severity": "info",
+                },
+            )(),
+            {"webhook_url": "https://hooks.slack.com/services/test"},
+        )
+
+    assert success is True
+    assert message == "Slack alert delivered."
+    assert captured["timeout"] == 10
+    assert captured["context"] is not None
+    assert captured["context"].get_ca_certs() == _ssl_context().get_ca_certs()

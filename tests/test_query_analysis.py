@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.routes import query_analysis_routes
 from app.skills.analysis_utils import (
     build_analysis_system_prompt,
     build_analysis_user_prompt,
@@ -261,3 +262,114 @@ def test_analyze_includes_prompt_hint_in_call(client, auth_headers):
             headers=auth_headers,
         )
     mock_prompt.assert_called_once_with(hint="Focus on anomalies")
+
+
+def test_run_query_uses_saved_query_title_alias(monkeypatch):
+    class _FakeForgeMetaSQL:
+        def execute_query_mappings(self, query, params=None):
+            return [
+                {
+                    "sql_json": {"columns": [{"field": {"columnName": "amount"}}]},
+                    "name": "Revenue by Region",
+                }
+            ]
+
+    class _FakeWorkspaceContext:
+        sql_exec = object()
+
+    class _FakeWorkspaceBuilder:
+        def build(self, workspace_id):
+            assert workspace_id == "ws-1"
+            return _FakeWorkspaceContext()
+
+    class _FakeQueryForgeService:
+        def __init__(self, executor, domain_resolver):
+            self.executor = executor
+            self.domain_resolver = domain_resolver
+
+        def run(self, raw_query, mode, limit, offset):
+            assert raw_query == {"columns": [{"field": {"columnName": "amount"}}]}
+            return type(
+                "Result",
+                (),
+                {
+                    "rows": [{"amount": 42}],
+                    "columns": ["amount"],
+                    "total": 1,
+                },
+            )()
+
+    monkeypatch.setattr(
+        "app.adapters.mysql_sql_executor.ForgeMetaSQL",
+        _FakeForgeMetaSQL,
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.WorkspaceSqlContextBuilder",
+        _FakeWorkspaceBuilder,
+    )
+    monkeypatch.setattr(
+        "app.services.query_forge_service.QueryForgeService",
+        _FakeQueryForgeService,
+    )
+    monkeypatch.setattr(
+        "app.services.domain_resolver.DomainResolver",
+        lambda workspace_id: {"workspace_id": workspace_id},
+    )
+
+    result = query_analysis_routes._run_query("query-1", "ws-1")
+
+    assert result["query_name"] == "Revenue by Region"
+    assert result["rows"] == [{"amount": 42}]
+    assert result["column_names"] == ["amount"]
+    assert result["row_count"] == 1
+
+
+def test_run_query_allows_global_saved_queries(monkeypatch):
+    captured = {}
+
+    class _FakeForgeMetaSQL:
+        def execute_query_mappings(self, query, params=None):
+            captured["query"] = " ".join(str(query).split())
+            return [
+                {
+                    "sql_json": {"columns": [{"field": {"columnName": "amount"}}]},
+                    "name": "Library Revenue by Region",
+                }
+            ]
+
+    class _FakeWorkspaceContext:
+        sql_exec = object()
+
+    class _FakeWorkspaceBuilder:
+        def build(self, workspace_id):
+            return _FakeWorkspaceContext()
+
+    class _FakeQueryForgeService:
+        def __init__(self, executor, domain_resolver):
+            self.executor = executor
+            self.domain_resolver = domain_resolver
+
+        def run(self, raw_query, mode, limit, offset):
+            return type(
+                "Result",
+                (),
+                {
+                    "rows": [{"amount": 84}],
+                    "columns": ["amount"],
+                    "total": 1,
+                },
+            )()
+
+    monkeypatch.setattr("app.adapters.mysql_sql_executor.ForgeMetaSQL", _FakeForgeMetaSQL)
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.WorkspaceSqlContextBuilder",
+        _FakeWorkspaceBuilder,
+    )
+    monkeypatch.setattr("app.services.query_forge_service.QueryForgeService", _FakeQueryForgeService)
+    monkeypatch.setattr("app.services.domain_resolver.DomainResolver", lambda workspace_id: {"workspace_id": workspace_id})
+
+    result = query_analysis_routes._run_query("query-2", "ws-1")
+
+    assert result["query_name"] == "Library Revenue by Region"
+    assert result["rows"] == [{"amount": 84}]
+    assert "workspace_id = :ws OR workspace_id IS NULL" in captured["query"]

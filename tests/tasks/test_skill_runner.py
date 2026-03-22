@@ -172,6 +172,95 @@ def test_execute_skill_query_returns_query_metadata_bundle(monkeypatch):
     assert isinstance(bundle["executed_at"], datetime)
 
 
+def test_execute_skill_query_accepts_saved_query_title_alias(monkeypatch):
+    sql = _FakeForgeMetaSQL(
+        rows={
+            "saved_query": [
+                {
+                    "sql_json": {"columns": [{"field": {"columnName": "amount"}}]},
+                    "name": "Title Aliased Query",
+                }
+            ]
+        }
+    )
+
+    class _FakeWorkspaceContext:
+        sql_exec = object()
+
+    class _FakeWorkspaceBuilder:
+        def build(self, workspace_id):
+            return _FakeWorkspaceContext()
+
+    class _FakeQueryForgeService:
+        def __init__(self, executor, domain_resolver):
+            self.executor = executor
+            self.domain_resolver = domain_resolver
+
+        def run(self, raw_query, mode, limit, offset):
+            return type(
+                "Result",
+                (),
+                {
+                    "rows": [],
+                    "columns": [],
+                },
+            )()
+
+    monkeypatch.setattr("app.adapters.mysql_sql_executor.ForgeMetaSQL", lambda: sql)
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.WorkspaceSqlContextBuilder",
+        _FakeWorkspaceBuilder,
+    )
+    monkeypatch.setattr("app.services.query_forge_service.QueryForgeService", _FakeQueryForgeService)
+    monkeypatch.setattr("app.services.domain_resolver.DomainResolver", lambda workspace_id: {"workspace_id": workspace_id})
+
+    bundle = skill_runner._execute_skill_query(workspace_id="ws-1", query_id="query-8")
+
+    assert bundle["query_name"] == "Title Aliased Query"
+
+
+def test_execute_skill_query_allows_global_saved_queries(monkeypatch):
+    sql_seen = {}
+
+    class _FakeForgeMetaSQL:
+        def execute_query_mappings(self, query, params=None):
+            sql_seen["query"] = " ".join(str(query).split())
+            return [
+                {
+                    "sql_json": {"columns": [{"field": {"columnName": "amount"}}]},
+                    "name": "Library Query",
+                }
+            ]
+
+    class _FakeWorkspaceContext:
+        sql_exec = object()
+
+    class _FakeWorkspaceBuilder:
+        def build(self, workspace_id):
+            return _FakeWorkspaceContext()
+
+    class _FakeQueryForgeService:
+        def __init__(self, executor, domain_resolver):
+            self.executor = executor
+            self.domain_resolver = domain_resolver
+
+        def run(self, raw_query, mode, limit, offset):
+            return type("Result", (), {"rows": [], "columns": []})()
+
+    monkeypatch.setattr("app.adapters.mysql_sql_executor.ForgeMetaSQL", _FakeForgeMetaSQL)
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.WorkspaceSqlContextBuilder",
+        _FakeWorkspaceBuilder,
+    )
+    monkeypatch.setattr("app.services.query_forge_service.QueryForgeService", _FakeQueryForgeService)
+    monkeypatch.setattr("app.services.domain_resolver.DomainResolver", lambda workspace_id: {"workspace_id": workspace_id})
+
+    bundle = skill_runner._execute_skill_query(workspace_id="ws-1", query_id="query-9")
+
+    assert bundle["query_name"] == "Library Query"
+    assert "workspace_id = :ws OR workspace_id IS NULL" in sql_seen["query"]
+
+
 def test_dispatch_due_advances_next_run_at_after_dispatch(app, monkeypatch):
     due_now = datetime(2026, 3, 21, 14, 0, 0)
     next_run = "2026-03-21T15:00:00+00:00"

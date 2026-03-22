@@ -5,10 +5,10 @@ from flask_restx import Namespace, abort
 
 from app.decorators.rbac import require_admin
 from app.decorators.security import token_required
-from app.models.rbac import Role, UserRole
+from app.models.rbac import GLOBAL_ROLES, Role, UserRole
 from app.routes.forge_resource import ForgeResource
 from app.routes.request_helpers import extract_workspace_id
-from app.services.rbac_service import assign_role, get_effective_roles, revoke_role_by_id
+from app.services.rbac_service import assign_role, ensure_system_roles, get_effective_roles, revoke_role_by_id
 
 rbac_ns = Namespace("rbac", description="RBAC administration")
 
@@ -22,7 +22,10 @@ def _list_user_role_rows(user_id: str, workspace_id: str) -> list[UserRole]:
         UserRole.query.join(Role)
         .filter(UserRole.user_id == user_id)
         .filter(
-            ((UserRole.workspace_id == workspace_id) | ((UserRole.workspace_id.is_(None)) & (Role.name == "super_admin")))
+            (
+                (UserRole.workspace_id == workspace_id)
+                | ((UserRole.workspace_id.is_(None)) & (Role.name.in_(GLOBAL_ROLES)))
+            )
         )
         .order_by(UserRole.id.asc())
         .all()
@@ -34,9 +37,13 @@ def _find_role_by_name(role_name: str) -> Role | None:
 
 
 def _normalize_role_workspace(role_name: str, workspace_id: str) -> str | None:
-    if role_name == "super_admin":
+    if role_name in GLOBAL_ROLES:
         return None
     return workspace_id
+
+
+def _requires_super_admin(role_name: str) -> bool:
+    return role_name in {"workspace_admin", *GLOBAL_ROLES}
 
 
 def _find_existing_user_role(user_id: str, role_id: int, workspace_id: str | None) -> UserRole | None:
@@ -79,6 +86,7 @@ class RbacRoleList(ForgeResource):
     @token_required
     @require_admin()
     def get(self):
+        ensure_system_roles()
         rows = _list_roles()
         return {"roles": [row.to_dict() for row in rows]}, 200
 
@@ -114,7 +122,7 @@ class UserRoleList(ForgeResource):
 
         current_roles = get_effective_roles(str(getattr(g, "user_id", "")), workspace_id=workspace_id)
         is_super = "super_admin" in current_roles
-        if role_name in {"super_admin", "workspace_admin"} and not is_super:
+        if _requires_super_admin(role_name) and not is_super:
             abort(403, "Only super_admin can assign admin roles.")
 
         existing = _find_existing_user_role(
@@ -128,7 +136,7 @@ class UserRoleList(ForgeResource):
         created = assign_role(
             user_id=user_id,
             role_name=role_name,
-            workspace_id=workspace_id,
+            workspace_id=_normalize_role_workspace(role_name, workspace_id),
             granted_by=str(getattr(g, "user_id", "") or ""),
         )
         return {"user_role": created}, 201
@@ -149,10 +157,10 @@ class UserRoleDetails(ForgeResource):
         current_roles = get_effective_roles(current_user_id, workspace_id=workspace_id)
         is_super = "super_admin" in current_roles
 
-        if role_name in {"super_admin", "workspace_admin"} and not is_super:
+        if _requires_super_admin(role_name) and not is_super:
             abort(403, "Only super_admin can revoke admin roles.")
 
-        if user_id == current_user_id and role_name in {"super_admin", "workspace_admin"}:
+        if user_id == current_user_id and _requires_super_admin(role_name):
             abort(403, "Cannot revoke your own admin role.")
 
         revoked = revoke_role_by_id(

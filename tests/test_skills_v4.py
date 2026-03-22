@@ -382,6 +382,37 @@ def test_webhook_generic_channel_passes_method_headers_and_token(webhook_skill, 
     }
 
 
+def test_webhook_fans_out_to_all_configured_channels(webhook_skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {
+        "channel_type": "slack",
+        "destination_id": 1,
+        "format": "summary",
+        "channels": [
+            {"type": "slack", "destination_id": 1},
+            {"type": "email", "destination_id": 23},
+        ],
+    })
+
+    slack_channel = MagicMock()
+    slack_channel.send.return_value = (True, "Slack alert delivered.")
+    email_channel = MagicMock()
+    email_channel.send.return_value = (True, "Alert emailed to 1 recipient(s).")
+
+    def _get_channel(channel_type: str):
+        return {"slack": slack_channel, "email": email_channel}[channel_type]
+
+    with patch("app.skills.webhook_delivery.get_channel", side_effect=_get_channel):
+        result = webhook_skill.execute(ctx)
+
+    assert result.success is True
+    assert slack_channel.send.call_count == 1
+    assert email_channel.send.call_count == 1
+    assert result.data["channels"] == [
+        {"type": "slack", "success": True, "message": "Slack alert delivered."},
+        {"type": "email", "success": True, "message": "Alert emailed to 1 recipient(s)."},
+    ]
+
+
 def test_digest_resolves_recipients_from_destination(digest_skill, metadata, sample_rows):
     ctx = make_context(metadata, sample_rows, {
         "destination_id": 7,

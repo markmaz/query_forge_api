@@ -336,8 +336,9 @@ def _run_query(query_id: str, workspace_id: str) -> dict:
     from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 
     rows_q = ForgeMetaSQL().execute_query_mappings(
-        "SELECT sql_json, name FROM saved_query "
-        "WHERE id = :id AND workspace_id = :ws AND is_deleted = 0 LIMIT 1",
+        "SELECT sql_json, title AS name FROM saved_query "
+        "WHERE id = :id AND (workspace_id = :ws OR workspace_id IS NULL) "
+        "AND is_deleted = 0 LIMIT 1",
         {"id": query_id, "ws": workspace_id},
     )
     if not rows_q:

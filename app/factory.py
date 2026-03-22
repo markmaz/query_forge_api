@@ -18,6 +18,7 @@ from app.config import (
     AWS_REGION,
     AWS_SECRET_ACCESS_KEY,
     AWS_SESSION_TOKEN,
+    DESTINATION_ENCRYPTION_KEY,
     FRONTEND_BASE_URL,
     LLM_INSTANCE_ID,
     LLM_STATUS_CACHE_SECONDS,
@@ -94,6 +95,7 @@ def create_app():
     app.config["QF_MINIMAL_CHAT_ENABLED"] = QF_MINIMAL_CHAT_ENABLED
     app.config["QF_FORGE_INSIGHTS_ENABLED"] = QF_FORGE_INSIGHTS_ENABLED
     app.config["FRONTEND_BASE_URL"] = FRONTEND_BASE_URL
+    app.config["DESTINATION_ENCRYPTION_KEY"] = DESTINATION_ENCRYPTION_KEY
     if not app.config["LLM_INSTANCE_ID"]:
         raise RuntimeError("LLM_INSTANCE_ID environment variable is required")
     if not app.config["AWS_ACCESS_KEY_ID"] or not app.config["AWS_SECRET_ACCESS_KEY"]:
