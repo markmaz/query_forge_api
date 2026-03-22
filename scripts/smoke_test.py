@@ -16,17 +16,12 @@ Options:
 from __future__ import annotations
 
 import os
-import sys
-import time
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any
+from dataclasses import dataclass
 
 import requests
 import typer
 from dotenv import load_dotenv
 from rich.console import Console
-from rich.table import Table
 
 load_dotenv()
 
@@ -96,7 +91,8 @@ def authenticate(cfg: SmokeConfig) -> str:
         console.print(f"[red]Authentication failed: {msg}[/red]")
         raise SystemExit(1)
 
-    token = resp.json().get("access_token")
+    data = resp.json()
+    token = data.get("access_token")
     if not token:
         console.print("[red]Auth response missing access_token[/red]")
         raise SystemExit(1)
