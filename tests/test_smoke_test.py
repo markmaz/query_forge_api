@@ -88,3 +88,56 @@ class TestAuthenticate:
         payload = mock_post.call_args[1]["json"]
         assert payload["username"] == "tester"
         assert payload["password"] == "secret"
+
+
+import requests as _requests
+
+def _session(cfg=None):
+    if cfg is None:
+        cfg = smoke.SmokeConfig("http://api", "u", "p", "ws-1")
+    s = _requests.Session()
+    s.headers.update({"Authorization": "Bearer tok", "X-Workspace-Id": cfg.workspace_id})
+    return s, cfg
+
+
+class TestHttpHelpers:
+    def _session(self):
+        s = _requests.Session()
+        s.headers.update({"Authorization": "Bearer tok", "X-Workspace-Id": "ws-1"})
+        return s
+
+    def test_get_returns_status_body_latency(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"ok": True}
+        with patch.object(_requests.Session, "get", return_value=mock_resp):
+            status, body, latency = smoke._get(self._session(), "http://x/path")
+        assert status == 200
+        assert body == {"ok": True}
+        assert isinstance(latency, int) and latency >= 0
+
+    def test_get_returns_empty_body_on_json_error(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.side_effect = ValueError("not json")
+        with patch.object(_requests.Session, "get", return_value=mock_resp):
+            status, body, latency = smoke._get(self._session(), "http://x/path")
+        assert status == 200
+        assert body == {}
+
+    def test_post_returns_status_body_latency(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"result": "ok"}
+        with patch.object(_requests.Session, "post", return_value=mock_resp):
+            status, body, latency = smoke._post(self._session(), "http://x/path", json={"q": "x"})
+        assert status == 200
+        assert body["result"] == "ok"
+
+    def test_check_result_is_fail_on_bad_status(self):
+        r = smoke.CheckResult(
+            area="Infra", name="healthz",
+            status=smoke.Status.FAIL, latency_ms=12, message="503"
+        )
+        assert r.status == smoke.Status.FAIL
+        assert r.latency_ms == 12

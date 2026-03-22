@@ -16,7 +16,10 @@ Options:
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
 
 import requests
 import typer
@@ -97,6 +100,61 @@ def authenticate(cfg: SmokeConfig) -> str:
         console.print("[red]Auth response missing access_token[/red]")
         raise SystemExit(1)
     return token
+
+
+# ---------------------------------------------------------------------------
+# Check result types
+# ---------------------------------------------------------------------------
+
+class Status(str, Enum):
+    PASS = "pass"
+    FAIL = "fail"
+    WARN = "warn"
+    SKIP = "skip"
+
+
+@dataclass
+class CheckResult:
+    area: str
+    name: str
+    status: Status
+    latency_ms: int | None
+    message: str
+    body: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def symbol(self) -> str:
+        return {"pass": "✓", "fail": "✗", "warn": "⚠", "skip": "⚠"}[self.status]
+
+    @property
+    def style(self) -> str:
+        return {"pass": "green", "fail": "red", "warn": "yellow", "skip": "yellow"}[self.status]
+
+
+# ---------------------------------------------------------------------------
+# HTTP helpers
+# ---------------------------------------------------------------------------
+
+def _get(session: requests.Session, url: str, *, timeout: int = 10) -> tuple[int, dict, int]:
+    start = time.perf_counter()
+    resp = session.get(url, timeout=timeout)
+    latency = int((time.perf_counter() - start) * 1000)
+    try:
+        body = resp.json()
+    except Exception:
+        body = {}
+    return resp.status_code, body, latency
+
+
+def _post(session: requests.Session, url: str, *, json: dict, timeout: int = 30) -> tuple[int, dict, int]:
+    start = time.perf_counter()
+    resp = session.post(url, json=json, timeout=timeout)
+    latency = int((time.perf_counter() - start) * 1000)
+    try:
+        body = resp.json()
+    except Exception:
+        body = {}
+    return resp.status_code, body, latency
 
 
 if __name__ == "__main__":
