@@ -215,5 +215,33 @@ def check_domains(session: requests.Session, cfg: SmokeConfig) -> CheckResult:
     return _simple_get_check("Domains", "list", session, f"{cfg.base_url}/api/v1/domains?limit=1")
 
 
+# ---------------------------------------------------------------------------
+# Checks 8–9: Planner and Query Execution
+# ---------------------------------------------------------------------------
+
+def check_planner(session: requests.Session, cfg: SmokeConfig) -> tuple[CheckResult, dict[str, Any] | None]:
+    """Returns (CheckResult, sql_json | None). sql_json is passed to check_query_execution."""
+    payload = {"prompt": "List all records", "workspace_id": cfg.workspace_id}
+    status, body, ms = _post(session, f"{cfg.base_url}/api/v1/planner/plan_domain", json=payload)
+    if status != 200:
+        return CheckResult("Planner", "plan_domain", Status.FAIL, ms, f"HTTP {status}", body), None
+    sql_json = body.get("sql_json")
+    if not isinstance(sql_json, dict):
+        return CheckResult("Planner", "plan_domain", Status.FAIL, ms, "response missing sql_json", body), None
+    return CheckResult("Planner", "plan_domain", Status.PASS, ms, ""), sql_json
+
+
+def check_query_execution(
+    session: requests.Session, cfg: SmokeConfig, *, sql_json: dict[str, Any] | None
+) -> CheckResult:
+    if sql_json is None:
+        return CheckResult("Query execution", "run", Status.SKIP, None, "skipped (planner failed)")
+    status, body, ms = _post(session, f"{cfg.base_url}/api/v1/query/", json=sql_json)
+    if status == 200:
+        return CheckResult("Query execution", "run", Status.PASS, ms, "")
+    # Warn rather than hard-fail — datasource may be unavailable in some environments
+    return CheckResult("Query execution", "run", Status.WARN, ms, f"HTTP {status}", body)
+
+
 if __name__ == "__main__":
     app()

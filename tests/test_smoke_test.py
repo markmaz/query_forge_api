@@ -224,3 +224,58 @@ class TestChecks1To7:
             with patch.object(session, "get", return_value=self._err()):
                 result = fn(session, cfg)
             assert result.status == smoke.Status.FAIL, f"{fn.__name__} should fail on 500"
+
+
+class TestChecks8And9:
+    def _ok(self, body=None):
+        m = MagicMock()
+        m.status_code = 200
+        m.json.return_value = body or {}
+        return m
+
+    def _err(self, code=500):
+        m = MagicMock()
+        m.status_code = code
+        m.json.return_value = {}
+        return m
+
+    def test_check_planner_pass_returns_sql_json(self):
+        session, cfg = _session()
+        body = {"sql_json": {"version": 1, "domainId": 5}, "trace_id": "abc"}
+        with patch.object(session, "post", return_value=self._ok(body)):
+            result, sql_json = smoke.check_planner(session, cfg)
+        assert result.status == smoke.Status.PASS
+        assert sql_json == {"version": 1, "domainId": 5}
+
+    def test_check_planner_fail_on_500(self):
+        session, cfg = _session()
+        with patch.object(session, "post", return_value=self._err(500)):
+            result, sql_json = smoke.check_planner(session, cfg)
+        assert result.status == smoke.Status.FAIL
+        assert sql_json is None
+
+    def test_check_planner_fail_when_no_sql_json_in_response(self):
+        session, cfg = _session()
+        with patch.object(session, "post", return_value=self._ok({"error": "no domain"})):
+            result, sql_json = smoke.check_planner(session, cfg)
+        assert result.status == smoke.Status.FAIL
+        assert sql_json is None
+
+    def test_check_query_execution_skipped_when_no_sql_json(self):
+        session, cfg = _session()
+        result = smoke.check_query_execution(session, cfg, sql_json=None)
+        assert result.status == smoke.Status.SKIP
+        assert "planner failed" in result.message
+
+    def test_check_query_execution_warn_on_500(self):
+        session, cfg = _session()
+        with patch.object(session, "post", return_value=self._err(500)):
+            result = smoke.check_query_execution(session, cfg, sql_json={"version": 1})
+        assert result.status == smoke.Status.WARN
+
+    def test_check_query_execution_pass_on_200(self):
+        session, cfg = _session()
+        body = {"rows": [], "total": 0}
+        with patch.object(session, "post", return_value=self._ok(body)):
+            result = smoke.check_query_execution(session, cfg, sql_json={"version": 1})
+        assert result.status == smoke.Status.PASS
