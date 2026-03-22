@@ -243,5 +243,40 @@ def check_query_execution(
     return CheckResult("Query execution", "run", Status.WARN, ms, f"HTTP {status}", body)
 
 
+# ---------------------------------------------------------------------------
+# Checks 10–16: Saved Queries, Skills, AI, Ingestion, Vector Admin
+# ---------------------------------------------------------------------------
+
+def check_saved_queries(session: requests.Session, cfg: SmokeConfig) -> CheckResult:
+    return _simple_get_check("Saved queries", "list", session, f"{cfg.base_url}/api/v1/query-tree/recent")
+
+
+def check_skills(session: requests.Session, cfg: SmokeConfig) -> CheckResult:
+    return _simple_get_check("Skills", "list", session, f"{cfg.base_url}/api/v1/skills")
+
+
+def check_skills_scheduler(session: requests.Session, cfg: SmokeConfig) -> CheckResult:
+    return _simple_get_check("Skills scheduler", "status", session, f"{cfg.base_url}/api/v1/skills/scheduler/status")
+
+
+def check_destinations(session: requests.Session, cfg: SmokeConfig) -> CheckResult:
+    return _simple_get_check(
+        "Destinations", "list", session,
+        f"{cfg.base_url}/api/v1/workspaces/{cfg.workspace_id}/destinations"
+    )
+
+
+def check_ai_health(session: requests.Session, cfg: SmokeConfig) -> CheckResult:
+    return _simple_get_check("AI", "health", session, f"{cfg.base_url}/api/v1/ai/health")
+
+
+def check_datasources(session: requests.Session, cfg: SmokeConfig) -> CheckResult:
+    return _simple_get_check("Ingestion", "datasources", session, f"{cfg.base_url}/api/v1/datasources")
+
+
+def check_pipeline_profiles(session: requests.Session, cfg: SmokeConfig) -> CheckResult:
+    return _simple_get_check("Vector admin", "status", session, f"{cfg.base_url}/api/v1/admin/pipeline-profiles?limit=1")
+
+
 if __name__ == "__main__":
     app()

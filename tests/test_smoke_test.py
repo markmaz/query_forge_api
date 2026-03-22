@@ -279,3 +279,58 @@ class TestChecks8And9:
         with patch.object(session, "post", return_value=self._ok(body)):
             result = smoke.check_query_execution(session, cfg, sql_json={"version": 1})
         assert result.status == smoke.Status.PASS
+
+
+class TestChecks10To16:
+    def _ok(self, body=None):
+        m = MagicMock()
+        m.status_code = 200
+        m.json.return_value = body or {}
+        return m
+
+    def _err(self):
+        m = MagicMock()
+        m.status_code = 500
+        m.json.return_value = {}
+        return m
+
+    def test_all_simple_checks_pass_on_200(self):
+        fns = [
+            smoke.check_saved_queries,
+            smoke.check_skills,
+            smoke.check_skills_scheduler,
+            smoke.check_ai_health,
+            smoke.check_datasources,
+            smoke.check_pipeline_profiles,
+        ]
+        for fn in fns:
+            session, cfg = _session()
+            with patch.object(session, "get", return_value=self._ok()):
+                result = fn(session, cfg)
+            assert result.status == smoke.Status.PASS, f"{fn.__name__} should pass on 200"
+
+    def test_all_simple_checks_fail_on_non_200(self):
+        fns = [
+            smoke.check_saved_queries,
+            smoke.check_skills,
+            smoke.check_skills_scheduler,
+            smoke.check_destinations,
+            smoke.check_ai_health,
+            smoke.check_datasources,
+            smoke.check_pipeline_profiles,
+        ]
+        for fn in fns:
+            session, cfg = _session()
+            with patch.object(session, "get", return_value=self._err()):
+                result = fn(session, cfg)
+            assert result.status == smoke.Status.FAIL, f"{fn.__name__} should fail on 500"
+
+    def test_check_destinations_uses_workspace_id_in_url(self):
+        session, cfg = _session()
+        captured_urls = []
+        def capturing_get(url, **kwargs):
+            captured_urls.append(url)
+            return self._ok()
+        with patch.object(session, "get", side_effect=capturing_get):
+            smoke.check_destinations(session, cfg)
+        assert cfg.workspace_id in captured_urls[0]
