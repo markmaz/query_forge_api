@@ -4,7 +4,10 @@ import json
 
 from app.exceptions.forge_error import ForgeError
 from app.models.domain.domain_profile import compute_content_hash
-from app.services.admin.domain_profile_embedding_service import DomainProfileEmbeddingService
+from app.services.admin.domain_profile_embedding_service import (
+    DomainProfileEmbeddingService,
+    _build_user_prompt,
+)
 
 
 class _FakeSQL:
@@ -225,3 +228,40 @@ def test_generate_all_loads_domain_ids_and_processes_batch():
     out = svc.generate_all(workspace_id="ws-1")
 
     assert out["total"] == 2
+
+
+def test_build_user_prompt_compacts_large_domain_context():
+    context = {
+        "workspace_id": "ws-1",
+        "domain": {
+            "domain_id": 12,
+            "name": "Large Domain",
+            "description": "A" * 500,
+        },
+        "tables": [
+            {
+                "workspace_table_id": table_index,
+                "table_name": f"table_{table_index}",
+                "description": "B" * 300,
+                "columns": [
+                    {
+                        "column_name": f"column_{column_index}",
+                        "data_type": "string",
+                        "description": "C" * 200,
+                    }
+                    for column_index in range(20)
+                ],
+            }
+            for table_index in range(20)
+        ],
+        "joins": [{"from_table_name": "a", "to_table_name": "b", "join_type": "LEFT", "join_spec": {}}] * 20,
+        "relationship_lines": [f"line {i}" for i in range(20)],
+        "stats": {"table_count": 20, "column_count": 400, "join_count": 20},
+    }
+
+    prompt = _build_user_prompt(context=context)
+
+    assert "\"tables_included_in_prompt\": 12" in prompt
+    assert "\"tables_omitted_from_prompt\": 8" in prompt
+    assert "\"columns_omitted_from_prompt\"" in prompt
+    assert "A" * 300 not in prompt

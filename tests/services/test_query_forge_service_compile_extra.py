@@ -1027,8 +1027,80 @@ def test_compile_rejects_invalid_join_order() -> None:
         "aggs": {"enabled": False, "metrics": [], "groupBy": []},
     }
 
-    with pytest.raises(ForgeError, match="Join order invalid"):
-        svc.compile(svc.normalize(q))
+    compiled = svc.compile(svc.normalize(q))
+    assert "FROM main.asset.a t0" in compiled.sql
+    assert "INNER JOIN main.asset.b t1 ON t0.id = t1.id" in compiled.sql
+    assert "INNER JOIN main.asset.c t2 ON t1.id = t2.id" in compiled.sql
+
+
+def test_from_clause_supports_reverse_join_path_edge_not_present_in_plan_joins() -> None:
+    primary = DomainPlanTable(
+        workspace_table_id=2,
+        full_name="main.asset.association",
+        alias="t0",
+        table_alias=None,
+        is_primary=True,
+        sort_order=0,
+        filter_mode="AUTO",
+        cardinality="ONE",
+    )
+    student = DomainPlanTable(
+        workspace_table_id=1,
+        full_name="main.asset.student",
+        alias="t1",
+        table_alias=None,
+        is_primary=False,
+        sort_order=1,
+        filter_mode="AUTO",
+        cardinality="ONE",
+    )
+    original_edge = DomainPlanJoin(
+        join_id="j1",
+        from_workspace_table_id=1,
+        to_workspace_table_id=2,
+        join_type="LEFT",
+        join_spec={
+            "on": [
+                {
+                    "op": "=",
+                    "left": {"workspaceTableId": 1, "columnName": "k_student"},
+                    "right": {"workspaceTableId": 2, "columnName": "k_student"},
+                }
+            ]
+        },
+        sort_order=0,
+    )
+    reversed_edge = DomainPlanJoin(
+        join_id="j1:rev",
+        from_workspace_table_id=2,
+        to_workspace_table_id=1,
+        join_type="LEFT",
+        join_spec={
+            "on": [
+                {
+                    "op": "=",
+                    "left": {"workspaceTableId": 2, "columnName": "k_student"},
+                    "right": {"workspaceTableId": 1, "columnName": "k_student"},
+                }
+            ]
+        },
+        sort_order=0,
+    )
+    plan = DomainPlan(
+        primary=primary,
+        tables=[primary, student],
+        joins=[original_edge],
+        alias_by_workspace_table_id={2: "t0", 1: "t1"},
+        column_name_policy="DEDUP_PRIMARY_FIRST",
+    )
+    resolver = FakeResolver(plan, paths={1: [reversed_edge]})
+    svc = QueryForgeService(executor=FakeForgeQueryPort(), domain_resolver=resolver)
+
+    from_sql = svc._from_clause_from_plan(plan, {1, 2})
+
+    assert "FROM main.asset.association t0" not in from_sql
+    assert "main.asset.association t0" in from_sql
+    assert "LEFT JOIN main.asset.student t1 ON t0.k_student = t1.k_student" in from_sql
 
 
 def test_run_renders_sql_and_rows() -> None:

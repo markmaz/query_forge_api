@@ -292,6 +292,28 @@ def test_slack_channel_posts_to_webhook():
     assert "blocks" in body
 
 
+def test_slack_channel_resolves_destination_using_payload_workspace_id():
+    ch = SlackDeliveryChannel()
+    payload = DeliveryPayload(
+        subject="Alert",
+        summary="Row count too high",
+        detail_html="",
+        detail_text="Row count too high",
+        query_name="Orders",
+        workspace_id=42,
+        query_id=1,
+        conditions_failed=[],
+    )
+    with patch("app.skills.destination_resolver.resolve_channel_config", return_value={"webhook_url": "https://hooks.slack.com/x"}) as mock_resolve, \
+         patch.object(ch, "_post_webhook", return_value=(True, "ok")) as mock_post:
+        success, msg = ch.send(payload, {"destination_id": 7})
+
+    assert success is True
+    assert msg == "ok"
+    mock_resolve.assert_called_once_with({"destination_id": 7}, 42)
+    mock_post.assert_called_once()
+
+
 # ---------------------------------------------------------------------------
 # Schedule utilities
 # ---------------------------------------------------------------------------

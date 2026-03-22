@@ -179,6 +179,28 @@ def test_profile_skips_top_values_for_id_like_columns():
     assert ex.execute.call_count <= 2
 
 
+def test_profile_falls_back_to_sample_values_for_high_cardinality_columns():
+    ex = MagicMock(spec=SQLExecutor)
+    ex.execute.side_effect = [
+        [{"row_count": 100}],
+        [{"null_name": 0, "dist_name": 5000}],
+        [{"val": "alpha"}, {"val": "beta"}],
+    ]
+    ex.get_dialect.return_value = "databricks"
+    provider = DatabricksMetadataProvider(executor=ex)
+
+    result = provider.profile_table_columns(
+        table_ref="main.sales.people",
+        columns=[{"column_name": "name", "data_type": "STRING", "is_nullable": True}],
+        options={**_DEFAULT_OPTIONS, "skip_top_values_for_id_like_cols": False},
+    )
+
+    sample_sql = ex.execute.call_args_list[2][0][0]
+    assert "SELECT DISTINCT" in sample_sql
+    assert "GROUP BY" not in sample_sql
+    assert result["name"]["top_values"] == ["alpha", "beta"]
+
+
 # --- list_schemas ---
 
 def test_list_schemas_without_catalog(executor):

@@ -2278,43 +2278,55 @@ class QueryForgeService:
         if severity_table_ids is None:
             severity_table_ids = set()
         tables_by_id = {t.workspace_table_id: t for t in plan.tables}
-        needed_edges: Dict[str, bool] = {}
+        needed_edges: Dict[tuple[str, int, int], Any] = {}
         for wt_id in required_table_ids:
             if int(wt_id) == int(plan.primary.workspace_table_id):
                 continue
             for edge in self._domains.get_join_path(plan, int(wt_id)):
-                needed_edges[str(edge.join_id)] = True
+                needed_edges[(str(edge.join_id), int(edge.from_workspace_table_id), int(edge.to_workspace_table_id))] = edge
 
         joined = {plan.primary.workspace_table_id}
         clauses = [f"{plan.primary.full_name} {self._qf_safe_ident(plan.primary.alias)}"]
+        remaining_edges = sorted(
+            needed_edges.values(),
+            key=lambda edge: (int(getattr(edge, "sort_order", 0)), str(edge.join_id)),
+        )
+        while remaining_edges:
+            progress = False
+            deferred: List[Any] = []
+            for edge in remaining_edges:
+                if edge.from_workspace_table_id == edge.to_workspace_table_id:
+                    raise ForgeError("Join cannot reference the same table", status_code=400)
+                if edge.from_workspace_table_id not in tables_by_id or edge.to_workspace_table_id not in tables_by_id:
+                    raise ForgeError("Join references table not in domain", status_code=400)
+                if edge.from_workspace_table_id not in joined:
+                    deferred.append(edge)
+                    continue
 
-        for edge in plan.joins:
-            if str(edge.join_id) not in needed_edges:
+                join_type = (edge.join_type or "").upper()
+                if join_type not in {"INNER", "LEFT", "RIGHT"}:
+                    raise ForgeError(f"Invalid join_type: {join_type}", status_code=400)
+
+                to_table = tables_by_id[edge.to_workspace_table_id]
+                on_sql = self._qf_compile_join_on(edge, plan.alias_by_workspace_table_id)
+                severity_pred = self._severity_predicate_for_alias(
+                    alias=self._qf_safe_ident(to_table.alias),
+                    workspace_table_id=int(to_table.workspace_table_id),
+                    severity_table_ids=severity_table_ids,
+                )
+                if severity_pred:
+                    on_sql = f"{on_sql} AND {severity_pred}"
+                clauses.append(
+                    f"{join_type} JOIN {to_table.full_name} {self._qf_safe_ident(to_table.alias)} ON {on_sql}"
+                )
+                joined.add(edge.to_workspace_table_id)
+                progress = True
+
+            if progress:
+                remaining_edges = deferred
                 continue
-            if edge.from_workspace_table_id == edge.to_workspace_table_id:
-                raise ForgeError("Join cannot reference the same table", status_code=400)
-            if edge.from_workspace_table_id not in tables_by_id or edge.to_workspace_table_id not in tables_by_id:
-                raise ForgeError("Join references table not in domain", status_code=400)
-            if edge.from_workspace_table_id not in joined:
-                raise ForgeError("Join order invalid: from table not yet joined", status_code=400)
 
-            join_type = (edge.join_type or "").upper()
-            if join_type not in {"INNER", "LEFT", "RIGHT"}:
-                raise ForgeError(f"Invalid join_type: {join_type}", status_code=400)
-
-            to_table = tables_by_id[edge.to_workspace_table_id]
-            on_sql = self._qf_compile_join_on(edge, plan.alias_by_workspace_table_id)
-            severity_pred = self._severity_predicate_for_alias(
-                alias=self._qf_safe_ident(to_table.alias),
-                workspace_table_id=int(to_table.workspace_table_id),
-                severity_table_ids=severity_table_ids,
-            )
-            if severity_pred:
-                on_sql = f"{on_sql} AND {severity_pred}"
-            clauses.append(
-                f"{join_type} JOIN {to_table.full_name} {self._qf_safe_ident(to_table.alias)} ON {on_sql}"
-            )
-            joined.add(edge.to_workspace_table_id)
+            raise ForgeError("Join order invalid: from table not yet joined", status_code=400)
 
         missing = [t.workspace_table_id for t in plan.tables if t.workspace_table_id in required_table_ids and t.workspace_table_id not in joined]
         if missing:

@@ -27,6 +27,7 @@ def test_run_sync_writes_completed_status():
         datasource="primary",
         catalog=None,
         schema="sales",
+        workspace_id="ws-1",
         table_names=None,
         run_profiling=False,
         run_enrichment=False,
@@ -57,6 +58,7 @@ def test_run_sync_writes_failed_status_on_error():
         datasource="primary",
         catalog=None,
         schema="sales",
+        workspace_id="ws-1",
         table_names=None,
         run_profiling=False,
         run_enrichment=False,
@@ -88,6 +90,7 @@ def test_run_sync_passes_options_to_service():
         datasource="primary",
         catalog="main",
         schema="sales",
+        workspace_id="ws-1",
         table_names=["orders"],
         run_profiling=True,
         run_enrichment=False,
@@ -101,6 +104,7 @@ def test_run_sync_passes_options_to_service():
     assert call_kwargs["datasource_name"] == "primary"
     assert call_kwargs["catalog"] == "main"
     assert call_kwargs["schema"] == "sales"
+    assert call_kwargs["workspace_id"] == "ws-1"
     assert call_kwargs["table_names"] == ["orders"]
     assert call_kwargs["run_profiling"] is True
     assert call_kwargs["overwrite_descriptions"] is True
@@ -125,6 +129,7 @@ def test_run_sync_persists_profiling_and_enrichment_counts():
         datasource="primary",
         catalog=None,
         schema="sales",
+        workspace_id="ws-1",
         table_names=None,
         run_profiling=True,
         run_enrichment=True,

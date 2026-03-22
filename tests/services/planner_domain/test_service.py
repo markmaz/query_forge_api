@@ -1830,8 +1830,10 @@ def test_get_domain_candidates_expands_work_prompt_and_includes_staff_domain() -
     class _CapturingDomainVector:
         def __init__(self) -> None:
             self.queries = []
+            self.calls = []
 
         def search_domains(self, **kwargs):
+            self.calls.append(dict(kwargs))
             query = str(kwargs.get("query") or "")
             self.queries.append(query)
             if "staff assignments" in query.lower():
@@ -1853,6 +1855,7 @@ def test_get_domain_candidates_expands_work_prompt_and_includes_staff_domain() -
     )
 
     assert len(vector.queries) > 1
+    assert all("vertical_norm" not in call for call in vector.calls)
     assert any("staff assignments" in query.lower() for query in vector.queries)
     assert out[0]["domain_id"] == 5
     assert any(int(row.get("domain_id") or 0) == 6 for row in out)

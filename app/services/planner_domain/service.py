@@ -875,6 +875,7 @@ class PlannerDomainService:
         llm_plan, school_year_issues, school_year_debug = _normalize_school_year_filters_in_plan(
             plan_json=llm_plan,
             capabilities=capabilities_full,
+            prompt=normalized_prompt,
         )
         llm_plan, year_keyword_issues, year_keyword_debug = _normalize_year_keyword_filters_in_plan(
             plan_json=llm_plan,
@@ -1033,6 +1034,7 @@ class PlannerDomainService:
             retry_plan, retry_school_year_issues, retry_school_year_debug = _normalize_school_year_filters_in_plan(
                 plan_json=retry_plan,
                 capabilities=capabilities_full,
+                prompt=normalized_prompt,
             )
             retry_plan, retry_year_keyword_issues, retry_year_keyword_debug = _normalize_year_keyword_filters_in_plan(
                 plan_json=retry_plan,
@@ -1530,7 +1532,6 @@ class PlannerDomainService:
             result = self._domain_vector.search_domains(
                 workspace_id=workspace_id,
                 query=query_text,
-                vertical_norm=vertical_norm,
                 limit=6,
                 score_threshold=0.0,
                 include_payload=False,
@@ -2382,18 +2383,18 @@ class PlannerDomainService:
         cap_rows = list(capabilities.get("filter_columns") or []) + list(capabilities.get("dimensions") or []) + list(
             capabilities.get("time_columns") or []
         )
-        model_to_key: Dict[int, str] = {}
+        workspace_to_key: Dict[int, str] = {}
         for row in cap_rows:
             if not isinstance(row, Mapping):
                 continue
             key = _norm_key(row.get("column_key"))
-            mid = _to_int(row.get("model_column_id"))
-            if key == "" or mid is None:
+            workspace_column_id = _to_int(row.get("workspace_column_id")) or _to_int(row.get("model_column_id"))
+            if key == "" or workspace_column_id is None:
                 continue
             if row.get("filterable") is False:
                 continue
-            model_to_key[mid] = key
-        if not model_to_key:
+            workspace_to_key[workspace_column_id] = key
+        if not workspace_to_key:
             return {}
 
         params: Dict[str, Any] = {
@@ -2401,14 +2402,14 @@ class PlannerDomainService:
             "vertical_norm": _norm_vertical(vertical_norm),
         }
         placeholders: List[str] = []
-        for idx, model_column_id in enumerate(sorted(model_to_key.keys())):
-            token = f"mid_{idx}"
+        for idx, workspace_column_id in enumerate(sorted(workspace_to_key.keys())):
+            token = f"wid_{idx}"
             placeholders.append(f":{token}")
-            params[token] = int(model_column_id)
+            params[token] = int(workspace_column_id)
 
         sql = f"""
             SELECT
-              scm.model_column_id,
+              scm.workspace_column_id,
               sr.concept_key,
               sr.semantic_type,
               scm.priority_rank,
@@ -2418,7 +2419,7 @@ class PlannerDomainService:
               ON sr.id = scm.semantic_registry_id
             WHERE scm.workspace_norm IN (:workspace_norm, '__global__')
               AND sr.vertical_norm IN (:vertical_norm, 'generic')
-              AND scm.model_column_id IN ({", ".join(placeholders)})
+              AND scm.workspace_column_id IN ({", ".join(placeholders)})
             ORDER BY
               scm.priority_rank DESC,
               scm.confidence_score DESC,
@@ -2434,10 +2435,10 @@ class PlannerDomainService:
         for row in rows:
             if not isinstance(row, Mapping):
                 continue
-            model_column_id = _to_int(row.get("model_column_id"))
-            if model_column_id is None:
+            workspace_column_id = _to_int(row.get("workspace_column_id"))
+            if workspace_column_id is None:
                 continue
-            column_key = model_to_key.get(model_column_id)
+            column_key = workspace_to_key.get(workspace_column_id)
             if not column_key:
                 continue
             concept_key = str(row.get("concept_key") or "")
@@ -5569,15 +5570,13 @@ def _normalize_school_year_filters_in_plan(
     *,
     plan_json: Mapping[str, Any],
     capabilities: Mapping[str, Any],
+    prompt: str = "",
     today: Optional[date] = None,
     school_year_start_month: int = QF_SCHOOL_YEAR_START_MONTH,
     school_year_end_month: int = QF_SCHOOL_YEAR_END_MONTH,
 ) -> Tuple[Dict[str, Any], List[Dict[str, str]], List[Dict[str, Any]]]:
     plan = dict(plan_json or {})
     filters = [dict(item) for item in list(plan.get("filters") or []) if isinstance(item, dict)]
-    if not filters:
-        return plan, [], []
-
     col_lookup = {
         _norm_key(row.get("column_key")): dict(row)
         for row in (
@@ -5587,6 +5586,26 @@ def _normalize_school_year_filters_in_plan(
         )
         if isinstance(row, dict) and _norm_key(row.get("column_key"))
     }
+
+    has_school_year_filter = any(
+        is_school_year_column(col_lookup.get(_norm_key(row.get("column_key"))) or {})
+        for row in filters
+    )
+
+    if not has_school_year_filter:
+        synthesized = _synthesize_school_year_filter_from_time_block(
+            plan=plan,
+            col_lookup=col_lookup,
+            prompt=prompt,
+            today=today,
+            school_year_start_month=school_year_start_month,
+            school_year_end_month=school_year_end_month,
+        )
+        if synthesized is not None:
+            filters = [*filters, synthesized]
+
+    if not filters:
+        return plan, [], []
 
     debug_rows: List[Dict[str, Any]] = []
     normalized_filters: List[Dict[str, Any]] = []
@@ -5648,6 +5667,42 @@ def _normalize_school_year_filters_in_plan(
 
     plan["filters"] = normalized_filters
     return plan, [], debug_rows
+
+
+def _synthesize_school_year_filter_from_time_block(
+    *,
+    plan: Mapping[str, Any],
+    col_lookup: Mapping[str, Dict[str, Any]],
+    prompt: str,
+    today: Optional[date],
+    school_year_start_month: int,
+    school_year_end_month: int,
+) -> Optional[Dict[str, Any]]:
+    time_block = dict(plan.get("time") or {})
+    time_column_key = _norm_key(time_block.get("time_column_key"))
+    if time_column_key == "":
+        return None
+
+    col_meta = col_lookup.get(time_column_key) or {}
+    if not is_school_year_column(col_meta):
+        return None
+
+    prompt_text = str(prompt or "").strip()
+    if prompt_text == "":
+        return None
+
+    years = normalize_school_year_values(
+        prompt_text,
+        today=today,
+        school_year_start_month=school_year_start_month,
+        school_year_end_month=school_year_end_month,
+    )
+    if not years:
+        return None
+
+    if len(years) == 1:
+        return {"column_key": time_column_key, "op": "eq", "value": years[0]}
+    return {"column_key": time_column_key, "op": "in", "values": years}
 
 
 def _normalize_semester_filters_in_plan(

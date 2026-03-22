@@ -17,7 +17,6 @@ class UserDomainReadService:
           SELECT
             d.id,
             d.name,
-            NULL AS model_table_id,
             (
               SELECT COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name)
               FROM domain_workspace_table dwt2
@@ -25,7 +24,7 @@ class UserDomainReadService:
               WHERE dwt2.domain_id = d.id
               ORDER BY dwt2.is_primary DESC, dwt2.sort_order ASC, wt.id ASC
               LIMIT 1
-            ) AS model_table_name,
+            ) AS primary_table_name,
           d.description,
           d.column_name_policy,
           udm.can_edit
@@ -38,4 +37,10 @@ class UserDomainReadService:
           ORDER BY d.name
           """
         rows = self._sql.execute_query_mappings(sql, {"ws": workspace_id, "user_id": user_id})
-        return serialize_result_rows([dict(r) for r in rows])
+        payload = []
+        for row in rows:
+            shaped = dict(row)
+            shaped["model_table_id"] = None
+            shaped["model_table_name"] = shaped.get("primary_table_name")
+            payload.append(shaped)
+        return serialize_result_rows(payload)

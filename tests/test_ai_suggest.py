@@ -36,7 +36,11 @@ def client(monkeypatch: pytest.MonkeyPatch):
         VLLM_MODEL="qwen25-7b",
         VLLM_TIMEOUT=60,
     )
-    monkeypatch.setattr(security.auth_service, "verify_token", lambda _token: {"sub": "user-1"})
+    monkeypatch.setattr(
+        security.auth_service,
+        "verify_token",
+        lambda _token: {"sub": "user-1", "is_admin": True},
+    )
     monkeypatch.setattr(
         security.workspace_access_service,
         "assert_workspace_access",
@@ -47,6 +51,12 @@ def client(monkeypatch: pytest.MonkeyPatch):
         "assert_workspace_access",
         lambda *, user_id, workspace_id: workspace_id,
     )
+
+    def _bypass_semantic(*args, **kwargs):
+        raise RuntimeError("semantic bridge bypassed for test")
+
+    monkeypatch.setattr(ai_routes, "_plan_response_as_suggest", _bypass_semantic)
+
     api = Api(app)
     api.add_namespace(ai_ns, path="/api/ai")
     return app.test_client()

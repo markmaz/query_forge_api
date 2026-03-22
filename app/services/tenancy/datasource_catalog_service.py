@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.tenancy.datasource_config_crypto import decrypt_datasource_config
 
 
 class DatasourceCatalogService:
@@ -76,7 +77,9 @@ class DatasourceCatalogService:
 
         row = dict(rows[0])
         cfg = self._coerce_json_obj(row.get("config_json"))
-        cfg.setdefault("type", str(row.get("type") or "").strip().lower())
+        datasource_type = str(row.get("type") or "").strip().lower()
+        cfg = decrypt_datasource_config(datasource_type, cfg)
+        cfg.setdefault("type", datasource_type)
         cfg["_datasource_id"] = row.get("id")
         cfg["_organization_id"] = row.get("organization_id")
         cfg["_secret_ref"] = row.get("secret_ref")
@@ -100,7 +103,9 @@ class DatasourceCatalogService:
         out: Dict[str, Dict[str, Any]] = {}
         for row in rows:
             cfg = self._coerce_json_obj(row.get("config_json"))
-            cfg.setdefault("type", str(row.get("type") or "").strip().lower())
+            datasource_type = str(row.get("type") or "").strip().lower()
+            cfg = decrypt_datasource_config(datasource_type, cfg)
+            cfg.setdefault("type", datasource_type)
             cfg["_datasource_id"] = row.get("id")
             cfg["_organization_id"] = row.get("organization_id")
             cfg["_secret_ref"] = row.get("secret_ref")

@@ -12,7 +12,7 @@ def _headers_with_auth(monkeypatch):
     monkeypatch.setattr(
         security.auth_service,
         "verify_token",
-        lambda _token: {"sub": "user-1", "username": "user-1"},
+        lambda _token: {"sub": "user-1", "username": "user-1", "is_admin": True},
     )
     monkeypatch.setattr(
         security.workspace_access_service,

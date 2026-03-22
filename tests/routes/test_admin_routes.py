@@ -4,14 +4,15 @@ from __future__ import annotations
 import app.routes.admin_routes as admin_routes
 
 
-def _headers(monkeypatch):
+def _headers(monkeypatch, *, is_admin: bool = True, roles: set[str] | None = None):
     from app import factory
     from app.decorators import security
     from app.routes import request_helpers as _route_utils
+    import app.services.rbac_service as rbac_service
     from app.services.workspace_inventory import workspace_context
 
     def _verify_token(_token):
-        return {"sub": "user-1", "username": "user-1", "is_admin": True}
+        return {"sub": "user-1", "username": "user-1", "is_admin": is_admin}
 
     def _allow_workspace_access(*, user_id, workspace_id):
         del user_id
@@ -25,6 +26,11 @@ def _headers(monkeypatch):
         workspace_context.WorkspaceAccessService,
         "assert_workspace_access",
         lambda self, *, user_id, workspace_id: workspace_id,
+    )
+    monkeypatch.setattr(
+        rbac_service,
+        "get_effective_roles",
+        lambda user_id, workspace_id=None: set({"super_admin"} if roles is None else roles),
     )
     return {
         "Authorization": "Bearer test-token",
@@ -84,6 +90,20 @@ def test_detailed_health_degraded(client, monkeypatch):
     assert resp.json["overall"] == "degraded"
 
 
+def test_detailed_health_allows_workspace_admin(client, monkeypatch):
+    class _FakeHealthSvc:
+        def check_all(self):
+            return {"overall": "healthy", "checks": {"app": {"status": "ok"}}}
+
+    monkeypatch.setattr(admin_routes, "AdminHealthService", _FakeHealthSvc)
+    resp = client.get(
+        "/api/v1/admin/health/detailed",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json["overall"] == "healthy"
+
+
 def test_broker_health_returns_status(client, monkeypatch):
     class _FakeHealthSvc:
         def check_broker(self):
@@ -117,6 +137,23 @@ def test_pipeline_profiles_list(client, monkeypatch):
     resp = client.get("/api/v1/admin/pipeline-profiles", headers=_headers(monkeypatch))
     assert resp.status_code == 200
     assert resp.json["count"] == 2
+
+
+def test_pipeline_profiles_list_allows_workspace_admin(client, monkeypatch):
+    class _FakePlannerSvc:
+        def list_pipeline_profiles(self, *, limit):
+            assert limit == 50
+            return [{"trace_id": "t-1", "total_ms": 500, "steps": []}]
+
+    from app.services import planner_domain as pd_mod
+
+    monkeypatch.setattr(pd_mod, "PlannerDomainService", _FakePlannerSvc)
+    resp = client.get(
+        "/api/v1/admin/pipeline-profiles?limit=50",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json["count"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +202,27 @@ def test_admin_prompt_feedback_delete(client, monkeypatch):
     assert resp.json["id"] == 22
 
 
+def test_admin_prompt_feedback_list_allows_workspace_admin(client, monkeypatch):
+    class _FakeSvc:
+        def list_feedback(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            return {
+                "rows": [{"id": 1, "vote": "up"}],
+                "count": 1,
+                "total": 1,
+                "limit": 100,
+                "offset": 0,
+            }
+
+    monkeypatch.setattr(admin_routes, "PromptFeedbackService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/prompt-feedback",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json["count"] == 1
+
+
 # ---------------------------------------------------------------------------
 # Domain profiles CRUD
 # ---------------------------------------------------------------------------
@@ -176,6 +234,20 @@ def test_domain_profile_list(client, monkeypatch):
 
     monkeypatch.setattr(admin_routes, "DomainProfileService", _FakeSvc)
     resp = client.get("/api/v1/admin/domain-profiles", headers=_headers(monkeypatch))
+    assert resp.status_code == 200
+    assert resp.json["count"] == 1
+
+
+def test_domain_profile_list_allows_workspace_admin(client, monkeypatch):
+    class _FakeSvc:
+        def list_profiles(self, workspace_id):
+            return [{"id": 1, "workspace_id": workspace_id, "domain_id": 4}]
+
+    monkeypatch.setattr(admin_routes, "DomainProfileService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/domain-profiles",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
     assert resp.status_code == 200
     assert resp.json["count"] == 1
 
@@ -350,6 +422,27 @@ def test_semantic_catalog_build_write_mode(client, monkeypatch):
     assert resp.json["result"]["concepts_upserted"] == 24
 
 
+def test_semantic_catalog_build_allows_workspace_admin(client, monkeypatch):
+    class _FakeBuilder:
+        def build_catalog(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["domain_id"] == 5
+            return {
+                "workspace_id": "ws-1",
+                "domain_id": 5,
+                "dry_run": True,
+            }
+
+    monkeypatch.setattr(admin_routes, "SemanticCatalogBuilder", _FakeBuilder)
+    resp = client.post(
+        "/api/v1/admin/semantic-catalog/build",
+        json={"domain_id": 5},
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json["result"]["workspace_id"] == "ws-1"
+
+
 # ---------------------------------------------------------------------------
 # Vector rebuild
 # ---------------------------------------------------------------------------
@@ -385,6 +478,23 @@ def test_vector_rebuild_all(client, monkeypatch):
     assert data["errors"] == {}
 
 
+def test_vector_semantic_concepts_rebuild_allows_workspace_admin(client, monkeypatch):
+    class _FakeSemanticSvc:
+        def rebuild_semantic_concept_index(self, vertical_norm=None):
+            assert vertical_norm == "education"
+            return {"conceptPoints": 10, "aliasPoints": 5}
+
+    monkeypatch.setattr(admin_routes, "SemanticConceptEmbeddingService", _FakeSemanticSvc)
+    resp = client.post(
+        "/api/v1/admin/vector/semantic-concepts/rebuild",
+        json={"vertical_norm": "education"},
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json["vertical_norm"] == "education"
+    assert resp.json["result"]["conceptPoints"] == 10
+
+
 def test_vector_embeddings_rebuild(client, monkeypatch):
     class _FakeEmbeddingSvc:
         def rebuild_index(self, include_tables=True, limit=0, workspace_id=None):
@@ -398,6 +508,43 @@ def test_vector_embeddings_rebuild(client, monkeypatch):
     )
     assert resp.status_code == 200
     assert resp.json["result"]["tablesIndexed"] == 5
+
+
+def test_vector_embeddings_rebuild_allows_workspace_admin(client, monkeypatch):
+    class _FakeEmbeddingSvc:
+        def rebuild_index(self, include_tables=True, limit=0, workspace_id=None):
+            assert include_tables is True
+            assert limit == 0
+            assert workspace_id == "ws-1"
+            return {"tablesIndexed": 5, "columnsIndexed": 30}
+
+    monkeypatch.setattr(admin_routes, "EmbeddingIndexService", _FakeEmbeddingSvc)
+    resp = client.post(
+        "/api/v1/admin/vector/embeddings/rebuild",
+        json={},
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json["result"]["tablesIndexed"] == 5
+
+
+def test_vector_domains_reindex_allows_workspace_admin(client, monkeypatch):
+    class _FakeDomainVectorSvc:
+        def reindex_domains(self, workspace_id=None, vertical_norm=None, force=False, json_fallback_path=None):
+            assert workspace_id == "ws-1"
+            assert vertical_norm == "education"
+            assert force is True
+            assert json_fallback_path is None
+            return {"upserted": 8, "skipped": 0}
+
+    monkeypatch.setattr(admin_routes, "DomainVectorIndexService", _FakeDomainVectorSvc)
+    resp = client.post(
+        "/api/v1/admin/vector/domains/reindex",
+        json={"vertical_norm": "education", "force": True},
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json["result"]["upserted"] == 8
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +621,26 @@ def test_admin_organizations_list(client, monkeypatch):
 
     monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
     resp = client.get("/api/v1/admin/organizations?include_inactive=true", headers=_headers(monkeypatch))
+    assert resp.status_code == 200
+    assert resp.json["count"] == 1
+    assert resp.json["rows"][0]["id"] == "org-1"
+
+
+def test_admin_organizations_list_allows_workspace_admin_in_current_workspace_scope(client, monkeypatch):
+    class _FakeSvc:
+        def get_workspace_binding(self, workspace_id):
+            assert workspace_id == "ws-1"
+            return {"workspace_id": "ws-1", "organization_id": "org-1"}
+
+        def get_organization(self, organization_id):
+            assert organization_id == "org-1"
+            return {"id": "org-1", "name": "Acme", "slug": "acme", "is_active": True}
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/organizations?include_inactive=true",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
     assert resp.status_code == 200
     assert resp.json["count"] == 1
     assert resp.json["rows"][0]["id"] == "org-1"
@@ -615,6 +782,29 @@ def test_admin_workspace_binding_list(client, monkeypatch):
     monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
     resp = client.get("/api/v1/admin/workspaces?organization_id=org-1", headers=_headers(monkeypatch))
     assert resp.status_code == 200
+    assert resp.json["rows"][0]["workspace_id"] == "ws-1"
+
+
+def test_admin_workspace_binding_list_allows_workspace_admin_in_current_workspace_scope(client, monkeypatch):
+    class _FakeSvc:
+        def get_workspace_binding(self, workspace_id):
+            assert workspace_id == "ws-1"
+            return {
+                "workspace_id": "ws-1",
+                "workspace_name": "Workspace One",
+                "workspace_is_active": True,
+                "organization_id": "org-1",
+                "organization_name": "Acme",
+                "datasource_name": "Warehouse",
+            }
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/workspaces",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json["count"] == 1
     assert resp.json["rows"][0]["workspace_id"] == "ws-1"
 
 

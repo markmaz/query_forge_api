@@ -16,6 +16,7 @@ from app.services.domain.domain_admin_write_service import DomainAdminWriteServi
 from app.services.domain.domain_column_sample_read_service import DomainColumnSampleReadService
 from app.services.domain.domain_join_service import DomainJoinService
 from app.services.domain.domain_profile_metric_config_service import DomainProfileMetricConfigService
+from app.services.domain.domain_recommendation_service import DomainRecommendationService
 from app.services.domain.domain_summary_read_service import DomainSummaryReadService
 from app.services.domain.domain_table_read_service import DomainTableReadService
 from app.services.domain.domain_table_write_service import DomainTableWriteService
@@ -108,6 +109,67 @@ class DomainsRoot(ForgeResource):
             return {"row": row}, 201
 
         return _run(handler, log_message="Domain create failed", client_error="Domain create failed")
+
+
+@qf_domains_ns.route("/recommendations/generate")
+class DomainRecommendationsGenerate(ForgeResource):
+    @token_required
+    @require_access("catalog", role="admin")
+    def post(self):
+        def handler() -> Tuple[Any, int]:
+            body = _json_body_dict()
+            max_domains = body.get("max_domains", 10)
+            max_tables = body.get("max_tables", 200)
+            llm_id_raw = body.get("llm_id")
+            llm_id = None
+            if llm_id_raw not in (None, ""):
+                try:
+                    llm_id = int(llm_id_raw)
+                except Exception as exc:
+                    raise ForgeError("llm_id must be an integer", status_code=400) from exc
+                if llm_id <= 0:
+                    raise ForgeError("llm_id must be greater than 0", status_code=400)
+
+            payload = DomainRecommendationService().generate_recommendations(
+                workspace_id=_workspace_id(),
+                max_domains=max_domains,
+                max_tables=max_tables,
+                llm_id=llm_id,
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message="Domain recommendations generate failed",
+            client_error="Domain recommendations generate failed",
+        )
+
+
+@qf_domains_ns.route("/recommendations/apply")
+class DomainRecommendationsApply(ForgeResource):
+    @token_required
+    @require_access("catalog", role="admin")
+    def post(self):
+        def handler() -> Tuple[Any, int]:
+            body = _json_body_dict()
+            recommendations = body.get("recommendations")
+            mode = body.get("mode", "create_only")
+            column_name_policy = body.get("column_name_policy")
+
+            payload = DomainRecommendationService().apply_recommendations(
+                workspace_id=_workspace_id(),
+                user_id=require_user_id(),
+                recommendations=recommendations,
+                mode=mode,
+                column_name_policy=column_name_policy,
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message="Domain recommendations apply failed",
+            client_error="Domain recommendations apply failed",
+        )
 
 
 @qf_domains_ns.route("/<int:domain_id>")

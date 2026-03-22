@@ -26,6 +26,7 @@ import json as _json
 import logging
 import uuid
 from datetime import datetime, timezone
+from time import perf_counter
 from typing import Any, Dict, List, Optional
 
 from app.celery_app import celery
@@ -33,6 +34,7 @@ from app.celery_app import celery
 logger = logging.getLogger(__name__)
 
 _SKILL_EXECUTE_ROW_CAP = 500
+_SKILL_META_KEY = "_qf_skill"
 
 
 # ---------------------------------------------------------------------------
@@ -113,19 +115,27 @@ def _run_execute(
         skill_row = dict(skill_rows[0])
         skill_type = str(skill_row["skill_type"])
         query_id = skill_row.get("query_id")
-        config = skill_row.get("config_json") or {}
-        if isinstance(config, str):
-            config = _json.loads(config)
+        config = _extract_runtime_config(skill_row.get("config_json"))
 
-        rows: List[Dict[str, Any]] = []
-        columns: List[Any] = []
+        query_execution = _empty_query_execution(query_id=query_id, query_name=skill_row.get("name"))
         if query_id:
-            rows, columns = _execute_skill_query(workspace_id=workspace_id, query_id=str(query_id))
+            query_execution = _execute_skill_query(workspace_id=workspace_id, query_id=str(query_id))
 
         frontend_base_url = current_app.config.get("FRONTEND_BASE_URL", "http://localhost:3000")
 
-        from app.skills.base import SkillContext
+        from app.skills.base import QueryMetadata, SkillContext
         from app.skills.registry import SkillRegistry
+
+        metadata = QueryMetadata(
+            query_id=query_id,
+            query_name=str(query_execution.get("query_name") or skill_row.get("name") or ""),
+            column_names=list(query_execution.get("column_names") or []),
+            column_types=dict(query_execution.get("column_types") or {}),
+            row_count=int(query_execution.get("row_count") or 0),
+            execution_time_ms=int(query_execution.get("execution_time_ms") or 0),
+            executed_at=query_execution.get("executed_at") or now,
+        )
+        workspace_config = _get_workspace_config(workspace_id)
 
         context = SkillContext(
             workspace_id=workspace_id,
@@ -133,8 +143,13 @@ def _run_execute(
             execution_id=execution_id,
             config=config,
             frontend_base_url=frontend_base_url,
-            rows=rows,
-            columns=columns,
+            rows=list(query_execution.get("rows") or []),
+            columns=list(query_execution.get("column_names") or []),
+            query_id=query_id,
+            triggered_by=triggered_by,
+            results=list(query_execution.get("rows") or []),
+            metadata=metadata,
+            workspace_config=workspace_config,
         )
 
         skill_cls = SkillRegistry.get(skill_type)
@@ -158,9 +173,9 @@ def _run_execute(
         raise
 
 
-def _execute_skill_query(*, workspace_id: str, query_id: str):
+def _execute_skill_query(*, workspace_id: str, query_id: str) -> Dict[str, Any]:
     """
-    Execute the saved query and return (rows, columns).
+    Execute the saved query and return the execution bundle needed by skills.
     Seam: ForgeMetaSQL -> saved_query.sql_json -> WorkspaceSqlContextBuilder -> QueryForgeService
     """
     import json
@@ -171,15 +186,17 @@ def _execute_skill_query(*, workspace_id: str, query_id: str):
 
     sql = ForgeMetaSQL()
     rows_q = sql.execute_query_mappings(
-        "SELECT sql_json, name FROM saved_query "
-        "WHERE id = :id AND workspace_id = :ws AND is_deleted = 0 LIMIT 1",
+        "SELECT sql_json, title AS name FROM saved_query "
+        "WHERE id = :id AND (workspace_id = :ws OR workspace_id IS NULL) "
+        "AND is_deleted = 0 LIMIT 1",
         {"id": query_id, "ws": workspace_id},
     )
     if not rows_q:
         logger.warning("_execute_skill_query: saved_query %s not found in workspace %s", query_id, workspace_id)
-        return [], []
+        return _empty_query_execution(query_id=query_id, query_name=f"Query {query_id}")
 
     sql_json = rows_q[0]["sql_json"]
+    query_name = str(rows_q[0].get("name") or f"Query {query_id}")
     if isinstance(sql_json, str):
         sql_json = json.loads(sql_json)
     sql_json = sql_json or {}
@@ -189,8 +206,23 @@ def _execute_skill_query(*, workspace_id: str, query_id: str):
         executor=ctx.sql_exec,
         domain_resolver=DomainResolver(workspace_id=workspace_id),
     )
+    started = perf_counter()
     result = svc.run(raw_query=sql_json, mode="export", limit=_SKILL_EXECUTE_ROW_CAP, offset=0)
-    return result.rows or [], result.columns or []
+    executed_at = datetime.now(timezone.utc)
+    execution_time_ms = max(int((perf_counter() - started) * 1000), 0)
+    rows = list(result.rows or [])
+    columns = list(result.columns or [])
+
+    return {
+        "rows": rows,
+        "columns": columns,
+        "column_names": _column_names(columns),
+        "column_types": _column_types(columns, rows),
+        "row_count": len(rows),
+        "query_name": query_name,
+        "execution_time_ms": execution_time_ms,
+        "executed_at": executed_at,
+    }
 
 
 def _get_workspace_config(workspace_id: str) -> dict:
@@ -205,6 +237,85 @@ def _get_workspace_config(workspace_id: str) -> dict:
     except Exception as exc:
         logger.warning("Could not load workspace LLM config for %s: %s", workspace_id, exc)
         return {}
+
+
+def _extract_runtime_config(config_json: Any) -> Dict[str, Any]:
+    if isinstance(config_json, str):
+        try:
+            config_json = _json.loads(config_json)
+        except Exception:
+            return {}
+    if not isinstance(config_json, dict):
+        return {}
+    return {k: v for k, v in config_json.items() if k != _SKILL_META_KEY}
+
+
+def _column_name(column: Any) -> str:
+    if isinstance(column, dict):
+        for key in ("label", "name", "columnName", "alias", "field"):
+            value = column.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if isinstance(value, dict):
+                nested_name = _column_name(value)
+                if nested_name:
+                    return nested_name
+    if isinstance(column, str):
+        return column
+    return ""
+
+
+def _column_names(columns: List[Any]) -> List[str]:
+    names = [_column_name(column) for column in columns]
+    return [name for name in names if name]
+
+
+def _type_name(value: Any) -> str:
+    if value is None:
+        return "unknown"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, (dict, list)):
+        return "json"
+    return type(value).__name__
+
+
+def _column_types(columns: List[Any], rows: List[Dict[str, Any]]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for column in columns:
+        name = _column_name(column)
+        if not name:
+            continue
+        declared_type = None
+        if isinstance(column, dict):
+            declared_type = column.get("type") or column.get("dataType") or column.get("datatype")
+        if isinstance(declared_type, str) and declared_type.strip():
+            out[name] = declared_type.strip()
+            continue
+        inferred = next((_type_name(row.get(name)) for row in rows if row.get(name) is not None), "unknown")
+        out[name] = inferred
+    for row in rows:
+        for name, value in row.items():
+            if name not in out:
+                out[name] = _type_name(value)
+    return out
+
+
+def _empty_query_execution(*, query_id: Any, query_name: Any) -> Dict[str, Any]:
+    return {
+        "rows": [],
+        "columns": [],
+        "column_names": [],
+        "column_types": {},
+        "row_count": 0,
+        "query_name": str(query_name or (f"Query {query_id}" if query_id else "")),
+        "execution_time_ms": 0,
+        "executed_at": datetime.now(timezone.utc),
+    }
 
 
 def _run_dispatch_due() -> Dict[str, Any]:
@@ -253,14 +364,21 @@ def _run_dispatch_due() -> Dict[str, Any]:
         next_run_at = row.get("next_run_at")
 
         # Catch-up protection
+        timezone_name = str(row.get("timezone") or "UTC").strip() or "UTC"
+
         if not catch_up and _is_overdue_by_more_than_one_interval(cron_expr, next_run_at, now):
+            next_run_at_value = _resolve_next_scheduled_run(
+                cron_expr=cron_expr,
+                timezone_name=timezone_name,
+                from_dt=now,
+            )
             logger.info(
                 "Skipping overdue schedule_id=%s (catch_up=False) — advancing.",
                 schedule_id,
             )
             sql.execute_write(
-                "UPDATE skill_schedules SET last_run_at = :now, next_run_at = NULL WHERE id = :id",
-                {"now": now, "id": schedule_id},
+                "UPDATE skill_schedules SET last_run_at = :now, next_run_at = :next_run_at WHERE id = :id",
+                {"now": now, "next_run_at": next_run_at_value, "id": schedule_id},
             )
             skipped_catchup.append(skill_id)
             continue
@@ -280,9 +398,10 @@ def _run_dispatch_due() -> Dict[str, Any]:
                     "schedule_id": schedule_id,
                 },
             )
-            sql.execute_write(
-                "UPDATE skill_schedules SET last_run_at = :now, next_run_at = NULL WHERE id = :id",
-                {"now": now, "id": schedule_id},
+            next_run_at_value = _resolve_next_scheduled_run(
+                cron_expr=cron_expr,
+                timezone_name=timezone_name,
+                from_dt=next_run_at or now,
             )
             execute_skill.apply_async(
                 kwargs={
@@ -291,6 +410,10 @@ def _run_dispatch_due() -> Dict[str, Any]:
                     "execution_id": execution_id,
                     "triggered_by": "schedule",
                 }
+            )
+            sql.execute_write(
+                "UPDATE skill_schedules SET last_run_at = :now, next_run_at = :next_run_at WHERE id = :id",
+                {"now": now, "next_run_at": next_run_at_value, "id": schedule_id},
             )
             dispatched.append({"skill_id": skill_id, "execution_id": execution_id})
             logger.info("Dispatched skill_id=%s (schedule_id=%s)", skill_id, schedule_id)
@@ -329,6 +452,35 @@ def _is_overdue_by_more_than_one_interval(
         return now_naive > one_interval_later.replace(tzinfo=None)
     except Exception:
         return False
+
+
+def _resolve_next_scheduled_run(
+    *,
+    cron_expr: str,
+    timezone_name: str,
+    from_dt: Any,
+) -> datetime | None:
+    from app.skills.schedule_utils import next_n_runs
+
+    base_dt = from_dt
+    if isinstance(base_dt, str):
+        try:
+            base_dt = datetime.fromisoformat(base_dt)
+        except Exception:
+            base_dt = None
+    if base_dt is None:
+        base_dt = datetime.now(timezone.utc)
+
+    upcoming = next_n_runs(cron_expr, timezone_name, n=1, from_dt=base_dt)
+    if not upcoming:
+        return None
+    try:
+        next_run_at = datetime.fromisoformat(str(upcoming[0]))
+    except Exception:
+        return None
+    if next_run_at.tzinfo is not None:
+        next_run_at = next_run_at.astimezone(timezone.utc).replace(tzinfo=None)
+    return next_run_at
 
 
 # Backward-compat aliases — tasks/__init__.py and skills_routes.py use old names

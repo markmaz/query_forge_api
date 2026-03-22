@@ -248,12 +248,21 @@ FROM (
                 continue
             if skip_id_like and _is_id_like(cname):
                 continue
-            if approx_dist > max_distinct:
-                continue
 
             try:
                 safe_cname = _safe_ident(cname)
-                top_sql = f"""
+                if approx_dist > max_distinct:
+                    value_sql = f"""
+SELECT DISTINCT CAST(`{safe_cname}` AS STRING) AS val
+FROM (
+  SELECT * FROM {table_ref} TABLESAMPLE ({sample_pct} PERCENT)
+  LIMIT {row_cap}
+) _sample
+WHERE `{safe_cname}` IS NOT NULL
+LIMIT {per_col_limit}
+"""
+                else:
+                    value_sql = f"""
 SELECT CAST(`{safe_cname}` AS STRING) AS val, COUNT(*) AS cnt
 FROM (
   SELECT * FROM {table_ref} TABLESAMPLE ({sample_pct} PERCENT)
@@ -264,11 +273,11 @@ GROUP BY `{safe_cname}`
 ORDER BY cnt DESC
 LIMIT {per_col_limit}
 """
-                top_rows = self._executor.execute(top_sql)
+                top_rows = self._executor.execute(value_sql)
                 result[cname]["top_values"] = [str(r.get("val", "")) for r in top_rows]
             except Exception as exc:
                 logger.warning(
-                    "profile_table_columns: top-values failed for %s.%s: %s",
+                    "profile_table_columns: value sampling failed for %s.%s: %s",
                     table_ref, cname, exc,
                 )
                 result[cname]["sample_error"] = str(exc)[:500]

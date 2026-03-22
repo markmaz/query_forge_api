@@ -224,7 +224,6 @@ class QueryStudioDomainExplorerService:
             """
             SELECT
               wc.id AS workspace_column_id,
-              COALESCE(wc.model_column_id, wc.id) AS model_column_id,
               wc.column_name,
               wc.data_type,
               wc.description,
@@ -273,10 +272,8 @@ class QueryStudioDomainExplorerService:
 
             data_type = str(row.get("data_type") or "").strip().lower() or None
             key = _slugify(column_name)
-            field_id = _as_int(row.get("model_column_id"))
-            if field_id is None:
-                workspace_column_id = _as_int(row.get("workspace_column_id"))
-                field_id = f"wc_{workspace_column_id}" if workspace_column_id is not None else path
+            workspace_column_id = _as_int(row.get("workspace_column_id"))
+            field_id = f"wc_{workspace_column_id}" if workspace_column_id is not None else path
 
             aliases = aliases_by_field.get(key, [])
             field = {

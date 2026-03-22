@@ -16,6 +16,8 @@ from app.decorators.security import token_required
 from app.decorators.rbac import require_access, require_role
 from app.routes.forge_resource import ForgeResource
 from app.services.analytics.metadata_provider_factory import MetadataProviderFactory
+from app.services.analytics.runtime_registry import build_runtime_registry
+from app.services.tenancy.datasource_resolver_service import WorkspaceDatasourceResolverService
 from app.tasks.ingestion_tasks import (
     _get_sync_service,
     _run_sync_and_update_record,
@@ -29,7 +31,11 @@ ingestion_ns = Namespace("ingestion", description="Metadata ingestion management
 _sync_request = ingestion_ns.model(
     "SyncRequest",
     {
-        "datasource": fields.String(required=True, description="Datasource name", example="primary"),
+        "datasource": fields.String(
+            required=False,
+            description="Datasource name (optional; defaults to the datasource bound to X-Workspace-Id)",
+            example="primary",
+        ),
         "catalog": fields.String(description="Catalog (optional)", example="main"),
         "schema": fields.String(required=True, description="Schema to sync", example="sales"),
         "table_names": fields.List(fields.String, description="Optional table filter"),
@@ -241,6 +247,28 @@ def _is_terminal_status(status: str) -> bool:
     return (status or "").strip().lower() in {"completed", "failed", "canceled", "cancelled"}
 
 
+def _resolve_workspace_bound_datasource_name() -> str | None:
+    workspace_id = str(getattr(g, "workspace_id", "") or request.headers.get("X-Workspace-Id") or "").strip()
+    if not workspace_id:
+        return None
+
+    resolved = WorkspaceDatasourceResolverService().resolve_for_workspace(
+        workspace_id=workspace_id,
+        require_active=True,
+    )
+    if not resolved:
+        return None
+
+    return str(resolved.datasource_slug or resolved.datasource_name or "").strip() or None
+
+
+def _resolve_requested_or_workspace_datasource(requested_name: str | None) -> str | None:
+    requested = str(requested_name or "").strip()
+    if requested:
+        return requested
+    return _resolve_workspace_bound_datasource_name()
+
+
 def _serialize_run(row: dict) -> dict:
     return {
         "id":              str(row.get("id") or ""),
@@ -279,32 +307,34 @@ class IngestionSync(ForgeResource):
     @token_required
     @require_access("ingestion", role="admin")
     def post(self):
-        # Admin-only: triggering a full metadata sync is a privileged operation.
-        if not bool(getattr(g, "is_admin", False)):
-            return {"error": "Admin role required"}, 403
-
         body = request.get_json(silent=True) or {}
         schema = (body.get("schema") or "").strip()
         if not schema:
             return {"error": "'schema' is required"}, 400
 
-        datasource = (body.get("datasource") or "primary").strip()
+        datasource = _resolve_requested_or_workspace_datasource(body.get("datasource"))
+        if not datasource:
+            return {
+                "error": "No datasource provided and the current workspace has no bound datasource",
+            }, 400
         catalog = body.get("catalog") or None
         table_names = body.get("table_names") or None
         run_profiling = bool(body.get("run_profiling", False))
         run_enrichment = bool(body.get("run_enrichment", False))
         overwrite_descriptions = bool(body.get("overwrite_descriptions", False))
+        workspace_id = str(getattr(g, "workspace_id", "") or "").strip() or None
 
         # Validate that the requested datasource is actually registered before
         # writing the run row or enqueueing the task.  This prevents zombie runs
         # (stuck in "running" forever) caused by typos or probing requests, and
         # avoids leaking the list of registered datasource names via the error
         # field of a completed-failed run.
-        registry = current_app.extensions.get("analytics_registry")
-        if registry is not None:
-            known = {ds["name"] for ds in registry.list_datasources()}
-            if datasource not in known:
-                return {"error": "Unknown datasource"}, 400
+        registry = build_runtime_registry(
+            fallback_registry=current_app.extensions.get("analytics_registry"),
+        )
+        known = {ds["name"] for ds in registry.list_datasources()}
+        if datasource not in known:
+            return {"error": "Unknown datasource"}, 400
 
         run_id = str(uuid.uuid4())
         mysql = ForgeMetaSQL()
@@ -330,7 +360,7 @@ VALUES
                     "table_names": json.dumps(table_names) if table_names else None,
                     "run_profiling": int(run_profiling),
                     "run_enrichment": int(run_enrichment),
-                    "started_at": datetime.utcnow(),
+                    "started_at": datetime.now(timezone.utc),
                 },
             )
 
@@ -341,6 +371,7 @@ VALUES
                     "datasource": datasource,
                     "catalog": catalog,
                     "schema": schema,
+                    "workspace_id": workspace_id,
                     "table_names": table_names,
                     "run_profiling": run_profiling,
                     "run_enrichment": run_enrichment,
@@ -361,6 +392,7 @@ VALUES
                     datasource=datasource,
                     catalog=catalog,
                     schema=schema,
+                    workspace_id=workspace_id,
                     table_names=table_names,
                     run_profiling=run_profiling,
                     run_enrichment=run_enrichment,
@@ -384,7 +416,7 @@ WHERE id = :run_id
                         {
                             "run_id": run_id,
                             "error": "Failed to enqueue background task or execute inline fallback",
-                            "completed_at": datetime.utcnow(),
+                            "completed_at": datetime.now(timezone.utc),
                         },
                     )
                 return {"error": "Failed to start sync job"}, 500
@@ -424,9 +456,6 @@ class IngestionDiagnostics(ForgeResource):
     @token_required
     @require_access("ingestion", role="admin")
     def get(self, job_id: str):
-        if not bool(getattr(g, "is_admin", False)):
-            return {"error": "Admin role required"}, 403
-
         mysql = ForgeMetaSQL()
         with mysql.transaction() as tx:
             rows = tx.execute_query_mappings(
@@ -450,9 +479,6 @@ class IngestionCancel(ForgeResource):
     @token_required
     @require_access("ingestion", role="admin")
     def post(self, job_id: str):
-        if not bool(getattr(g, "is_admin", False)):
-            return {"error": "Admin role required"}, 403
-
         mysql = ForgeMetaSQL()
         with mysql.transaction() as tx:
             rows = tx.execute_query_mappings(
@@ -537,29 +563,33 @@ class IngestionSchemas(ForgeResource):
     @ingestion_ns.doc(
         "list_schemas",
         params={
-            "datasource": "Datasource name (required)",
+            "datasource": "Datasource name (optional; defaults to the datasource bound to X-Workspace-Id)",
             "catalog": "Catalog/database context (optional)",
         },
     )
     @ingestion_ns.response(200, "Schema list", _schemas_response)
-    @ingestion_ns.response(400, "Bad request — datasource parameter missing")
+    @ingestion_ns.response(400, "Bad request — datasource missing and workspace has no bound datasource")
     @ingestion_ns.response(403, "Forbidden — admin role required")
     @ingestion_ns.response(404, "Datasource not found")
     @ingestion_ns.response(503, "Analytics registry not available")
     @ingestion_ns.marshal_with(_schemas_response)
     def get(self):
         """List schemas available in a configured analytics datasource."""
-        if not g.is_admin:
-            ingestion_ns.abort(403, "Admin access required")
-
-        datasource_name = (request.args.get("datasource") or "").strip()
+        datasource_name = _resolve_requested_or_workspace_datasource(
+            request.args.get("datasource"),
+        )
         if not datasource_name:
-            ingestion_ns.abort(400, "datasource parameter is required")
+            ingestion_ns.abort(
+                400,
+                "datasource parameter is required unless the current workspace has a bound datasource",
+            )
 
         catalog = (request.args.get("catalog") or "").strip() or None
 
-        registry = current_app.extensions.get("analytics_registry")
-        if not registry:
+        registry = build_runtime_registry(
+            fallback_registry=current_app.extensions.get("analytics_registry"),
+        )
+        if not registry.list_datasources():
             ingestion_ns.abort(503, "Analytics registry not available")
 
         try:

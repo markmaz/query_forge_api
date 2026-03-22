@@ -10,6 +10,7 @@ import pytest
 
 from app.adapters.analytics.snowflake_executor import (
     SnowflakeSQLExecutor,
+    _load_private_key_pem,
     _normalize_account_identifier,
 )
 
@@ -281,6 +282,35 @@ def test_execute_uses_private_key_when_provided(tmp_path):
     assert "password" not in connect_kwargs
 
 
+def test_execute_uses_private_key_pem_when_provided():
+    columns = ["val"]
+    rows = [(1,)]
+    cursor = _make_mock_cursor(rows, columns)
+    conn = _make_mock_conn(cursor)
+
+    fake_der_bytes = b"fake_der_bytes"
+    pem = "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----"
+
+    with patch(
+        "app.adapters.analytics.snowflake_executor._load_private_key_pem",
+        return_value=fake_der_bytes,
+    ) as mock_load_key, patch("snowflake.connector.connect", return_value=conn) as mock_connect:
+        executor = SnowflakeSQLExecutor(
+            account="acc",
+            user="u",
+            database="db",
+            warehouse="wh",
+            private_key_pem=pem,
+            private_key_passphrase="passphrase",
+        )
+        executor.execute("SELECT 1 AS val")
+
+    mock_load_key.assert_called_once_with(pem, "passphrase")
+    connect_kwargs = mock_connect.call_args[1]
+    assert connect_kwargs["private_key"] == fake_der_bytes
+    assert "password" not in connect_kwargs
+
+
 def test_execute_uses_externalbrowser_auth_without_password():
     columns = ["val"]
     rows = [(1,)]
@@ -305,3 +335,24 @@ def test_execute_uses_externalbrowser_auth_without_password():
     assert connect_kwargs["role"] == "ACCOUNTADMIN"
     assert "warehouse" not in connect_kwargs
     assert "password" not in connect_kwargs
+
+
+def test_load_private_key_reads_pem_text(monkeypatch):
+    fake_private_key = MagicMock()
+    fake_private_key.private_bytes.return_value = b"der-bytes"
+    load_mock = MagicMock(return_value=fake_private_key)
+
+    monkeypatch.setattr(
+        "cryptography.hazmat.primitives.serialization.load_pem_private_key",
+        load_mock,
+    )
+
+    result = _load_private_key_pem(
+        "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
+        "passphrase",
+    )
+
+    assert result == b"der-bytes"
+    call_args = load_mock.call_args
+    assert call_args.args[0].startswith(b"-----BEGIN PRIVATE KEY-----")
+    assert call_args.kwargs["password"] == b"passphrase"

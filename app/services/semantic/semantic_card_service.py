@@ -34,14 +34,14 @@ class SemanticCardService:
         workspace_table_id: Optional[int] = None,
     ) -> int:
         return self._count_columns_workspace(
-            model_table_id=model_table_id,
+            legacy_table_id=model_table_id,
             workspace_table_id=workspace_table_id,
         )
 
     def _count_columns_workspace(
         self,
         *,
-        model_table_id: Optional[int],
+        legacy_table_id: Optional[int],
         workspace_table_id: Optional[int],
     ) -> int:
         params: Dict[str, Any] = {}
@@ -49,10 +49,10 @@ class SemanticCardService:
         if workspace_table_id is not None:
             where_parts.append("wc.workspace_table_id = :workspace_table_id")
             params["workspace_table_id"] = int(workspace_table_id)
-        if model_table_id is not None:
-            # Legacy compatibility: treat model_table_id filter as workspace_table_id.
-            where_parts.append("wc.workspace_table_id = :model_table_id")
-            params["model_table_id"] = int(model_table_id)
+        if legacy_table_id is not None:
+            # Legacy compatibility: treat the old table id input as workspace_table_id.
+            where_parts.append("wc.workspace_table_id = :legacy_table_id")
+            params["legacy_table_id"] = int(legacy_table_id)
 
         where_sql = f"WHERE {' AND '.join(where_parts)}"
         rows = self._sql.execute_query_mappings(
@@ -78,7 +78,7 @@ class SemanticCardService:
         return self._build_column_cards_workspace(
             offset=offset,
             limit=limit,
-            model_table_id=model_table_id,
+            legacy_table_id=model_table_id,
             workspace_table_id=workspace_table_id,
         )
 
@@ -87,15 +87,15 @@ class SemanticCardService:
         *,
         offset: int,
         limit: int,
-        model_table_id: Optional[int],
+        legacy_table_id: Optional[int],
         workspace_table_id: Optional[int],
     ) -> List[Dict[str, Any]]:
         params: Dict[str, Any] = {"offset": max(0, int(offset)), "limit": max(1, int(limit))}
         where_parts = ["wt.exists_in_dbx = 1", "wc.exists_in_dbx = 1"]
-        if model_table_id is not None:
-            # Legacy compatibility: treat model_table_id filter as workspace_table_id.
-            where_parts.append("wc.workspace_table_id = :model_table_id")
-            params["model_table_id"] = int(model_table_id)
+        if legacy_table_id is not None:
+            # Legacy compatibility: treat the old table id input as workspace_table_id.
+            where_parts.append("wc.workspace_table_id = :legacy_table_id")
+            params["legacy_table_id"] = int(legacy_table_id)
         if workspace_table_id is not None:
             where_parts.append("wc.workspace_table_id = :workspace_table_id")
             params["workspace_table_id"] = int(workspace_table_id)
@@ -104,8 +104,6 @@ class SemanticCardService:
         rows = self._sql.execute_query_mappings(
             f"""
             SELECT
-              COALESCE(wc.model_column_id, wc.id) AS model_column_id,
-              NULL AS model_table_id,
               wc.id AS workspace_column_id,
               wt.id AS workspace_table_id,
               COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name, wt.full_name) AS table_name,
@@ -131,8 +129,8 @@ class SemanticCardService:
             signals = _derive_signals(samples, stats)
             cards.append(
                 {
-                    "modelColumnId": int(row["model_column_id"]),
-                    "modelTableId": int(row["model_table_id"]) if row.get("model_table_id") is not None else None,
+                    "modelColumnId": int(row["workspace_column_id"]),
+                    "modelTableId": int(row["workspace_table_id"]),
                     "workspaceColumnId": int(row["workspace_column_id"]),
                     "workspaceTableId": int(row["workspace_table_id"]),
                     "tableName": row.get("table_name"),

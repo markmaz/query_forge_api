@@ -194,3 +194,78 @@ def test_resolve_workspace_datasource_rejects_inactive_organization():
     with pytest.raises(ForgeError) as exc:
         service.resolve_for_workspace(workspace_id="ws-1")
     assert exc.value.status_code == 403
+
+
+def test_resolve_workspace_datasource_decrypts_sensitive_config(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.tenancy.datasource_config_crypto.decrypt_secret",
+        lambda value: value.replace("enc::", "", 1),
+    )
+
+    service = WorkspaceDatasourceResolverService(
+        sql=_StubSQL(
+            [
+                {
+                    "workspace_id": "ws-1",
+                    "workspace_name": "Main",
+                    "workspace_organization_id": "org-1",
+                    "organization_is_active": 1,
+                    "workspace_is_active": 1,
+                    "datasource_id": 10,
+                    "default_catalog": None,
+                    "default_schema": None,
+                    "datasource_organization_id": "org-1",
+                    "datasource_name": "Primary",
+                    "datasource_slug": "primary",
+                    "datasource_type": "snowflake",
+                    "datasource_is_active": 1,
+                    "config_json": {"account": "acct", "password_encrypted": "enc::secret-1"},
+                    "secret_ref": None,
+                }
+            ]
+        )
+    )
+
+    resolved = service.resolve_for_workspace(workspace_id="ws-1")
+    assert resolved is not None
+    assert resolved.config_json["password"] == "secret-1"
+
+
+def test_resolve_workspace_datasource_decrypts_private_key_material(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.tenancy.datasource_config_crypto.decrypt_secret",
+        lambda value: value.replace("enc::", "", 1),
+    )
+
+    service = WorkspaceDatasourceResolverService(
+        sql=_StubSQL(
+            [
+                {
+                    "workspace_id": "ws-1",
+                    "workspace_name": "Main",
+                    "workspace_organization_id": "org-1",
+                    "organization_is_active": 1,
+                    "workspace_is_active": 1,
+                    "datasource_id": 10,
+                    "default_catalog": None,
+                    "default_schema": None,
+                    "datasource_organization_id": "org-1",
+                    "datasource_name": "Primary",
+                    "datasource_slug": "primary",
+                    "datasource_type": "snowflake",
+                    "datasource_is_active": 1,
+                    "config_json": {
+                        "account": "acct",
+                        "private_key_pem_encrypted": "enc::pem-body",
+                        "private_key_passphrase_encrypted": "enc::pass-1",
+                    },
+                    "secret_ref": None,
+                }
+            ]
+        )
+    )
+
+    resolved = service.resolve_for_workspace(workspace_id="ws-1")
+    assert resolved is not None
+    assert resolved.config_json["private_key_pem"] == "pem-body"
+    assert resolved.config_json["private_key_passphrase"] == "pass-1"

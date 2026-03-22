@@ -83,7 +83,102 @@ def test_list_workspace_tables_skips_registry_sync_when_schema_missing(monkeypat
     assert called["count"] == 0
 
 
-def test_sync_workspace_inventory_uses_factory_registry(monkeypatch) -> None:
+def test_list_workspace_tables_tolerates_inventory_sync_failure(monkeypatch) -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[{"workspace_table_id": 1, "table_name": "orders"}]]
+    service = DomainTableReadService(sql=sql, metadata_mode="legacy")
+
+    def fake_sync(*_args, **_kwargs):
+        raise RuntimeError("sync failed")
+
+    monkeypatch.setattr(
+        service,
+        "_sync_workspace_inventory_from_registry",
+        fake_sync,
+    )
+
+    rows = service.list_workspace_tables(
+        workspace_id="ws1",
+        schema_name="asset",
+        ensure_snapshot=True,
+    )
+
+    assert rows[0]["table_name"] == "orders"
+
+
+def test_sync_workspace_inventory_uses_workspace_datasource_from_db(monkeypatch) -> None:
+    app = Flask(__name__)
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [{"id": 11, "table_name": "orders"}],
+    ]
+    service = DomainTableReadService(sql=sql, metadata_mode="legacy")
+
+    resolved = MagicMock()
+    resolved.datasource_type = "snowflake"
+    resolved.config_json = {
+        "account": "acc",
+        "user": "svc_user",
+        "database": "QUERYFORGE",
+        "warehouse": "WH",
+    }
+    resolved.secret_ref = "env:SNOWFLAKE_PASSWORD"
+
+    provider = MagicMock()
+    provider.list_tables.return_value = [{"table_name": "orders"}]
+    provider.list_columns.return_value = [
+        {
+            "table_name": "orders",
+            "column_name": "id",
+            "data_type": "NUMBER",
+            "is_nullable": False,
+            "ordinal_position": 1,
+        }
+    ]
+
+    captured = {}
+
+    def fake_create(dialect, exec_obj):
+        captured["dialect"] = dialect
+        captured["executor"] = exec_obj
+        return provider
+
+    created_executor = MagicMock()
+
+    monkeypatch.setattr(
+        "app.services.domain.domain_table_read_service.WorkspaceDatasourceResolverService.resolve_for_workspace",
+        lambda self, *, workspace_id, require_active=True: resolved,
+    )
+    monkeypatch.setattr(
+        "app.services.domain.domain_table_read_service.SecretResolver.resolve",
+        lambda self, secret_ref: "secret-password",
+    )
+    monkeypatch.setattr(
+        "app.services.domain.domain_table_read_service.ExecutorFactory.create",
+        lambda ds_type, config: created_executor,
+    )
+
+    monkeypatch.setattr(
+        "app.services.domain.domain_table_read_service.MetadataProviderFactory.create",
+        fake_create,
+    )
+
+    with app.app_context():
+        service._sync_workspace_inventory_from_registry(
+            workspace_id="ws1",
+            schema_name="MEDICAL_SALES",
+            catalog_name="QUERYFORGE_DEMO",
+        )
+
+    assert captured["dialect"] == "snowflake"
+    assert captured["executor"] is created_executor
+    provider.list_tables.assert_called_once_with("QUERYFORGE_DEMO", "MEDICAL_SALES")
+    provider.list_columns.assert_called_once_with("QUERYFORGE_DEMO", "MEDICAL_SALES", ["orders"])
+    assert any("INSERT INTO workspace_table" in call.query for call in sql.write_calls)
+    assert any("INSERT INTO workspace_column" in call.query for call in sql.write_calls)
+
+
+def test_sync_workspace_inventory_falls_back_to_legacy_registry_when_workspace_has_no_datasource(monkeypatch) -> None:
     app = Flask(__name__)
     sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
@@ -108,16 +203,13 @@ def test_sync_workspace_inventory_uses_factory_registry(monkeypatch) -> None:
         }
     ]
 
-    captured = {}
-
-    def fake_create(dialect, exec_obj):
-        captured["dialect"] = dialect
-        captured["executor"] = exec_obj
-        return provider
-
+    monkeypatch.setattr(
+        "app.services.domain.domain_table_read_service.WorkspaceDatasourceResolverService.resolve_for_workspace",
+        lambda self, *, workspace_id, require_active=True: None,
+    )
     monkeypatch.setattr(
         "app.services.domain.domain_table_read_service.MetadataProviderFactory.create",
-        fake_create,
+        lambda dialect, exec_obj: provider,
     )
 
     with app.app_context():
@@ -129,9 +221,3 @@ def test_sync_workspace_inventory_uses_factory_registry(monkeypatch) -> None:
         )
 
     registry.get.assert_called_once_with("primary")
-    assert captured["dialect"] == "snowflake"
-    assert captured["executor"] is executor
-    provider.list_tables.assert_called_once_with("QUERYFORGE_DEMO", "MEDICAL_SALES")
-    provider.list_columns.assert_called_once_with("QUERYFORGE_DEMO", "MEDICAL_SALES", ["orders"])
-    assert any("INSERT INTO workspace_table" in call.query for call in sql.write_calls)
-    assert any("INSERT INTO workspace_column" in call.query for call in sql.write_calls)

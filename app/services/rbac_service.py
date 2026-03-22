@@ -27,7 +27,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.models.rbac import FEATURE_KEYS, UserRole, WorkspaceFeature
+from sqlalchemy import and_, or_, text
+
+from app.models.rbac import FEATURE_KEYS, GLOBAL_ROLES, ROLE_DEFINITIONS, Role, UserRole, WorkspaceFeature
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,11 @@ ROLE_CACHE_TTL = 60       # seconds
 FEATURE_CACHE_TTL = 120   # seconds — entitlements change less often
 ROLE_CACHE_PREFIX = "qf:roles:user:"
 FEATURE_CACHE_PREFIX = "qf:features:workspace:"
+
+
+def _role_cache_key(user_id: str, workspace_id: str | None) -> str:
+    scope = str(workspace_id or "__global__").strip() or "__global__"
+    return f"{ROLE_CACHE_PREFIX}{user_id}:{scope}"
 
 
 # ---------------------------------------------------------------------------
@@ -59,12 +66,12 @@ def _valkey():
 # ---------------------------------------------------------------------------
 
 
-def get_user_roles(user_id: str) -> set[str]:
+def get_user_roles(user_id: str, workspace_id: str | None = None) -> set[str]:
     """
     Return the set of role names assigned to a user.
     Cached in Valkey for ROLE_CACHE_TTL seconds.
     """
-    cache_key = f"{ROLE_CACHE_PREFIX}{user_id}"
+    cache_key = _role_cache_key(user_id, workspace_id)
 
     try:
         client = _valkey()
@@ -74,8 +81,23 @@ def get_user_roles(user_id: str) -> set[str]:
     except Exception as exc:
         logger.debug("Role cache read failed (non-fatal): %s", exc)
 
-    # Cache miss — load from DB
-    rows = UserRole.query.filter_by(user_id=user_id).all()
+    query = (
+        UserRole.query.join(Role)
+        .filter(UserRole.user_id == user_id)
+    )
+    if workspace_id:
+        query = query.filter(
+            or_(
+                UserRole.workspace_id == workspace_id,
+                and_(UserRole.workspace_id.is_(None), Role.name == "super_admin"),
+            )
+        )
+    else:
+        query = query.filter(
+            and_(UserRole.workspace_id.is_(None), Role.name == "super_admin")
+        )
+
+    rows = query.all()
     roles = {r.role.name for r in rows if r.role}
 
     try:
@@ -92,10 +114,16 @@ def get_user_roles(user_id: str) -> set[str]:
     return roles
 
 
-def invalidate_user_roles(user_id: str) -> None:
+def invalidate_user_roles(user_id: str, workspace_id: str | None = None) -> None:
     """Call after any role assignment or revocation."""
     try:
-        _valkey().delete(f"{ROLE_CACHE_PREFIX}{user_id}")
+        client = _valkey()
+        if workspace_id:
+            client.delete(_role_cache_key(user_id, workspace_id))
+        pattern = f"{ROLE_CACHE_PREFIX}{user_id}:*"
+        keys = list(client.keys(pattern))
+        if keys:
+            client.delete(*keys)
     except Exception as exc:
         logger.debug("Role cache invalidation failed (non-fatal): %s", exc)
 
@@ -105,7 +133,7 @@ def invalidate_user_roles(user_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def get_effective_roles(user_id: str) -> set[str]:
+def get_effective_roles(user_id: str, workspace_id: str | None = None) -> set[str]:
     """
     Return the full set of effective role names for a user,
     including implied roles.
@@ -114,7 +142,7 @@ def get_effective_roles(user_id: str) -> set[str]:
       workspace_admin  → adds all feature:user roles
       feature:admin    → adds feature:user for the same feature
     """
-    assigned = get_user_roles(user_id)
+    assigned = get_user_roles(user_id, workspace_id=workspace_id)
     # Remove placeholder
     assigned.discard("__empty__")
 
@@ -128,10 +156,13 @@ def get_effective_roles(user_id: str) -> set[str]:
         effective.add("workspace_admin")
         return effective
 
-    if "workspace_admin" in assigned:
-        # workspace_admin implies all feature :user roles
+    if "workspace_admin" in assigned and workspace_id:
+        # workspace_admin implies all feature :user roles only inside its workspace
         for fk in FEATURE_KEYS:
             effective.add(f"{fk}:user")
+
+    if "library_admin" in assigned:
+        effective.add("query_studio:user")
 
     # feature:admin implies feature:user
     for fk in FEATURE_KEYS:
@@ -141,9 +172,9 @@ def get_effective_roles(user_id: str) -> set[str]:
     return effective
 
 
-def user_has_role(user_id: str, role_name: str) -> bool:
+def user_has_role(user_id: str, role_name: str, workspace_id: str | None = None) -> bool:
     """Check whether a user has an effective role."""
-    return role_name in get_effective_roles(user_id)
+    return role_name in get_effective_roles(user_id, workspace_id=workspace_id)
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +233,12 @@ def workspace_has_feature(workspace_id: str, feature_key: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def assign_role(user_id: str, role_name: str, granted_by: str) -> dict[str, Any]:
+def assign_role(
+    user_id: str,
+    role_name: str,
+    granted_by: str,
+    workspace_id: str | None = None,
+) -> dict[str, Any]:
     """
     Assign a role to a user. Invalidates cache.
     Returns the created UserRole dict or existing if already assigned.
@@ -214,18 +250,121 @@ def assign_role(user_id: str, role_name: str, granted_by: str) -> dict[str, Any]
     if not role:
         raise ValueError(f"Unknown role: {role_name!r}")
 
-    existing = db.session.query(UserRole).filter_by(user_id=user_id, role_id=role.id).first()
+    request_workspace_id = str(workspace_id or "").strip() or None
+    normalized_workspace_id = request_workspace_id
+    if role_name in GLOBAL_ROLES:
+        normalized_workspace_id = None
+    elif not normalized_workspace_id:
+        raise ValueError("workspace_id is required for non-global roles.")
+
+    existing = db.session.query(UserRole).filter_by(
+        user_id=user_id,
+        workspace_id=normalized_workspace_id,
+        role_id=role.id,
+    ).first()
     if existing:
         return existing.to_dict()
 
-    ur = UserRole(user_id=user_id, role_id=role.id, granted_by=granted_by)
+    ur = UserRole(
+        user_id=user_id,
+        workspace_id=normalized_workspace_id,
+        role_id=role.id,
+        granted_by=granted_by,
+    )
     db.session.add(ur)
+    _ensure_workspace_membership_for_role(
+        user_id=user_id,
+        role_name=role_name,
+        workspace_id=request_workspace_id,
+    )
     db.session.commit()
-    invalidate_user_roles(user_id)
+    invalidate_user_roles(user_id, workspace_id=normalized_workspace_id)
     return ur.to_dict()
 
 
-def revoke_role(user_id: str, role_name: str) -> bool:
+def _ensure_workspace_membership_for_role(
+    *,
+    user_id: str,
+    role_name: str,
+    workspace_id: str | None,
+) -> None:
+    """
+    Keep workspace_membership aligned with workspace-scoped RBAC assignments.
+
+    - workspace_admin => ensure membership.role = 'admin'
+    - feature/global assignments made in a workspace context => ensure active
+      membership exists, preserving any existing 'admin' role/default flag.
+    """
+    from app.extensions import db
+
+    normalized_workspace_id = str(workspace_id or "").strip() or None
+    if not normalized_workspace_id:
+        return
+
+    membership_role = "admin" if role_name == "workspace_admin" else "member"
+    existing = db.session.execute(
+        text(
+            """
+            SELECT id, role
+            FROM workspace_membership
+            WHERE user_id = :user_id
+              AND workspace_id = :workspace_id
+            LIMIT 1
+            """
+        ),
+        {"user_id": user_id, "workspace_id": normalized_workspace_id},
+    ).mappings().first()
+
+    if existing:
+        params: dict[str, Any] = {
+            "membership_id": existing["id"],
+            "role": membership_role,
+        }
+        if str(existing.get("role") or "").strip().lower() == "admin":
+            params["role"] = "admin"
+        db.session.execute(
+            text(
+                """
+                UPDATE workspace_membership
+                SET role = :role,
+                    is_active = 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :membership_id
+                """
+            ),
+            params,
+        )
+        return
+
+    existing_membership_count = db.session.execute(
+        text(
+            """
+            SELECT COUNT(*) AS count
+            FROM workspace_membership
+            WHERE user_id = :user_id
+              AND COALESCE(is_active, 1) = 1
+            """
+        ),
+        {"user_id": user_id},
+    ).scalar_one()
+
+    db.session.execute(
+        text(
+            """
+            INSERT INTO workspace_membership (workspace_id, user_id, role, is_active, is_default)
+            VALUES (:workspace_id, :user_id, :role, 1, :is_default)
+            """
+        ),
+        {
+            "workspace_id": normalized_workspace_id,
+            "user_id": user_id,
+            "role": membership_role,
+            "is_default": 1 if int(existing_membership_count or 0) == 0 else 0,
+        },
+    )
+
+
+def revoke_role(user_id: str, role_name: str, workspace_id: str | None = None) -> bool:
     """
     Revoke a role from a user. Invalidates cache.
     Returns True if removed, False if not assigned.
@@ -237,13 +376,52 @@ def revoke_role(user_id: str, role_name: str) -> bool:
     if not role:
         raise ValueError(f"Unknown role: {role_name!r}")
 
-    ur = db.session.query(UserRole).filter_by(user_id=user_id, role_id=role.id).first()
+    normalized_workspace_id = str(workspace_id or "").strip() or None
+    if role_name in GLOBAL_ROLES:
+        normalized_workspace_id = None
+    elif not normalized_workspace_id:
+        raise ValueError("workspace_id is required for non-global roles.")
+
+    ur = db.session.query(UserRole).filter_by(
+        user_id=user_id,
+        workspace_id=normalized_workspace_id,
+        role_id=role.id,
+    ).first()
     if not ur:
         return False
 
     db.session.delete(ur)
     db.session.commit()
-    invalidate_user_roles(user_id)
+    invalidate_user_roles(user_id, workspace_id=normalized_workspace_id)
+    return True
+
+
+def revoke_role_by_id(
+    user_id: str,
+    user_role_id: int,
+    workspace_id: str | None = None,
+) -> bool:
+    """
+    Revoke a direct role assignment by user_roles.id.
+
+    Only super_admin may remain global (workspace_id NULL).
+    """
+    from app.extensions import db
+    ur = db.session.query(UserRole).filter_by(id=user_role_id, user_id=user_id).first()
+    if not ur:
+        return False
+
+    role_name = ur.role.name if ur.role else ""
+    normalized_workspace_id = str(workspace_id or "").strip() or None
+    if role_name in GLOBAL_ROLES:
+        if ur.workspace_id is not None:
+            return False
+    elif ur.workspace_id != normalized_workspace_id:
+        return False
+
+    db.session.delete(ur)
+    db.session.commit()
+    invalidate_user_roles(user_id, workspace_id=ur.workspace_id)
     return True
 
 
@@ -273,3 +451,32 @@ def set_workspace_feature(
     db.session.commit()
     invalidate_workspace_features(workspace_id)
     return wf.to_dict()
+
+
+def ensure_system_roles() -> list[dict[str, Any]]:
+    """
+    Ensure all canonical system RBAC roles exist.
+
+    Safe to call repeatedly. Returns the created role rows, if any.
+    """
+    from app.extensions import db
+
+    created: list[dict[str, Any]] = []
+    existing = {
+        row.name: row
+        for row in db.session.query(Role).filter(
+            Role.name.in_([definition["name"] for definition in ROLE_DEFINITIONS])
+        ).all()
+    }
+
+    for definition in ROLE_DEFINITIONS:
+        if definition["name"] in existing:
+            continue
+        role = Role(**definition)
+        db.session.add(role)
+        created.append(definition)
+
+    if created:
+        db.session.commit()
+
+    return created

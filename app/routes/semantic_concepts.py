@@ -21,7 +21,7 @@ semantic_concept_aliases_ns = Namespace("semantic-concept-aliases", description=
 semantic_value_aliases_ns = Namespace("semantic-value-aliases", description="Semantic concept value alias endpoints")
 semantic_concept_column_maps_ns = Namespace(
     "semantic-concept-column-maps",
-    description="Semantic concept to model_column mapping endpoints",
+    description="Semantic concept to workspace_column mapping endpoints",
 )
 
 concept_create_model = semantic_concepts_ns.model(
@@ -99,7 +99,6 @@ concept_column_map_create_model = semantic_concept_column_maps_ns.model(
     {
         "vertical_norm": fields.String(required=True),
         "semantic_concept_id": fields.Integer(required=True),
-        "model_column_id": fields.Integer(required=False),
         "workspace_column_id": fields.Integer(required=False),
         "relationship_kind": fields.String(required=False),
         "weight": fields.Float(required=False),
@@ -468,7 +467,6 @@ class SemanticConceptColumnMapCollection(ForgeResource):
             "vertical": "Filter by vertical",
             "semantic_concept_id": "Filter by semantic_concept_id",
             "concept_key": "Filter by concept_key (contains, case-insensitive)",
-            "model_column_id": "Filter by model_column_id",
             "workspace_column_id": "Filter by workspace_column_id",
             "column_name": "Filter by column_name (contains, case-insensitive)",
             "relationship_kind": "Filter by relationship_kind",
@@ -483,7 +481,6 @@ class SemanticConceptColumnMapCollection(ForgeResource):
                 vertical=request.args.get("vertical") or None,
                 semantic_concept_id=_optional_int(request.args.get("semantic_concept_id"), "semantic_concept_id"),
                 concept_key=request.args.get("concept_key") or None,
-                model_column_id=_optional_int(request.args.get("model_column_id"), "model_column_id"),
                 workspace_column_id=_optional_int(request.args.get("workspace_column_id"), "workspace_column_id"),
                 column_name=request.args.get("column_name") or None,
                 relationship_kind=request.args.get("relationship_kind") or None,

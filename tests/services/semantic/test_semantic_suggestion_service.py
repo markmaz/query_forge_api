@@ -14,12 +14,12 @@ class _StubCardService:
         self._cards = cards
         self._served = False
 
-    def count_columns(self, *, model_table_id: Optional[int] = None) -> int:
-        del model_table_id
+    def count_columns(self, *, workspace_table_id: Optional[int] = None) -> int:
+        del workspace_table_id
         return len(self._cards)
 
-    def build_column_cards(self, *, offset: int, limit: int, model_table_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        del limit, model_table_id
+    def build_column_cards(self, *, offset: int, limit: int, workspace_table_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        del limit, workspace_table_id
         if self._served or offset > 0:
             return []
         self._served = True
@@ -98,8 +98,8 @@ def test_execution_flow_with_mocked_llm() -> None:
 
     cards = [
         {
-            "modelColumnId": 10,
-            "modelTableId": 2,
+            "workspaceColumnId": 10,
+            "workspaceTableId": 2,
             "tableName": "students",
             "columnName": "first_name",
             "dataType": "STRING",
@@ -267,8 +267,6 @@ def test_apply_idempotency() -> None:
     assert second["status"] == "applied"
     assert upsert_calls["registry"] == 1
     assert upsert_calls["mapping"] == 1
-    model_column_updates = [c for c in sql.write_calls if "UPDATE model_column" in c.query]
-    assert len(model_column_updates) == 1
 
 
 def test_llm_raw_json_saved_on_schema_failure() -> None:
@@ -293,8 +291,8 @@ def test_llm_raw_json_saved_on_schema_failure() -> None:
     ]
     cards = [
         {
-            "modelColumnId": 22,
-            "modelTableId": 2,
+            "workspaceColumnId": 22,
+            "workspaceTableId": 2,
             "tableName": "students",
             "columnName": "bad_col",
             "dataType": "STRING",

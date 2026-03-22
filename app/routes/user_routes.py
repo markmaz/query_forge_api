@@ -10,6 +10,7 @@ from app.decorators.rbac import require_admin
 from app.exceptions.forge_error import ForgeError
 from app.models.tenancy.user import User
 from app.models.tenancy.user_workspace import UserInvitation
+from app.routes.request_helpers import extract_workspace_id
 from app.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
@@ -47,21 +48,21 @@ mapping_model = qf_user_ns.model('UserWorkspaceMapping', {
 user_role_add_model = qf_user_ns.model(
     "UserRoleAdd",
     {
-        "role_id": fields.String(required=True, description="Role ID to assign directly to the user"),
+        "role_name": fields.String(required=True, description="Canonical role name to assign directly to the user"),
     },
 )
 
 user_role_replace_model = qf_user_ns.model(
     "UserRoleReplace",
     {
-        "role_ids": fields.List(fields.String, required=True, description="Complete direct role id list"),
+        "role_names": fields.List(fields.String, required=True, description="Complete direct role name list"),
     },
 )
 
 user_role_update_model = qf_user_ns.model(
     "UserRoleUpdate",
     {
-        "role_id": fields.String(required=True, description="Replacement role id"),
+        "role_name": fields.String(required=True, description="Replacement role name"),
     },
 )
 
@@ -102,6 +103,7 @@ class UserList(ForgeResource):
     def get(self):
         """List users with cursor-based pagination"""
         args = qf_user_parser.parse_args()
+        workspace_id = (request.headers.get("X-Workspace-Id") or "").strip() or None
         logger.info(f"Parsed args: {args}")  # Debug query parameters
         logger.info(args['status'])
         try:
@@ -111,7 +113,8 @@ class UserList(ForgeResource):
                 cursor=args['cursor'],
                 limit=args['limit'],
                 direction=args['direction'],
-                username=args['q']
+                username=args['q'],
+                workspace_id=workspace_id,
             )
             return {
                 'users': [_public_user_payload(user) for user in users],
@@ -140,7 +143,11 @@ class UserUpdates(ForgeResource):
 
         user = User(**body)
         userService = UserService()
-        result = userService.update_user(user_id=user_id, update_data=user)
+        result = userService.update_user(
+            user_id=user_id,
+            update_data=user,
+            workspace_id=(request.headers.get("X-Workspace-Id") or "").strip() or None,
+        )
         
         return jsonify(_public_user_payload(result))
 
@@ -165,7 +172,10 @@ class UserUpdates(ForgeResource):
         Get a specific User
         """
         userService = UserService()
-        result = userService.get_user(user_id)
+        result = userService.get_user(
+            user_id,
+            workspace_id=(request.headers.get("X-Workspace-Id") or "").strip() or None,
+        )
         return jsonify(_public_user_payload(result))
     
     def options(self, user_id):
@@ -189,11 +199,13 @@ class UserDirectRoles(ForgeResource):
     @token_required
     @require_admin()
     def get(self, user_id):
+        workspace_id = extract_workspace_id()
         user_service = UserService()
-        direct_roles = user_service.get_user_direct_roles(user_id)
-        effective_roles = user_service.get_user_effective_roles(user_id)
+        direct_roles = user_service.get_user_direct_roles(user_id, workspace_id=workspace_id)
+        effective_roles = user_service.get_user_effective_roles(user_id, workspace_id=workspace_id)
         return {
             "user_id": user_id,
+            "workspace_id": workspace_id,
             "direct_roles": direct_roles,
             "effective_roles": effective_roles,
         }, 200
@@ -202,46 +214,55 @@ class UserDirectRoles(ForgeResource):
     @require_admin()
     @qf_user_ns.expect(user_role_add_model, validate=False)
     def post(self, user_id):
+        workspace_id = extract_workspace_id()
         data = request.get_json(silent=True) or {}
-        role_id = str(data.get("role_id") or "").strip()
-        if not role_id:
-            return {"error": "role_id is required"}, 400
+        role_name = str(data.get("role_name") or "").strip()
+        if not role_name:
+            return {"error": "role_name is required"}, 400
         user_service = UserService()
-        mapping = user_service.add_user_direct_role(user_id, role_id)
+        mapping = user_service.add_user_direct_role(user_id, role_name, workspace_id=workspace_id)
         return {"mapping": mapping}, 200
 
     @token_required
     @require_admin()
     @qf_user_ns.expect(user_role_replace_model, validate=False)
     def put(self, user_id):
+        workspace_id = extract_workspace_id()
         data = request.get_json(silent=True) or {}
-        role_ids = data.get("role_ids")
-        if not isinstance(role_ids, list):
-            return {"error": "role_ids must be an array"}, 400
+        role_names = data.get("role_names")
+        if not isinstance(role_names, list):
+            return {"error": "role_names must be an array"}, 400
         user_service = UserService()
-        result = user_service.replace_user_direct_roles(user_id, role_ids)
+        result = user_service.replace_user_direct_roles(user_id, role_names, workspace_id=workspace_id)
         return result, 200
 
 
-@qf_user_ns.route("/<string:user_id>/roles/<string:role_id>")
+@qf_user_ns.route("/<string:user_id>/roles/<string:role_name>")
 class UserDirectRoleById(ForgeResource):
     @token_required
     @require_admin()
     @qf_user_ns.expect(user_role_update_model, validate=False)
-    def patch(self, user_id, role_id):
+    def patch(self, user_id, role_name):
+        workspace_id = extract_workspace_id()
         data = request.get_json(silent=True) or {}
-        new_role_id = str(data.get("role_id") or "").strip()
-        if not new_role_id:
-            return {"error": "role_id is required"}, 400
+        new_role_name = str(data.get("role_name") or "").strip()
+        if not new_role_name:
+            return {"error": "role_name is required"}, 400
         user_service = UserService()
-        result = user_service.update_user_direct_role(user_id, role_id, new_role_id)
+        result = user_service.update_user_direct_role(
+            user_id,
+            role_name,
+            new_role_name,
+            workspace_id=workspace_id,
+        )
         return result, 200
 
     @token_required
     @require_admin()
-    def delete(self, user_id, role_id):
+    def delete(self, user_id, role_name):
+        workspace_id = extract_workspace_id()
         user_service = UserService()
-        result = user_service.remove_user_direct_role(user_id, role_id)
+        result = user_service.remove_user_direct_role(user_id, role_name, workspace_id=workspace_id)
         return result, 200
 
 @qf_user_ns.route("/<string:user_id>/workspaces/<string:workspace_id>/dashboards/<string:dashboard_id>/embed")
@@ -275,7 +296,9 @@ class UserCounts(ForgeResource):
     @require_admin()
     def get(self):
         user_service = UserService()
-        results = user_service.get_counts()
+        results = user_service.get_counts(
+            workspace_id=(request.headers.get("X-Workspace-Id") or "").strip() or None,
+        )
 
         return results, 200
 
@@ -300,5 +323,5 @@ class BulkInviteUsers(ForgeResource):
         data = request.json
 
         service = UserService()
-        return service.create_invite_bulk(data["emails"], data["products"], data["workspaces"])
+        return service.create_invite_bulk(data["emails"], data["workspaces"])
         

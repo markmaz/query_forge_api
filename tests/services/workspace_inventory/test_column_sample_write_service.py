@@ -58,20 +58,20 @@ def test_fetch_column_stats_and_samples() -> None:
 
 def test_refresh_model_samples_success() -> None:
     mysql = FakeForgeQueryPort()
-    mysql.query_mappings_responses.append([{"model_table_id": 1, "full_name": "main.asset.patients"}])
+    mysql.query_mappings_responses.append([{"workspace_table_id": 1, "full_name": "main.asset.patients"}])
     mysql.query_mappings_responses.append([{"id": 10, "column_name": "patient_id", "data_type": "STRING", "nullable": 1, "is_active": 1}])
 
     svc = _SampleService(sql=FakeDatabricksForgeQueryPort(), mysql=mysql)
     result = svc.refresh_model_samples(workspace_id="ws-1", schema_name="asset")
 
     assert result["columns_updated"] == 1
-    update_call = next(call for call in mysql.write_calls if "UPDATE model_column" in call.query)
+    update_call = next(call for call in mysql.write_calls if "UPDATE workspace_column" in call.query)
     assert update_call.params["id"] == 10
 
 
 def test_refresh_model_samples_handles_failures() -> None:
     mysql = FakeForgeQueryPort()
-    mysql.query_mappings_responses.append([{"model_table_id": 1, "full_name": "main.asset.patients"}])
+    mysql.query_mappings_responses.append([{"workspace_table_id": 1, "full_name": "main.asset.patients"}])
     mysql.query_mappings_responses.append([{"id": 10, "column_name": "patient_id", "data_type": "STRING", "nullable": 1, "is_active": 1}])
 
     svc = _FailingSampleService(sql=FakeDatabricksForgeQueryPort(), mysql=mysql)

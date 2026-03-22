@@ -137,6 +137,9 @@ class DestinationList(Resource):
             dest.set_config(body.get("config", {}))
         except ValueError as exc:
             return {"error": str(exc)}, 422
+        except RuntimeError as exc:
+            logger.error("Destination encryption unavailable during create: %s", exc)
+            return {"error": str(exc)}, 503
 
         db.session.add(dest)
         db.session.commit()
@@ -194,6 +197,9 @@ class DestinationDetail(Resource):
                 dest.set_config(merged)
             except ValueError as exc:
                 return {"error": str(exc)}, 422
+            except RuntimeError as exc:
+                logger.error("Destination encryption unavailable during update: %s", exc)
+                return {"error": str(exc)}, 503
 
         if "is_active" in body:
             dest.is_active = body["is_active"]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -85,6 +86,29 @@ def test_list_columns_returns_full_shape(svc):
     # is_active coerced to bool
     assert col["is_active"] is True
     assert col["table_name"] == "dim_prov"
+
+
+def test_list_columns_serializes_decimal_fields(svc):
+    raw = [{
+        "id": 5, "workspace_table_id": 1, "column_name": "npi",
+        "data_type": "string", "ordinal_position": 1,
+        "description": "10-digit NPI", "is_active": 1,
+        "semantic_type": None, "semantic_entity": None,
+        "semantic_sub_type": None, "semantic_confidence": Decimal("0.92"),
+        "sample_values_json": ["val1", "val2"],
+        "sample_stats_json": {"null_pct": Decimal("0.0"), "approx_distinct": Decimal("2")},
+        "sample_ran_at": None, "sample_error": None,
+        "table_name": "dim_prov", "full_name": "asset.dim_prov",
+    }]
+    conn, cm = _make_conn(raw)
+    with patch("app.services.dictionary.dictionary_service.engine") as mock_engine:
+        mock_engine.connect.return_value = cm
+        result = svc.list_columns(
+            workspace_id="ws-1", workspace_table_id=1, q=None, active_only=True
+        )
+    col = result["rows"][0]
+    assert col["semantic_confidence"] == 0.92
+    assert col["sample_stats_json"] == {"null_pct": 0.0, "approx_distinct": 2.0}
 
 
 def test_list_columns_404_when_table_not_in_workspace(svc):

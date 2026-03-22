@@ -219,3 +219,31 @@ def test_sync_propagates_overwrite_descriptions_to_writer_and_enricher():
     assert writer.upsert_tables.call_args[1]["overwrite_descriptions"] is True
     assert writer.upsert_columns.call_args[1]["overwrite_descriptions"] is True
     assert enricher.enrich.call_args[1]["overwrite"] is True
+
+
+def test_sync_propagates_workspace_llm_context_to_enricher():
+    registry, _executor = _make_registry()
+    provider = _make_provider()
+    writer = MagicMock()
+    writer.upsert_tables.return_value = {"tables_upserted": 1, "name_to_id": {"orders": 1}}
+    writer.upsert_columns.return_value = {"columns_upserted": 1, "cols_by_table_id": {1: {"id"}}}
+    enricher = MagicMock()
+    enricher.enrich.return_value = {"enriched": 1, "errors": 0}
+
+    svc = MetadataSyncService(registry=registry, writer=writer, enricher=enricher)
+
+    with patch(
+        "app.services.analytics.metadata_sync_service.MetadataProviderFactory.create",
+        return_value=provider,
+    ):
+        svc.sync_workspace_source_metadata(
+            datasource_name="primary",
+            catalog=None,
+            schema="sales",
+            run_enrichment=True,
+            workspace_id="ws-9",
+            llm_id=42,
+        )
+
+    assert enricher.enrich.call_args[1]["workspace_id"] == "ws-9"
+    assert enricher.enrich.call_args[1]["llm_id"] == 42

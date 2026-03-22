@@ -141,6 +141,11 @@ def test_llm_client_normalizes_endpoint_with_leading_equals() -> None:
     assert client._chat_url() == "http://localhost:8000/v1/chat/completions"
 
 
+def test_llm_client_uses_openai_base_v1_without_double_prefix() -> None:
+    client = LLMClient(endpoint="https://api.openai.com/v1", model="gpt-5.2", timeout_seconds=1)
+    assert client._chat_url() == "https://api.openai.com/v1/chat/completions"
+
+
 def test_chat_json_with_trace_uses_max_completion_tokens_for_gpt5(monkeypatch) -> None:
     captured = {}
 

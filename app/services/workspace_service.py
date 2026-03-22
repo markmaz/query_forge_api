@@ -8,9 +8,13 @@ from urllib.parse import urlparse
 
 import requests
 
+from app.adapters.databricks_workspace_token_provider import (
+    DatabricksWorkspaceTokenProvider,
+    create_databricks_oauth_provider,
+)
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import DATABRICKS_WORKSPACE_USERS_URL
-from app.decorators.validate import validate_params
+from app.utils.param_guard import validate_params
 from app.exceptions.forge_error import ForgeError
 from app.models.tenancy.user import User
 from app.models.tenancy.workspace import Workspace
@@ -72,8 +76,9 @@ class WorkspaceService:
 
         cfg = dict(resolved.config_json or {})
         host = str(cfg.get("host") or cfg.get("workspace_url") or cfg.get("server") or "").strip()
+        auth_method = str(cfg.get("auth_method") or "").strip().lower()
         token = str(cfg.get("token") or "").strip()
-        if not token:
+        if not token and auth_method != "oauth_client_credentials":
             token = str(self._secrets.resolve(resolved.secret_ref) or "").strip()
 
         if not host:
@@ -82,8 +87,20 @@ class WorkspaceService:
                 status_code=400,
             )
         if not token:
+            provider = create_databricks_oauth_provider(
+                workspace_host=host,
+                workspace_id=str(workspace_id),
+                config=cfg,
+            )
+            if provider is None:
+                provider = DatabricksWorkspaceTokenProvider(
+                    workspace_host=host,
+                    workspace_id=str(workspace_id),
+                )
+            token = str(provider.fetch_forge_token() or "").strip()
+        if not token:
             raise ForgeError(
-                f"Workspace {workspace_id} Databricks datasource is missing token/secret_ref",
+                f"Workspace {workspace_id} Databricks datasource is missing token/secret_ref or OAuth credentials",
                 status_code=503,
             )
 

@@ -35,19 +35,19 @@ class WebhookDeliverySkill(BaseSkill):
 
     config_schema = {
         "type": "object",
-        "required": ["channel_type", "webhook_url"],
+        "required": ["channel_type"],
         "properties": {
             "channel_type": {
                 "type": "string",
                 "title": "Channel",
-                "enum": ["slack", "teams"],
-                "enumNames": ["Slack", "Microsoft Teams"],
+                "enum": ["slack", "teams", "webhook"],
+                "enumNames": ["Slack", "Microsoft Teams", "Generic Webhook"],
                 "ui:widget": "select",
             },
             "webhook_url": {
                 "type": "string",
                 "title": "Webhook URL",
-                "description": "Incoming webhook URL from Slack or Teams.",
+                "description": "Incoming webhook URL from Slack or Teams, or a generic endpoint URL.",
                 "ui:widget": "text",
             },
             "message": {
@@ -100,10 +100,12 @@ class WebhookDeliverySkill(BaseSkill):
 
     def validate_config(self, config: dict[str, Any]) -> list[str]:
         errors: list[str] = []
-        if config.get("channel_type") not in ("slack", "teams"):
-            errors.append("channel_type must be 'slack' or 'teams'.")
-        if not config.get("webhook_url", "").strip():
-            errors.append("Webhook URL is required.")
+        if config.get("channel_type") not in ("slack", "teams", "webhook"):
+            errors.append("channel_type must be 'slack', 'teams', or 'webhook'.")
+        destination_id = config.get("destination_id")
+        target_url = str(config.get("webhook_url") or config.get("url") or "").strip()
+        if not destination_id and not target_url:
+            errors.append("Webhook URL or destination is required.")
         if config.get("format") not in ("summary", "table", "highlights"):
             errors.append("Format must be one of: summary, table, highlights.")
         return errors
@@ -132,7 +134,7 @@ class WebhookDeliverySkill(BaseSkill):
         payload = DeliveryPayload(
             subject=subject,
             summary=subject,
-            detail_html="",        # not used by Slack/Teams channels
+            detail_html=self._build_email_html(context, subject),
             detail_text=detail_text,
             query_name=context.metadata.query_name,
             workspace_id=context.workspace_id,
@@ -141,11 +143,40 @@ class WebhookDeliverySkill(BaseSkill):
             severity=cfg.get("severity", "info"),
         )
 
-        channel_config = {
-            "webhook_url": cfg["webhook_url"],
-        }
-
         try:
+            channels = cfg.get("channels")
+            if isinstance(channels, list) and channels:
+                results: list[dict[str, Any]] = []
+                for raw_channel in channels:
+                    if not isinstance(raw_channel, dict):
+                        continue
+                    channel_type = str(raw_channel.get("type") or "").strip().lower()
+                    if not channel_type:
+                        continue
+                    channel = get_channel(channel_type)
+                    success, message = channel.send(payload, raw_channel)
+                    results.append({
+                        "type": channel_type,
+                        "success": success,
+                        "message": message,
+                    })
+                overall_success = bool(results) and all(item["success"] for item in results)
+                message = "; ".join(
+                    f"{item['type']}: {item['message']}"
+                    for item in results
+                ) or "No delivery channels configured."
+                return SkillResult(
+                    success=overall_success,
+                    message=message,
+                    data={
+                        "row_count": context.metadata.row_count,
+                        "format": fmt,
+                        "channels": results,
+                    },
+                    error=None if overall_success else message,
+                )
+
+            channel_config = self._channel_config(cfg)
             channel = get_channel(cfg["channel_type"])
             success, message = channel.send(payload, channel_config)
         except Exception as exc:
@@ -162,6 +193,23 @@ class WebhookDeliverySkill(BaseSkill):
             },
             error=None if success else message,
         )
+
+    def _build_email_html(self, context: SkillContext, subject: str) -> str:
+        try:
+            from flask import current_app
+            from app.skills.email_delivery import EmailDeliverySkill
+
+            base_url = current_app.config.get("FRONTEND_BASE_URL", "http://localhost:3000")
+            return EmailDeliverySkill()._build_html(
+                subject,
+                "",
+                context.rows,
+                context.columns,
+                base_url,
+            )
+        except Exception:
+            logger.exception("Failed to build email HTML for webhook delivery")
+            return ""
 
     # ------------------------------------------------------------------
     # Formatters
@@ -274,6 +322,28 @@ class WebhookDeliverySkill(BaseSkill):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _channel_config(self, config: dict[str, Any]) -> dict[str, Any]:
+        channel_type = str(config.get("channel_type") or "slack").strip().lower() or "slack"
+        channel_config: dict[str, Any] = {"type": channel_type}
+        destination_id = config.get("destination_id")
+        if destination_id:
+            channel_config["destination_id"] = destination_id
+            return channel_config
+
+        target_url = str(config.get("webhook_url") or config.get("url") or "").strip()
+        if channel_type == "webhook":
+            channel_config["url"] = target_url
+            channel_config["method"] = str(config.get("method") or "POST").strip().upper() or "POST"
+            headers = config.get("headers")
+            if isinstance(headers, dict) and headers:
+                channel_config["headers"] = headers
+            auth_token = str(config.get("auth_token") or "").strip()
+            if auth_token:
+                channel_config["auth_token"] = auth_token
+        else:
+            channel_config["webhook_url"] = target_url
+        return channel_config
 
     def _render_tokens(self, template: str, context: SkillContext) -> str:
         return (

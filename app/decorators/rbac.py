@@ -60,7 +60,7 @@ def _ensure_roles_loaded() -> None:
         from app.services.rbac_service import get_effective_roles
         user_id = getattr(g, "user_id", None)
         if user_id:
-            g.effective_roles = get_effective_roles(user_id)
+            g.effective_roles = get_effective_roles(user_id, workspace_id=getattr(g, "workspace_id", None))
         else:
             g.effective_roles = set()
 
@@ -180,8 +180,11 @@ def require_access(feature_key: str, role: str = "user"):
                     if not workspace_has_feature(workspace_id, feature_key):
                         abort(403, f"Feature '{feature_key}' is not enabled for this workspace.")
 
-            # Role check (bypassed for super_admin only)
-            if not _is_super_admin():
+            # Role check (bypassed for super_admin and workspace_admin).
+            # workspace_admin is the workspace-scoped admin surface, so it
+            # should be able to operate feature admin flows within that
+            # workspace without needing every individual <feature>:admin role.
+            if not _is_super_admin() and not _is_workspace_admin():
                 _ensure_roles_loaded()
                 if full_role not in g.effective_roles:
                     abort(403, f"Required role: '{full_role}'.")

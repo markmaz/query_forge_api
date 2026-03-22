@@ -127,6 +127,51 @@ def test_get_workspace_users_from_dbx(monkeypatch: pytest.MonkeyPatch) -> None:
     assert users[0]["display_name"] == "A B"
 
 
+def test_get_workspace_users_from_dbx_uses_oauth_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    monkeypatch.setattr("app.services.workspace_service.requests.get", lambda *_args, **_kwargs: _Resp(200))
+    monkeypatch.setattr(
+        "app.services.workspace_service.process_response",
+        lambda _resp: {"Resources": []},
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_service.WorkspaceDatasourceResolverService.resolve_for_workspace",
+        lambda self, *, workspace_id, require_active=True: type(
+            "Resolved",
+            (),
+            {
+                "datasource_type": "databricks",
+                "config_json": {
+                    "host": "https://dbx",
+                    "auth_method": "oauth_client_credentials",
+                    "client_id": "client-1",
+                    "client_secret": "secret-1",
+                },
+                "secret_ref": None,
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_service.create_databricks_oauth_provider",
+        lambda **kwargs: captured.update(kwargs) or type(
+            "Provider",
+            (),
+            {"fetch_forge_token": lambda self: "oauth-token-1"},
+        )(),
+    )
+    monkeypatch.setattr(
+        WorkspaceService,
+        "get_workspace",
+        lambda *_args, **_kwargs: {"name": "Org"},
+    )
+
+    svc = WorkspaceService()
+    svc.get_workspace_users_from_dbx("1")
+    assert captured["workspace_host"] == "https://dbx"
+    assert captured["workspace_id"] == "1"
+
+
 def test_get_workspace_users_from_dbx_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     def _raise(*_args, **_kwargs):
         raise ForgeError("missing", 404)

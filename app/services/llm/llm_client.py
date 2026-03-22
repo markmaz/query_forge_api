@@ -392,6 +392,10 @@ class LLMClient:
     def _chat_url(self) -> str:
         if self._endpoint.endswith("/v1/chat/completions"):
             return self._endpoint
+        if self._endpoint.endswith("/v1"):
+            return f"{self._endpoint}/chat/completions"
+        if self._endpoint.endswith("/v1/"):
+            return f"{self._endpoint}chat/completions"
         if self._endpoint.endswith("/"):
             return f"{self._endpoint}v1/chat/completions"
         return f"{self._endpoint}/v1/chat/completions"

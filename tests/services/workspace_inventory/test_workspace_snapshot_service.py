@@ -112,13 +112,8 @@ def test_sync_snapshot_with_rows() -> None:
     sql.submit_responses.append({"table": table})
 
     mysql = FakeForgeQueryPort()
-    mysql.query_responses.append([("patient",), ("diagnosis",)])
-    mysql.query_mappings_responses.append(
-        [
-            {"id": 10, "name": "patient"},
-            {"id": 20, "name": "diagnosis"},
-        ]
-    )
+    # _load_current_workspace_table_ids is the only execute_query_mappings call;
+    # it expects rows keyed by full_name.
     mysql.query_mappings_responses.append(
         [
             {"id": 101, "full_name": "main.asset.patient"},

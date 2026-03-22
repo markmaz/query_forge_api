@@ -135,6 +135,8 @@ class AISummaryDigestSkill(BaseSkill):
 
     def execute(self, context: SkillContext) -> SkillResult:
         cfg = context.config
+        resolved_cfg = self._resolve_destination_config(cfg, context.workspace_id)
+        recipients = list(resolved_cfg.get("recipients") or cfg.get("recipients") or [])
 
         # Load previous snapshot for comparison
         previous_snapshot = self._load_snapshot(context) if cfg.get("include_comparison", True) else None
@@ -151,7 +153,7 @@ class AISummaryDigestSkill(BaseSkill):
         html_body = self._build_email_body(context, cfg, digest)
 
         try:
-            self._send(cfg["recipients"], subject, html_body)
+            self._send(recipients, subject, html_body)
         except Exception as exc:
             logger.exception("Digest email delivery failed")
             return SkillResult(success=False, message="Email delivery failed.", error=str(exc))
@@ -161,14 +163,29 @@ class AISummaryDigestSkill(BaseSkill):
 
         return SkillResult(
             success=True,
-            message=f"Digest delivered to {len(cfg['recipients'])} recipient(s).",
+            message=f"Digest delivered to {len(recipients)} recipient(s).",
             data={
-                "recipients": cfg["recipients"],
+                "recipients": recipients,
                 "row_count": context.metadata.row_count,
                 "subject": subject,
                 "had_previous_snapshot": previous_snapshot is not None,
             },
         )
+
+    def _resolve_destination_config(self, config: dict[str, Any], workspace_id: str) -> dict[str, Any]:
+        destination_id = config.get("destination_id")
+        if not destination_id:
+            return {}
+        from app.skills.destination_resolver import resolve_channel_config
+
+        try:
+            return resolve_channel_config(
+                {"type": "email", "destination_id": destination_id},
+                workspace_id,
+            )
+        except Exception:
+            logger.exception("AISummaryDigestSkill: failed to resolve destination_id=%s", destination_id)
+            return {}
 
     # ------------------------------------------------------------------
     # LLM digest generation

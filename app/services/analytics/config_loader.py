@@ -18,7 +18,7 @@ _ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
 
 # Required keys per datasource type
 _REQUIRED_KEYS: dict[str, list[str]] = {
-    "databricks": ["host", "token", "http_path"],
+    "databricks": ["host", "http_path"],
     "snowflake": ["account", "user", "database"],
     # FIND-022: ssl_ca is required for MySQL analytics connections.
     "mysql": ["host", "database", "user", "password", "ssl_ca"],
@@ -99,6 +99,20 @@ def _validate_datasource(name: str, cfg: dict[str, Any]) -> None:
         raise ValueError(
             f"Datasource '{name}' (type={ds_type}) is missing required keys: {missing}"
         )
+
+    if ds_type == "databricks":
+        auth_method = str(cfg.get("auth_method") or "").strip().lower()
+        if auth_method == "oauth_client_credentials":
+            oauth_missing = [k for k in ("client_id", "client_secret") if not cfg.get(k)]
+            if oauth_missing:
+                raise ValueError(
+                    f"Datasource '{name}' (type=databricks) is missing required OAuth keys: {oauth_missing}"
+                )
+            return
+        if not cfg.get("token"):
+            raise ValueError(
+                f"Datasource '{name}' (type=databricks) is missing required keys: ['token']"
+            )
 
 
 def load_analytics_config(config_path: Path | None = None) -> dict[str, dict[str, Any]]:

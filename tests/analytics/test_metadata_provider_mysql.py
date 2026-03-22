@@ -92,6 +92,28 @@ def test_profile_error_captured():
     assert result["id"]["sample_error"] is not None
 
 
+def test_profile_falls_back_to_sample_values_for_high_cardinality_columns():
+    ex = MagicMock(spec=SQLExecutor)
+    ex.execute.side_effect = [
+        [{"row_count": 300}],
+        [{"null_name": 0, "dist_name": 3000}],
+        [{"val": "alpha"}, {"val": "beta"}],
+    ]
+    ex.get_dialect.return_value = "mysql"
+    provider = MySQLMetadataProvider(executor=ex)
+
+    result = provider.profile_table_columns(
+        table_ref="`mydb`.`people`",
+        columns=[{"column_name": "name", "data_type": "varchar", "is_nullable": True}],
+        options={**_DEFAULT_OPTIONS, "skip_top_values_for_id_like_cols": False},
+    )
+
+    sample_sql = ex.execute.call_args_list[2][0][0]
+    assert "SELECT DISTINCT" in sample_sql.upper()
+    assert "GROUP BY" not in sample_sql.upper()
+    assert result["name"]["top_values"] == ["alpha", "beta"]
+
+
 def test_list_schemas():
     ex = _make_executor([
         {"schema_name": "app_db"},

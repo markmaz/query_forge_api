@@ -18,7 +18,7 @@ NULL created_by = system-owned legacy data → admin-only for all operations.
 
 Seam notes:
   user_id / workspace_id — str (VARCHAR PKs)
-  get_effective_roles(user_id) — single param (no workspace_id arg)
+  get_effective_roles(user_id, workspace_id)
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def _has_admin_access(
 ) -> bool:
     """True if user has admin_role, workspace_admin, or super_admin."""
     from app.services.rbac_service import get_effective_roles
-    roles = get_effective_roles(requesting_user_id)
+    roles = get_effective_roles(requesting_user_id, workspace_id=workspace_id)
     return (
         admin_role in roles
         or "workspace_admin" in roles

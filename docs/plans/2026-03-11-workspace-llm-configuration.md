@@ -16,7 +16,7 @@
 - **workspace_id type:** `VARCHAR` string throughout (not INT). Use `VARCHAR(255)` FK.
 - **Service pattern:** `ForgeMetaSQL().execute_query_mappings(sql, params)` for reads, `execute_write(sql, params)` for writes. Dict-based returns. See `DatasourceCatalogService`.
 - **Route pattern:** `Namespace`, `ForgeResource`, `@token_required`, try/except with `ForgeError`. See `workspace_routes.py`.
-- **Encryption:** No existing pattern — introduce Fernet from `cryptography`. Key from `QF_LLM_ENCRYPTION_KEY` env var.
+- **Encryption:** No existing pattern — introduce Fernet from `cryptography`. Key from `QF_ENCRYPTION_KEY` env var.
 - **LLM env vars:** `VLLM_BASE_URL` + `VLLM_MODEL` (planner/default), `SEMANTIC_LLM_ENDPOINT` + `SEMANTIC_LLM_MODEL` (ner/summarizer), `SEMANTIC_PLAN_LLM_MODEL` (planner alt). Fallback maps these to roles.
 - **Unique constraint:** MySQL doesn't support partial unique indexes. Enforce "one active LLM per role per workspace" in service layer.
 - **Frontend wizard:** `CustomerInitializationPage.tsx` has 4 steps (WizardStep: `1|2|3|4`). Current Step 4 = "Bind + Confirm". New Step 4 = LLMs (optional), Step 5 = "Bind + Confirm".
@@ -143,7 +143,7 @@ from cryptography.fernet import Fernet
 
 def test_encrypt_decrypt_roundtrip(monkeypatch):
     key = Fernet.generate_key().decode()
-    monkeypatch.setenv("QF_LLM_ENCRYPTION_KEY", key)
+    monkeypatch.setenv("QF_ENCRYPTION_KEY", key)
 
     from app.utils import encryption
     import importlib
@@ -160,7 +160,7 @@ def test_encrypt_decrypt_roundtrip(monkeypatch):
 
 def test_encrypt_empty_returns_none(monkeypatch):
     key = Fernet.generate_key().decode()
-    monkeypatch.setenv("QF_LLM_ENCRYPTION_KEY", key)
+    monkeypatch.setenv("QF_ENCRYPTION_KEY", key)
     from app.utils import encryption
     import importlib
     importlib.reload(encryption)
@@ -221,15 +221,15 @@ def _get_fernet():
     if _fernet is not None:
         return _fernet
     from cryptography.fernet import Fernet
-    key = os.getenv("QF_LLM_ENCRYPTION_KEY", "").strip()
+    key = os.getenv("QF_ENCRYPTION_KEY", "").strip()
     if not key:
-        logger.warning("QF_LLM_ENCRYPTION_KEY is not set; API key encryption disabled")
+        logger.warning("QF_ENCRYPTION_KEY is not set; API key encryption disabled")
         return None
     try:
         _fernet = Fernet(key.encode() if isinstance(key, str) else key)
         return _fernet
     except Exception:
-        logger.exception("Invalid QF_LLM_ENCRYPTION_KEY; API key encryption disabled")
+        logger.exception("Invalid QF_ENCRYPTION_KEY; API key encryption disabled")
         return None
 
 
@@ -2591,7 +2591,7 @@ POST   /api/v1/workspaces/{workspace_id}/llms/{llm_id}/test
 
 ## Encryption Approach
 
-Fernet symmetric encryption (cryptography library). Key from `QF_LLM_ENCRYPTION_KEY` env var.
+Fernet symmetric encryption (cryptography library). Key from `QF_ENCRYPTION_KEY` env var.
 - Raw API key never persisted; always encrypted via `encrypt_api_key()` before DB write
 - Never returned in REST responses — only `has_api_key: bool` and `masked_api_key: str | null`
 - Decryption happens only in `_to_internal_dict()` for internal pipeline use

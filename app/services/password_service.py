@@ -6,7 +6,7 @@ from collections.abc import Callable
 import pyotp
 
 from app.config import MIN_PASSWORD_LENGTH
-from app.decorators.validate import validate_params
+from app.utils.param_guard import validate_params
 from app.exceptions.forge_error import ForgeError
 from app.utils.password_check import pwned_count, is_proper_length, is_strong_password
 

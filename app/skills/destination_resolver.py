@@ -25,6 +25,23 @@ from app.models.domain.destinations import WorkspaceDestination
 logger = logging.getLogger(__name__)
 
 
+def _query_destination(*, destination_id: int, workspace_id: int, active_only: bool) -> WorkspaceDestination | None:
+    query = getattr(WorkspaceDestination, "query", None)
+    if query is not None:
+        filters = {"id": destination_id, "workspace_id": workspace_id}
+        if active_only:
+            filters["is_active"] = True
+        return query.filter_by(**filters).first()
+
+    session_query = db.session.query(WorkspaceDestination).filter_by(
+        id=destination_id,
+        workspace_id=workspace_id,
+    )
+    if active_only:
+        session_query = session_query.filter_by(is_active=True)
+    return session_query.first()
+
+
 def resolve_destination(destination_id: int, workspace_id: int) -> dict[str, Any]:
     """
     Resolve a destination_id to its decrypted config dict.
@@ -32,10 +49,10 @@ def resolve_destination(destination_id: int, workspace_id: int) -> dict[str, Any
     Raises:
         ValueError — if destination not found, inactive, or belongs to different workspace
     """
-    dest = (
-        db.session.query(WorkspaceDestination)
-        .filter_by(id=destination_id, workspace_id=workspace_id, is_active=True)
-        .first()
+    dest = _query_destination(
+        destination_id=destination_id,
+        workspace_id=workspace_id,
+        active_only=True,
     )
 
     if not dest:
@@ -92,10 +109,10 @@ def validate_destination_ref(destination_id: int, workspace_id: int) -> list[str
     Validate that a destination_id is usable. Returns list of error strings.
     Called during skill config validation.
     """
-    dest = (
-        db.session.query(WorkspaceDestination)
-        .filter_by(id=destination_id, workspace_id=workspace_id)
-        .first()
+    dest = _query_destination(
+        destination_id=destination_id,
+        workspace_id=workspace_id,
+        active_only=False,
     )
 
     if not dest:

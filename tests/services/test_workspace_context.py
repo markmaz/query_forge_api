@@ -34,7 +34,7 @@ def test_build_context(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda: "user-1",
     )
     monkeypatch.setattr(
-        "app.services.workspace_inventory.workspace_context.DatabricksWorkspaceForgeTokenPort",
+        "app.services.workspace_inventory.workspace_context.DatabricksWorkspaceTokenProvider",
         _DummyForgeTokenPort,
     )
     monkeypatch.setattr(
@@ -129,6 +129,54 @@ def test_build_context_uses_workspace_datasource_databricks(monkeypatch: pytest.
     assert ctx.workspace_url == "https://adb-1.azuredatabricks.net"
     assert ctx.warehouse_id == "wh-1"
     assert isinstance(ctx.sql_exec, _DummyExecutor)
+
+
+def test_build_context_uses_workspace_datasource_databricks_oauth(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.resolve_request_username",
+        lambda: "user-1",
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.WorkspaceDatasourceResolverService.resolve_for_workspace",
+        lambda *_args, **_kwargs: ResolvedWorkspaceDatasource(
+            workspace_id="ws-1",
+            workspace_name="WS",
+            organization_id="org-1",
+            organization_is_active=True,
+            workspace_is_active=True,
+            datasource_id=10,
+            datasource_name="DBX",
+            datasource_slug="dbx",
+            datasource_type="databricks",
+            datasource_is_active=True,
+            config_json={
+                "host": "https://adb-1.azuredatabricks.net",
+                "warehouse_id": "wh-1",
+                "auth_method": "oauth_client_credentials",
+                "client_id": "client-1",
+                "client_secret": "secret-1",
+            },
+            secret_ref=None,
+            default_catalog="main",
+            default_schema="asset",
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.create_databricks_oauth_provider",
+        lambda **kwargs: captured.update(kwargs) or _DummyForgeTokenPort(),
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.DatabricksForgeQueryPort",
+        _DummyExecutor,
+    )
+
+    ctx = WorkspaceSqlContextBuilder().build("ws-1")
+    assert ctx.workspace_url == "https://adb-1.azuredatabricks.net"
+    assert ctx.warehouse_id == "wh-1"
+    assert captured["workspace_host"] == "https://adb-1.azuredatabricks.net"
+    assert captured["workspace_id"] == "ws-1"
 
 
 def test_build_context_uses_workspace_datasource_non_databricks(monkeypatch: pytest.MonkeyPatch) -> None:

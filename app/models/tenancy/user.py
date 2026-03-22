@@ -1,9 +1,8 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, computed_field
+from pydantic import BaseModel, ConfigDict, computed_field, field_serializer
 
-from app.models.tenancy.product import Product
 from app.models.tenancy.role import Role
 from app.models.tenancy.user_workspace import UserWorkspace
 
@@ -20,9 +19,9 @@ class User(BaseModel):
     eula_accepted: Optional[bool] = False
     otp_secret: Optional[str] = None
     two_factor_preference: Optional[str] = "Email"
-    products: Optional[List[Product]] = []
     workspaces: Optional[List[UserWorkspace]] = []
     rbac_roles: Optional[List[Role]] = []
+    rbac_role_names: Optional[List[str]] = []
     rbac_role_ids: Optional[List[str]] = []
     last_log_in: Optional[datetime] = None
 
@@ -30,8 +29,11 @@ class User(BaseModel):
     @property
     def display_name(self) -> str:
         return f"{self.first_name} {self.last_name}"
+
+    @field_serializer("last_log_in")
+    def serialize_last_log_in(self, value: Optional[datetime]) -> Optional[str]:
+        return value.isoformat() if value is not None else None
     
     model_config = ConfigDict(
         extra="ignore",
-        json_encoders={datetime: lambda v: v.isoformat()},
     )

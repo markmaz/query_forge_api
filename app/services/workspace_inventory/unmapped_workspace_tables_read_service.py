@@ -63,7 +63,11 @@ SELECT COUNT(*) AS total
 FROM workspace_table wt
 WHERE wt.workspace_id = :ws
   AND wt.exists_in_dbx = 1
-  AND wt.model_table_id IS NULL
+  AND NOT EXISTS (
+        SELECT 1
+        FROM domain_workspace_table dwt
+        WHERE dwt.workspace_table_id = wt.id
+  )
   AND (:schema IS NULL OR wt.schema_name = :schema)
   AND (:q IS NULL OR (
         wt.full_name  LIKE CONCAT('%', :q, '%')
@@ -87,7 +91,11 @@ SELECT
 FROM workspace_table wt
 WHERE wt.workspace_id = :ws
   AND wt.exists_in_dbx = 1
-  AND wt.model_table_id IS NULL
+  AND NOT EXISTS (
+        SELECT 1
+        FROM domain_workspace_table dwt
+        WHERE dwt.workspace_table_id = wt.id
+  )
   AND (:schema IS NULL OR wt.schema_name = :schema)
   AND (:q IS NULL OR (
         wt.full_name  LIKE CONCAT('%', :q, '%')

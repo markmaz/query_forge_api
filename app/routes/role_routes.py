@@ -13,8 +13,11 @@ role_ns = Namespace("roles", description="Role management")
 role_model = role_ns.model(
     "role",
     {
-        "role_id": fields.String(required=True, description="The unique identifier of the role"),
-        "name": fields.String(require=True, description="The name of the role"),
+        "role_name": fields.String(required=True, description="Canonical role name"),
+        "display_name": fields.String(required=False, description="Human readable role name"),
+        "description": fields.String(required=False, description="Role description"),
+        "feature_key": fields.String(required=False, description="Owning feature key"),
+        "is_system": fields.Boolean(required=False, description="True for system-managed roles"),
     },
 )
 
@@ -41,14 +44,14 @@ class RoleList(ForgeResource):
         return _service().add_role(payload["role_name"]), 201
 
 
-@role_ns.route("/<string:role_id>")
+@role_ns.route("/<string:role_name>")
 class RoleDetails(ForgeResource):
     @token_required
     @require_admin()
-    def delete(self, role_id: str):
-        return _service().delete_role(role_id)
+    def delete(self, role_name: str):
+        return _service().delete_role(role_name)
 
     @token_required
     @require_admin()
-    def get(self, role_id: str):
-        return _service().get_role(role_id)
+    def get(self, role_name: str):
+        return _service().get_role(role_name)

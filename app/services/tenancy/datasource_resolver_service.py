@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.tenancy.datasource_config_crypto import decrypt_datasource_config
 
 
 @dataclass(frozen=True)
@@ -95,7 +96,11 @@ class WorkspaceDatasourceResolverService:
         if ws_org and ds_org and str(ws_org) != str(ds_org):
             raise ForgeError("Workspace/datasource organization mismatch", status_code=500)
 
-        config_json = self._coerce_json_obj(row.get("config_json"))
+        datasource_type = str(row.get("datasource_type") or "").strip().lower()
+        config_json = decrypt_datasource_config(
+            datasource_type,
+            self._coerce_json_obj(row.get("config_json")),
+        )
 
         return ResolvedWorkspaceDatasource(
             workspace_id=str(row.get("workspace_id") or ws),
@@ -106,7 +111,7 @@ class WorkspaceDatasourceResolverService:
             datasource_id=int(datasource_id),
             datasource_name=str(row.get("datasource_name") or f"datasource-{datasource_id}"),
             datasource_slug=str(row.get("datasource_slug") or ""),
-            datasource_type=str(row.get("datasource_type") or "").strip().lower(),
+            datasource_type=datasource_type,
             datasource_is_active=datasource_active,
             config_json=config_json,
             secret_ref=(str(row.get("secret_ref")) if row.get("secret_ref") is not None else None),

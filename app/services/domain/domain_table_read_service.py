@@ -1,14 +1,20 @@
 from __future__ import annotations
 
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from flask import current_app, has_app_context
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.analytics.executor_factory import ExecutorFactory
 from app.services.analytics.metadata_provider_factory import MetadataProviderFactory
 from app.services.shared.jsonify import serialize_result_rows
+from app.services.tenancy.datasource_resolver_service import WorkspaceDatasourceResolverService
+from app.services.tenancy.secret_resolver import SecretResolver
+
+logger = logging.getLogger(__name__)
 
 
 class DomainTableReadService:
@@ -23,8 +29,7 @@ class DomainTableReadService:
             """
             SELECT
               wt.id               AS workspace_table_id,
-              NULL                AS model_table_id,
-              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
+              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS table_label,
               dwt.relation_kind   AS relation_kind,
               dwt.is_primary      AS is_primary,
               dwt.sort_order      AS sort_order,
@@ -49,7 +54,13 @@ class DomainTableReadService:
             """,
             {"ws": workspace_id, "did": int(domain_id)},
         )
-        return serialize_result_rows([dict(row) for row in rows])
+        payload = []
+        for row in rows:
+            shaped = dict(row)
+            shaped["model_table_id"] = shaped.get("workspace_table_id")
+            shaped["model_table_name"] = shaped.get("table_label")
+            payload.append(shaped)
+        return serialize_result_rows(payload)
 
     def get_domain(self, *, workspace_id: str, domain_name: str) -> Dict[str, Any]:
         ws = (workspace_id or "").strip()
@@ -100,11 +111,19 @@ class DomainTableReadService:
         catalog = (catalog_name or "").strip() or None
 
         if ensure_snapshot and schema:
-            self._sync_workspace_inventory_from_registry(
-                workspace_id=workspace_id,
-                schema_name=schema,
-                catalog_name=catalog,
-            )
+            try:
+                self._sync_workspace_inventory_from_registry(
+                    workspace_id=workspace_id,
+                    schema_name=schema,
+                    catalog_name=catalog,
+                )
+            except Exception:
+                logger.exception(
+                    "Workspace inventory sync skipped ws=%s schema=%s catalog=%s",
+                    workspace_id,
+                    schema,
+                    catalog,
+                )
 
         params: Dict[str, Any] = {
             "ws": workspace_id,
@@ -121,8 +140,7 @@ class DomainTableReadService:
             """
             SELECT
               wt.id               AS workspace_table_id,
-              NULL                AS model_table_id,
-              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS model_table_name,
+              COALESCE(NULLIF(wt.source_table_name, ''), wt.table_name) AS table_label,
               wt.catalog_name,
               wt.schema_name,
               wt.table_name,
@@ -166,7 +184,13 @@ class DomainTableReadService:
             """,
             params,
         )
-        return serialize_result_rows([dict(row) for row in rows])
+        payload = []
+        for row in rows:
+            shaped = dict(row)
+            shaped["model_table_id"] = shaped.get("workspace_table_id")
+            shaped["model_table_name"] = shaped.get("table_label")
+            payload.append(shaped)
+        return serialize_result_rows(payload)
 
     def _sync_workspace_inventory_from_registry(
         self,
@@ -178,12 +202,11 @@ class DomainTableReadService:
         if not has_app_context():
             return
 
-        registry = current_app.extensions.get("analytics_registry")
-        if registry is None:
-            raise RuntimeError("Analytics datasource registry is not available")
-
-        executor = registry.get("primary")
-        provider = MetadataProviderFactory.create(executor.get_dialect(), executor)
+        provider = self._resolve_metadata_provider(
+            workspace_id=workspace_id,
+            schema_name=schema_name,
+            catalog_name=catalog_name,
+        )
 
         tables = provider.list_tables(catalog_name, schema_name)
         table_names = sorted(
@@ -195,7 +218,7 @@ class DomainTableReadService:
         )
         columns = provider.list_columns(catalog_name, schema_name, table_names or None)
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         catalog_value = (catalog_name or "").strip()
 
         with self._sql.transaction() as tx:
@@ -321,3 +344,51 @@ class DomainTableReadService:
                     """,
                     column_payload,
                 )
+
+    def _resolve_metadata_provider(
+        self,
+        *,
+        workspace_id: str,
+        schema_name: str,
+        catalog_name: Optional[str],
+    ):
+        resolved = WorkspaceDatasourceResolverService(sql=self._sql).resolve_for_workspace(
+            workspace_id=workspace_id,
+            require_active=True,
+        )
+        if resolved is not None:
+            ds_type = str(resolved.datasource_type or "").strip().lower()
+            if ds_type not in {"databricks", "snowflake", "mysql"}:
+                raise ForgeError(
+                    f"Workspace '{workspace_id}' datasource type '{ds_type}' does not support metadata sync",
+                    status_code=400,
+                )
+
+            config = dict(resolved.config_json or {})
+            secrets = SecretResolver()
+            if ds_type == "databricks":
+                auth_method = str(config.get("auth_method") or "").strip().lower()
+                if auth_method != "oauth_client_credentials":
+                    config = secrets.inject_if_missing(config, secret_ref=resolved.secret_ref, key="token")
+                config.setdefault("host", config.get("workspace_url") or config.get("server"))
+                config.setdefault("http_path", config.get("http_path"))
+                config.setdefault("workspace_id", workspace_id)
+                config.setdefault("_workspace_id", workspace_id)
+            elif ds_type in {"snowflake", "mysql"}:
+                config = secrets.inject_if_missing(config, secret_ref=resolved.secret_ref, key="password")
+
+            if catalog_name and not config.get("catalog"):
+                config["catalog"] = catalog_name
+            if schema_name and not config.get("schema"):
+                config["schema"] = schema_name
+            config.setdefault("type", ds_type)
+
+            executor = ExecutorFactory.create(ds_type, config)
+            return MetadataProviderFactory.create(ds_type, executor)
+
+        registry = current_app.extensions.get("analytics_registry")
+        if registry is None:
+            raise RuntimeError("Analytics datasource registry is not available")
+
+        executor = registry.get("primary")
+        return MetadataProviderFactory.create(executor.get_dialect(), executor)

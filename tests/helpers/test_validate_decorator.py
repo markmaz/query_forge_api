@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.decorators.validate import validate_params
+from app.utils.param_guard import validate_params
 from app.exceptions.forge_error import ForgeError
 
 

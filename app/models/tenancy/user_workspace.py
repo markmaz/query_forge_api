@@ -2,8 +2,6 @@ from typing import List, Optional
 
 from pydantic import BaseModel, EmailStr
 
-from app.models.tenancy.product import Product
-
 
 class UserWorkspace(BaseModel):
     workspace_id: Optional[str]
@@ -13,5 +11,4 @@ class UserWorkspace(BaseModel):
 class UserInvitation(BaseModel):
     email: EmailStr
     user_id: Optional[str] = None
-    products: Optional[List[Product]] = []
     workspaces: Optional[List[UserWorkspace]] = []

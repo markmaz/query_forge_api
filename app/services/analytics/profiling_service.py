@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
@@ -137,7 +137,7 @@ class ProfilingService:
         col_stats: dict[str, dict],
         table_cols: list[dict],
     ) -> int:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         persisted = 0
         with self._mysql.transaction() as tx:
             for col in table_cols:

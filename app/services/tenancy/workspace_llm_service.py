@@ -253,14 +253,16 @@ class WorkspaceLLMService:
         api_key = config.get("api_key") or ""
         model = config.get("model_name") or ""
         try:
-            if provider in (LLMProvider.OLLAMA, LLMProvider.GENERIC):
-                return self._test_openai_compatible(endpoint, api_key, model)
+            if provider == LLMProvider.OLLAMA:
+                return self._test_ollama(endpoint)
+            elif provider == LLMProvider.GENERIC:
+                return self._test_openai_compatible(endpoint, api_key)
             elif provider == LLMProvider.OPENAI:
-                return self._test_openai_compatible("https://api.openai.com/v1", api_key, model)
+                return self._test_openai_compatible("https://api.openai.com/v1", api_key)
             elif provider == LLMProvider.ANTHROPIC:
                 return self._test_anthropic(api_key, model)
             elif provider == LLMProvider.AZURE_OPENAI:
-                return self._test_openai_compatible(endpoint, api_key, model)
+                return self._test_openai_compatible(endpoint, api_key)
             else:
                 return {"success": False, "message": f"Unknown provider: {provider}"}
         except Exception as exc:
@@ -360,9 +362,9 @@ class WorkspaceLLMService:
         except Exception:
             return None
 
-    def _test_openai_compatible(self, endpoint: str, api_key: str, model: str) -> Dict[str, Any]:
+    def _test_openai_compatible(self, endpoint: str, api_key: str) -> Dict[str, Any]:
         import httpx
-        url = endpoint.rstrip("/") + "/api/tags"
+        url = self._join_url(endpoint, "models")
         headers = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
@@ -373,6 +375,25 @@ class WorkspaceLLMService:
             return {"success": False, "message": f"HTTP {r.status_code}: {r.text[:200]}"}
         except Exception as exc:
             return {"success": False, "message": str(exc)}
+
+    def _test_ollama(self, endpoint: str) -> Dict[str, Any]:
+        import httpx
+        url = self._join_url(endpoint, "api/tags")
+        try:
+            r = httpx.get(url, timeout=10)
+            if r.status_code < 400:
+                return {"success": True, "message": f"Connected to {endpoint} (HTTP {r.status_code})"}
+            return {"success": False, "message": f"HTTP {r.status_code}: {r.text[:200]}"}
+        except Exception as exc:
+            return {"success": False, "message": str(exc)}
+
+    @staticmethod
+    def _join_url(base: str, suffix: str) -> str:
+        normalized_base = str(base or "").rstrip("/")
+        normalized_suffix = str(suffix or "").lstrip("/")
+        if normalized_base.endswith(f"/{normalized_suffix}"):
+            return normalized_base
+        return f"{normalized_base}/{normalized_suffix}"
 
     def _test_anthropic(self, api_key: str, model: str) -> Dict[str, Any]:
         import httpx

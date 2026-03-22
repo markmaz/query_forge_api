@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
@@ -392,7 +392,7 @@ class ForgeMatchMappingService:
             current_source_row_id=None,
             analysis_error=None,
             cancel_requested=False,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
             completed_at=None,
         )
 
@@ -415,7 +415,7 @@ class ForgeMatchMappingService:
                         analysis_error="Canceled by operator",
                         cancel_requested=True,
                         started_at=None,
-                        completed_at=datetime.utcnow(),
+                        completed_at=datetime.now(timezone.utc),
                     )
                     return {
                         "job_id": job_id,
@@ -545,7 +545,7 @@ class ForgeMatchMappingService:
                 current_phase="analyzed",
                 current_source_row_id=None,
                 analysis_error=warning_error,
-                completed_at=datetime.utcnow(),
+                completed_at=datetime.now(timezone.utc),
             )
 
             return {
@@ -574,7 +574,7 @@ class ForgeMatchMappingService:
                 current_phase="failed",
                 current_source_row_id=None,
                 analysis_error=str(exc)[:2000],
-                completed_at=datetime.utcnow(),
+                completed_at=datetime.now(timezone.utc),
             )
             raise
 
@@ -623,7 +623,7 @@ class ForgeMatchMappingService:
             current_source_row_id=status.get("current_source_row_id"),
             analysis_error="Canceled by operator",
             cancel_requested=True,
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(timezone.utc),
         )
         refreshed = self.get_analysis_status(workspace_id=ws, job_id=jid)
         return {
@@ -977,7 +977,7 @@ class ForgeMatchMappingService:
             "cancel_requested": None if cancel_requested is None else (1 if cancel_requested else 0),
             "started_at": started_at,
             "completed_at": completed_at,
-            "last_heartbeat_at": datetime.utcnow(),
+            "last_heartbeat_at": datetime.now(timezone.utc),
         }
 
         advanced_sql = """

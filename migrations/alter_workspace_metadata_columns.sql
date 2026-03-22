@@ -24,6 +24,7 @@ ALTER TABLE workspace_column
   ADD COLUMN semantic_concept_key VARCHAR(128) NULL,
   ADD COLUMN semantic_concept_id BIGINT UNSIGNED NULL,
   ADD COLUMN semantic_assigned_at DATETIME NULL,
+  ADD COLUMN semantic_updated_at DATETIME NULL,
   ADD COLUMN semantic_reasons_json JSON NULL,
   ADD COLUMN sample_values_json JSON NULL,
   ADD COLUMN sample_stats_json JSON NULL,

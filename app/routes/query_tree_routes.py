@@ -12,6 +12,7 @@ from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import require_user_id, extract_workspace_id
 from app.services.query_tree.saved_query_folder_write_service import SavedQueryFolderWriteService
+from app.services.query_tree.saved_query_library_service import SavedQueryLibraryService
 from app.services.query_tree.saved_query_read_service import SavedQueryReadService
 from app.services.query_tree.saved_query_share_service import SavedQueryShareService
 from app.services.query_tree.saved_query_tree_service import SavedQueryTreeService
@@ -99,6 +100,41 @@ def _json_body() -> Dict[str, Any]:
     return payload
 
 
+def _effective_roles() -> set[str]:
+    roles = getattr(g, "effective_roles", None)
+    if roles is None:
+        from app.services.rbac_service import get_effective_roles
+
+        roles = get_effective_roles(_current_user_id(), workspace_id=getattr(g, "workspace_id", None))
+        g.effective_roles = roles
+    return set(roles)
+
+
+def _can_publish_to_library() -> bool:
+    roles = _effective_roles()
+    return bool({"workspace_admin", "library_admin", "super_admin"} & roles)
+
+
+def _can_delete_library_queries() -> bool:
+    roles = _effective_roles()
+    return bool({"workspace_admin", "library_admin", "super_admin"} & roles)
+
+
+def _can_manage_library_items() -> bool:
+    roles = _effective_roles()
+    return bool({"workspace_admin", "library_admin", "super_admin"} & roles)
+
+
+def _library_service() -> SavedQueryLibraryService:
+    return SavedQueryLibraryService(
+        workspace_id=_workspace_id(),
+        user_id=_current_user_id(),
+        allow_publish=_can_publish_to_library(),
+        allow_delete_query=_can_delete_library_queries(),
+        allow_manage=_can_manage_library_items(),
+    )
+
+
 def _run_route(error_message: str, fn: Callable[[], Tuple[Dict[str, Any], int]]) -> Tuple[Dict[str, Any], int]:
     try:
         return fn()
@@ -133,6 +169,21 @@ class Folders(ForgeResource):
     def post(self):
         def _execute():
             payload = _json_body()
+            if str(payload.get("scope") or "").strip().lower() == "library":
+                svc = SavedQueryLibraryService(
+                    workspace_id=_workspace_id(),
+                    user_id=_current_user_id(),
+                    allow_manage=_can_manage_library_items(),
+                )
+                return (
+                    svc.create_folder(
+                        name=payload.get("name"),
+                        parent_folder_id=payload.get("parentId"),
+                        sort_index=payload.get("sortIndex", 0),
+                    ),
+                    200,
+                )
+
             svc = SavedQueryFolderWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return (
                 svc.create_folder(
@@ -153,6 +204,9 @@ class FolderRename(ForgeResource):
     def patch(self, folder_id: str):
         def _execute():
             payload = _json_body()
+            library_svc = _library_service()
+            if library_svc.folder_exists(folder_id):
+                return library_svc.rename_folder(folder_id=folder_id, name=payload.get("name")), 200
             svc = SavedQueryFolderWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return svc.rename_folder(folder_id=folder_id, name=payload.get("name")), 200
 
@@ -166,6 +220,16 @@ class FolderMove(ForgeResource):
     def patch(self, folder_id: str):
         def _execute():
             payload = _json_body()
+            library_svc = _library_service()
+            if library_svc.folder_exists(folder_id):
+                return (
+                    library_svc.move_folder(
+                        folder_id=folder_id,
+                        parent_id=payload.get("parentId"),
+                        sort_index=payload.get("sortIndex"),
+                    ),
+                    200,
+                )
             svc = SavedQueryFolderWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return (
                 svc.move_folder(
@@ -185,6 +249,9 @@ class FolderDelete(ForgeResource):
     @require_access("query_studio")
     def delete(self, folder_id: str):
         def _execute():
+            library_svc = _library_service()
+            if library_svc.folder_exists(folder_id):
+                return library_svc.delete_folder(folder_id=folder_id), 200
             svc = SavedQueryFolderWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return svc.delete_folder(folder_id=folder_id), 200
 
@@ -285,6 +352,18 @@ class SavedQuery(ForgeResource):
     def patch(self, query_id: str):
         def _execute():
             payload = _json_body()
+            library_svc = _library_service()
+            if library_svc.query_exists(query_id):
+                return (
+                    library_svc.update_query(
+                        query_id=query_id,
+                        title=payload.get("name") or payload.get("title"),
+                        sql_json=payload.get("sqlJson") or payload.get("sql_json"),
+                        description=payload.get("description"),
+                        folder_id=payload.get("folderId"),
+                    ),
+                    200,
+                )
             svc = SavedQueryWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return (
                 svc.save_query(
@@ -307,6 +386,9 @@ class SavedQueryMove(ForgeResource):
     def patch(self, query_id: str):
         def _execute():
             payload = _json_body()
+            library_svc = _library_service()
+            if library_svc.query_exists(query_id):
+                return library_svc.move_query(query_id=query_id, folder_id=payload.get("folderId")), 200
             svc = SavedQueryWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return svc.move_query(query_id=query_id, folder_id=payload.get("folderId")), 200
 
@@ -319,10 +401,25 @@ class SavedQueryDelete(ForgeResource):
     @require_access("query_studio")
     def post(self, query_id: str):
         def _execute():
+            library_svc = _library_service()
+            if library_svc.query_exists(query_id):
+                return library_svc.delete_query(query_id=query_id), 200
             svc = SavedQueryWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return svc.delete_query(query_id=query_id), 200
 
         return _run_route("Saved query delete failed", _execute)
+
+
+@qf_saved_query_ns.route("/<string:query_id>/save-to-library")
+class SavedQuerySaveToLibrary(ForgeResource):
+    @token_required
+    @require_access("query_studio")
+    def post(self, query_id: str):
+        def _execute():
+            svc = _library_service()
+            return svc.save_query_to_library(source_query_id=query_id), 200
+
+        return _run_route("Saved query save to library failed", _execute)
 
 
 @qf_saved_query_ns.route("/<string:query_id>/restore")
@@ -409,4 +506,3 @@ class SavedQueryShares(ForgeResource):
             )
 
         return _run_route("Saved query unshare failed", _execute)
-

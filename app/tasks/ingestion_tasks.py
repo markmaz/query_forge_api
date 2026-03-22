@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from celery import shared_task
@@ -23,8 +23,11 @@ def _get_sync_service():
     from app.services.analytics.metadata_sync_service import MetadataSyncService
     from app.services.analytics.model_catalog_writer import ModelCatalogWriter
     from app.services.analytics.profiling_service import ProfilingService
+    from app.services.analytics.runtime_registry import build_runtime_registry
 
-    registry = current_app.extensions.get("analytics_registry")
+    registry = build_runtime_registry(
+        fallback_registry=current_app.extensions.get("analytics_registry"),
+    )
     return MetadataSyncService(
         registry=registry,
         writer=ModelCatalogWriter(),
@@ -39,11 +42,13 @@ def _run_sync_and_update_record(
     datasource: str,
     catalog: str | None,
     schema: str,
+    workspace_id: str | None,
     table_names: list[str] | None,
     run_profiling: bool,
     run_enrichment: bool,
     overwrite_descriptions: bool,
     profiling_options: dict | None,
+    llm_id: int | None = None,
     sync_service,
     mysql: ForgeMetaSQL,
 ) -> None:
@@ -124,11 +129,13 @@ WHERE id = :run_id
             datasource_name=datasource,
             catalog=catalog,
             schema=schema,
+            workspace_id=workspace_id,
             table_names=table_names,
             run_profiling=run_profiling,
             run_enrichment=run_enrichment,
             overwrite_descriptions=overwrite_descriptions,
             profiling_options=profiling_options,
+            llm_id=llm_id,
             progress_callback=_persist_progress,
         )
         status = "completed"
@@ -205,7 +212,7 @@ WHERE id = :run_id
         "current_table": None,
         "current_column": None,
         "error": error_text,
-        "completed_at": datetime.utcnow(),
+        "completed_at": datetime.now(timezone.utc),
     }
     with mysql.transaction() as tx:
         if advanced_progress_supported:
@@ -227,11 +234,13 @@ def sync_metadata_task(
     datasource: str,
     catalog: str | None,
     schema: str,
+    workspace_id: str | None = None,
     table_names: list[str] | None = None,
     run_profiling: bool = False,
     run_enrichment: bool = False,
     overwrite_descriptions: bool = False,
     profiling_options: dict | None = None,
+    llm_id: int | None = None,
 ) -> dict:
     mysql = ForgeMetaSQL()
     sync_service = _get_sync_service()
@@ -241,11 +250,13 @@ def sync_metadata_task(
         datasource=datasource,
         catalog=catalog,
         schema=schema,
+        workspace_id=workspace_id,
         table_names=table_names,
         run_profiling=run_profiling,
         run_enrichment=run_enrichment,
         overwrite_descriptions=overwrite_descriptions,
         profiling_options=profiling_options,
+        llm_id=llm_id,
         sync_service=sync_service,
         mysql=mysql,
     )
