@@ -135,10 +135,10 @@ class CheckResult:
 # HTTP helpers
 # ---------------------------------------------------------------------------
 
-def _get(session: requests.Session, url: str, *, timeout: int = 10) -> tuple[int, dict, int]:
+def _get(session: requests.Session, url: str, *, timeout: int = 10) -> tuple[int, dict[str, Any], int]:
     start = time.perf_counter()
     resp = session.get(url, timeout=timeout)
-    latency = int((time.perf_counter() - start) * 1000)
+    latency = round((time.perf_counter() - start) * 1000)
     try:
         body = resp.json()
     except Exception:
@@ -146,10 +146,10 @@ def _get(session: requests.Session, url: str, *, timeout: int = 10) -> tuple[int
     return resp.status_code, body, latency
 
 
-def _post(session: requests.Session, url: str, *, json: dict, timeout: int = 30) -> tuple[int, dict, int]:
+def _post(session: requests.Session, url: str, *, json: dict[str, Any], timeout: int = 30) -> tuple[int, dict[str, Any], int]:
     start = time.perf_counter()
     resp = session.post(url, json=json, timeout=timeout)
-    latency = int((time.perf_counter() - start) * 1000)
+    latency = round((time.perf_counter() - start) * 1000)
     try:
         body = resp.json()
     except Exception:
