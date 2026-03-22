@@ -17,6 +17,7 @@ from cryptography.fernet import Fernet
 
 from app.models.domain.destinations import (
     DESTINATION_CONFIG_SCHEMAS,
+    _count_skills_using_destination,
     decrypt_config,
     encrypt_config,
     mask_config,
@@ -260,3 +261,25 @@ def test_webhook_marks_url_and_token_sensitive():
     sensitive = DESTINATION_CONFIG_SCHEMAS["webhook"]["sensitive"]
     assert "url" in sensitive
     assert "auth_token" in sensitive
+
+
+def test_count_skills_using_destination_queries_config_json():
+    executed = {}
+
+    class _ScalarResult:
+        def scalar(self):
+            return 3
+
+    def _fake_execute(query, params):
+        executed["query"] = str(query)
+        executed["params"] = params
+        return _ScalarResult()
+
+    with patch("app.models.domain.destinations.db") as mock_db:
+        mock_db.text.side_effect = lambda sql: sql
+        mock_db.session.execute.side_effect = _fake_execute
+        count = _count_skills_using_destination(17, 9)
+
+    assert count == 3
+    assert "JSON_SEARCH(config_json, 'one', :dest_id)" in executed["query"]
+    assert executed["params"] == {"ws": 9, "dest_id": "17"}

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 import re
-from urllib.parse import urlparse
 from typing import Optional
+from urllib.parse import urlparse
 
 from app.ports.sql_executor_abc import SQLExecutor
 
@@ -34,11 +34,11 @@ def _normalize_account_identifier(account: str) -> str:
     return host_or_account.strip().lower()
 
 
-def _load_private_key(private_key_path: str, private_key_passphrase: Optional[str]):
-    """Load a PEM private key for Snowflake keypair authentication.
+def _load_private_key_pem(private_key_pem: str, private_key_passphrase: Optional[str]):
+    """Load PEM private key text for Snowflake keypair authentication.
 
-    :param private_key_path: Filesystem path to the PEM private key file.
-    :param private_key_passphrase: Optional passphrase for the key file.
+    :param private_key_pem: PEM private key contents.
+    :param private_key_passphrase: Optional passphrase for the key.
     :returns: DER-encoded private key bytes suitable for ``snowflake.connector``.
     """
     from cryptography.hazmat.backends import default_backend
@@ -48,18 +48,23 @@ def _load_private_key(private_key_path: str, private_key_passphrase: Optional[st
     if private_key_passphrase:
         passphrase_bytes = private_key_passphrase.encode("utf-8")
 
-    with open(private_key_path, "rb") as key_file:
-        private_key = serialization.load_pem_private_key(
-            key_file.read(),
-            password=passphrase_bytes,
-            backend=default_backend(),
-        )
+    private_key = serialization.load_pem_private_key(
+        private_key_pem.encode("utf-8"),
+        password=passphrase_bytes,
+        backend=default_backend(),
+    )
 
     return private_key.private_bytes(
         encoding=serialization.Encoding.DER,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
+
+
+def _load_private_key(private_key_path: str, private_key_passphrase: Optional[str]):
+    """Load a PEM private key file for Snowflake keypair authentication."""
+    with open(private_key_path, "r", encoding="utf-8") as key_file:
+        return _load_private_key_pem(key_file.read(), private_key_passphrase)
 
 
 def _rewrite_named_params_for_snowflake(sql: str, params: Optional[dict]) -> str:
@@ -165,7 +170,8 @@ class SnowflakeSQLExecutor(SQLExecutor):
 
     Opens and closes a Snowflake connection on every ``execute()`` call — no
     persistent global connection is maintained.  Supports both username/password
-    authentication and keypair authentication (when ``private_key_path`` is provided).
+    authentication and keypair authentication (when ``private_key_pem`` or
+    ``private_key_path`` is provided).
 
     :param account: Snowflake account identifier, e.g. ``xy12345.us-east-1``.
     :param user: Snowflake username.
@@ -176,6 +182,7 @@ class SnowflakeSQLExecutor(SQLExecutor):
         ``externalbrowser`` for SSO/browser login).
     :param role: Optional Snowflake role to adopt.
     :param password: Password for username/password auth.
+    :param private_key_pem: PEM private key contents for keypair auth.
     :param private_key_path: Path to PEM private key file for keypair auth.
     :param private_key_passphrase: Optional passphrase for the private key.
     """
@@ -190,6 +197,7 @@ class SnowflakeSQLExecutor(SQLExecutor):
         authenticator: Optional[str] = None,
         role: Optional[str] = None,
         password: Optional[str] = None,
+        private_key_pem: Optional[str] = None,
         private_key_path: Optional[str] = None,
         private_key_passphrase: Optional[str] = None,
     ) -> None:
@@ -199,10 +207,10 @@ class SnowflakeSQLExecutor(SQLExecutor):
             raise ValueError("SnowflakeSQLExecutor: 'user' is required")
         if not database:
             raise ValueError("SnowflakeSQLExecutor: 'database' is required")
-        if not password and not private_key_path and not authenticator:
+        if not password and not private_key_pem and not private_key_path and not authenticator:
             raise ValueError(
                 "SnowflakeSQLExecutor: one auth method is required "
-                "('password', 'private_key_path', or 'authenticator')"
+                "('password', 'private_key_pem', 'private_key_path', or 'authenticator')"
             )
 
         self._account = _normalize_account_identifier(account)
@@ -214,6 +222,7 @@ class SnowflakeSQLExecutor(SQLExecutor):
         self._authenticator = ("externalbrowser" if auth.lower() == "externalbrowser" else auth) or None
         self._role = role
         self._password = password
+        self._private_key_pem = private_key_pem
         self._private_key_path = private_key_path
         self._private_key_passphrase = private_key_passphrase
 
@@ -251,7 +260,12 @@ class SnowflakeSQLExecutor(SQLExecutor):
         if self._authenticator:
             connect_kwargs["authenticator"] = self._authenticator
 
-        if self._private_key_path:
+        if self._private_key_pem:
+            connect_kwargs["private_key"] = _load_private_key_pem(
+                self._private_key_pem,
+                self._private_key_passphrase,
+            )
+        elif self._private_key_path:
             connect_kwargs["private_key"] = _load_private_key(
                 self._private_key_path, self._private_key_passphrase
             )
@@ -307,7 +321,7 @@ class SnowflakeSQLExecutor(SQLExecutor):
             if err_no == 250001:
                 raise RuntimeError(
                     "Analytics authentication failed: Snowflake JWT token is invalid. "
-                    "Verify SNOWFLAKE_PRIVATE_KEY_PATH/SNOWFLAKE_PRIVATE_KEY_PASSPHRASE and "
+                    "Verify the Snowflake private key configuration and "
                     "that the matching RSA public key is configured for the Snowflake user."
                 ) from exc
             if _is_missing_warehouse_error(exc):
@@ -332,9 +346,10 @@ class SnowflakeSQLExecutor(SQLExecutor):
         """Verify connectivity by running ``SELECT CURRENT_VERSION()``."""
         try:
             self.execute("SELECT CURRENT_VERSION() AS _ping")
-        except RuntimeError:
-            # Preserve specific connection/warehouse/auth diagnostics from execute().
-            raise
+        except RuntimeError as exc:
+            # Keep the execute() diagnostic, but make it explicit this happened
+            # during a datasource connectivity check.
+            raise RuntimeError(f"Analytics datasource connection test failed: {exc}") from exc
         except Exception as exc:
             # FIND-021: sanitized message — no account identifier or hostname.
             logger.exception("SnowflakeSQLExecutor.test_connection failed")

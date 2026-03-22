@@ -43,9 +43,11 @@ class _QueryProperty:
 # Constants
 # ---------------------------------------------------------------------------
 
-GLOBAL_ROLES = ("super_admin", "workspace_admin")
+GLOBAL_ROLES = ("super_admin", "library_admin")
 
 FEATURE_KEYS = (
+    "catalog",
+    "workspaces",
     "forge_match",
     "forge_insights",
     "query_studio",
@@ -53,6 +55,7 @@ FEATURE_KEYS = (
     "planner",
     "semantic",
     "ingestion",
+    "exports",
     "vector",
     "ai",
     "system",
@@ -60,15 +63,74 @@ FEATURE_KEYS = (
 
 ALL_ROLE_NAMES = (
     "super_admin",
+    "library_admin",
     "workspace_admin",
     *[f"{f}:admin" for f in FEATURE_KEYS],
     *[f"{f}:user" for f in FEATURE_KEYS],
+)
+
+ROLE_DEFINITIONS = (
+    {
+        "name": "super_admin",
+        "display_name": "Super Admin",
+        "description": "Global administrator with full platform access.",
+        "feature_key": None,
+        "is_system": True,
+    },
+    {
+        "name": "library_admin",
+        "display_name": "Library Admin",
+        "description": "Can publish, create, move, rename, and delete shared library queries and folders.",
+        "feature_key": None,
+        "is_system": True,
+    },
+    {
+        "name": "workspace_admin",
+        "display_name": "Workspace Admin",
+        "description": "Administrator for workspace-scoped management operations.",
+        "feature_key": None,
+        "is_system": True,
+    },
+    *[
+        {
+            "name": f"{feature_key}:{role_suffix}",
+            "display_name": f"{feature_key.replace('_', ' ').title()} {role_suffix.title()}",
+            "description": (
+                f"System role granting {role_suffix} access to the {feature_key} feature."
+            ),
+            "feature_key": feature_key,
+            "is_system": True,
+        }
+        for feature_key in FEATURE_KEYS
+        for role_suffix in ("admin", "user")
+    ],
 )
 
 
 # ---------------------------------------------------------------------------
 # Role
 # ---------------------------------------------------------------------------
+
+
+class UserRecord(db.Model):
+    """Minimal ORM anchor for the existing users table.
+
+    RBAC writes reference users.user_id via foreign keys, so the table needs to
+    exist in SQLAlchemy metadata even though the rest of the app uses raw SQL or
+    Pydantic models for user reads.
+    """
+
+    __tablename__ = "users"
+
+    user_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+
+
+class WorkspaceRecord(db.Model):
+    """Minimal ORM anchor for the existing workspace table."""
+
+    __tablename__ = "workspace"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
 
 
 class Role(db.Model):
@@ -120,6 +182,9 @@ class UserRole(db.Model):
     user_id: Mapped[str] = mapped_column(
         String(255), db.ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False
     )
+    workspace_id: Mapped[str | None] = mapped_column(
+        String(128), db.ForeignKey("workspace.id", ondelete="CASCADE"), nullable=True
+    )
     role_id: Mapped[int] = mapped_column(
         Integer, db.ForeignKey("roles.id", ondelete="CASCADE"), nullable=False
     )
@@ -131,13 +196,14 @@ class UserRole(db.Model):
     role: Mapped[Role] = relationship("Role", back_populates="user_roles")
 
     __table_args__ = (
-        UniqueConstraint("user_id", "role_id", name="uq_user_role"),
+        UniqueConstraint("user_id", "workspace_id", "role_id", name="uq_user_role_workspace"),
     )
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "user_id": self.user_id,
+            "workspace_id": self.workspace_id,
             "role_id": self.role_id,
             "role_name": self.role.name if self.role else None,
             "granted_by": self.granted_by,

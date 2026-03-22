@@ -174,3 +174,40 @@ def test_update_llm_preserves_existing_api_key_when_not_provided(service, mock_s
     write_call = mock_sql.execute_write.call_args
     # The encrypted value must be preserved in the UPDATE
     assert "existing_encrypted_value" in str(write_call)
+
+
+def test_test_connection_uses_openai_models_endpoint(service, mock_sql):
+    row = _make_row(encrypted_key="enc_key")
+    row["provider"] = "openai"
+    mock_sql.execute_query_mappings.return_value = [row]
+
+    http_response = MagicMock(status_code=200)
+    with (
+        patch("app.services.tenancy.workspace_llm_service.decrypt_api_key", return_value="sk-real"),
+        patch("httpx.get", return_value=http_response) as mock_get,
+    ):
+        result = service.test_connection(1)
+
+    assert result["success"] is True
+    mock_get.assert_called_once_with(
+        "https://api.openai.com/v1/models",
+        headers={"Authorization": "Bearer sk-real"},
+        timeout=10,
+    )
+
+
+def test_test_connection_uses_ollama_tags_endpoint(service, mock_sql):
+    row = _make_row(encrypted_key=None)
+    row["provider"] = "ollama"
+    row["endpoint_url"] = "http://localhost:11434"
+    mock_sql.execute_query_mappings.return_value = [row]
+
+    http_response = MagicMock(status_code=200)
+    with patch("httpx.get", return_value=http_response) as mock_get:
+        result = service.test_connection(1)
+
+    assert result["success"] is True
+    mock_get.assert_called_once_with(
+        "http://localhost:11434/api/tags",
+        timeout=10,
+    )

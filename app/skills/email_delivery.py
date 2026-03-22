@@ -25,9 +25,10 @@ class EmailDeliverySkill(BaseSkill):
         from app.email.mailer import get_logo, send_email
 
         cfg = context.config or {}
-        recipients: List[str] = list(cfg.get("recipients") or [])
+        resolved_cfg = self._resolve_destination_config(cfg, context.workspace_id)
+        recipients: List[str] = list(resolved_cfg.get("recipients") or cfg.get("recipients") or [])
         subject: str = str(cfg.get("subject") or "QueryForge Report")
-        reply_to: Optional[str] = cfg.get("reply_to") or None
+        reply_to: Optional[str] = resolved_cfg.get("reply_to") or cfg.get("reply_to") or None
         include_summary: bool = bool(cfg.get("include_summary", True))
 
         summary_text = ""
@@ -59,6 +60,21 @@ class EmailDeliverySkill(BaseSkill):
             "sent": sent_count,
             "failed": failed,
         }
+
+    def _resolve_destination_config(self, config: Dict[str, Any], workspace_id: str) -> Dict[str, Any]:
+        destination_id = config.get("destination_id")
+        if not destination_id:
+            return {}
+        from app.skills.destination_resolver import resolve_channel_config
+
+        try:
+            return resolve_channel_config(
+                {"type": "email", "destination_id": destination_id},
+                workspace_id,
+            )
+        except Exception:
+            logger.exception("EmailDeliverySkill: failed to resolve destination_id=%s", destination_id)
+            return {}
 
     def _generate_summary(self, context: SkillContext) -> str:
         try:

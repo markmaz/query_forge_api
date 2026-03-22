@@ -294,8 +294,10 @@ class DomainTableWriteService:
         cardinality: Optional[str] = None,
         cardinality_set: bool = False,
         set_primary_if_empty: bool = True,
+        bypass_permissions: bool = False,
     ) -> Dict[str, Any]:
-        self._assert_can_edit_domain(workspace_id=workspace_id, user_id=user_id, domain_id=domain_id)
+        if not bypass_permissions:
+            self._assert_can_edit_domain(workspace_id=workspace_id, user_id=user_id, domain_id=domain_id)
 
         relation_kind_val = self._normalize_relation_kind(relation_kind)
         filter_mode_val = self._normalize_filter_mode(filter_mode)
@@ -375,8 +377,10 @@ class DomainTableWriteService:
         domain_id: int,
         add: Optional[Iterable[Any]] = None,
         remove: Optional[Iterable[Any]] = None,
+        bypass_permissions: bool = False,
     ) -> Dict[str, Any]:
-        self._assert_can_edit_domain(workspace_id=workspace_id, user_id=user_id, domain_id=domain_id)
+        if not bypass_permissions:
+            self._assert_can_edit_domain(workspace_id=workspace_id, user_id=user_id, domain_id=domain_id)
 
         add_ids = self._normalize_ids(add, "add")
         remove_ids = self._normalize_ids(remove, "remove")

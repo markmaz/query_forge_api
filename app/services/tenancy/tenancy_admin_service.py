@@ -23,6 +23,11 @@ from app.models.tenancy.tenancy_admin import (
 )
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.analytics.executor_factory import ExecutorFactory
+from app.services.tenancy.datasource_config_crypto import (
+    decrypt_datasource_config,
+    encrypt_datasource_config,
+    mask_datasource_config,
+)
 from app.services.tenancy.secret_resolver import SecretResolver
 
 _SUPPORTED_DATASOURCE_TYPES = {"databricks", "snowflake", "mysql", "postgres", "bigquery"}
@@ -327,21 +332,8 @@ class TenancyAdminService:
         }
 
     def get_datasource(self, datasource_id: int) -> Dict[str, Any]:
-        did = int(datasource_id)
-        rows = self._sql.execute_query_mappings(
-            """
-            SELECT
-              id, organization_id, name, slug, type, description, COALESCE(is_active, 1) AS is_active,
-              secret_ref, config_json, last_tested_at, last_test_status, last_test_message, created_at, updated_at
-            FROM datasource
-            WHERE id = :id
-            LIMIT 1
-            """,
-            {"id": did},
-        )
-        if not rows:
-            raise ForgeError("Datasource not found", status_code=404, details={"datasource_id": did})
-        return _coerce_datasource_row(dict(rows[0]))
+        row = self._get_datasource_row(int(datasource_id))
+        return _coerce_datasource_row(row, public=True)
 
     def create_datasource(self, *, organization_id: str, req: DatasourceCreateRequest) -> Dict[str, Any]:
         oid = _required_text(organization_id, "organization_id")
@@ -368,7 +360,7 @@ class TenancyAdminService:
                 "description": _optional_text(req.description),
                 "is_active": 1 if req.is_active else 0,
                 "secret_ref": _optional_text(req.secret_ref),
-                "config_json": _json_dumps(req.config_json),
+                "config_json": _json_dumps(encrypt_datasource_config(dtype, req.config_json)),
             },
         )
         datasource_id = int(insert_result.lastrowid or 0)
@@ -378,7 +370,10 @@ class TenancyAdminService:
 
     def update_datasource(self, *, datasource_id: int, req: DatasourceUpdateRequest) -> Dict[str, Any]:
         did = int(datasource_id)
-        existing = self.get_datasource(did)
+        existing = self._get_datasource_row(did)
+        existing_config = _json_loads(existing.get("config_json"))
+        if not isinstance(existing_config, dict):
+            existing_config = {}
         name = _optional_text(req.name) or str(existing.get("name") or "")
         slug = _optional_text(req.slug) or str(existing.get("slug") or "")
         dtype = _normalize_datasource_type(req.type or str(existing.get("type") or ""))
@@ -408,7 +403,17 @@ class TenancyAdminService:
                 "description": req.description if req.description is not None else existing.get("description"),
                 "is_active": (1 if req.is_active else 0) if req.is_active is not None else (1 if existing.get("is_active") else 0),
                 "secret_ref": req.secret_ref if req.secret_ref is not None else existing.get("secret_ref"),
-                "config_json": _json_dumps(req.config_json) if req.config_json is not None else _json_dumps(existing.get("config_json")),
+                "config_json": (
+                    _json_dumps(
+                        encrypt_datasource_config(
+                            dtype,
+                            req.config_json,
+                            existing_config=existing_config,
+                        )
+                    )
+                    if req.config_json is not None
+                    else existing.get("config_json")
+                ),
             },
         )
         return self.get_datasource(did)
@@ -426,13 +431,15 @@ class TenancyAdminService:
         return {"datasource_id": did, "deleted": True, "mode": "soft"}
 
     def test_datasource(self, *, datasource_id: int) -> Dict[str, Any]:
-        row = self.get_datasource(datasource_id)
+        row = _coerce_datasource_row(self._get_datasource_row(datasource_id), public=False)
         ds_type = _normalize_datasource_type(row.get("type"))
         config_json = dict(row.get("config_json") or {})
         secret_ref = _optional_text(row.get("secret_ref"))
+        auth_method = str(config_json.get("auth_method") or "").strip().lower()
 
         if ds_type == "databricks":
-            config_json = self._secrets.inject_if_missing(config_json, secret_ref=secret_ref, key="token")
+            if auth_method != "oauth_client_credentials":
+                config_json = self._secrets.inject_if_missing(config_json, secret_ref=secret_ref, key="token")
         elif ds_type in {"snowflake", "mysql", "postgres", "bigquery"}:
             config_json = self._secrets.inject_if_missing(config_json, secret_ref=secret_ref, key="password")
 
@@ -887,6 +894,23 @@ class TenancyAdminService:
         if not rows:
             raise ForgeError("Workspace not found", status_code=404, details={"workspace_id": workspace_id})
 
+    def _get_datasource_row(self, datasource_id: int) -> Dict[str, Any]:
+        did = int(datasource_id)
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT
+              id, organization_id, name, slug, type, description, COALESCE(is_active, 1) AS is_active,
+              secret_ref, config_json, last_tested_at, last_test_status, last_test_message, created_at, updated_at
+            FROM datasource
+            WHERE id = :id
+            LIMIT 1
+            """,
+            {"id": did},
+        )
+        if not rows:
+            raise ForgeError("Datasource not found", status_code=404, details={"datasource_id": did})
+        return dict(rows[0])
+
     def _get_org_membership(self, *, organization_id: str, membership_id: int) -> Dict[str, Any]:
         oid = _required_text(organization_id, "organization_id")
         mid = int(membership_id)
@@ -981,9 +1005,14 @@ def _normalize_bool_flags(row: Dict[str, Any], fields: tuple[str, ...]) -> Dict[
     return out
 
 
-def _coerce_datasource_row(row: Dict[str, Any]) -> Dict[str, Any]:
+def _coerce_datasource_row(row: Dict[str, Any], *, public: bool = True) -> Dict[str, Any]:
     out = _normalize_bool_flags(row, ("is_active",))
-    out["config_json"] = _json_loads(out.get("config_json"))
+    datasource_type = str(out.get("type") or "").strip().lower()
+    config = _json_loads(out.get("config_json"))
+    if not isinstance(config, dict):
+        config = {}
+    config = decrypt_datasource_config(datasource_type, config)
+    out["config_json"] = mask_datasource_config(datasource_type, config) if public else config
     return out
 
 

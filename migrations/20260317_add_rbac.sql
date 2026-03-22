@@ -52,19 +52,24 @@ CREATE TABLE roles (
 CREATE TABLE user_roles (
     id              INT NOT NULL AUTO_INCREMENT,
     user_id         VARCHAR(255) NOT NULL,
+    workspace_id    VARCHAR(128) NULL
+        COMMENT 'NULL only for global roles such as super_admin',
     role_id         INT NOT NULL,
     granted_by      VARCHAR(255) NULL
         COMMENT 'user_id of admin who assigned this role',
     granted_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uq_user_role (user_id, role_id),
+    UNIQUE KEY uq_user_role_workspace (user_id, workspace_id, role_id),
     CONSTRAINT fk_user_roles_user
         FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    CONSTRAINT fk_user_roles_workspace
+        FOREIGN KEY (workspace_id) REFERENCES workspace(id) ON DELETE CASCADE,
     CONSTRAINT fk_user_roles_role
         FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE INDEX ix_user_roles_user_id ON user_roles (user_id);
+CREATE INDEX ix_user_roles_user_workspace ON user_roles (user_id, workspace_id);
 CREATE INDEX ix_user_roles_role_id ON user_roles (role_id);
 
 -- ---------------------------------------------------------------------------

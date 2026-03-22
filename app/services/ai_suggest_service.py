@@ -1374,7 +1374,7 @@ class AISuggestService:
             client_name="AISuggestService.chat",
             request_id=request_id,
             status_code=response.status_code,
-            response_text=response.text,
+            response_text=getattr(response, "text", ""),
         )
         response.raise_for_status()
         return response.json()

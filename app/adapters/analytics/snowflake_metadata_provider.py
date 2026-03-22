@@ -202,18 +202,24 @@ FROM (SELECT * FROM {table_ref} SAMPLE ({sample_pct}) LIMIT {row_cap}) _s
                 continue
             if skip_id_like and _is_id_like(cn):
                 continue
-            if result[cn].get("approx_distinct", 0) > max_distinct:
-                continue
 
             try:
                 safe_cn = _safe_ident(cn)
-                top_sql = f"""
+                if result[cn].get("approx_distinct", 0) > max_distinct:
+                    value_sql = f"""
+SELECT DISTINCT CAST("{safe_cn}" AS VARCHAR) AS val
+FROM (SELECT * FROM {table_ref} SAMPLE ({sample_pct}) LIMIT {row_cap}) _s
+WHERE "{safe_cn}" IS NOT NULL
+LIMIT {per_col_limit}
+"""
+                else:
+                    value_sql = f"""
 SELECT CAST("{safe_cn}" AS VARCHAR) AS val, COUNT(*) AS cnt
 FROM (SELECT * FROM {table_ref} SAMPLE ({sample_pct}) LIMIT {row_cap}) _s
 WHERE "{safe_cn}" IS NOT NULL
 GROUP BY "{safe_cn}" ORDER BY cnt DESC LIMIT {per_col_limit}
 """
-                top_rows = self._executor.execute(top_sql)
+                top_rows = self._executor.execute(value_sql)
                 top_values: list[str] = []
                 for row in top_rows:
                     normalized = _normalize_row(row)
@@ -221,7 +227,7 @@ GROUP BY "{safe_cn}" ORDER BY cnt DESC LIMIT {per_col_limit}
                 result[cn]["top_values"] = top_values
             except Exception as exc:
                 logger.warning(
-                    "Snowflake top-values failed for %s.%s: %s", table_ref, cn, exc
+                    "Snowflake value sampling failed for %s.%s: %s", table_ref, cn, exc
                 )
                 result[cn]["sample_error"] = str(exc)[:500]
 

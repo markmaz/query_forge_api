@@ -32,6 +32,7 @@ def build_compact_semantic_planner_user_prompt(
     candidates: SemanticCandidatePayload,
     conversation_context: Mapping[str, Any],
 ) -> str:
+    context_payload = dict(conversation_context or {})
     domain_obj = candidates.domain.model_dump(mode="json") if candidates.domain is not None else None
     payload = {
         "prompt": str(prompt or "").strip(),
@@ -46,13 +47,22 @@ def build_compact_semantic_planner_user_prompt(
         "time_candidates": [_candidate_for_prompt(row) for row in candidates.time_candidates],
         "lexical_hints": dict(candidates.lexical_hints or {}),
         "planning_rules": list(candidates.planning_rules or []),
-        "conversation_context": dict(conversation_context or {}),
+        "conversation_context": context_payload,
     }
-    return (
+    prompt_text = (
         "Build a compact semantic planning object for this request.\n"
         "Use only provided candidates and lexical hints.\n"
+        f"Prompt: {str(prompt or '').strip()}\n"
         f"input={json.dumps(payload, ensure_ascii=True)}"
     )
+    if context_payload:
+        prompt_text = (
+            f"{prompt_text}\n"
+            "Conversation context for follow-up turn:\n"
+            f"{json.dumps(context_payload, ensure_ascii=True)}\n"
+            "Apply user edits to the prior plan. Preserve prior filters/dimensions unless user explicitly changes them."
+        )
+    return prompt_text
 
 
 def build_compact_semantic_retry_prompt(

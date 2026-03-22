@@ -875,6 +875,7 @@ class PlannerDomainService:
         llm_plan, school_year_issues, school_year_debug = _normalize_school_year_filters_in_plan(
             plan_json=llm_plan,
             capabilities=capabilities_full,
+            prompt=normalized_prompt,
         )
         llm_plan, year_keyword_issues, year_keyword_debug = _normalize_year_keyword_filters_in_plan(
             plan_json=llm_plan,
@@ -1033,6 +1034,7 @@ class PlannerDomainService:
             retry_plan, retry_school_year_issues, retry_school_year_debug = _normalize_school_year_filters_in_plan(
                 plan_json=retry_plan,
                 capabilities=capabilities_full,
+                prompt=normalized_prompt,
             )
             retry_plan, retry_year_keyword_issues, retry_year_keyword_debug = _normalize_year_keyword_filters_in_plan(
                 plan_json=retry_plan,
@@ -1530,7 +1532,6 @@ class PlannerDomainService:
             result = self._domain_vector.search_domains(
                 workspace_id=workspace_id,
                 query=query_text,
-                vertical_norm=vertical_norm,
                 limit=6,
                 score_threshold=0.0,
                 include_payload=False,
@@ -5569,15 +5570,13 @@ def _normalize_school_year_filters_in_plan(
     *,
     plan_json: Mapping[str, Any],
     capabilities: Mapping[str, Any],
+    prompt: str = "",
     today: Optional[date] = None,
     school_year_start_month: int = QF_SCHOOL_YEAR_START_MONTH,
     school_year_end_month: int = QF_SCHOOL_YEAR_END_MONTH,
 ) -> Tuple[Dict[str, Any], List[Dict[str, str]], List[Dict[str, Any]]]:
     plan = dict(plan_json or {})
     filters = [dict(item) for item in list(plan.get("filters") or []) if isinstance(item, dict)]
-    if not filters:
-        return plan, [], []
-
     col_lookup = {
         _norm_key(row.get("column_key")): dict(row)
         for row in (
@@ -5587,6 +5586,26 @@ def _normalize_school_year_filters_in_plan(
         )
         if isinstance(row, dict) and _norm_key(row.get("column_key"))
     }
+
+    has_school_year_filter = any(
+        is_school_year_column(col_lookup.get(_norm_key(row.get("column_key"))) or {})
+        for row in filters
+    )
+
+    if not has_school_year_filter:
+        synthesized = _synthesize_school_year_filter_from_time_block(
+            plan=plan,
+            col_lookup=col_lookup,
+            prompt=prompt,
+            today=today,
+            school_year_start_month=school_year_start_month,
+            school_year_end_month=school_year_end_month,
+        )
+        if synthesized is not None:
+            filters = [*filters, synthesized]
+
+    if not filters:
+        return plan, [], []
 
     debug_rows: List[Dict[str, Any]] = []
     normalized_filters: List[Dict[str, Any]] = []
@@ -5648,6 +5667,42 @@ def _normalize_school_year_filters_in_plan(
 
     plan["filters"] = normalized_filters
     return plan, [], debug_rows
+
+
+def _synthesize_school_year_filter_from_time_block(
+    *,
+    plan: Mapping[str, Any],
+    col_lookup: Mapping[str, Dict[str, Any]],
+    prompt: str,
+    today: Optional[date],
+    school_year_start_month: int,
+    school_year_end_month: int,
+) -> Optional[Dict[str, Any]]:
+    time_block = dict(plan.get("time") or {})
+    time_column_key = _norm_key(time_block.get("time_column_key"))
+    if time_column_key == "":
+        return None
+
+    col_meta = col_lookup.get(time_column_key) or {}
+    if not is_school_year_column(col_meta):
+        return None
+
+    prompt_text = str(prompt or "").strip()
+    if prompt_text == "":
+        return None
+
+    years = normalize_school_year_values(
+        prompt_text,
+        today=today,
+        school_year_start_month=school_year_start_month,
+        school_year_end_month=school_year_end_month,
+    )
+    if not years:
+        return None
+
+    if len(years) == 1:
+        return {"column_key": time_column_key, "op": "eq", "value": years[0]}
+    return {"column_key": time_column_key, "op": "in", "values": years}
 
 
 def _normalize_semester_filters_in_plan(

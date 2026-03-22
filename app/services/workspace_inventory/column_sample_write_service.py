@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import pyarrow as pa
@@ -220,7 +220,7 @@ TABLESAMPLE (1 PERCENT)
         if max_tables is not None:
             picked = picked[: int(max_tables)]
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         tables_attempted = 0
         tables_processed = 0

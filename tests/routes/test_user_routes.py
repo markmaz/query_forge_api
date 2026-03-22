@@ -7,6 +7,7 @@ from app.models.tenancy.user import User
 def test_users_get_success(client, auth_headers, monkeypatch):
     class _Svc:
         def get_users(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
             return [], None, None, 0
 
     monkeypatch.setattr(user_routes, "UserService", _Svc)
@@ -14,6 +15,19 @@ def test_users_get_success(client, auth_headers, monkeypatch):
     resp = client.get("/api/v1/users/", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json["total_count"] == 0
+
+
+def test_user_counts_scopes_to_workspace(client, auth_headers, monkeypatch):
+    class _Svc:
+        def get_counts(self, *, workspace_id=None):
+            assert workspace_id == "ws-1"
+            return {"All": 1, "Active": 1, "Inactive": 0, "Invited": 0}
+
+    monkeypatch.setattr(user_routes, "UserService", _Svc)
+
+    resp = client.get("/api/v1/users/counts", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json["All"] == 1
 
 
 def test_users_post_validation_error(client, auth_headers):
@@ -32,7 +46,7 @@ def test_users_get_redacts_sensitive_fields(client, monkeypatch):
     monkeypatch.setattr(
         security.auth_service,
         "verify_token",
-        lambda _token: {"sub": "user-1", "username": "user-1"},
+        lambda _token: {"sub": "user-1", "username": "user-1", "is_admin": True},
     )
 
     class _Svc:
@@ -61,11 +75,11 @@ def test_users_put_redacts_sensitive_fields(client, monkeypatch):
     monkeypatch.setattr(
         security.auth_service,
         "verify_token",
-        lambda _token: {"sub": "user-1", "username": "user-1"},
+        lambda _token: {"sub": "user-1", "username": "user-1", "is_admin": True},
     )
 
     class _Svc:
-        def update_user(self, user_id: str, update_data: User):
+        def update_user(self, user_id: str, update_data: User, workspace_id: str | None = None):
             return User(
                 user_id=user_id,
                 first_name="Updated",

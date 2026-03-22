@@ -397,11 +397,13 @@ def _build_system_prompt() -> str:
 
 
 def _build_user_prompt(*, context: Mapping[str, Any]) -> str:
+    compact_context = _compact_domain_context(context)
     return (
         "Analyze this complete domain definition and generate semantic profile JSON for embedding.\n"
         "This output will be used for semantic search vector embeddings. "
         "Optimize for discoverability and conceptual understanding.\n"
-        f"domain_context_json: {json.dumps(dict(context), ensure_ascii=True)}"
+        "Prefer concise, information-dense output over exhaustive repetition.\n"
+        f"domain_context_json: {json.dumps(compact_context, ensure_ascii=True)}"
     )
 
 
@@ -502,6 +504,105 @@ def _extract_model_and_tokens(trace: Mapping[str, Any]) -> Tuple[str, Dict[str, 
         if isinstance(usage, dict):
             tokens = usage
     return model, tokens
+
+
+def _compact_domain_context(context: Mapping[str, Any]) -> Dict[str, Any]:
+    tables = context.get("tables") if isinstance(context.get("tables"), list) else []
+    joins = context.get("joins") if isinstance(context.get("joins"), list) else []
+    relationship_lines = (
+        context.get("relationship_lines")
+        if isinstance(context.get("relationship_lines"), list)
+        else []
+    )
+    stats = context.get("stats") if isinstance(context.get("stats"), Mapping) else {}
+    domain = context.get("domain") if isinstance(context.get("domain"), Mapping) else {}
+
+    max_tables = 12
+    max_columns_per_table = 12
+    max_joins = 12
+    max_relationship_lines = 12
+
+    compact_tables: List[Dict[str, Any]] = []
+    omitted_columns = 0
+    for raw_table in tables[:max_tables]:
+        if not isinstance(raw_table, Mapping):
+            continue
+        raw_columns = raw_table.get("columns") if isinstance(raw_table.get("columns"), list) else []
+        kept_columns = []
+        for raw_column in raw_columns[:max_columns_per_table]:
+            if not isinstance(raw_column, Mapping):
+                continue
+            kept_columns.append(
+                {
+                    "column_name": str(raw_column.get("column_name") or "").strip(),
+                    "data_type": str(raw_column.get("data_type") or "").strip() or None,
+                    "description": _truncate_text(raw_column.get("description"), 120),
+                    "semantic_type": str(raw_column.get("semantic_type") or "").strip() or None,
+                }
+            )
+        omitted_columns += max(0, len(raw_columns) - len(kept_columns))
+        compact_tables.append(
+            {
+                "workspace_table_id": raw_table.get("workspace_table_id"),
+                "table_name": str(raw_table.get("table_name") or "").strip(),
+                "description": _truncate_text(raw_table.get("description"), 180),
+                "is_primary": bool(raw_table.get("is_primary")),
+                "table_alias": str(raw_table.get("table_alias") or "").strip() or None,
+                "filter_mode": str(raw_table.get("filter_mode") or "").strip() or None,
+                "cardinality": str(raw_table.get("cardinality") or "").strip() or None,
+                "columns": kept_columns,
+            }
+        )
+
+    compact_joins: List[Dict[str, Any]] = []
+    for raw_join in joins[:max_joins]:
+        if not isinstance(raw_join, Mapping):
+            continue
+        compact_joins.append(
+            {
+                "from_table_name": str(raw_join.get("from_table_name") or "").strip() or None,
+                "to_table_name": str(raw_join.get("to_table_name") or "").strip() or None,
+                "join_type": str(raw_join.get("join_type") or "").strip() or None,
+                "join_spec": raw_join.get("join_spec") if isinstance(raw_join.get("join_spec"), Mapping) else {},
+            }
+        )
+
+    return {
+        "workspace_id": str(context.get("workspace_id") or "").strip(),
+        "domain": {
+            "domain_id": domain.get("domain_id"),
+            "name": str(domain.get("name") or "").strip(),
+            "description": _truncate_text(domain.get("description"), 220),
+            "kind": str(domain.get("kind") or "").strip() or None,
+            "is_active": bool(domain.get("is_active")),
+        },
+        "stats": {
+            "table_count": int(stats.get("table_count") or len(tables)),
+            "column_count": int(stats.get("column_count") or 0),
+            "join_count": int(stats.get("join_count") or len(joins)),
+            "tables_included_in_prompt": len(compact_tables),
+            "tables_omitted_from_prompt": max(0, len(tables) - len(compact_tables)),
+            "columns_omitted_from_prompt": omitted_columns,
+            "joins_included_in_prompt": len(compact_joins),
+            "joins_omitted_from_prompt": max(0, len(joins) - len(compact_joins)),
+        },
+        "tables": compact_tables,
+        "joins": compact_joins,
+        "relationship_lines": [
+            _truncate_text(value, 180)
+            for value in relationship_lines[:max_relationship_lines]
+            if str(value or "").strip()
+        ],
+    }
+
+
+def _truncate_text(value: Any, limit: int) -> Optional[str]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
 
 
 def _json_or_none(value: Any) -> Optional[str]:

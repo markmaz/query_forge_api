@@ -251,7 +251,7 @@ def _count_skills_using_destination(destination_id: int, workspace_id: int) -> i
             db.text(
                 "SELECT COUNT(*) FROM query_skills "
                 "WHERE workspace_id = :ws AND is_active = 1 "
-                "AND JSON_SEARCH(config, 'one', :dest_id) IS NOT NULL"
+                "AND JSON_SEARCH(config_json, 'one', :dest_id) IS NOT NULL"
             ),
             {"ws": workspace_id, "dest_id": str(destination_id)},
         ).scalar()

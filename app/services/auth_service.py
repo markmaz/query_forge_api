@@ -22,7 +22,7 @@ from app.config import (
     REFRESH_TOKEN_TTL_SECONDS,
     VALKEY_CONFIG,
 )
-from app.decorators.validate import validate_params
+from app.utils.param_guard import validate_params
 from app.exceptions.forge_error import ForgeError
 from app.models.tenancy.user import User
 from app.services.user_service import UserService
@@ -140,7 +140,7 @@ class AuthService:
         if isinstance(expiry, datetime.datetime):
             expiry = int(expiry.timestamp())
 
-        now_ts = int(datetime.datetime.utcnow().timestamp())
+        now_ts = int(datetime.datetime.now(datetime.UTC).timestamp())
         logger.debug(
             "Token timing (%s): sub=%s typ=%s iat=%s exp=%s now=%s leeway=%s",
             context,
@@ -178,7 +178,7 @@ class AuthService:
             for key, value in defaults.items():
                 claims.setdefault(key, value)
 
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(datetime.UTC)
         payload: dict[str, Any] = {
             "sub": str(user_id),
             "typ": "access",
@@ -191,7 +191,7 @@ class AuthService:
         return self._encode(payload)
 
     def _generate_refresh_token_with_jti(self, user_id: str) -> tuple[str, str]:
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(datetime.UTC)
         jti = uuid.uuid4().hex
         payload = {
             "sub": str(user_id),

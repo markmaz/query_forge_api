@@ -1,6 +1,7 @@
 import logging
 import os
 from typing import Any, Dict
+from urllib.parse import unquote
 
 from flask import g, jsonify, make_response, request
 from flask_restx import Namespace, fields
@@ -91,6 +92,63 @@ def _extract_invite_token(body: Dict[str, Any]) -> str:
         return body_token
     return str(request.args.get("token") or "").strip()
 
+
+def _clear_legacy_refresh_cookies(response) -> None:
+    for legacy_path in ("/", "/api/v1"):
+        if legacy_path == REFRESH_COOKIE_PATH:
+            continue
+        response.set_cookie(
+            "refresh_token",
+            "",
+            httponly=True,
+            secure=bool(COOKIE_SECURE),
+            samesite=COOKIE_SAMESITE,
+            max_age=0,
+            path=legacy_path,
+        )
+
+
+def _set_refresh_cookie(response, refresh_token: str, max_age: int) -> None:
+    response.set_cookie(
+        "refresh_token",
+        refresh_token,
+        httponly=True,
+        secure=bool(COOKIE_SECURE),
+        samesite=COOKIE_SAMESITE,
+        max_age=max_age,
+        path=REFRESH_COOKIE_PATH,
+    )
+    _clear_legacy_refresh_cookies(response)
+
+
+def _get_refresh_candidates_from_request() -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+        if token and token not in seen:
+            seen.add(token)
+            values.append(token)
+
+    raw_cookie = request.headers.get("Cookie", "")
+    for chunk in raw_cookie.split(";"):
+        name, sep, value = chunk.partition("=")
+        if sep == "" or name.strip() != "refresh_token":
+            continue
+        token = unquote(value.strip().strip('"'))
+        if token and token not in seen:
+            seen.add(token)
+            values.append(token)
+
+    parsed_cookie = request.cookies.get("refresh_token")
+    if parsed_cookie and parsed_cookie not in seen:
+        seen.add(parsed_cookie)
+        values.append(parsed_cookie)
+
+    return values
+
 @qf_auth_ns.route('/auth')
 @qf_auth_ns.expect(login_model)
 class Authenticate(ForgeResource):
@@ -120,15 +178,7 @@ class Authenticate(ForgeResource):
                 }
             )
         )
-        response.set_cookie(
-            "refresh_token",
-            tokens["refresh_token"],
-            httponly=True,
-            secure=bool(COOKIE_SECURE),
-            samesite=COOKIE_SAMESITE,
-            max_age=auth.qf_refresh_ttl,
-            path=REFRESH_COOKIE_PATH,
-        )
+        _set_refresh_cookie(response, tokens["refresh_token"], auth.qf_refresh_ttl)
         return response
 
 @qf_auth_ns.route('/login')
@@ -285,15 +335,7 @@ class VerifyTotpChallenge(ForgeResource):
             },
             200,
         )
-        response.set_cookie(
-            "refresh_token",
-            tokens["refresh_token"],
-            httponly=True,
-            secure=bool(COOKIE_SECURE),
-            samesite=COOKIE_SAMESITE,
-            max_age=auth.qf_refresh_ttl,
-            path=REFRESH_COOKIE_PATH,
-        )
+        _set_refresh_cookie(response, tokens["refresh_token"], auth.qf_refresh_ttl)
         return response
 
 
@@ -317,30 +359,28 @@ class DisableTotp(ForgeResource):
         )
         result = TotpService().disable_totp(user_id, password, code)
         return result, 200
-
-
-def _get_refresh_from_request() -> str | None:
-    token = request.cookies.get("refresh_token")
-    if token:
-        return token
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        return auth_header.split(" ", 1)[1].strip()
-    return None
-
-
 @qf_auth_ns.route("/refresh")
 class Refresh(ForgeResource):
     @public
     def post(self):
-        token = _get_refresh_from_request()
-        if not token:
+        tokens = _get_refresh_candidates_from_request()
+        if not tokens:
             return {"error": "Missing refresh token"}, 401
 
         auth = AuthService()
         workspace_id = None
+        new_refresh = None
+        user_id = None
+        last_error: ForgeError | None = None
         try:
-            new_refresh, user_id = auth.rotate_refresh_token(token)
+            for token in tokens:
+                try:
+                    new_refresh, user_id = auth.rotate_refresh_token(token)
+                    break
+                except ForgeError as exc:
+                    last_error = exc
+            if not new_refresh or not user_id:
+                raise last_error or ForgeError("Invalid refresh token", status_code=401)
             try:
                 full_user = UserService().get_user(user_id)
                 workspace_id = _extract_default_workspace_id(full_user)
@@ -361,15 +401,7 @@ class Refresh(ForgeResource):
                 }
             )
         )
-        response.set_cookie(
-            "refresh_token",
-            new_refresh,
-            httponly=True,
-            secure=bool(COOKIE_SECURE),
-            samesite=COOKIE_SAMESITE,
-            max_age=auth.qf_refresh_ttl,
-            path=REFRESH_COOKIE_PATH,
-        )
+        _set_refresh_cookie(response, new_refresh, auth.qf_refresh_ttl)
         return response
 
 
@@ -411,6 +443,7 @@ class Logout(ForgeResource):
             max_age=0,
             path=REFRESH_COOKIE_PATH,
         )
+        _clear_legacy_refresh_cookies(response)
         return response
 
 @qf_auth_ns.route("/invite/validate/<string:token>")

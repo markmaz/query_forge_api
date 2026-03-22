@@ -6,6 +6,7 @@ from app.exceptions.forge_error import ForgeError
 
 logger = logging.getLogger(__name__)
 
+
 def validate_params(*required_params):
     """
     Decorator to ensure required parameters are present.
@@ -24,7 +25,7 @@ def validate_params(*required_params):
                 if param not in provided or provided[param] is None:
                     logger.error(f"Missing data {provided}")
                     raise ForgeError(f"Missing data ({param})", 400)
-            
+
             return func(*args, **kwargs)
         return wrapper
     return decorator

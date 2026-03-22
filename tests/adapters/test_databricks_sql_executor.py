@@ -117,6 +117,7 @@ def test_submit_statement_wait_false() -> None:
     assert resp["qf_statement_id"] == "s1"
     assert resp["statement_id"] == "s1"
     assert session.posts
+    assert session.posts[-1]["url"] == "https://dbx/api/2.0/sql/statements"
 
 
 def test_submit_statement_wait_false_accepts_statement_id() -> None:
@@ -176,6 +177,7 @@ def test_get_statement_status() -> None:
 
     status = exec.get_statement_status("s1")
     assert status["status"]["state"] == "RUNNING"
+    assert session.gets[-1]["url"] == "https://dbx/api/2.0/sql/statements/s1"
 
 
 def test_cancel_statement_allows_202() -> None:

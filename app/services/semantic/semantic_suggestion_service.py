@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from datetime import date, datetime
@@ -51,6 +52,33 @@ class SemanticSuggestionService:
         self._auto_approve_max_errors = int(
             SEMANTIC_AUTO_APPROVE_MAX_ERRORS if auto_approve_max_errors is None else auto_approve_max_errors
         )
+
+    def _label_cards(
+        self,
+        *,
+        cards: List[Dict[str, Any]],
+        vertical: Optional[str],
+        known_concepts: Optional[List[Dict[str, Any]]] = None,
+        workspace_id: Optional[str] = None,
+        llm_id: Optional[int] = None,
+    ):
+        kwargs = {
+            "cards": cards,
+            "vertical": vertical,
+            "known_concepts": known_concepts,
+            "workspace_id": workspace_id,
+            "llm_id": llm_id,
+        }
+        try:
+            signature = inspect.signature(self._labeler.label_cards)
+        except (TypeError, ValueError):
+            return self._labeler.label_cards(**kwargs)
+        accepted = {
+            name: value
+            for name, value in kwargs.items()
+            if name in signature.parameters
+        }
+        return self._labeler.label_cards(**accepted)
 
     def create_run(self, payload: Dict[str, Any], *, created_by: Optional[str] = None) -> Dict[str, Any]:
         if not isinstance(payload, dict):
@@ -172,7 +200,7 @@ class SemanticSuggestionService:
                         unresolved_cards.append(_to_llm_card(card))
 
                     if unresolved_cards:
-                        llm_outputs, llm_errors = self._labeler.label_cards(
+                        llm_outputs, llm_errors = self._label_cards(
                             cards=unresolved_cards,
                             vertical=run.get("vertical"),
                             known_concepts=known_concepts,

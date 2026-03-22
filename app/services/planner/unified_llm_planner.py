@@ -190,6 +190,7 @@ def _build_unified_user_prompt(
     capabilities_compact: Mapping[str, Any],
     conversation_context: Mapping[str, Any],
 ) -> str:
+    context_payload = dict(conversation_context or {})
     payload = {
         "prompt": prompt,
         "normalized_prompt": normalized_prompt,
@@ -199,13 +200,22 @@ def _build_unified_user_prompt(
         "base_domain_id": int(base_domain_id),
         "domain_name": str(domain_name or ""),
         "allowed": dict(capabilities_compact or {}),
-        "conversation_context": dict(conversation_context or {}),
+        "conversation_context": context_payload,
     }
-    return (
+    prompt_text = (
         "Build slot_hints + plan_json_v2 for this input.\n"
+        f"Prompt: {str(prompt or '').strip()}\n"
         f"input: {json.dumps(payload, ensure_ascii=True)}\n"
         "Return JSON only."
     )
+    if context_payload:
+        prompt_text = (
+            f"{prompt_text}\n"
+            "Conversation context for follow-up turn:\n"
+            f"{json.dumps(context_payload, ensure_ascii=True)}\n"
+            "Apply user edits to the prior plan. Preserve prior filters/dimensions unless user explicitly changes them."
+        )
+    return prompt_text
 
 
 def _build_json_fix_prompt(*, raw_payload: str) -> str:

@@ -253,6 +253,15 @@ def test_webhook_validate_missing_url(webhook_skill):
     assert any("webhook" in e.lower() or "url" in e.lower() for e in errors)
 
 
+def test_webhook_validate_allows_generic_destination(webhook_skill):
+    errors = webhook_skill.validate_config({
+        "channel_type": "webhook",
+        "destination_id": 42,
+        "format": "summary",
+    })
+    assert errors == []
+
+
 # ---------------------------------------------------------------------------
 # WebhookDeliverySkill — execution
 # ---------------------------------------------------------------------------
@@ -344,3 +353,49 @@ def test_webhook_handles_channel_failure(webhook_skill, metadata, sample_rows):
 
     assert result.success is False
     assert "Connection refused" in result.error
+
+
+def test_webhook_generic_channel_passes_method_headers_and_token(webhook_skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {
+        "channel_type": "webhook",
+        "url": "https://hooks.example.com/queryforge",
+        "method": "PUT",
+        "headers": {"X-Test": "1"},
+        "auth_token": "secret",
+        "format": "summary",
+    })
+    with patch("app.skills.webhook_delivery.get_channel") as mock_get:
+        mock_channel = MagicMock()
+        mock_channel.send.return_value = (True, "Webhook delivered.")
+        mock_get.return_value = mock_channel
+        result = webhook_skill.execute(ctx)
+
+    assert result.success is True
+    payload_arg, config_arg = mock_channel.send.call_args[0]
+    assert payload_arg.query_name == "Monthly Sales"
+    assert config_arg == {
+        "type": "webhook",
+        "url": "https://hooks.example.com/queryforge",
+        "method": "PUT",
+        "headers": {"X-Test": "1"},
+        "auth_token": "secret",
+    }
+
+
+def test_digest_resolves_recipients_from_destination(digest_skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {
+        "destination_id": 7,
+        "subject": "Digest",
+        "include_comparison": False,
+        "include_appendix": False,
+        "include_query_link": False,
+    }, workspace_config={})
+
+    with patch("app.skills.destination_resolver.resolve_channel_config", return_value={"recipients": ["ops@example.com"]}), \
+         patch.object(digest_skill, "_send") as mock_send, \
+         patch.object(digest_skill, "_load_snapshot", return_value=None), \
+         patch.object(digest_skill, "_save_snapshot"):
+        result = digest_skill.execute(ctx)
+
+    assert result.success is True
+    assert mock_send.call_args[0][0] == ["ops@example.com"]

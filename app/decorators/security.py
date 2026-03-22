@@ -37,6 +37,12 @@ def _extract_user_context(payload: Dict[str, Any]) -> Tuple[str, str, bool, List
     return str(user_id or "").strip(), str(display_name or "").strip(), is_admin, roles
 
 
+def _has_super_admin_access(is_admin: bool, roles: List[str]) -> bool:
+    if is_admin:
+        return True
+    return any(str(role or "").strip().lower() == "super_admin" for role in roles)
+
+
 def token_required(f):
     """Ensures methods that need to be secured are called with the proper tokens."""
 
@@ -81,18 +87,35 @@ def token_required(f):
         g.user_roles = roles
 
         workspace_id = (request.headers.get("X-Workspace-Id") or "").strip()
-        if workspace_id:
-            workspace_access_service.assert_workspace_access(
-                user_id=user_id,
-                workspace_id=workspace_id,
-            )
-        g.workspace_id = workspace_id or None
+        preloaded_effective_roles: set[str] | None = None
 
-        # Pre-load effective roles — graceful: falls back to empty set on any error
-        # (e.g., DB unavailable, tables not yet migrated in test env)
+        # Pre-load effective roles before workspace membership enforcement so a
+        # DB-backed super_admin can administer workspaces they do not belong to.
         try:
             from app.services.rbac_service import get_effective_roles
-            g.effective_roles = get_effective_roles(user_id)
+            preloaded_effective_roles = get_effective_roles(user_id, workspace_id=workspace_id or None)
+        except Exception:
+            preloaded_effective_roles = None
+
+        if workspace_id:
+            has_super_admin = _has_super_admin_access(is_admin, roles) or (
+                preloaded_effective_roles is not None and "super_admin" in preloaded_effective_roles
+            )
+            if not has_super_admin:
+                workspace_access_service.assert_workspace_access(
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
+        g.workspace_id = workspace_id or None
+
+        # Keep effective roles on g, falling back gracefully when RBAC is unavailable.
+        try:
+            from app.services.rbac_service import get_effective_roles
+            g.effective_roles = (
+                preloaded_effective_roles
+                if preloaded_effective_roles is not None
+                else get_effective_roles(user_id, workspace_id=workspace_id or None)
+            )
             # Backwards compat: token-level is_admin maps to super_admin when
             # DB has no RBAC rows yet (e.g. pre-migration or test environments)
             if is_admin and not g.effective_roles:
@@ -104,8 +127,8 @@ def token_required(f):
             )
         except Exception:
             # DB unavailable — fall back gracefully, preserving token-level claim
-            g.effective_roles = {"super_admin"} if is_admin else set()
-            g.is_admin = is_admin
+            g.effective_roles = {"super_admin"} if _has_super_admin_access(is_admin, roles) else set()
+            g.is_admin = _has_super_admin_access(is_admin, roles)
 
         return f(*args, **kwargs)
 

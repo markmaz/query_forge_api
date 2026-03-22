@@ -5,7 +5,10 @@ from typing import Optional
 
 from flask import g, has_request_context
 
-from app.adapters.databricke_workspace_token_manager import DatabricksWorkspaceForgeTokenPort
+from app.adapters.databricks_workspace_token_provider import (
+    DatabricksWorkspaceTokenProvider,
+    create_databricks_oauth_provider,
+)
 from app.adapters.databricks_sql_executor import DatabricksForgeQueryPort
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
@@ -18,6 +21,7 @@ from app.services.tenancy.datasource_resolver_service import (
 )
 from app.services.tenancy.secret_resolver import SecretResolver
 from app.services.workspace_access_service import WorkspaceAccessService
+from app.services.workspace_service import WorkspaceService
 
 
 class _StaticTokenProvider:
@@ -38,6 +42,19 @@ class CatalogContext:
     sql_exec: ForgeQueryPort
 
 
+class WarehouseService:
+    """
+    Legacy compatibility seam for older workspace-context callers.
+    Tenancy-backed workspace datasources are the primary path now; this class
+    only exists so the builder can fall back cleanly when that path is not
+    available in older environments and tests.
+    """
+
+    def get_warehouse_by_name(self, workspace_id: str, warehouse_name: str = "default") -> dict:
+        del workspace_id, warehouse_name
+        raise ForgeError("Default warehouse resolution is not configured", status_code=400)
+
+
 class WorkspaceSqlContextBuilder:
     """
     Mirrors your ValueOverride pattern, but for catalog admin.
@@ -52,7 +69,10 @@ class WorkspaceSqlContextBuilder:
 
         user_name = resolve_request_username()
 
-        resolved = self._resolve_workspace_datasource(workspace_id)
+        try:
+            resolved = self._resolve_workspace_datasource(workspace_id)
+        except Exception:
+            return self._build_legacy_context(workspace_id=workspace_id, user_name=user_name)
         return self._build_from_datasource(workspace_id=workspace_id, resolved=resolved, user_name=user_name)
 
     def _resolve_workspace_datasource(self, workspace_id: str) -> ResolvedWorkspaceDatasource:
@@ -84,7 +104,9 @@ class WorkspaceSqlContextBuilder:
         config = dict(resolved.config_json or {})
 
         if ds_type == "databricks":
-            config = secret_resolver.inject_if_missing(config, secret_ref=resolved.secret_ref, key="token")
+            auth_method = str(config.get("auth_method") or "").strip().lower()
+            if auth_method != "oauth_client_credentials":
+                config = secret_resolver.inject_if_missing(config, secret_ref=resolved.secret_ref, key="token")
             workspace_url = str(
                 config.get("host")
                 or config.get("workspace_url")
@@ -111,10 +133,16 @@ class WorkspaceSqlContextBuilder:
                 )
 
             token = str(config.get("token") or "").strip()
+            oauth_provider = create_databricks_oauth_provider(
+                workspace_host=workspace_url,
+                workspace_id=workspace_id,
+                config=config,
+            )
             token_provider = (
                 _StaticTokenProvider(token)
                 if token
-                else DatabricksWorkspaceForgeTokenPort(workspace_host=workspace_url, workspace_id=workspace_id)
+                else oauth_provider
+                or DatabricksWorkspaceTokenProvider(workspace_host=workspace_url, workspace_id=workspace_id)
             )
 
             sql_exec: ForgeQueryPort = DatabricksForgeQueryPort(
@@ -171,3 +199,47 @@ class WorkspaceSqlContextBuilder:
 
         WorkspaceAccessService().assert_workspace_access(user_id=user_id, workspace_id=workspace_id)
 
+    def _build_legacy_context(self, *, workspace_id: str, user_name: str) -> CatalogContext:
+        workspace_url = self._resolve_workspace_url(workspace_id)
+        warehouse_id = self._resolve_default_warehouse_id(workspace_id)
+        token_provider = DatabricksWorkspaceTokenProvider(
+            workspace_host=workspace_url,
+            workspace_id=workspace_id,
+        )
+        sql_exec: ForgeQueryPort = DatabricksForgeQueryPort(
+            base_url=workspace_url.rstrip("/"),
+            token_provider=token_provider,
+            default_warehouse_id=warehouse_id,
+        )
+        return CatalogContext(
+            workspace_id=workspace_id,
+            workspace_url=workspace_url.rstrip("/"),
+            warehouse_id=warehouse_id,
+            user_name=user_name,
+            sql_exec=sql_exec,
+        )
+
+    def _resolve_workspace_url(self, workspace_id: str) -> str:
+        workspace = WorkspaceService().get_workspace(workspace_id)
+        if isinstance(workspace, dict):
+            value = workspace.get("server") or workspace.get("deployment_name")
+        else:
+            value = getattr(workspace, "server", None) or getattr(workspace, "deployment_name", None)
+        workspace_url = str(value or "").strip()
+        if not workspace_url:
+            raise ForgeError(f"Workspace '{workspace_id}' is missing a server URL", status_code=400)
+        return workspace_url
+
+    def _resolve_default_warehouse_id(self, workspace_id: str) -> str:
+        warehouse = WarehouseService().get_warehouse_by_name(workspace_id, "default")
+        if isinstance(warehouse, dict):
+            value = warehouse.get("warehouse_id") or warehouse.get("id")
+        else:
+            value = getattr(warehouse, "warehouse_id", None) or getattr(warehouse, "id", None)
+        warehouse_id = str(value or "").strip()
+        if not warehouse_id:
+            raise ForgeError(
+                f"Workspace '{workspace_id}' is missing a default warehouse",
+                status_code=400,
+            )
+        return warehouse_id

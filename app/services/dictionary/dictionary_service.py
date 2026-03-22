@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import text
 
 from app.adapters.mysql_sql_executor import engine
+from app.services.shared.jsonify import serialize_record
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,12 @@ class DictionaryService:
             count_params = {k: v for k, v in params.items() if k != "limit" and k != "offset"}
             total = conn.execute(text(count_sql), count_params).fetchone()[0]
 
-        return {"rows": rows, "total": int(total), "limit": limit, "offset": offset}
+        return {
+            "rows": [serialize_record(row) for row in rows],
+            "total": int(total),
+            "limit": limit,
+            "offset": offset,
+        }
 
     # ------------------------------------------------------------------
     # Columns
@@ -103,7 +109,7 @@ class DictionaryService:
         r["is_active"] = bool(r.get("is_active"))
         r["sample_values_json"] = _parse_json_field(r.get("sample_values_json"))
         r["sample_stats_json"] = _parse_json_field(r.get("sample_stats_json"))
-        return r
+        return serialize_record(r)
 
     def list_columns(
         self,
@@ -267,7 +273,7 @@ class DictionaryService:
 
         if not rows:
             raise ForgeError("Workspace table not found", status_code=404)
-        return {"row": rows[0]}
+        return {"row": serialize_record(rows[0])}
 
     # ------------------------------------------------------------------
     # Import

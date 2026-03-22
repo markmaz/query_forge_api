@@ -36,7 +36,11 @@ def client(monkeypatch: pytest.MonkeyPatch):
         VLLM_MODEL="qwen25-7b",
         VLLM_TIMEOUT=60,
     )
-    monkeypatch.setattr(security.auth_service, "verify_token", lambda _token: {"sub": "user-1"})
+    monkeypatch.setattr(
+        security.auth_service,
+        "verify_token",
+        lambda _token: {"sub": "user-1", "is_admin": True},
+    )
     monkeypatch.setattr(
         security.workspace_access_service,
         "assert_workspace_access",

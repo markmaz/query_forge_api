@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from qdrant_client.http import models as qdrant_models
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
-from app.config import EMBEDDING_MODEL_NAME, QDRANT_DOMAIN_COLLECTION, QF_VERTICAL_DEFAULT
+from app.config import EMBEDDING_MODEL_NAME, QDRANT_DOMAIN_COLLECTION
 from app.exceptions.forge_error import ForgeError
 from app.infra.embedding_model import EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
@@ -20,7 +20,6 @@ from app.ports.sql_executor import ForgeQueryPort
 logger = logging.getLogger(__name__)
 
 DEFAULT_COLLECTION = QDRANT_DOMAIN_COLLECTION or "domain_catalog_v1"
-DEFAULT_VERTICAL = QF_VERTICAL_DEFAULT or "generic"
 DEFAULT_LIMIT = 5
 MAX_LIMIT = 50
 
@@ -71,7 +70,7 @@ ORDER BY d.id ASC
 class DomainEmbeddingState:
     domain_id: int
     workspace_id: Optional[str]
-    vertical_norm: str
+    vertical_norm: Optional[str]
     domain_version: int
     embedding_hash: str
 
@@ -97,10 +96,6 @@ class DomainVectorIndexService:
 
         self._qdrant.ensure_collection(self._collection_name, vector_size)
         self._qdrant.ensure_payload_index(
-            key="vertical_norm",
-            schema=qdrant_models.PayloadSchemaType.KEYWORD,
-        )
-        self._qdrant.ensure_payload_index(
             key="is_active",
             schema=qdrant_models.PayloadSchemaType.BOOL,
         )
@@ -116,7 +111,7 @@ class DomainVectorIndexService:
             "collection": self._collection_name,
             "vector_size": int(vector_size),
             "distance": "cosine",
-            "payload_indexes": ["vertical_norm", "is_active", "domain_version", "workspace_id"],
+            "payload_indexes": ["is_active", "domain_version", "workspace_id"],
         }
 
     def reindex_domains(
@@ -127,19 +122,17 @@ class DomainVectorIndexService:
         force: bool = False,
         json_fallback_path: Optional[str] = None,
     ) -> Dict[str, Any]:
+        del vertical_norm
         t0 = time.perf_counter()
-        vertical = _normalize_vertical(vertical_norm) if vertical_norm is not None else None
         rows = self._load_domains(workspace_id=workspace_id, json_fallback_path=json_fallback_path)
-        if vertical is not None:
-            rows = [row for row in rows if _infer_vertical_norm(row, default=DEFAULT_VERTICAL) == vertical]
 
         collection_meta = self.ensure_collection()
-        state = self._load_embedding_state(workspace_id=workspace_id, vertical_norm=vertical)
+        state = self._load_embedding_state(workspace_id=workspace_id, vertical_norm=None)
         result = self.upsert_domains(
             rows,
             force=force,
             state_by_domain_id=state,
-            vertical_norm=vertical,
+            vertical_norm=None,
         )
         result["timings_ms"] = {"total": int((time.perf_counter() - t0) * 1000)}
         result["collection"] = collection_meta
@@ -154,6 +147,7 @@ class DomainVectorIndexService:
         state_by_domain_id: Optional[Mapping[int, DomainEmbeddingState]] = None,
         vertical_norm: Optional[str] = None,
     ) -> Dict[str, Any]:
+        del vertical_norm
         if not domains:
             return {"total": 0, "upserted": 0, "skipped": 0, "errors": []}
 
@@ -175,10 +169,10 @@ class DomainVectorIndexService:
                 skipped += 1
                 continue
 
-            inferred_vertical = _normalize_vertical(vertical_norm) if vertical_norm else _infer_vertical_norm(row, default=DEFAULT_VERTICAL)
             domain_version = _coerce_int(row.get("domain_version"), default=0)
             embedding_hash = hashlib.sha256(embedding_text.encode("utf-8")).hexdigest()
             ws_id = str(row.get("workspace_id") or "").strip() or None
+            explicit_vertical = _explicit_vertical_norm(row)
 
             prev = state.get(domain_id)
             if (
@@ -186,7 +180,6 @@ class DomainVectorIndexService:
                 and prev is not None
                 and prev.embedding_hash == embedding_hash
                 and int(prev.domain_version) == int(domain_version)
-                and prev.vertical_norm == inferred_vertical
             ):
                 skipped += 1
                 continue
@@ -194,7 +187,6 @@ class DomainVectorIndexService:
             payload = {
                 "domain_id": domain_id,
                 "workspace_id": ws_id,
-                "vertical_norm": inferred_vertical,
                 "name": str(row.get("name") or "").strip(),
                 "summary": str(row.get("summary") or "").strip(),
                 "embedding_text": embedding_text,
@@ -209,7 +201,7 @@ class DomainVectorIndexService:
                 DomainEmbeddingState(
                     domain_id=domain_id,
                     workspace_id=ws_id,
-                    vertical_norm=inferred_vertical,
+                    vertical_norm=explicit_vertical,
                     domain_version=int(domain_version),
                     embedding_hash=embedding_hash,
                 )
@@ -235,7 +227,7 @@ class DomainVectorIndexService:
         *,
         workspace_id: str,
         query: str,
-        vertical_norm: str,
+        vertical_norm: Optional[str] = None,
         limit: int = DEFAULT_LIMIT,
         score_threshold: float = 0.2,
         include_payload: bool = True,
@@ -243,13 +235,13 @@ class DomainVectorIndexService:
         query_text = _normalize_query_text(query)
         if query_text == "":
             raise ForgeError("query is required", status_code=400)
+        del vertical_norm
 
         ws = str(workspace_id or "").strip()
         if ws == "":
             raise ForgeError("workspace_id is required", status_code=400)
 
         k = max(1, min(int(limit or DEFAULT_LIMIT), MAX_LIMIT))
-        vertical = _normalize_vertical(vertical_norm)
         threshold = float(score_threshold if score_threshold is not None else 0.2)
 
         vector = self._model.encode([query_text], normalize=True)[0]
@@ -258,10 +250,6 @@ class DomainVectorIndexService:
                 qdrant_models.FieldCondition(
                     key="workspace_id",
                     match=qdrant_models.MatchValue(value=ws),
-                ),
-                qdrant_models.FieldCondition(
-                    key="vertical_norm",
-                    match=qdrant_models.MatchValue(value=vertical),
                 ),
                 qdrant_models.FieldCondition(
                     key="is_active",
@@ -351,16 +339,13 @@ class DomainVectorIndexService:
         vertical_norm: Optional[str],
     ) -> Dict[int, DomainEmbeddingState]:
         ws = str(workspace_id or "").strip() or None
-        vertical = _normalize_vertical(vertical_norm) if vertical_norm is not None else None
+        del vertical_norm
 
         where: List[str] = []
         params: Dict[str, Any] = {}
         if ws is not None:
             where.append("workspace_id = :workspace_id")
             params["workspace_id"] = ws
-        if vertical is not None:
-            where.append("vertical_norm = :vertical_norm")
-            params["vertical_norm"] = vertical
 
         sql = """
         SELECT domain_id, workspace_id, vertical_norm, domain_version, embedding_hash
@@ -385,7 +370,7 @@ class DomainVectorIndexService:
             out[domain_id] = DomainEmbeddingState(
                 domain_id=domain_id,
                 workspace_id=str(row.get("workspace_id") or "").strip() or None,
-                vertical_norm=_normalize_vertical(row.get("vertical_norm")),
+                vertical_norm=_explicit_vertical_norm(row),
                 domain_version=_coerce_int(row.get("domain_version"), default=0),
                 embedding_hash=str(row.get("embedding_hash") or "").strip(),
             )
@@ -424,7 +409,7 @@ class DomainVectorIndexService:
                     {
                         "domain_id": int(row.domain_id),
                         "workspace_id": row.workspace_id,
-                        "vertical_norm": row.vertical_norm,
+                        "vertical_norm": row.vertical_norm or "generic",
                         "domain_version": int(row.domain_version),
                         "embedding_hash": row.embedding_hash,
                     },
@@ -476,30 +461,11 @@ def _normalize_query_text(text: Any) -> str:
     return _collapse_ws(str(text or "").strip())
 
 
-def _normalize_vertical(value: Any) -> str:
-    text = str(value or "").strip().lower()
-    return text or DEFAULT_VERTICAL
-
-
-def _infer_vertical_norm(row: Mapping[str, Any], *, default: str) -> str:
+def _explicit_vertical_norm(row: Mapping[str, Any]) -> Optional[str]:
     explicit = str(row.get("vertical_norm") or row.get("vertical") or "").strip().lower()
     if explicit in {"education", "healthcare", "generic"}:
         return explicit
-
-    blob_parts = [
-        str(row.get("kind") or ""),
-        str(row.get("name") or ""),
-        str(row.get("summary") or ""),
-        " ".join(_as_text_list(row.get("keywords"))),
-    ]
-    blob = " ".join(blob_parts).lower()
-    edu_tokens = ("student", "school", "district", "attendance", "enrollment", "teacher", "k12")
-    hc_tokens = ("patient", "provider", "claim", "diagnosis", "procedure", "npi", "health")
-    if any(token in blob for token in edu_tokens):
-        return "education"
-    if any(token in blob for token in hc_tokens):
-        return "healthcare"
-    return _normalize_vertical(default)
+    return None
 
 
 def _as_text_list(value: Any) -> List[str]:

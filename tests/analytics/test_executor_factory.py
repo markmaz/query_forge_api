@@ -61,6 +61,38 @@ def test_create_databricks_missing_token_raises():
         ExecutorFactory.create("databricks", cfg)
 
 
+def test_create_databricks_oauth_builds_token_provider():
+    cfg = {
+        "type": "databricks",
+        "host": "https://adb-1.azuredatabricks.net",
+        "http_path": "/sql/1.0/warehouses/w1",
+        "auth_method": "oauth_client_credentials",
+        "client_id": "client-1",
+        "client_secret": "secret-1",
+    }
+
+    with patch("app.adapters.databricks_workspace_token_provider.create_databricks_oauth_provider") as mock_provider:
+        with patch("app.adapters.analytics.databricks_executor.DatabricksSQLExecutor") as mock_cls:
+            provider = MagicMock()
+            mock_provider.return_value = provider
+            mock_instance = MagicMock()
+            mock_cls.return_value = mock_instance
+
+            result = ExecutorFactory.create("databricks", cfg)
+
+    assert result is mock_instance
+    mock_provider.assert_called_once()
+    mock_cls.assert_called_once_with(
+        host="https://adb-1.azuredatabricks.net",
+        token=None,
+        http_path="/sql/1.0/warehouses/w1",
+        catalog=None,
+        schema=None,
+        token_provider=provider,
+        platform=None,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Snowflake
 # ---------------------------------------------------------------------------
@@ -117,6 +149,7 @@ def test_create_snowflake_passes_optional_authenticator_and_schema():
         authenticator="externalbrowser",
         role="ACCOUNTADMIN",
         password=None,
+        private_key_pem=None,
         private_key_path=None,
         private_key_passphrase=None,
     )

@@ -39,98 +39,21 @@ from app.exceptions.forge_error import ForgeError
 from app.extensions import mail
 from app.api_config import NAME, VERSION, build_url
 from app.features import register_features
-from app.services.analytics.config_loader import load_analytics_config
-from app.services.analytics.executor_factory import ExecutorFactory
 from app.services.analytics.registry import AnalyticsDatasourceRegistry
 from app.services.auth_service import AuthService
 from app.services.semantic.concept_seed import ConceptSeedService
-from app.services.tenancy.datasource_catalog_service import DatasourceCatalogService
-from app.services.tenancy.secret_resolver import SecretResolver
 
 auth_service = AuthService()
 
 
-def _is_placeholder(value: str) -> bool:
-    return "${" in value and "}" in value
+def _register_analytics_registry(app: Flask) -> None:
+    """Register an empty analytics registry.
 
-
-def _is_configured_value(value: str) -> bool:
-    raw = (value or "").strip()
-    return bool(raw and not _is_placeholder(raw))
-
-
-
-
-
-def _register_analytics_registry(
-    app: Flask, *, config: dict[str, dict[str, Any]] | None = None
-) -> None:  # noqa: F821
-    """Load analytics datasource config and register the registry in ``app.extensions``.
-
-    Failures are logged but never crash app startup — the registry will simply be
-    absent or empty so that unrelated features are unaffected.
+    Analytics executors are now resolved lazily from workspace or tenancy
+    datasource records when a request actually needs them. Startup should only
+    initialize the application database and framework services.
     """
-    _logger = logging.getLogger(__name__)
-    try:
-        config = config if config is not None else load_analytics_config()
-        config = dict(config or {})
-        db_configs = DatasourceCatalogService().load_all_executor_configs()
-        if db_configs:
-            # DB-backed datasource definitions are the new source of truth.
-            config.update(db_configs)
-        executors = {}
-        skipped: list[str] = []
-        secret_resolver = SecretResolver()
-        for name, cfg in config.items():
-            try:
-                effective_cfg = dict(cfg)
-                ds_type = str(effective_cfg.get("type") or "").strip().lower()
-
-                secret_ref = str(effective_cfg.get("_secret_ref") or "").strip()
-                if secret_ref:
-                    resolved_secret = secret_resolver.resolve(secret_ref)
-                    if resolved_secret:
-                        if ds_type == "databricks" and not effective_cfg.get("token"):
-                            effective_cfg["token"] = resolved_secret
-                        elif ds_type in {"snowflake", "mysql"} and not effective_cfg.get("password"):
-                            effective_cfg["password"] = resolved_secret
-
-                if str(effective_cfg.get("type") or "").strip().lower() == "databricks":
-                    token_raw = str(effective_cfg.get("token") or "").strip()
-                    if (not token_raw) or "${" in token_raw or "}" in token_raw:
-                        token_manager = app.config.get("DATABRICKS_TOKEN_MANAGER")
-                        if token_manager is not None:
-                            effective_cfg.pop("token", None)
-                            effective_cfg["token_provider"] = token_manager
-
-                executors[name] = ExecutorFactory.create(effective_cfg["type"], effective_cfg)
-            except Exception as exc:
-                skipped.append(name)
-                _logger.error(
-                    "Skipping analytics datasource '%s' due to invalid configuration: %s",
-                    name,
-                    exc,
-                )
-
-        registry = AnalyticsDatasourceRegistry(executors)
-        app.extensions["analytics_registry"] = registry
-        if skipped:
-            _logger.warning(
-                "Analytics datasource registry initialised with %d datasource(s); skipped %d datasource(s): %s",
-                len(executors),
-                len(skipped),
-                ", ".join(sorted(skipped)),
-            )
-        else:
-            _logger.info(
-                "Analytics datasource registry initialised with %d datasource(s): %s",
-                len(executors),
-                ", ".join(
-                    f"{name}({executor.get_dialect()})" for name, executor in executors.items()
-                ),
-            )
-    except Exception:
-        _logger.exception("Failed to initialise analytics datasource registry")
+    app.extensions["analytics_registry"] = AnalyticsDatasourceRegistry({})
 
 def try_get_json_body(req):
     try:
@@ -261,15 +184,13 @@ def create_app():
         response.status_code = error.status_code
         return response
 
-    bootstrap_analytics_config: dict[str, dict[str, Any]] | None = None
-    try:
-        bootstrap_analytics_config = load_analytics_config()
-    except Exception:
-        logger.exception("Failed to load analytics config")
-
-    _register_analytics_registry(app, config=bootstrap_analytics_config)
+    _register_analytics_registry(app)
 
     from app.commands.create_superuser import create_superuser_command
+    from app.commands.encrypt_datasource_secrets import encrypt_datasource_secrets_command
+    from app.commands.seed_rbac_roles import seed_rbac_roles_command
     app.cli.add_command(create_superuser_command)
+    app.cli.add_command(encrypt_datasource_secrets_command)
+    app.cli.add_command(seed_rbac_roles_command)
 
     return app

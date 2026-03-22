@@ -206,6 +206,7 @@ CHANNEL_REGISTRY: dict[str, type[BaseDeliveryChannel]] = {
     "email": EmailDeliveryChannel,
     "slack": SlackDeliveryChannel,
     "teams": TeamsDeliveryChannel,
+    "webhook": None,  # populated after GenericWebhookDeliveryChannel definition
 }
 
 
@@ -213,6 +214,56 @@ def get_channel(channel_type: str) -> BaseDeliveryChannel:
     if channel_type not in CHANNEL_REGISTRY:
         raise ValueError(f"Unknown delivery channel: {channel_type!r}. Available: {list(CHANNEL_REGISTRY)}")
     return CHANNEL_REGISTRY[channel_type]()
+
+
+class GenericWebhookDeliveryChannel(BaseDeliveryChannel):
+    channel_type = "webhook"
+
+    def send(self, payload: DeliveryPayload, config: dict[str, Any]) -> tuple[bool, str]:
+        resolved = _resolve(config, config.get("workspace_id", 0))
+        url = str(resolved.get("url") or resolved.get("webhook_url") or "").strip()
+        if not url:
+            return False, "No webhook URL configured."
+
+        method = str(resolved.get("method") or "POST").strip().upper() or "POST"
+        if method not in {"POST", "PUT"}:
+            return False, f"Unsupported webhook method: {method}"
+
+        headers = {"Content-Type": "application/json"}
+        extra_headers = resolved.get("headers")
+        if isinstance(extra_headers, dict):
+            headers.update({str(k): str(v) for k, v in extra_headers.items()})
+        auth_token = str(resolved.get("auth_token") or "").strip()
+        if auth_token:
+            headers["Authorization"] = f"Bearer {auth_token}"
+
+        body = {
+            "subject": payload.subject,
+            "summary": payload.summary,
+            "detail_text": payload.detail_text,
+            "detail_html": payload.detail_html,
+            "query_name": payload.query_name,
+            "workspace_id": payload.workspace_id,
+            "query_id": payload.query_id,
+            "conditions_failed": payload.conditions_failed,
+            "severity": payload.severity,
+        }
+        try:
+            data = json.dumps(body).encode("utf-8")
+            req = urllib_request.Request(url, data=data, headers=headers, method=method)
+            with urllib_request.urlopen(req, timeout=10) as resp:
+                response_text = resp.read().decode()
+                if 200 <= resp.status < 300:
+                    return True, "Webhook delivered."
+                return False, f"Webhook responded: {resp.status} {response_text}"
+        except URLError as exc:
+            return False, f"Webhook error: {exc}"
+        except Exception as exc:
+            logger.exception("Generic webhook delivery error")
+            return False, str(exc)
+
+
+CHANNEL_REGISTRY["webhook"] = GenericWebhookDeliveryChannel
 
 
 # ---------------------------------------------------------------------------

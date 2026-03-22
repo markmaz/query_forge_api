@@ -6,6 +6,7 @@ import app.routes.auth_routes as auth_routes
 from app.decorators import security
 from app.exceptions.forge_error import ForgeError
 from app.models.tenancy.user import User
+from app.models.tenancy.user_workspace import UserWorkspace
 
 
 def test_login_success(client, monkeypatch):
@@ -81,6 +82,68 @@ def test_totp_verify_success(client, monkeypatch):
     assert resp.json["access_token"] == "access-1"
     assert resp.json["mfa_type"] == "totp"
     assert "refresh_token=" in (resp.headers.get("Set-Cookie") or "")
+
+
+def test_auth_sets_refresh_cookie_and_clears_legacy_paths(client, monkeypatch):
+    monkeypatch.setattr(
+        auth_routes.AuthService,
+        "non_interactive_authentication",
+        lambda self, username, password: User(
+            user_id="u1",
+            user_name="u1",
+            workspaces=[UserWorkspace(workspace_id="ws-1", is_default=True)],
+        ),
+    )
+    monkeypatch.setattr(
+        auth_routes.AuthService,
+        "issue_tokens",
+        lambda self, _user: {
+            "access_token": "access-1",
+            "refresh_token": "refresh-1",
+            "expires_in": 900,
+        },
+    )
+    monkeypatch.setattr(auth_routes.AuthService, "qf_refresh_ttl", 1209600, raising=False)
+
+    resp = client.post("/api/v1/auth/auth", json={"username": "u", "password": "p"})
+
+    assert resp.status_code == 200
+    cookies = resp.headers.getlist("Set-Cookie")
+    assert any("refresh_token=refresh-1" in value and "Path=/api/v1/auth" in value for value in cookies)
+    assert any("refresh_token=" in value and "Max-Age=0" in value and "Path=/" in value for value in cookies)
+    assert any("refresh_token=" in value and "Max-Age=0" in value and "Path=/api/v1" in value for value in cookies)
+
+
+def test_refresh_tries_multiple_refresh_cookie_candidates(client, monkeypatch):
+    def _rotate(self, token: str):
+        if token == "current-refresh":
+            return "next-refresh", "u1"
+        raise ForgeError("Refresh token revoked", 401)
+
+    monkeypatch.setattr(auth_routes.AuthService, "rotate_refresh_token", _rotate)
+    monkeypatch.setattr(auth_routes.AuthService, "generate_access_token", lambda self, _user_id: "access-2")
+    monkeypatch.setattr(auth_routes.AuthService, "access_ttl_seconds", 900, raising=False)
+    monkeypatch.setattr(auth_routes.AuthService, "qf_refresh_ttl", 1209600, raising=False)
+    monkeypatch.setattr(
+        auth_routes,
+        "_get_refresh_candidates_from_request",
+        lambda: ["stale-refresh", "current-refresh"],
+    )
+    monkeypatch.setattr(
+        auth_routes.UserService,
+        "get_user",
+        lambda self, _user_id: User(
+            user_id="u1",
+            workspaces=[UserWorkspace(workspace_id="ws-1", is_default=True)],
+        ),
+    )
+
+    resp = client.post("/api/v1/auth/refresh")
+
+    assert resp.status_code == 200
+    assert resp.json["access_token"] == "access-2"
+    cookies = resp.headers.getlist("Set-Cookie")
+    assert any("refresh_token=next-refresh" in value and "Path=/api/v1/auth" in value for value in cookies)
 
 
 def test_totp_verify_invalid_challenge(client, monkeypatch):

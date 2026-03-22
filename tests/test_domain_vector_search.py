@@ -113,7 +113,7 @@ def _service() -> DomainVectorIndexService:
     )
 
 
-def test_domain_vector_search_filters_vertical_and_workspace() -> None:
+def test_domain_vector_search_filters_workspace_but_ignores_vertical() -> None:
     svc = _service()
     svc.ensure_collection()
     svc.upsert_domains(
@@ -163,16 +163,17 @@ def test_domain_vector_search_filters_vertical_and_workspace() -> None:
 
     out = svc.search_domains(
         workspace_id="ws-1",
-        query="student enrollment",
+        query="health claims",
         vertical_norm="education",
         limit=5,
         score_threshold=0.0,
         include_payload=False,
     )
 
-    assert len(out["results"]) == 1
-    assert out["results"][0]["domain_id"] == 7
-    assert "student" in out["results"][0]["reason"]
+    ids = [row["domain_id"] for row in out["results"]]
+    assert ids[0] == 8
+    assert 9 not in ids
+    assert "claims" in out["results"][0]["reason"]
 
 
 def test_domain_vector_search_stable_order_by_score_then_id() -> None:
@@ -269,4 +270,38 @@ def test_domain_vector_search_returns_payload_fields() -> None:
     assert row["table_count"] == 7
     assert row["join_edge_count"] == 5
     assert isinstance(row.get("payload"), dict)
-    assert row["payload"]["vertical_norm"] == "education"
+    assert "vertical_norm" not in row["payload"]
+
+
+def test_domain_reindex_does_not_filter_rows_by_vertical() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [
+            {
+                "domain_id": 31,
+                "workspace_id": "ws-1",
+                "name": "Schools",
+                "summary": "School directory",
+                "embedding_text": "school directory by city",
+                "domain_version": 2,
+                "is_active": True,
+                "table_count": 1,
+                "join_edge_count": 0,
+            }
+        ],
+        [],
+    ]
+    qdrant = _FakeQdrant()
+    svc = DomainVectorIndexService(
+        sql=sql,
+        qdrant=qdrant,
+        model=_FakeEmbeddingModel(),
+        collection_name="domain_catalog_v1",
+    )
+
+    out = svc.reindex_domains(workspace_id="ws-1", vertical_norm="generic", force=True)
+
+    assert out["total"] == 1
+    assert out["upserted"] == 1
+    assert 31 in qdrant.points
+    assert "vertical_norm" not in qdrant.points[31]["payload"]

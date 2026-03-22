@@ -11,15 +11,15 @@ import pyarrow as pa
 import pyarrow.ipc as pa_ipc
 import requests
 
-from app.config import DATABRICKS_STATEMENTS_URL
 from app.ports.sql_executor import ForgeExecResult
-from app.ports.token_manager import ForgeTokenPort
+from app.adapters.token_provider import TokenProvider
 from app.services.base_service import build_url
 
 logger = logging.getLogger(__name__)
 
 ResultFormat = Literal["JSON_ARRAY", "JSON", "ARROW_STREAM"]
 _TERMINAL_STATES = frozenset({"SUCCEEDED", "FAILED", "CANCELED"})
+_STATEMENTS_API_PATH = "/api/2.0/sql/statements"
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,7 @@ class DatabricksForgeQueryPort:
     def __init__(
         self,
         base_url: str,
-        token_provider: ForgeTokenPort,
+        token_provider: TokenProvider,
         http: Optional[requests.Session] = None,
         default_warehouse_id: Optional[str] = None,
         default_catalog: Optional[str] = None,
@@ -73,7 +73,7 @@ class DatabricksForgeQueryPort:
         )
 
         logger.debug("Submitting SQL statement: %s", self._summarize_statement_payload(payload))
-        response_payload = self._post_json(DATABRICKS_STATEMENTS_URL, payload)
+        response_payload = self._post_json(_STATEMENTS_API_PATH, payload)
         response_payload = self._with_statement_id_aliases(response_payload)
 
         if not wait:
@@ -144,16 +144,16 @@ class DatabricksForgeQueryPort:
             qf_result_fmt=qf_result_fmt,
         )
         logger.debug("Submitting async SQL statement: %s", self._summarize_statement_payload(payload))
-        response_payload = self._post_json(DATABRICKS_STATEMENTS_URL, payload)
+        response_payload = self._post_json(_STATEMENTS_API_PATH, payload)
         return self._with_statement_id_aliases(response_payload)
 
     def get_statement_status(self, qf_statement_id: str) -> Dict[str, Any]:
-        response = self._get(f"{DATABRICKS_STATEMENTS_URL}/{qf_statement_id}")
+        response = self._get(f"{_STATEMENTS_API_PATH}/{qf_statement_id}")
         response.raise_for_status()
         return response.json()
 
     def cancel_statement(self, qf_statement_id: str) -> None:
-        response = self._post(f"{DATABRICKS_STATEMENTS_URL}/{qf_statement_id}/cancel")
+        response = self._post(f"{_STATEMENTS_API_PATH}/{qf_statement_id}/cancel")
         if response.status_code not in (200, 202):
             response.raise_for_status()
 
@@ -185,7 +185,7 @@ class DatabricksForgeQueryPort:
         raise NotImplementedError("DatabricksForgeQueryPort does not support transactions")
 
     def poll_status(self, qf_statement_id: str) -> Dict[str, Any]:
-        response = self._get(f"{DATABRICKS_STATEMENTS_URL}/{qf_statement_id}")
+        response = self._get(f"{_STATEMENTS_API_PATH}/{qf_statement_id}")
         response.raise_for_status()
         payload = response.json()
         state = (payload.get("status") or {}).get("state")
@@ -232,7 +232,7 @@ class DatabricksForgeQueryPort:
         return self.fetch_arrow_table(qf_statement_id).to_pylist()
 
     def cancel(self, qf_statement_id: str) -> None:
-        response = self._post(f"{DATABRICKS_STATEMENTS_URL}/{qf_statement_id}/cancel")
+        response = self._post(f"{_STATEMENTS_API_PATH}/{qf_statement_id}/cancel")
         if response.status_code not in (200, 202, 409, 404):
             response.raise_for_status()
 
@@ -289,7 +289,7 @@ class DatabricksForgeQueryPort:
         return "Unknown Databricks error"
 
     def _iter_statement_result_pages(self, qf_statement_id: str) -> Iterable[Dict[str, Any]]:
-        next_path: Optional[str] = f"{DATABRICKS_STATEMENTS_URL}/{qf_statement_id}"
+        next_path: Optional[str] = f"{_STATEMENTS_API_PATH}/{qf_statement_id}"
         while next_path:
             response = self._get(next_path)
             if response.status_code == 404:
@@ -402,10 +402,10 @@ class DatabricksForgeQueryPort:
         elif callable(provider):
             token = provider()
         else:
-            raise TypeError("ForgeTokenPort must expose get_token(), token attribute, or be callable")
+            raise TypeError("TokenProvider must expose get_token(), token attribute, or be callable")
 
         if not token:
-            raise ValueError("ForgeTokenPort returned an empty token")
+            raise ValueError("TokenProvider returned an empty token")
 
         return token
 

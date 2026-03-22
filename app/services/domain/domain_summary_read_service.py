@@ -20,8 +20,7 @@ class DomainSummaryReadService:
     def list_domain_summaries(self, *, workspace_id: str, sample_size: int = 2) -> List[Dict[str, Any]]:
         sample_size = max(0, int(sample_size))
 
-        # MySQL 8+ window functions. Includes QF-specific concept_count from semantic concept mappings.
-        sql = """
+        sql = f"""
           WITH mapped AS (
             SELECT
               dwt.domain_id,
@@ -34,27 +33,18 @@ class DomainSummaryReadService:
              AND d.is_active = 1
             JOIN workspace_table wt
               ON wt.id = dwt.workspace_table_id
-             AND wt.exists_in_dbx = 1
           ),
           table_counts AS (
             SELECT domain_id, COUNT(*) AS table_count
             FROM mapped
             GROUP BY domain_id
-          ),
-          concept_counts AS (
-            SELECT dsc.domain_id, COUNT(DISTINCT dsc.concept_id) AS concept_count
-            FROM domain_semantic_concept dsc
-            JOIN domain d ON d.id = dsc.domain_id AND d.workspace_id = :ws AND d.is_active = 1
-            GROUP BY dsc.domain_id
           )
           SELECT
             d.id AS domain_id,
             COALESCE(tc.table_count, 0) AS table_count,
-            COALESCE(cc.concept_count, 0) AS concept_count,
             m.table_name AS sample_table_name
           FROM domain d
           LEFT JOIN table_counts tc ON tc.domain_id = d.id
-          LEFT JOIN concept_counts cc ON cc.domain_id = d.id
           LEFT JOIN mapped m ON m.domain_id = d.id AND m.rn <= :n
           WHERE d.workspace_id = :ws
             AND d.is_active = 1
@@ -66,7 +56,7 @@ class DomainSummaryReadService:
         rows = self._sql.execute_query_mappings(sql, params)
 
         # Collapse multi-row result (one per sample table) into domain-level dicts.
-        # Shape: {id, table_count, concept_count, table_sample: [...]}
+        # Shape: {id, table_count, table_sample: [...]}
         by_id: Dict[int, Dict[str, Any]] = {}
 
         for r in rows:
@@ -75,7 +65,6 @@ class DomainSummaryReadService:
                 by_id[did] = {
                     "id": did,
                     "table_count": int(r["table_count"] or 0),
-                    "concept_count": int(r["concept_count"] or 0),
                     "table_sample": [],
                 }
             tn = r.get("sample_table_name")

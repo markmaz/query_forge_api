@@ -67,15 +67,27 @@ class ExecutorFactory:
     @staticmethod
     def _create_databricks(config: dict[str, Any]) -> SQLExecutor:
         from app.adapters.analytics.databricks_executor import DatabricksSQLExecutor
+        from app.adapters.databricks_workspace_token_provider import create_databricks_oauth_provider
+
+        cfg = dict(config or {})
+        if cfg.get("token_provider") is None:
+            oauth_provider = create_databricks_oauth_provider(
+                workspace_host=cfg["host"],
+                workspace_id=str(cfg.get("workspace_id") or cfg.get("_workspace_id") or ""),
+                config=cfg,
+            )
+            if oauth_provider is not None:
+                cfg["token_provider"] = oauth_provider
+                cfg.pop("token", None)
 
         return DatabricksSQLExecutor(
-            host=config["host"],
-            token=config.get("token"),
-            http_path=config["http_path"],
-            catalog=config.get("catalog"),
-            schema=config.get("schema"),
-            token_provider=config.get("token_provider"),
-            platform=config.get("platform"),
+            host=cfg["host"],
+            token=cfg.get("token"),
+            http_path=cfg["http_path"],
+            catalog=cfg.get("catalog"),
+            schema=cfg.get("schema"),
+            token_provider=cfg.get("token_provider"),
+            platform=cfg.get("platform"),
         )
 
     @staticmethod
@@ -91,6 +103,7 @@ class ExecutorFactory:
             authenticator=config.get("authenticator"),
             role=config.get("role"),
             password=config.get("password"),
+            private_key_pem=config.get("private_key_pem"),
             private_key_path=config.get("private_key_path"),
             private_key_passphrase=config.get("private_key_passphrase"),
         )

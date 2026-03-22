@@ -5,7 +5,7 @@ from cryptography.fernet import Fernet
 
 def test_encrypt_decrypt_roundtrip(monkeypatch):
     key = Fernet.generate_key().decode()
-    monkeypatch.setenv("QF_LLM_ENCRYPTION_KEY", key)
+    monkeypatch.setenv("QF_ENCRYPTION_KEY", key)
 
     import importlib
     import app.utils.encryption as encryption
@@ -22,7 +22,7 @@ def test_encrypt_decrypt_roundtrip(monkeypatch):
 
 def test_encrypt_empty_returns_none(monkeypatch):
     key = Fernet.generate_key().decode()
-    monkeypatch.setenv("QF_LLM_ENCRYPTION_KEY", key)
+    monkeypatch.setenv("QF_ENCRYPTION_KEY", key)
     import importlib
     import app.utils.encryption as encryption
     importlib.reload(encryption)
@@ -51,7 +51,7 @@ def test_mask_api_key_none():
 
 def test_decrypt_invalid_ciphertext_returns_none(monkeypatch):
     key = Fernet.generate_key().decode()
-    monkeypatch.setenv("QF_LLM_ENCRYPTION_KEY", key)
+    monkeypatch.setenv("QF_ENCRYPTION_KEY", key)
     import importlib
     import app.utils.encryption as encryption
     importlib.reload(encryption)

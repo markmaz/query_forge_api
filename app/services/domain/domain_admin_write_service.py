@@ -211,8 +211,10 @@ class DomainAdminWriteService:
         description: Optional[str] = None,
         model_table_id: Optional[int] = None,
         column_name_policy: Optional[str] = None,
+        bypass_permissions: bool = False,
     ) -> Dict[str, Any]:
-        self._assert_can_edit_any(workspace_id=workspace_id, user_id=user_id)
+        if not bypass_permissions:
+            self._assert_can_edit_any(workspace_id=workspace_id, user_id=user_id)
 
         clean_name = self._clean_required_name(name)
         clean_kind = self._clean_optional_text(kind)

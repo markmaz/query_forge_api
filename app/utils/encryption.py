@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 _fernet = None
 _FERNET_INITIALIZED = False  # add this
+_PRIMARY_ENV_VAR = "QF_ENCRYPTION_KEY"
 
 
 def _get_fernet():
@@ -16,16 +17,20 @@ def _get_fernet():
         return _fernet  # returns None if key was invalid (cached)
     _FERNET_INITIALIZED = True
     from cryptography.fernet import Fernet
-    key = os.getenv("QF_LLM_ENCRYPTION_KEY", "").strip()
+    key = os.getenv(_PRIMARY_ENV_VAR, "").strip()
     if not key:
-        logger.warning("QF_LLM_ENCRYPTION_KEY is not set; API key encryption disabled")
+        logger.warning("%s is not set; secret encryption disabled", _PRIMARY_ENV_VAR)
         return None
     try:
         _fernet = Fernet(key.encode() if isinstance(key, str) else key)
         return _fernet
     except Exception:
-        logger.error("Invalid QF_LLM_ENCRYPTION_KEY; API key encryption disabled")
+        logger.error("Invalid %s; secret encryption disabled", _PRIMARY_ENV_VAR)
         return None
+
+
+def is_secret_encryption_available() -> bool:
+    return _get_fernet() is not None
 
 
 def encrypt_api_key(plaintext: Optional[str]) -> Optional[str]:
@@ -57,6 +62,16 @@ def decrypt_api_key(ciphertext: Optional[str]) -> Optional[str]:
     except Exception:
         logger.exception("Failed to decrypt API key")
         return None
+
+
+def encrypt_secret(plaintext: Optional[str]) -> Optional[str]:
+    """Generic Fernet secret encryption helper backed by the LLM encryption key."""
+    return encrypt_api_key(plaintext)
+
+
+def decrypt_secret(ciphertext: Optional[str]) -> Optional[str]:
+    """Generic Fernet secret decryption helper backed by the LLM encryption key."""
+    return decrypt_api_key(ciphertext)
 
 
 def mask_api_key(plaintext: Optional[str]) -> Optional[str]:

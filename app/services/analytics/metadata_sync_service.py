@@ -42,6 +42,8 @@ class MetadataSyncService:
         run_enrichment: bool = False,
         overwrite_descriptions: bool = False,
         profiling_options: dict | None = None,
+        workspace_id: str | None = None,
+        llm_id: int | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         executor = self._registry.get(datasource_name)
@@ -227,6 +229,8 @@ class MetadataSyncService:
                     table_id_by_name=name_to_id,
                     columns=columns,
                     overwrite=overwrite_descriptions,
+                    workspace_id=workspace_id,
+                    llm_id=llm_id,
                     progress_callback=_on_enrichment_progress,
                 )
             except Exception:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pyarrow as pa
@@ -133,7 +133,7 @@ class WorkspaceSnapshotService:
         qf_catalog_name: Optional[str] = None,
     ) -> SnapshotResult:
         run_id = str(uuid.uuid4())
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         if qf_catalog_name is None:
             qf_catalog_name, _ = _discover_default_catalog_schema(self._sql)

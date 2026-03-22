@@ -4,6 +4,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 
+import app.routes.datasource_routes as datasource_routes
 from app.services.analytics.registry import AnalyticsDatasourceRegistry
 
 
@@ -19,6 +20,17 @@ def _make_registry(datasources: list[dict]) -> AnalyticsDatasourceRegistry:
     return registry
 
 
+def _mock_catalog(monkeypatch, datasources: list[dict] | None = None, *, error: Exception | None = None) -> None:
+    class _Svc:
+        def list_datasources(self, *, include_inactive: bool = False):
+            assert include_inactive is False
+            if error is not None:
+                raise error
+            return list(datasources or [])
+
+    monkeypatch.setattr(datasource_routes, "DatasourceCatalogService", _Svc)
+
+
 def _mock_token(monkeypatch):
     """Patch token verification to always succeed."""
     from app.decorators import security
@@ -26,7 +38,7 @@ def _mock_token(monkeypatch):
     monkeypatch.setattr(
         security.auth_service,
         "verify_token",
-        lambda _token: {"sub": "user-1", "username": "user-1"},
+        lambda _token: {"sub": "user-1", "username": "user-1", "is_admin": True},
     )
     monkeypatch.setattr(
         security.workspace_access_service,
@@ -45,6 +57,7 @@ _VALID_HEADERS = {"Authorization": "Bearer test-token"}
 
 def test_get_datasources_returns_list(client, monkeypatch):
     _mock_token(monkeypatch)
+    _mock_catalog(monkeypatch, [])
 
     registry = _make_registry(
         [
@@ -68,6 +81,7 @@ def test_get_datasources_returns_list(client, monkeypatch):
 
 def test_get_datasources_only_exposes_name_and_type(client, monkeypatch):
     _mock_token(monkeypatch)
+    _mock_catalog(monkeypatch, [])
 
     registry = _make_registry([{"name": "primary", "type": "databricks"}])
 
@@ -84,6 +98,7 @@ def test_get_datasources_only_exposes_name_and_type(client, monkeypatch):
 
 def test_get_datasources_empty_registry(client, monkeypatch):
     _mock_token(monkeypatch)
+    _mock_catalog(monkeypatch, [])
 
     registry = _make_registry([])
 
@@ -103,6 +118,7 @@ def test_get_datasources_empty_registry(client, monkeypatch):
 
 def test_get_datasources_returns_503_when_registry_missing(client, monkeypatch):
     _mock_token(monkeypatch)
+    _mock_catalog(monkeypatch, [])
 
     # Remove registry from extensions if present
     with client.application.app_context():
@@ -135,6 +151,7 @@ def test_get_datasources_rejects_invalid_token(client, invalid_auth_headers):
 
 def test_get_datasources_returns_500_on_registry_error(client, monkeypatch):
     _mock_token(monkeypatch)
+    _mock_catalog(monkeypatch, error=RuntimeError("unexpected boom"))
 
     registry = MagicMock(spec=AnalyticsDatasourceRegistry)
     registry.list_datasources.side_effect = RuntimeError("unexpected boom")

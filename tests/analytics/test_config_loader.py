@@ -97,6 +97,20 @@ def test_validate_datasource_passes_valid_databricks():
     )
 
 
+def test_validate_datasource_passes_valid_databricks_oauth():
+    _validate_datasource(
+        "ds1",
+        {
+            "type": "databricks",
+            "host": "https://h",
+            "http_path": "/p",
+            "auth_method": "oauth_client_credentials",
+            "client_id": "client-1",
+            "client_secret": "secret-1",
+        },
+    )
+
+
 def test_validate_datasource_passes_valid_snowflake():
     _validate_datasource(
         "ds1",

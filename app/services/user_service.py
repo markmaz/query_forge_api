@@ -8,10 +8,8 @@ from sqlalchemy import exc
 from werkzeug.security import generate_password_hash
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
-from app.decorators.validate import validate_params
+from app.utils.param_guard import validate_params
 from app.exceptions.forge_error import ForgeError
-from app.models.tenancy.product import Product
-from app.models.tenancy.role import ProductRole
 from app.models.tenancy.role import Role
 from app.models.tenancy.status_enum import UserStatus
 from app.models.tenancy.user import User
@@ -39,15 +37,41 @@ class UserService:
         except exc.SQLAlchemyError as e:
             logger.error(f"{sql} - {str(e)}")
             raise ForgeError(f"Database error: {str(e)}", 500)
-    def get_counts(self):
+    def get_counts(self, *, workspace_id: Optional[str] = None):
+        normalized_workspace_id = str(workspace_id or "").strip() or None
         sql = """
-            SELECT status, COUNT(*) as count
-            FROM users WHERE status is not null
-            GROUP BY status
+            SELECT u.status, COUNT(*) as count
+            FROM users u
+            WHERE u.status IS NOT NULL
         """
+        params: Dict[str, Any] = {}
+        if normalized_workspace_id:
+            sql += """
+              AND (
+                    EXISTS (
+                        SELECT 1
+                        FROM workspace_membership wm
+                        WHERE wm.user_id = u.user_id
+                          AND wm.workspace_id = :workspace_id
+                          AND COALESCE(wm.is_active, 1) = 1
+                    )
+                 OR EXISTS (
+                        SELECT 1
+                        FROM workspace w
+                        JOIN organization_membership om
+                          ON om.organization_id = w.organization_id
+                         AND om.user_id = u.user_id
+                         AND COALESCE(om.is_active, 1) = 1
+                        WHERE w.id = :workspace_id
+                          AND COALESCE(w.is_active, 1) = 1
+                    )
+              )
+            """
+            params["workspace_id"] = normalized_workspace_id
+        sql += " GROUP BY u.status"
 
         try:
-            results = self._sql.execute_query_mappings(sql)
+            results = self._sql.execute_query_mappings(sql, params)
             counts = {row["status"]: row["count"] for row in results}
             counts["All"] = sum(counts.values())
 
@@ -66,8 +90,8 @@ class UserService:
         self.update_last_login(user_id)
         return {"email": email, "user_id": user_id}
     
-    validate_params("emails", "product_roles", "workspaces")
-    def create_invite_bulk(self, emails: List[str], products: List[dict], workspaces: List[dict]):
+    validate_params("emails", "workspaces")
+    def create_invite_bulk(self, emails: List[str], workspaces: List[dict]):
         insert_user_sql = """
             INSERT IGNORE INTO users
             (email, user_id, status, username, password, otp_secret, last_log_in)
@@ -102,14 +126,13 @@ class UserService:
 
                     user_id = params["user_id"]
 
-                    # map workspaces (first one default = True)
                     for workspace in workspaces:
-                        self.map_user_workspace(user_id, workspace["workspace_id"], workspace["is_default"], tx)
-
-                    # map product roles
-                    for p in products:
-                        self.map_user_product(user_id, p["product_id"], tx)
-                        self.map_user_product_role(user_id, p["product_role_id"], tx)
+                        self.map_user_workspace(
+                            user_id,
+                            workspace["workspace_id"],
+                            workspace["is_default"],
+                            tx,
+                        )
 
                     # send invite email async
                     from app.tasks.email_tasks import send_invite_email_task
@@ -151,12 +174,6 @@ class UserService:
 
                 for org in invitation.workspaces:
                     self.map_user_workspace(user_id, org.workspace_id, org.is_default, tx)
-                
-                for product in invitation.products:
-                    self.map_user_product(user_id, product.product_id, tx)
-
-                    for r in product.roles:
-                        self.map_user_product_role(user_id, r.product_role_id, tx)
                 
                 logger.info(f"User {invitation.email} created successfully")
 
@@ -223,12 +240,17 @@ class UserService:
 
     validate_params("user_id")
 
-    def update_user(self, user_id: str, update_data: "User") -> Dict[str, Any]:
+    def update_user(
+        self,
+        user_id: str,
+        update_data: "User",
+        *,
+        workspace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
             """
-            Updates a user and synchronizes related workspaces and product roles.
+            Updates a user and synchronizes related workspaces and direct RBAC roles.
             Expects update_data to optionally include:
             - workspaces: List[{"workspace_id": str|int, "is_default": bool}]
-            - products:   List[{"product_id": str, "roles": [{"product_role_id": str, ...}], ...}]
             """
             # 1) Load current user (and fail fast if missing)
             current_user = self.get_user(user_id)
@@ -238,17 +260,17 @@ class UserService:
             # 2) Prepare scalar field updates on the users table, excluding nested relations
             update_fields = update_data.model_dump(exclude_unset=True)
             new_workspaces = update_fields.pop("workspaces", None)
-            new_products = update_fields.pop("products", None)
-            new_rbac_role_ids = update_fields.pop("rbac_role_ids", None)
+            new_rbac_role_names = update_fields.pop("rbac_role_names", None)
+            update_fields.pop("rbac_role_ids", None)
             rbac_roles_payload = update_fields.pop("rbac_roles", None)
-            if new_rbac_role_ids is None and rbac_roles_payload is not None:
+            if new_rbac_role_names is None and rbac_roles_payload is not None:
                 extracted: List[str] = []
                 for role_obj in rbac_roles_payload or []:
                     if isinstance(role_obj, dict):
-                        extracted.append(str(role_obj.get("role_id") or "").strip())
+                        extracted.append(str(role_obj.get("role_name") or "").strip())
                     else:
-                        extracted.append(str(getattr(role_obj, "role_id", "")).strip())
-                new_rbac_role_ids = [rid for rid in extracted if rid]
+                        extracted.append(str(getattr(role_obj, "role_name", "")).strip())
+                new_rbac_role_names = [name for name in extracted if name]
 
             params = {"user_id": user_id}
             updates = []
@@ -283,16 +305,21 @@ class UserService:
                     if new_workspaces is not None:
                         self._sync_user_workspaces(tx, user_id, new_workspaces)
 
-                    # 3c) Sync product roles junction if provided
-                    if new_products is not None:
-                        self._sync_user_product_roles(tx, user_id, new_products)
+                    # 3c) Sync user-level RBAC roles if provided
+                    if new_rbac_role_names is not None:
+                        self._sync_user_direct_roles(
+                            tx,
+                            user_id,
+                            new_rbac_role_names,
+                            workspace_id=workspace_id,
+                        )
 
-                    # 3d) Sync user-level RBAC roles if provided
-                    if new_rbac_role_ids is not None:
-                        self._sync_user_direct_roles(tx, user_id, new_rbac_role_ids)
+                if new_rbac_role_names is not None:
+                    from app.services.rbac_service import invalidate_user_roles
+                    invalidate_user_roles(user_id, workspace_id=str(workspace_id or "").strip() or None)
 
                 # 4) Return fresh copy
-                return self.get_user(user_id)
+                return self.get_user(user_id, workspace_id=workspace_id)
 
             except exc.SQLAlchemyError as e:
                 logger.error(f"update_user failed for {user_id}: {e}")
@@ -371,73 +398,99 @@ class UserService:
                     {"uid": user_id, "keep": keep},
                 )
 
-    def _sync_user_product_roles(self, tx: ForgeQueryTx, user_id: str, new_products: List[Dict[str, Any]]) -> None:
+    def _get_roles_by_names(
+        self,
+        role_names: List[str],
+        *,
+        tx: Optional[ForgeQueryTx] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        names = [str(name or "").strip() for name in role_names if str(name or "").strip()]
+        if not names:
+            return {}
+        placeholders = ",".join([f":name{i}" for i in range(len(names))])
+        params = {f"name{i}": name for i, name in enumerate(names)}
+        query = f"""
+            SELECT
+                id,
+                CAST(id AS CHAR) AS role_id,
+                name AS role_name,
+                display_name,
+                description,
+                feature_key,
+                is_system
+            FROM roles
+            WHERE name IN ({placeholders})
         """
-        new_products: [{"product_id": "...", "roles": [{"product_role_id": "..."}]}...]
-        We only need the set of product_role_id assignments for the user.
-        """
-        desired_role_ids = set()
-        for p in (new_products or []):
-            for r in (p.get("roles") or []):
-                prid = r.get("product_role_id")
-                if prid:
-                    desired_role_ids.add(str(prid))
+        executor = tx.execute_query_mappings if tx is not None else self._sql.execute_query_mappings
+        rows = executor(query, params)
+        return {
+            str(row.get("role_name") or "").strip(): dict(row)
+            for row in rows
+            if str(row.get("role_name") or "").strip()
+        }
 
-        # Load existing assignments
-        rows = tx.execute_query_mappings(
-            "SELECT product_role_id FROM user_roles WHERE user_id = :uid",
-            {"uid": user_id},
-        )
-        existing_role_ids = set(str(r["product_role_id"]) for r in rows)
+    def _normalize_role_workspace(self, role_name: str, workspace_id: Optional[str]) -> Optional[str]:
+        role_name = str(role_name or "").strip()
+        normalized_workspace_id = str(workspace_id or "").strip() or None
+        if role_name == "super_admin":
+            return None
+        if not normalized_workspace_id:
+            raise ForgeError("workspace_id is required for non-global roles", 400)
+        return normalized_workspace_id
 
-        to_delete = existing_role_ids - desired_role_ids
-        to_insert = desired_role_ids - existing_role_ids
-
-        if to_delete:
-            ids_list = list(to_delete)
-            placeholders = ",".join([f":id{i}" for i in range(len(ids_list))])
-            params = {"uid": user_id, **{f"id{i}": rid for i, rid in enumerate(ids_list)}}
-            tx.execute_write(
-                f"DELETE FROM user_roles WHERE user_id = :uid AND product_role_id IN ({placeholders})",
-                params,
-            )
-
-        if to_insert:
-            tx.execute_write(
-                "INSERT INTO user_roles (user_id, product_role_id) "
-                "VALUES (:uid, :product_role_id)",
-                [{"uid": user_id, "product_role_id": prid} for prid in to_insert],
-            )
-
-    def _sync_user_direct_roles(self, tx: ForgeQueryTx, user_id: str, new_role_ids: List[str]) -> None:
-        desired_role_ids: Set[str] = set()
-        for role_id in new_role_ids or []:
-            rid = str(role_id or "").strip()
-            if rid:
-                desired_role_ids.add(rid)
+    def _sync_user_direct_roles(
+        self,
+        tx: ForgeQueryTx,
+        user_id: str,
+        new_role_names: List[str],
+        *,
+        workspace_id: Optional[str] = None,
+    ) -> None:
+        desired_role_names: Set[str] = {
+            str(role_name or "").strip()
+            for role_name in (new_role_names or [])
+            if str(role_name or "").strip()
+        }
+        normalized_workspace_id = str(workspace_id or "").strip() or None
+        if any(role_name != "super_admin" for role_name in desired_role_names) and not normalized_workspace_id:
+            raise ForgeError("workspace_id is required for non-global roles", 400)
 
         rows = tx.execute_query_mappings(
-            "SELECT role_id FROM user_global_roles WHERE user_id = :uid",
-            {"uid": user_id},
+            """
+            SELECT r.id, r.name AS role_name
+            FROM user_roles ur
+            JOIN roles r ON r.id = ur.role_id
+            WHERE ur.user_id = :uid
+              AND (
+                    (ur.workspace_id <=> :workspace_id)
+                 OR (ur.workspace_id IS NULL AND r.name = 'super_admin')
+              )
+            """,
+            {"uid": user_id, "workspace_id": normalized_workspace_id},
         )
-        existing_role_ids = set(str(r.get("role_id")) for r in rows if r.get("role_id"))
+        existing_role_names = {
+            str(row.get("role_name") or "").strip()
+            for row in rows
+            if str(row.get("role_name") or "").strip()
+        }
 
-        to_delete = existing_role_ids - desired_role_ids
-        to_insert = desired_role_ids - existing_role_ids
+        to_delete = sorted(existing_role_names - desired_role_names)
+        to_insert = sorted(desired_role_names - existing_role_names)
 
-        if to_delete:
-            ids_list = list(to_delete)
-            placeholders = ",".join([f":id{i}" for i in range(len(ids_list))])
-            params = {"uid": user_id, **{f"id{i}": rid for i, rid in enumerate(ids_list)}}
-            tx.execute_write(
-                f"DELETE FROM user_global_roles WHERE user_id = :uid AND role_id IN ({placeholders})",
-                params,
+        for role_name in to_delete:
+            self.remove_user_direct_role(
+                user_id,
+                role_name,
+                workspace_id=normalized_workspace_id,
+                tx=tx,
             )
 
-        if to_insert:
-            tx.execute_write(
-                "INSERT INTO user_global_roles (user_id, role_id) VALUES (:uid, :role_id)",
-                [{"uid": user_id, "role_id": rid} for rid in to_insert],
+        for role_name in to_insert:
+            self.add_user_direct_role(
+                user_id,
+                role_name,
+                workspace_id=normalized_workspace_id,
+                tx=tx,
             )
 
 
@@ -458,14 +511,12 @@ class UserService:
         delete_user_workspace = "DELETE FROM workspace_membership WHERE user_id = :user_id"
         delete_user_org_membership = "DELETE FROM organization_membership WHERE user_id = :user_id"
         delete_user_roles = "DELETE FROM user_roles WHERE user_id = :user_id"
-        delete_user_global_roles = "DELETE FROM user_global_roles WHERE user_id = :user_id"
         delete_user_domain_mapping = "DELETE FROM user_domain_mapping WHERE user_id = :user_id"
 
         try:
             with self._sql.transaction() as tx:
                 # Delete dependent rows first to avoid FK violations.
                 tx.execute_write(delete_user_roles, {"user_id": user_id})
-                tx.execute_write(delete_user_global_roles, {"user_id": user_id})
                 tx.execute_write(delete_user_domain_mapping, {"user_id": user_id})
                 tx.execute_write(delete_user_workspace, {"user_id": user_id})
                 tx.execute_write(delete_user_org_membership, {"user_id": user_id})
@@ -479,7 +530,7 @@ class UserService:
             raise ForgeError(f"Failed to delete user: {str(e)}", 500)
 
     @validate_params("username")
-    def find_user_by_username(self, username: str) -> Optional[User]:
+    def find_user_by_username(self, username: str, workspace_id: Optional[str] = None) -> Optional[User]:
         """
         Fetches a user by username and returns None when missing.
 
@@ -492,32 +543,42 @@ class UserService:
             ForgeError 500 (database error)
         """
         sql = """
-            SELECT u.user_id, u.username, u.password, u.email, u.first_name, u.last_name, u.tos_accepted, u.eula_accepted, u.status as user_status,
-                u.otp_secret, u.last_log_in, u.two_factor_preference, p.product_name, p.status as product_status, p.last_update,
-                ur.product_role_id, r.role_name, r.role_id
-            FROM users u
-            LEFT JOIN user_roles ur on ur.user_id = u.user_id
-            LEFT JOIN product_roles pr on pr.product_role_id = ur.product_role_id
-            LEFT JOIN products p on p.product_id = pr.product_id
-            LEFT JOIN roles r on r.role_id = pr.role_id
-            WHERE u.username = :username AND (p.status not in ('Inactive') OR p.product_id IS NULL);
+            SELECT
+                user_id,
+                username,
+                password,
+                email,
+                first_name,
+                last_name,
+                tos_accepted,
+                eula_accepted,
+                status AS user_status,
+                otp_secret,
+                last_log_in,
+                two_factor_preference
+            FROM users
+            WHERE username = :username
+            LIMIT 1
         """
         try:
             result = self._sql.execute_query_mappings(sql, {"username": username})
             if not result:
                 return None
-            user = self.map_user_with_products(result)
+            user = self._map_user_row(result[0])
             user.workspaces = [UserWorkspace(**row) for row in self.get_user_workspaces(str(user.user_id))]
-            direct_roles = self._to_role_models(self.get_user_direct_roles(str(user.user_id)))
+            direct_roles = self._to_role_models(
+                self.get_user_direct_roles(str(user.user_id), workspace_id=workspace_id)
+            )
             user.rbac_roles = direct_roles
             user.rbac_role_ids = [role.role_id for role in direct_roles]
+            user.rbac_role_names = [role.role_name for role in direct_roles]
             return user
         except exc.SQLAlchemyError as e:
             logger.error(f"{sql} - {str(e)}")
             raise ForgeError(f"Failed to retrieve user: {str(e)}", 500)
 
     @validate_params("username")
-    def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
+    def get_user_by_username(self, username: str, workspace_id: Optional[str] = None) -> User:
         """
         Fetches a user by username.
         
@@ -529,14 +590,14 @@ class UserService:
         Raises:
             ForgeError 404 (User not found), 500 (database error)
         """
-        user = self.find_user_by_username(username)
+        user = self.find_user_by_username(username, workspace_id=workspace_id)
         if not user:
             logger.error(f"User not found {username}")
             raise ForgeError("User not found", 404)
         return user
 
     @validate_params("user_id")
-    def get_user(self, user_id: str) -> Optional[User]:
+    def get_user(self, user_id: str, workspace_id: Optional[str] = None) -> Optional[User]:
         """
         Fetches a user by user_id.
         
@@ -549,56 +610,121 @@ class UserService:
             ForgeError 404 (User not found), 500 (database error)
         """
         sql = """
-            SELECT u.user_id, u.username, u.password, u.email, u.first_name, u.last_name, u.tos_accepted, u.eula_accepted, u.status as user_status,
-                u.otp_secret, u.last_log_in, u.two_factor_preference, p.product_name, p.product_id,
-                p.status as product_status, p.last_update, ur.product_role_id, r.role_name, r.role_id
-            FROM users u
-            LEFT JOIN user_roles ur on ur.user_id = u.user_id
-            LEFT JOIN product_roles pr on pr.product_role_id = ur.product_role_id
-            LEFT JOIN products p on p.product_id = pr.product_id
-            LEFT JOIN roles r on r.role_id = pr.role_id
-            WHERE u.user_id = :user_id AND (p.status not in ('Inactive') OR p.product_id IS NULL);
+            SELECT
+                user_id,
+                username,
+                password,
+                email,
+                first_name,
+                last_name,
+                tos_accepted,
+                eula_accepted,
+                status AS user_status,
+                otp_secret,
+                last_log_in,
+                two_factor_preference
+            FROM users
+            WHERE user_id = :user_id
+            LIMIT 1
         """
         try:
             result = self._sql.execute_query_mappings(sql, {"user_id": user_id})
             if not result:
                 logger.error(f"User not found {user_id}")
                 raise ForgeError("User not found", 404)
-            user = self.map_user_with_products(result)
-            user.workspaces = [UserWorkspace(**row) for row in self.get_user_workspaces(str(user.user_id))]
-            direct_roles = self._to_role_models(self.get_user_direct_roles(str(user.user_id)))
+            if workspace_id and not self._user_is_visible_in_workspace(str(user_id), workspace_id):
+                logger.error(f"User not found in workspace scope {user_id} {workspace_id}")
+                raise ForgeError("User not found", 404)
+            user = self._map_user_row(result[0])
+            user.workspaces = [
+                UserWorkspace(**row)
+                for row in self.get_user_workspaces(str(user.user_id), scope_workspace_id=workspace_id)
+            ]
+            direct_roles = self._to_role_models(
+                self.get_user_direct_roles(str(user.user_id), workspace_id=workspace_id)
+            )
             user.rbac_roles = direct_roles
             user.rbac_role_ids = [role.role_id for role in direct_roles]
+            user.rbac_role_names = [role.role_name for role in direct_roles]
             return user
         except exc.SQLAlchemyError as e:
             logger.error(f"{sql} - {str(e)}")
             raise ForgeError(f"Failed to retrieve user: {str(e)}", 500)
     
 
-    def get_users(self, status: str = 'All', cursor: Optional[str] = None, limit: int = 10, direction: str = 'forward', username: Optional[str] = None) -> tuple:
-        where_clause = "status = :status OR :status = 'All' AND status is not null"
+    def get_users(
+        self,
+        status: str = 'All',
+        cursor: Optional[str] = None,
+        limit: int = 10,
+        direction: str = 'forward',
+        username: Optional[str] = None,
+        *,
+        workspace_id: Optional[str] = None,
+    ) -> tuple:
+        normalized_workspace_id = str(workspace_id or "").strip() or None
+        where_clauses = ["(:status = 'All' OR u.status = :status)", "u.status IS NOT NULL"]
         params = {"status": status, "limit": limit + 1}  # One extra for pagination check
 
         if username:
-            where_clause += " AND username like :username"
-            params["username"] = f"{username}%"
+            q = str(username or "").strip().lower()
+            where_clauses.append(
+                """
+                (
+                    LOWER(COALESCE(u.username, '')) LIKE :username
+                    OR LOWER(COALESCE(u.email, '')) LIKE :username
+                    OR LOWER(COALESCE(u.first_name, '')) LIKE :username
+                    OR LOWER(COALESCE(u.last_name, '')) LIKE :username
+                    OR LOWER(CONCAT_WS(' ', COALESCE(u.first_name, ''), COALESCE(u.last_name, ''))) LIKE :username
+                )
+                """
+            )
+            params["username"] = f"%{q}%"
+
+        if normalized_workspace_id:
+            where_clauses.append(
+                """
+                (
+                    EXISTS (
+                        SELECT 1
+                        FROM workspace_membership wm
+                        WHERE wm.user_id = u.user_id
+                          AND wm.workspace_id = :workspace_id
+                          AND COALESCE(wm.is_active, 1) = 1
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM workspace w
+                        JOIN organization_membership om
+                          ON om.organization_id = w.organization_id
+                         AND om.user_id = u.user_id
+                         AND COALESCE(om.is_active, 1) = 1
+                        WHERE w.id = :workspace_id
+                          AND COALESCE(w.is_active, 1) = 1
+                    )
+                )
+                """
+            )
+            params["workspace_id"] = normalized_workspace_id
+
+        where_clause = " AND ".join(where_clauses)
 
         if cursor:
             if direction == 'forward':
-                where_clause += " AND user_id > :cursor"
+                where_clause += " AND u.user_id > :cursor"
                 params["cursor"] = cursor
-                order_by = "ORDER BY user_id ASC"
+                order_by = "ORDER BY u.user_id ASC"
             else:
-                where_clause += " AND user_id < :cursor"
+                where_clause += " AND u.user_id < :cursor"
                 params["cursor"] = cursor
-                order_by = "ORDER BY user_id ASC"  # Reverse later
+                order_by = "ORDER BY u.user_id ASC"  # Reverse later
         else:
-            order_by = "ORDER BY user_id ASC"
+            order_by = "ORDER BY u.user_id ASC"
 
         base_user_query = f"""
-            SELECT user_id, username, first_name, last_name, email, status, tos_accepted,
-                eula_accepted, two_factor_preference, last_log_in
-            FROM users
+            SELECT u.user_id, u.username, u.first_name, u.last_name, u.email, u.status, u.tos_accepted,
+                u.eula_accepted, u.two_factor_preference, u.last_log_in
+            FROM users u
             WHERE {where_clause}
             {order_by}
             LIMIT :limit
@@ -613,36 +739,6 @@ class UserService:
         trimmed = base_rows[:limit]
         user_ids = [row["user_id"] for row in trimmed]
 
-        # Get product data for all users in this page
-        user_ids_placeholders = ",".join([f":uid{i}" for i in range(len(user_ids))])
-        extended_query = """
-            SELECT u.user_id, p.product_id, p.product_name, p.product_id, p.status, p.last_update,
-                ur.product_role_id, r.role_id, r.role_name
-            FROM users u
-            LEFT JOIN user_roles ur ON ur.user_id = u.user_id
-            LEFT JOIN product_roles pr ON pr.product_role_id = ur.product_role_id
-            LEFT JOIN products p ON p.product_id = pr.product_id
-            LEFT JOIN roles r ON r.role_id = pr.role_id
-            WHERE (p.status not in ('Inactive') OR p.product_id IS NULL)
-              AND u.user_id IN ({user_ids_placeholders})
-        """
-
-        extended_rows = self._sql.execute_query_mappings(
-            extended_query.format(user_ids_placeholders=user_ids_placeholders),
-            {f"uid{i}": uid for i, uid in enumerate(user_ids)},
-        )
-
-        # Group extended rows by user_id
-        user_map = defaultdict(lambda: {"products": defaultdict(list)})
-        for row in extended_rows:
-            uid = row["user_id"]
-
-            # Products
-            if row["product_id"] and row["product_role_id"] and row["role_id"]:
-                role = Role(role_id=row["role_id"], role_name=row["role_name"])
-                product_role = ProductRole(product_role_id=row["product_role_id"], role=role)
-                user_map[uid]["products"][row["product_id"], row["product_name"], row["status"], row["last_update"]].append(product_role)
-
         workspace_map = self._get_user_workspaces_bulk(user_ids)
 
         # Build full user models
@@ -653,32 +749,21 @@ class UserService:
             row_dict['tos_accepted'] = bool(row_dict.get('tos_accepted'))
             row_dict['eula_accepted'] = bool(row_dict.get('eula_accepted'))
 
-            # Products
-            products = [
-                Product(
-                    product_id=pid,
-                    product_name=pname,
-                    status=status,
-                    last_update=last_update,
-                    roles=proles
-                )
-                for (pid, pname, status, last_update), proles in user_map[uid]["products"].items()
-            ]
-
             # Workspaces
             workspaces = [
                 UserWorkspace(workspace_id=row.get("workspace_id"), is_default=bool(row.get("is_default")))
                 for row in workspace_map.get(str(uid), [])
             ]
 
-            users.append(User(**row_dict, products=products, workspaces=workspaces))
+            users.append(User(**row_dict, workspaces=workspaces))
 
-        direct_roles_map = self.get_direct_roles_for_users(user_ids)
+        direct_roles_map = self.get_direct_roles_for_users(user_ids, workspace_id=workspace_id)
         for user in users:
             role_rows = direct_roles_map.get(str(user.user_id), [])
             role_models = self._to_role_models(role_rows)
             user.rbac_roles = role_models
             user.rbac_role_ids = [role.role_id for role in role_models]
+            user.rbac_role_names = [role.role_name for role in role_models]
 
         # Pagination cursors
         next_cursor = None
@@ -687,22 +772,38 @@ class UserService:
         if len(base_rows) > limit:
             next_cursor = base_rows[limit - 1]["user_id"]
         if direction == 'forward' and cursor:
-            prev_query = "SELECT user_id FROM users WHERE user_id < :cursor AND (:status = 'All' OR status = :status) ORDER BY user_id DESC LIMIT 1"
-            prev_rows = self._sql.execute_query_mappings(prev_query, {"cursor": cursor, "status": status})
+            prev_query = f"""
+                SELECT u.user_id
+                FROM users u
+                WHERE {where_clause.replace('u.user_id > :cursor', 'u.user_id < :cursor')}
+                ORDER BY u.user_id DESC
+                LIMIT 1
+            """
+            prev_rows = self._sql.execute_query_mappings(prev_query, {**params, "limit": None})
             prev_result = prev_rows[0] if prev_rows else None
             if prev_result:
                 prev_cursor = prev_result['user_id']
         elif direction == 'backward' and len(users) > 0:
             next_cursor = users[0].user_id
             users = users[::-1]
-            prev_query = "SELECT user_id FROM users WHERE user_id < :cursor AND (:status = 'All' OR status = :status) ORDER BY user_id DESC LIMIT 1"
-            prev_rows = self._sql.execute_query_mappings(prev_query, {"cursor": users[0].user_id, "status": status})
+            prev_query = f"""
+                SELECT u.user_id
+                FROM users u
+                WHERE {where_clause.replace('u.user_id < :cursor', 'u.user_id < :cursor')}
+                ORDER BY u.user_id DESC
+                LIMIT 1
+            """
+            prev_rows = self._sql.execute_query_mappings(
+                prev_query,
+                {**params, "cursor": users[0].user_id, "limit": None},
+            )
             prev_result = prev_rows[0] if prev_rows else None
             if prev_result:
                 prev_cursor = prev_result['user_id']
 
-        count_query = "SELECT COUNT(*) as count FROM users WHERE :status = 'All' OR status = :status"
-        count_rows = self._sql.execute_query_mappings(count_query, {"status": status})
+        count_query = f"SELECT COUNT(*) as count FROM users u WHERE {' AND '.join(where_clauses)}"
+        count_params = {k: v for k, v in params.items() if k not in {'limit', 'cursor'}}
+        count_rows = self._sql.execute_query_mappings(count_query, count_params)
         total_count = count_rows[0].get("count") if count_rows else 0
 
         return users, next_cursor, prev_cursor, total_count
@@ -786,168 +887,140 @@ class UserService:
             logger.error(f"SQL error during user mapping: {str(e)}")
             raise ForgeError(f"Failed to map user to workspace: {str(e)}", 500)
     
-    @validate_params("user_id", "product")
-    def map_user_product(self, user_id: str, product: str, tx: Optional[ForgeQueryTx] = None):
-        mapping = self.get_user_products(user_id)
-
-        if any(p['product_id'] == product for p in mapping):
-            return None
-        
-
-        try:
-            if tx is None:
-                with self._sql.transaction() as local_tx:
-                    return self.map_user_product(user_id, product, local_tx)
-
-            sql = "INSERT INTO user_product_map (user_id, product_id) VALUES(:user_id, :product_id)"
-            tx.execute_write(sql, {"user_id": user_id, "product_id": product})
-
-            return {
-                "message": "User and product mapped successfully",
-                "mapping": {
-                    "user_id": user_id,
-                    "product_id": product,
-                },
-            }
-
-        except exc.SQLAlchemyError as e:
-            logger.error(f"SQL error during user mapping: {str(e)}")
-            raise ForgeError(f"Failed to map user to product: {str(e)}", 500)
-
-    @validate_params("user_id", "product_role_id")
-    def map_user_product_role(self, user_id: str, product_role_id: str, tx: Optional[ForgeQueryTx] = None):
-        mapping = self.get_user_product_roles(user_id)
-
-        if any(p['product_role_id'] == product_role_id for p in mapping):
-            return None
-        
-
-        try:
-            if tx is None:
-                with self._sql.transaction() as local_tx:
-                    return self.map_user_product_role(user_id, product_role_id, local_tx)
-
-            sql = "INSERT INTO user_roles (user_role_id, user_id, product_role_id) VALUES(null, :user_id, :product_role_id)"
-            tx.execute_write(sql, {"user_id": user_id, "product_role_id": product_role_id})
-
-            return {
-                "message": "User and role mapped successfully",
-                "mapping": {
-                    "user_id": user_id,
-                    "product_role_id": product_role_id,
-                },
-            }
-
-        except exc.SQLAlchemyError as e:
-            logger.error(f"SQL error during user mapping: {str(e)}")
-            raise ForgeError(f"Failed to map user to product: {str(e)}", 500)
-
     @validate_params("user_id")
-    def get_user_product_roles(self, user_id: str):
-        sql = """ 
-            SELECT u.product_role_id, r.role_name, r.role_id
-            FROM user_roles u
-            LEFT JOIN product_roles pr on pr.product_role_id = u.product_role_id
-            LEFT JOIN roles r on r.role_id = pr.role_id
-            LEFT JOIN products p on p.product_id = pr.product_id
-            WHERE user_id = :user_id AND p.status not in ('Inactive')
-        """
-
-        try:
-            results = self._sql.execute_query_mappings(sql, {"user_id": user_id})
-            return [dict(row) for row in results]
-        except exc.SQLAlchemyError as e:
-            logger.error(f"Error fetching roles for user_id={user_id}: {str(e)}")
-            raise ForgeError(f"Failed to retrieve user roles: {str(e)}", 500)
-
-    @validate_params("user_id")
-    def get_user_direct_roles(self, user_id: str) -> List[Dict[str, Any]]:
+    def get_user_direct_roles(self, user_id: str, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        normalized_workspace_id = str(workspace_id or "").strip() or None
         sql = """
-            SELECT ugr.role_id, r.role_name
-            FROM user_global_roles ugr
-            JOIN roles r ON r.role_id = ugr.role_id
-            WHERE ugr.user_id = :user_id
-            ORDER BY r.role_name
+            SELECT
+                CAST(r.id AS CHAR) AS role_id,
+                r.name AS role_name,
+                r.display_name,
+                r.description,
+                r.feature_key,
+                r.is_system
+            FROM user_roles ur
+            JOIN roles r ON r.id = ur.role_id
+            WHERE ur.user_id = :user_id
+              AND (
+                    (ur.workspace_id <=> :workspace_id)
+                 OR (ur.workspace_id IS NULL AND r.name = 'super_admin')
+              )
+            ORDER BY r.name
         """
         try:
-            return [dict(row) for row in self._sql.execute_query_mappings(sql, {"user_id": user_id})]
+            return [
+                dict(row)
+                for row in self._sql.execute_query_mappings(
+                    sql,
+                    {"user_id": user_id, "workspace_id": normalized_workspace_id},
+                )
+            ]
         except exc.SQLAlchemyError as e:
             logger.error(f"Error fetching direct roles for user_id={user_id}: {str(e)}")
             raise ForgeError(f"Failed to retrieve user direct roles: {str(e)}", 500)
 
-    @validate_params("user_id", "role_id")
-    def add_user_direct_role(self, user_id: str, role_id: str, tx: Optional[ForgeQueryTx] = None) -> Dict[str, Any]:
+    @validate_params("user_id", "role_name")
+    def add_user_direct_role(
+        self,
+        user_id: str,
+        role_name: str,
+        workspace_id: Optional[str] = None,
+        tx: Optional[ForgeQueryTx] = None,
+    ) -> Dict[str, Any]:
         uid = str(user_id or "").strip()
-        rid = str(role_id or "").strip()
+        role_name = str(role_name or "").strip()
         self._assert_user_exists(uid)
-        self._assert_role_exists(rid)
+        role = self.get_role_by_name(role_name)
+        role_id = int(role.get("id") or role.get("role_id"))
+        normalized_workspace_id = self._normalize_role_workspace(role_name, workspace_id)
 
         try:
             if tx is None:
+                result: Dict[str, Any]
                 with self._sql.transaction() as local_tx:
                     exists_rows = local_tx.execute_query_mappings(
                         """
-                        SELECT user_global_role_id
-                        FROM user_global_roles
-                        WHERE user_id = :user_id AND role_id = :role_id
+                        SELECT id
+                        FROM user_roles
+                        WHERE user_id = :user_id
+                          AND role_id = :role_id
+                          AND workspace_id <=> :workspace_id
                         LIMIT 1
                         """,
-                        {"user_id": uid, "role_id": rid},
+                        {
+                            "user_id": uid,
+                            "role_id": role_id,
+                            "workspace_id": normalized_workspace_id,
+                        },
                     )
                     if exists_rows:
-                        role = self.get_role_by_id(rid)
-                        return {
+                        result = {
                             "user_id": uid,
-                            "role_id": rid,
-                            "role_name": role.get("role_name"),
+                            "workspace_id": normalized_workspace_id,
+                            "role_name": role_name,
                             "created": False,
                         }
+                    else:
+                        local_tx.execute_write(
+                            """
+                            INSERT INTO user_roles (user_id, workspace_id, role_id)
+                            VALUES (:user_id, :workspace_id, :role_id)
+                            """,
+                            {
+                                "user_id": uid,
+                                "workspace_id": normalized_workspace_id,
+                                "role_id": role_id,
+                            },
+                        )
+                        result = {
+                            "user_id": uid,
+                            "workspace_id": normalized_workspace_id,
+                            "role_name": role_name,
+                            "created": True,
+                        }
 
-                    local_tx.execute_write(
-                        """
-                        INSERT INTO user_global_roles (user_id, role_id)
-                        VALUES (:user_id, :role_id)
-                        """,
-                        {"user_id": uid, "role_id": rid},
-                    )
-                    role = self.get_role_by_id(rid)
-                    return {
-                        "user_id": uid,
-                        "role_id": rid,
-                        "role_name": role.get("role_name"),
-                        "created": True,
-                    }
+                from app.services.rbac_service import invalidate_user_roles
+                invalidate_user_roles(uid, workspace_id=normalized_workspace_id)
+                return result
 
             exists_rows = tx.execute_query_mappings(
                 """
-                SELECT user_global_role_id
-                FROM user_global_roles
-                WHERE user_id = :user_id AND role_id = :role_id
+                SELECT id
+                FROM user_roles
+                WHERE user_id = :user_id
+                  AND role_id = :role_id
+                  AND workspace_id <=> :workspace_id
                 LIMIT 1
                 """,
-                {"user_id": uid, "role_id": rid},
+                {
+                    "user_id": uid,
+                    "role_id": role_id,
+                    "workspace_id": normalized_workspace_id,
+                },
             )
             if exists_rows:
-                role = self.get_role_by_id(rid)
                 return {
                     "user_id": uid,
-                    "role_id": rid,
-                    "role_name": role.get("role_name"),
+                    "workspace_id": normalized_workspace_id,
+                    "role_name": role_name,
                     "created": False,
                 }
 
             tx.execute_write(
                 """
-                INSERT INTO user_global_roles (user_id, role_id)
-                VALUES (:user_id, :role_id)
+                INSERT INTO user_roles (user_id, workspace_id, role_id)
+                VALUES (:user_id, :workspace_id, :role_id)
                 """,
-                {"user_id": uid, "role_id": rid},
+                {
+                    "user_id": uid,
+                    "workspace_id": normalized_workspace_id,
+                    "role_id": role_id,
+                },
             )
-            role = self.get_role_by_id(rid)
             return {
                 "user_id": uid,
-                "role_id": rid,
-                "role_name": role.get("role_name"),
+                "workspace_id": normalized_workspace_id,
+                "role_name": role_name,
                 "created": True,
             }
         except ForgeError:
@@ -956,43 +1029,70 @@ class UserService:
             logger.error(f"Error adding direct role for user_id={uid}: {str(e)}")
             raise ForgeError(f"Failed to add user direct role: {str(e)}", 500)
 
-    @validate_params("user_id", "role_id")
-    def remove_user_direct_role(self, user_id: str, role_id: str, tx: Optional[ForgeQueryTx] = None) -> Dict[str, Any]:
+    @validate_params("user_id", "role_name")
+    def remove_user_direct_role(
+        self,
+        user_id: str,
+        role_name: str,
+        workspace_id: Optional[str] = None,
+        tx: Optional[ForgeQueryTx] = None,
+    ) -> Dict[str, Any]:
         uid = str(user_id or "").strip()
-        rid = str(role_id or "").strip()
+        role_name = str(role_name or "").strip()
         self._assert_user_exists(uid)
+        role = self.get_role_by_name(role_name)
+        role_id = int(role.get("id") or role.get("role_id"))
+        normalized_workspace_id = self._normalize_role_workspace(role_name, workspace_id)
 
         try:
             if tx is None:
+                result: Dict[str, Any]
                 with self._sql.transaction() as local_tx:
                     deleted = local_tx.execute_write(
                         """
-                        DELETE FROM user_global_roles
-                        WHERE user_id = :user_id AND role_id = :role_id
+                        DELETE FROM user_roles
+                        WHERE user_id = :user_id
+                          AND role_id = :role_id
+                          AND workspace_id <=> :workspace_id
                         """,
-                        {"user_id": uid, "role_id": rid},
+                        {
+                            "user_id": uid,
+                            "role_id": role_id,
+                            "workspace_id": normalized_workspace_id,
+                        },
                     )
                     if int(deleted or 0) == 0:
                         raise ForgeError("User direct role mapping not found", 404)
-                    return {
+                    result = {
                         "user_id": uid,
-                        "role_id": rid,
+                        "workspace_id": normalized_workspace_id,
+                        "role_name": role_name,
                         "deleted": True,
                     }
+                from app.services.rbac_service import invalidate_user_roles
+                invalidate_user_roles(uid, workspace_id=normalized_workspace_id)
+                return result
 
             deleted = tx.execute_write(
                 """
-                DELETE FROM user_global_roles
-                WHERE user_id = :user_id AND role_id = :role_id
+                DELETE FROM user_roles
+                WHERE user_id = :user_id
+                  AND role_id = :role_id
+                  AND workspace_id <=> :workspace_id
                 """,
-                {"user_id": uid, "role_id": rid},
+                {
+                    "user_id": uid,
+                    "role_id": role_id,
+                    "workspace_id": normalized_workspace_id,
+                },
             )
             if int(deleted or 0) == 0:
                 raise ForgeError("User direct role mapping not found", 404)
 
             return {
                 "user_id": uid,
-                "role_id": rid,
+                "workspace_id": normalized_workspace_id,
+                "role_name": role_name,
                 "deleted": True,
             }
         except ForgeError:
@@ -1002,30 +1102,43 @@ class UserService:
             raise ForgeError(f"Failed to remove user direct role: {str(e)}", 500)
 
     @validate_params("user_id")
-    def replace_user_direct_roles(self, user_id: str, role_ids: List[str]) -> Dict[str, Any]:
+    def replace_user_direct_roles(
+        self,
+        user_id: str,
+        role_names: List[str],
+        workspace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         uid = str(user_id or "").strip()
         self._assert_user_exists(uid)
 
-        normalized_role_ids: List[str] = []
+        normalized_role_names: List[str] = []
         seen = set()
-        for role_id in role_ids or []:
-            rid = str(role_id or "").strip()
-            if not rid:
+        for role_name in role_names or []:
+            name = str(role_name or "").strip()
+            if not name:
                 continue
-            if rid in seen:
+            if name in seen:
                 continue
-            seen.add(rid)
-            normalized_role_ids.append(rid)
+            seen.add(name)
+            normalized_role_names.append(name)
 
-        for rid in normalized_role_ids:
-            self._assert_role_exists(rid)
+        for name in normalized_role_names:
+            self._assert_role_exists(name)
 
         try:
             with self._sql.transaction() as tx:
-                self._sync_user_direct_roles(tx, uid, normalized_role_ids)
-            roles = self.get_user_direct_roles(uid)
+                self._sync_user_direct_roles(
+                    tx,
+                    uid,
+                    normalized_role_names,
+                    workspace_id=workspace_id,
+                )
+            from app.services.rbac_service import invalidate_user_roles
+            invalidate_user_roles(uid, workspace_id=str(workspace_id or "").strip() or None)
+            roles = self.get_user_direct_roles(uid, workspace_id=workspace_id)
             return {
                 "user_id": uid,
+                "workspace_id": str(workspace_id or "").strip() or None,
                 "roles": roles,
                 "count": len(roles),
             }
@@ -1035,22 +1148,34 @@ class UserService:
             logger.error(f"Error replacing direct roles for user_id={uid}: {str(e)}")
             raise ForgeError(f"Failed to replace user direct roles: {str(e)}", 500)
 
-    @validate_params("user_id", "old_role_id", "new_role_id")
-    def update_user_direct_role(self, user_id: str, old_role_id: str, new_role_id: str) -> Dict[str, Any]:
+    @validate_params("user_id", "old_role_name", "new_role_name")
+    def update_user_direct_role(
+        self,
+        user_id: str,
+        old_role_name: str,
+        new_role_name: str,
+        workspace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         uid = str(user_id or "").strip()
-        old_rid = str(old_role_id or "").strip()
-        new_rid = str(new_role_id or "").strip()
+        old_role_name = str(old_role_name or "").strip()
+        new_role_name = str(new_role_name or "").strip()
         self._assert_user_exists(uid)
-        self._assert_role_exists(new_rid)
+        self._assert_role_exists(new_role_name)
 
         try:
             with self._sql.transaction() as tx:
-                self.remove_user_direct_role(uid, old_rid, tx=tx)
-                created = self.add_user_direct_role(uid, new_rid, tx=tx)
+                self.remove_user_direct_role(uid, old_role_name, workspace_id=workspace_id, tx=tx)
+                created = self.add_user_direct_role(uid, new_role_name, workspace_id=workspace_id, tx=tx)
+            from app.services.rbac_service import invalidate_user_roles
+            invalidate_user_roles(
+                uid,
+                workspace_id=self._normalize_role_workspace(new_role_name, workspace_id),
+            )
             return {
                 "user_id": uid,
-                "old_role_id": old_rid,
-                "new_role_id": new_rid,
+                "workspace_id": str(workspace_id or "").strip() or None,
+                "old_role_name": old_role_name,
+                "new_role_name": new_role_name,
                 "created": bool(created.get("created")),
             }
         except ForgeError:
@@ -1059,18 +1184,35 @@ class UserService:
             logger.error(f"Error updating direct role for user_id={uid}: {str(e)}")
             raise ForgeError(f"Failed to update user direct role: {str(e)}", 500)
 
-    def get_direct_roles_for_users(self, user_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+    def get_direct_roles_for_users(
+        self,
+        user_ids: List[str],
+        workspace_id: Optional[str] = None,
+    ) -> Dict[str, List[Dict[str, Any]]]:
         ids = [str(uid or "").strip() for uid in user_ids if str(uid or "").strip()]
         if not ids:
             return {}
+        normalized_workspace_id = str(workspace_id or "").strip() or None
         placeholders = ",".join([f":uid{i}" for i in range(len(ids))])
         params = {f"uid{i}": uid for i, uid in enumerate(ids)}
+        params["workspace_id"] = normalized_workspace_id
         sql = f"""
-            SELECT ugr.user_id, ugr.role_id, r.role_name
-            FROM user_global_roles ugr
-            JOIN roles r ON r.role_id = ugr.role_id
-            WHERE ugr.user_id IN ({placeholders})
-            ORDER BY ugr.user_id, r.role_name
+            SELECT
+                ur.user_id,
+                CAST(r.id AS CHAR) AS role_id,
+                r.name AS role_name,
+                r.display_name,
+                r.description,
+                r.feature_key,
+                r.is_system
+            FROM user_roles ur
+            JOIN roles r ON r.id = ur.role_id
+            WHERE ur.user_id IN ({placeholders})
+              AND (
+                    (ur.workspace_id <=> :workspace_id)
+                 OR (ur.workspace_id IS NULL AND r.name = 'super_admin')
+              )
+            ORDER BY ur.user_id, r.name
         """
         try:
             rows = self._sql.execute_query_mappings(sql, params)
@@ -1082,33 +1224,36 @@ class UserService:
         for row in rows:
             uid = str(row.get("user_id") or "").strip()
             if uid:
-                out[uid].append({"role_id": row.get("role_id"), "role_name": row.get("role_name")})
+                out[uid].append(dict(row))
         return out
 
     @validate_params("user_id")
-    def get_user_effective_roles(self, user_id: str) -> List[Dict[str, Any]]:
-        roles_by_id: Dict[str, Dict[str, Any]] = {}
-        for row in self.get_user_product_roles(user_id):
-            rid = str(row.get("role_id") or "").strip()
-            if rid and rid not in roles_by_id:
-                roles_by_id[rid] = {"role_id": rid, "role_name": row.get("role_name")}
-        for row in self.get_user_direct_roles(user_id):
-            rid = str(row.get("role_id") or "").strip()
-            if rid and rid not in roles_by_id:
-                roles_by_id[rid] = {"role_id": rid, "role_name": row.get("role_name")}
-        values = list(roles_by_id.values())
-        values.sort(key=lambda item: str(item.get("role_name") or ""))
-        return values
+    def get_user_effective_roles(self, user_id: str, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        from app.services.rbac_service import get_effective_roles
 
-    def get_role_by_id(self, role_id: str) -> Dict[str, Any]:
+        role_names = sorted(get_effective_roles(str(user_id or "").strip(), workspace_id=workspace_id))
+        if not role_names:
+            return []
+
+        roles_by_name = self._get_roles_by_names(role_names)
+        return [roles_by_name[name] for name in role_names if name in roles_by_name]
+
+    def get_role_by_name(self, role_name: str) -> Dict[str, Any]:
         rows = self._sql.execute_query_mappings(
             """
-            SELECT role_id, role_name
+            SELECT
+                id,
+                CAST(id AS CHAR) AS role_id,
+                name AS role_name,
+                display_name,
+                description,
+                feature_key,
+                is_system
             FROM roles
-            WHERE role_id = :role_id
+            WHERE name = :role_name
             LIMIT 1
             """,
-            {"role_id": str(role_id)},
+            {"role_name": str(role_name)},
         )
         if not rows:
             raise ForgeError("Role not found", 404)
@@ -1127,22 +1272,22 @@ class UserService:
         if not rows:
             raise ForgeError("User not found", 404)
 
-    def _assert_role_exists(self, role_id: str) -> None:
+    def _assert_role_exists(self, role_name: str) -> None:
         rows = self._sql.execute_query_mappings(
             """
-            SELECT role_id
+            SELECT id
             FROM roles
-            WHERE role_id = :role_id
+            WHERE name = :role_name
             LIMIT 1
             """,
-            {"role_id": str(role_id)},
+            {"role_name": str(role_name)},
         )
         if not rows:
             raise ForgeError("Role not found", 404)
 
     @validate_params("user_id")
-    def get_user_effective_role_names(self, user_id: str) -> List[str]:
-        roles = self.get_user_effective_roles(user_id)
+    def get_user_effective_role_names(self, user_id: str, workspace_id: Optional[str] = None) -> List[str]:
+        roles = self.get_user_effective_roles(user_id, workspace_id=workspace_id)
         names: List[str] = []
         seen = set()
         for row in roles:
@@ -1155,24 +1300,6 @@ class UserService:
             seen.add(key)
             names.append(role_name)
         return names
-
-    @validate_params("user_id")
-    def get_user_products(self, user_id: str):
-        sql = """
-            SELECT p.product_id, p.product_name 
-            FROM user_product_map upm 
-            JOIN products p ON upm.product_id = p.product_id 
-            WHERE user_id = :user_id AND p.status not in ('Inactive')
-        """
-
-        try:
-            results = self._sql.execute_query_mappings(sql, {"user_id": user_id})
-            return [dict(row) for row in results]
-        except exc.SQLAlchemyError as e:
-            logger.error(f"Error fetching products for user_id={user_id}: {str(e)}")
-            raise ForgeError(f"Failed to retrieve user products: {str(e)}", 500)
-
-    
 
     @validate_params("user_id", "workspace_id", "is_default")
     def set_workspace_default(self, user_id: str, workspace_id: str, is_default: bool) -> Dict[str, str]:
@@ -1244,7 +1371,7 @@ class UserService:
             raise ForgeError(f"Failed to update workspace mapping: {str(e)}", 500)
 
     @validate_params("user_id")
-    def get_user_workspaces(self, user_id: str) -> List[Dict[str, Any]]:
+    def get_user_workspaces(self, user_id: str, scope_workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Retrieves all workspaces for a given user in a single query.
         
@@ -1257,6 +1384,13 @@ class UserService:
             ForgeError 500 (database error)
 
         """
+        effective_role_names = {
+            str(role_name or "").strip().lower()
+            for role_name in self.get_user_effective_role_names(user_id)
+        }
+        include_all_workspaces = "super_admin" in effective_role_names
+        scope_workspace_value = str(scope_workspace_id or "").strip() or None
+
         sql = """
             SELECT workspace_id, MAX(is_default) AS is_default
             FROM (
@@ -1269,6 +1403,7 @@ class UserService:
                  AND COALESCE(w.is_active, 1) = 1
                 WHERE wm.user_id = :user_id
                   AND COALESCE(wm.is_active, 1) = 1
+                  AND (:scope_workspace_id IS NULL OR wm.workspace_id = :scope_workspace_id)
 
                 UNION ALL
 
@@ -1284,12 +1419,31 @@ class UserService:
                  AND COALESCE(w.is_active, 1) = 1
                 WHERE om.user_id = :user_id
                   AND COALESCE(om.is_active, 1) = 1
+                  AND (:scope_workspace_id IS NULL OR w.id = :scope_workspace_id)
+        """
+        if include_all_workspaces:
+            sql += """
+
+                UNION ALL
+
+                SELECT
+                    w.id AS workspace_id,
+                    0 AS is_default
+                FROM workspace w
+                WHERE COALESCE(w.is_active, 1) = 1
+                  AND (:scope_workspace_id IS NULL OR w.id = :scope_workspace_id)
+            """
+
+        sql += """
             ) access_rows
             GROUP BY workspace_id
             ORDER BY is_default DESC, workspace_id ASC
         """
         try:
-            result = self._sql.execute_query_mappings(sql, {"user_id": user_id})
+            result = self._sql.execute_query_mappings(
+                sql,
+                {"user_id": user_id, "scope_workspace_id": scope_workspace_value},
+            )
             rows = [dict(row) for row in result]
             if not rows:
                 return []
@@ -1310,6 +1464,31 @@ class UserService:
         except exc.SQLAlchemyError as e:
             logger.error(f"{sql} - {str(e)}")
             raise ForgeError(f"Failed to retrieve user workspaces: {str(e)}", 500)
+
+    def _user_is_visible_in_workspace(self, user_id: str, workspace_id: str) -> bool:
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT 1
+            FROM workspace_membership wm
+            WHERE wm.user_id = :user_id
+              AND wm.workspace_id = :workspace_id
+              AND COALESCE(wm.is_active, 1) = 1
+
+            UNION ALL
+
+            SELECT 1
+            FROM workspace w
+            JOIN organization_membership om
+              ON om.organization_id = w.organization_id
+             AND om.user_id = :user_id
+             AND COALESCE(om.is_active, 1) = 1
+            WHERE w.id = :workspace_id
+              AND COALESCE(w.is_active, 1) = 1
+            LIMIT 1
+            """,
+            {"user_id": str(user_id or "").strip(), "workspace_id": str(workspace_id or "").strip()},
+        )
+        return bool(rows)
 
     def _get_user_workspaces_bulk(self, user_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
         out: Dict[str, List[Dict[str, Any]]] = {}
@@ -1372,11 +1551,7 @@ class UserService:
             logger.error(f"{sql} - {str(e)}")
             raise ForgeError(f"Failed to retrieve user workspaces: {str(e)}", 500)
 
-    def map_user_with_products(self, rows: List[dict]) -> User:
-        if not rows:
-            raise ValueError("No data returned from query")
-
-        base_row = rows[0]
+    def _map_user_row(self, base_row: Dict[str, Any]) -> User:
         user_data = {
             "user_id": base_row["user_id"],
             "user_name": base_row.get("username"),
@@ -1392,74 +1567,7 @@ class UserService:
          
             "last_log_in": base_row.get("last_log_in")
         }
-
-        # Group products and roles
-        product_map = {}
-
-        for row in rows:
-            # Expect these columns from your SQLAlchemy row:
-            # row["product_id"], row["product_name"], row["product_role_id"],
-            # row["role_id"], row["role_name"]
-            pid = row.get("product_id")
-            pname = row.get("product_name")
-            last_update = row.get("last_update")
-            prod_role_id = row.get("product_role_id")
-            product_status = row.get("product_status")
-            role_id = row.get("role_id")
-            role_name = row.get("role_name")
-
-            # Skip incomplete rows
-            if not (pid and pname and prod_role_id and role_name):
-                continue
-
-            # init bucket
-            if pid not in product_map:
-                product_map[pid] = {"name": pname, "status": product_status, "last_update": last_update, "roles": [], "seen": set()}
-
-            # de-dupe product roles per product
-            if prod_role_id in product_map[pid]["seen"]:
-                continue
-
-            role = Role(
-                role_id=role_id,
-                role_name=role_name
-            )
-            product_role = ProductRole(
-                product_role_id=prod_role_id,
-                role=role
-            )
-
-            product_map[pid]["roles"].append(product_role)
-            product_map[pid]["seen"].add(prod_role_id)
-
-        # build Products
-        products = [
-            Product(
-                product_id=pid,
-                product_name=bucket["name"],
-                status=bucket["status"],
-                last_update=bucket["last_update"],
-                roles=bucket["roles"]
-            )
-            for pid, bucket in product_map.items()
-        ]
-
-        workspaces = []
-        seen_workspace_ids = set()
-        for row in rows:
-            org_id = row.get("workspace_id")
-            if org_id and org_id not in seen_workspace_ids:
-                workspaces.append(UserWorkspace(
-                    workspace_id=org_id,
-                    is_default=row.get("is_default", False)
-                ))
-                seen_workspace_ids.add(org_id)
-
-        return User(
-            **user_data,
-            products=products,
-            workspaces=workspaces
-        )
+        return User(**user_data, workspaces=[])
 
     @staticmethod
     def _to_role_models(rows: List[Dict[str, Any]]) -> List[Role]:

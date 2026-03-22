@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
@@ -67,7 +67,7 @@ class SemanticAssignmentService:
                     "semantic_source": (str(source).strip().lower() if source is not None else None),
                     "semantic_confidence": float(confidence) if confidence is not None else None,
                     "semantic_reasons_json": json.dumps(reasons or []),
-                    "semantic_assigned_at": datetime.utcnow(),
+                    "semantic_assigned_at": datetime.now(timezone.utc),
                 },
             )
         return affected

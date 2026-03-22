@@ -48,6 +48,45 @@ def test_domains_get_forbidden_workspace(client, monkeypatch):
     assert "workspace" in resp.json["error"].lower()
 
 
+def test_domains_get_allows_super_admin_without_workspace_membership(client, monkeypatch):
+    import app.decorators.security as security
+    import app.services.rbac_service as rbac_service
+
+    monkeypatch.setattr(
+        security.auth_service,
+        "verify_token",
+        lambda _token: {"sub": "admin-1", "username": "admin-1"},
+    )
+
+    def _deny_workspace_access(*, user_id: str, workspace_id: str) -> str:
+        raise AssertionError("workspace membership should not be checked for super_admin")
+
+    monkeypatch.setattr(
+        "app.decorators.security.workspace_access_service.assert_workspace_access",
+        _deny_workspace_access,
+    )
+    monkeypatch.setattr(
+        rbac_service,
+        "get_effective_roles",
+        lambda user_id, workspace_id=None: {"super_admin"},
+    )
+
+    class _Svc:
+        def list_user_domains(self, *, workspace_id: str, user_id: str):
+            assert workspace_id == "ws-9"
+            assert user_id == "admin-1"
+            return [{"id": 1, "name": "Domain"}]
+
+    monkeypatch.setattr(domain_routes, "UserDomainReadService", _Svc)
+
+    resp = client.get(
+        "/api/v1/domains/",
+        headers={"Authorization": "Bearer token-1", "X-Workspace-Id": "ws-9"},
+    )
+    assert resp.status_code == 200
+    assert resp.json["rows"][0]["name"] == "Domain"
+
+
 def test_domains_get_service_error(client, auth_headers, monkeypatch):
     class _Svc:
         def list_user_domains(self, *, workspace_id: str, user_id: str):
@@ -58,6 +97,114 @@ def test_domains_get_service_error(client, auth_headers, monkeypatch):
     resp = client.get("/api/v1/domains/", headers=auth_headers)
     assert resp.status_code == 418
     assert resp.json["error"] == "nope"
+
+
+def test_domain_recommendations_generate_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def generate_recommendations(self, *, workspace_id, max_domains, max_tables, llm_id):
+            assert workspace_id == "ws-1"
+            assert max_domains == 8
+            assert max_tables == 150
+            assert llm_id == 12
+            return {
+                "workspace_id": workspace_id,
+                "generated_at": "2026-03-19T21:00:00Z",
+                "recommendations": [
+                    {
+                        "key": "student_demographics",
+                        "name": "Student Demographics",
+                        "description": "Core student context.",
+                        "table_names": ["dim_student"],
+                        "confidence": 0.91,
+                        "rationale": ["student grain"],
+                        "needs_review": False,
+                    }
+                ],
+                "unassigned_tables": ["dim_subgroup"],
+                "warnings": [],
+            }
+
+    monkeypatch.setattr(domain_routes, "DomainRecommendationService", _Svc)
+
+    resp = client.post(
+        "/api/v1/domains/recommendations/generate",
+        headers=auth_headers,
+        json={"max_domains": 8, "max_tables": 150, "llm_id": 12},
+    )
+    assert resp.status_code == 200
+    assert resp.json["recommendations"][0]["name"] == "Student Demographics"
+    assert resp.json["unassigned_tables"] == ["dim_subgroup"]
+
+
+def test_domain_recommendations_generate_invalid_llm_id(client, auth_headers):
+    resp = client.post(
+        "/api/v1/domains/recommendations/generate",
+        headers=auth_headers,
+        json={"llm_id": "abc"},
+    )
+    assert resp.status_code == 400
+    assert "llm_id must be an integer" in resp.json["error"]
+
+
+def test_domain_recommendations_apply_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def apply_recommendations(
+            self,
+            *,
+            workspace_id,
+            user_id,
+            recommendations,
+            mode,
+            column_name_policy,
+        ):
+            assert workspace_id == "ws-1"
+            assert user_id == "user-1"
+            assert mode == "create_only"
+            assert column_name_policy == "DEDUP_PRIMARY_FIRST"
+            assert recommendations[0]["name"] == "Student Demographics"
+            return {
+                "created_domains": [{"domain_id": 14, "name": "Student Demographics"}],
+                "merged_domains": [],
+                "assigned_tables": 3,
+                "warnings": [],
+            }
+
+    monkeypatch.setattr(domain_routes, "DomainRecommendationService", _Svc)
+
+    resp = client.post(
+        "/api/v1/domains/recommendations/apply",
+        headers=auth_headers,
+        json={
+            "mode": "create_only",
+            "column_name_policy": "DEDUP_PRIMARY_FIRST",
+            "recommendations": [
+                {
+                    "name": "Student Demographics",
+                    "description": "Core student context.",
+                    "table_names": ["dim_student", "dim_student_school", "fct_student_school_association"],
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json["created_domains"][0]["domain_id"] == 14
+    assert resp.json["assigned_tables"] == 3
+
+
+def test_domain_recommendations_apply_service_error(client, auth_headers, monkeypatch):
+    class _Svc:
+        def apply_recommendations(self, **kwargs):
+            raise ForgeError("duplicate tables", status_code=400)
+
+    monkeypatch.setattr(domain_routes, "DomainRecommendationService", _Svc)
+
+    resp = client.post(
+        "/api/v1/domains/recommendations/apply",
+        headers=auth_headers,
+        json={"recommendations": [{"name": "A", "table_names": ["t1"]}]},
+    )
+    assert resp.status_code == 400
+    assert resp.json["error"] == "duplicate tables"
 
 
 def test_domains_requires_auth(client):

@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
-from app.decorators.rbac import public, require_role
+from app.decorators.rbac import public, require_admin, require_role
 from app.exceptions.forge_error import ForgeError
 from app.models.domain.domain_profile import (
     DomainProfileCreateRequest,
@@ -253,7 +253,7 @@ class ShowHealth(ForgeResource):
 @admin_ns.route("/health/detailed")
 class DetailedHealth(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def get(self):
         try:
             _require_admin()
@@ -289,10 +289,9 @@ class BrokerHealth(ForgeResource):
 @admin_ns.route("/pipeline-profiles")
 class PipelineProfileList(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def get(self):
         try:
-            _require_admin()
             from app.services.planner_domain import PlannerDomainService
 
             limit = request.args.get("limit", 50, type=int)
@@ -312,10 +311,9 @@ class PipelineProfileList(ForgeResource):
 @admin_ns.route("/prompt-feedback")
 class AdminPromptFeedbackList(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def get(self):
         try:
-            _require_admin()
             workspace_id = extract_workspace_id()
             limit = request.args.get("limit", default=100, type=int) or 100
             offset = request.args.get("offset", default=0, type=int) or 0
@@ -350,10 +348,9 @@ class AdminPromptFeedbackList(ForgeResource):
 @admin_ns.route("/prompt-feedback/<int:feedback_id>")
 class AdminPromptFeedbackDelete(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def delete(self, feedback_id: int):
         try:
-            _require_admin()
             workspace_id = extract_workspace_id()
             result = PromptFeedbackService().delete_feedback(
                 workspace_id=workspace_id,
@@ -374,7 +371,7 @@ class AdminPromptFeedbackDelete(ForgeResource):
 @admin_ns.route("/vector/semantic-concepts/rebuild")
 class RebuildSemanticConceptVectors(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def post(self):
         try:
             _require_admin()
@@ -391,7 +388,7 @@ class RebuildSemanticConceptVectors(ForgeResource):
 @admin_ns.route("/vector/domains/reindex")
 class ReindexDomainVectors(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def post(self):
         try:
             _require_admin()
@@ -422,7 +419,7 @@ class ReindexDomainVectors(ForgeResource):
 @admin_ns.route("/vector/embeddings/rebuild")
 class RebuildEmbeddingVectors(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def post(self):
         try:
             _require_admin()
@@ -519,10 +516,9 @@ class RebuildAllVectors(ForgeResource):
 @admin_ns.route("/domain-profiles")
 class DomainProfileList(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def get(self):
         try:
-            _require_admin()
             workspace_id = extract_workspace_id()
             profiles = DomainProfileService().list_profiles(workspace_id)
             return {"profiles": profiles, "count": len(profiles)}, 200
@@ -533,11 +529,10 @@ class DomainProfileList(ForgeResource):
             return {"error": "domain profile list failed"}, 500
 
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     @admin_ns.expect(domain_profile_model, validate=False)
     def post(self):
         try:
-            _require_admin()
             body = request.get_json(silent=True) or {}
             workspace_id = extract_workspace_id()
             body["workspace_id"] = workspace_id
@@ -554,10 +549,9 @@ class DomainProfileList(ForgeResource):
 @admin_ns.route("/domain-profiles/<int:domain_id>")
 class DomainProfileDetail(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def get(self, domain_id: int):
         try:
-            _require_admin()
             workspace_id = extract_workspace_id()
             result = DomainProfileService().get_profile(workspace_id, domain_id)
             return result, 200
@@ -568,11 +562,10 @@ class DomainProfileDetail(ForgeResource):
             return {"error": "domain profile get failed"}, 500
 
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     @admin_ns.expect(domain_profile_model, validate=False)
     def put(self, domain_id: int):
         try:
-            _require_admin()
             body = request.get_json(silent=True) or {}
             workspace_id = extract_workspace_id()
             req = DomainProfileUpdateRequest(**body)
@@ -585,10 +578,9 @@ class DomainProfileDetail(ForgeResource):
             return {"error": "domain profile update failed"}, 500
 
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def delete(self, domain_id: int):
         try:
-            _require_admin()
             workspace_id = extract_workspace_id()
             result = DomainProfileService().delete_profile(workspace_id, domain_id)
             return result, 200
@@ -602,11 +594,10 @@ class DomainProfileDetail(ForgeResource):
 @admin_ns.route("/domain-profiles/<int:domain_id>/generate")
 class DomainProfileGenerateOne(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     @admin_ns.expect(domain_profile_generate_one_model, validate=False)
     def post(self, domain_id: int):
         try:
-            _require_admin()
             body = request.get_json(silent=True) or {}
             req = DomainProfileGenerateOneRequest(**body)
             workspace_id = extract_workspace_id()
@@ -629,11 +620,10 @@ class DomainProfileGenerateOne(ForgeResource):
 @admin_ns.route("/domain-profiles/generate")
 class DomainProfileGenerateBatch(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     @admin_ns.expect(domain_profile_generate_batch_model, validate=False)
     def post(self):
         try:
-            _require_admin()
             body = request.get_json(silent=True) or {}
             req = DomainProfileGenerateRequest(**body)
             workspace_id = extract_workspace_id()
@@ -656,11 +646,10 @@ class DomainProfileGenerateBatch(ForgeResource):
 @admin_ns.route("/domain-profiles/generate-all")
 class DomainProfileGenerateAll(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     @admin_ns.expect(domain_profile_generate_all_model, validate=False)
     def post(self):
         try:
-            _require_admin()
             body = request.get_json(silent=True) or {}
             req = DomainProfileGenerateAllRequest(**body)
             workspace_id = extract_workspace_id()
@@ -687,7 +676,7 @@ class DomainProfileGenerateAll(ForgeResource):
 @admin_ns.route("/semantic-catalog/build")
 class SemanticCatalogBuild(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     @admin_ns.expect(semantic_catalog_build_model, validate=False)
     def post(self):
         try:
@@ -765,7 +754,7 @@ class TenancyBootstrap(ForgeResource):
 @admin_ns.route("/organizations")
 class OrganizationListCreate(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def get(self):
         try:
             _require_admin()
@@ -773,12 +762,23 @@ class OrganizationListCreate(ForgeResource):
             q = str(request.args.get("q") or "").strip() or None
             limit = request.args.get("limit", default=100, type=int) or 100
             offset = request.args.get("offset", default=0, type=int) or 0
-            return TenancyAdminService().list_organizations(
-                include_inactive=include_inactive,
-                q=q,
-                limit=limit,
-                offset=offset,
-            ), 200
+            service = TenancyAdminService()
+            if _is_super_admin_request():
+                return service.list_organizations(
+                    include_inactive=include_inactive,
+                    q=q,
+                    limit=limit,
+                    offset=offset,
+                ), 200
+
+            scoped_binding = _current_workspace_binding(service)
+            organization_id = str(scoped_binding.get("organization_id") or "").strip()
+            if not organization_id:
+                return _paged_rows([], limit=limit, offset=offset), 200
+
+            organization = service.get_organization(organization_id)
+            rows = [organization] if _matches_scoped_organization_row(organization, include_inactive=include_inactive, q=q) else []
+            return _paged_rows(rows, limit=limit, offset=offset), 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
@@ -1027,7 +1027,7 @@ class DatasourceConnectionTest(ForgeResource):
 @admin_ns.route("/workspaces")
 class WorkspaceBindingList(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def get(self):
         try:
             _require_admin()
@@ -1035,12 +1035,25 @@ class WorkspaceBindingList(ForgeResource):
             organization_id = str(request.args.get("organization_id") or "").strip() or None
             limit = request.args.get("limit", default=200, type=int) or 200
             offset = request.args.get("offset", default=0, type=int) or 0
-            result = TenancyAdminService().list_workspace_bindings(
-                organization_id=organization_id,
+            service = TenancyAdminService()
+            if _is_super_admin_request():
+                result = service.list_workspace_bindings(
+                    organization_id=organization_id,
+                    include_inactive=include_inactive,
+                    limit=limit,
+                    offset=offset,
+                )
+                return result, 200
+
+            scoped_binding = _current_workspace_binding(service)
+            rows = [
+                scoped_binding,
+            ] if _matches_scoped_workspace_row(
+                scoped_binding,
                 include_inactive=include_inactive,
-                limit=limit,
-                offset=offset,
-            )
+                organization_id=organization_id,
+            ) else []
+            result = _paged_rows(rows, limit=limit, offset=offset)
             return result, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -1178,6 +1191,55 @@ class WorkspaceMembershipDetail(ForgeResource):
 def _require_admin() -> None:
     if not bool(getattr(g, "is_admin", False)):
         raise ForgeError("Admin access required", status_code=403)
+
+
+def _is_super_admin_request() -> bool:
+    effective_roles = getattr(g, "effective_roles", set()) or set()
+    return "super_admin" in effective_roles
+
+
+def _current_workspace_binding(service: TenancyAdminService) -> dict:
+    workspace_id = str(getattr(g, "workspace_id", "") or "").strip()
+    if not workspace_id:
+        raise ForgeError("X-Workspace-Id header is required for workspace-scoped admin access", status_code=400)
+    return service.get_workspace_binding(workspace_id)
+
+
+def _paged_rows(rows: list[dict], *, limit: int, offset: int) -> dict:
+    page_limit = max(1, int(limit or 1))
+    page_offset = max(0, int(offset or 0))
+    paged = rows[page_offset: page_offset + page_limit]
+    return {
+        "rows": paged,
+        "count": len(paged),
+        "total": len(rows),
+        "limit": page_limit,
+        "offset": page_offset,
+    }
+
+
+def _matches_scoped_organization_row(row: dict, *, include_inactive: bool, q: str | None) -> bool:
+    if not include_inactive and not bool(row.get("is_active", True)):
+        return False
+    if not q:
+        return True
+    query = str(q or "").strip().lower()
+    name = str(row.get("name") or "").strip().lower()
+    slug = str(row.get("slug") or "").strip().lower()
+    return query in name or query in slug
+
+
+def _matches_scoped_workspace_row(
+    row: dict,
+    *,
+    include_inactive: bool,
+    organization_id: str | None,
+) -> bool:
+    if not include_inactive and not bool(row.get("workspace_is_active", True)):
+        return False
+    if organization_id and str(row.get("organization_id") or "").strip() != str(organization_id).strip():
+        return False
+    return True
 
 
 def _as_bool(value, *, default: bool = False) -> bool:

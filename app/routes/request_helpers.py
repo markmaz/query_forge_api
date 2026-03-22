@@ -15,7 +15,8 @@ def extract_workspace_id() -> str:
     if not ws:
         raise ForgeError("Missing X-Workspace-Id header", status_code=400)
     user_id = str(getattr(g, "user_id", "") or "").strip()
-    if user_id:
+    effective_roles = set(getattr(g, "effective_roles", set()) or set())
+    if user_id and "super_admin" not in effective_roles:
         workspace_access_service.assert_workspace_access(user_id=user_id, workspace_id=ws)
     return ws
 

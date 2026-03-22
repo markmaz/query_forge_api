@@ -15,3 +15,5 @@ def test_list_domain_summaries() -> None:
     service = DomainSummaryReadService(sql=sql)
     rows = service.list_domain_summaries(workspace_id="ws1", sample_size=2)
     assert rows[0]["table_count"] == 2
+    assert "wt.exists_in_dbx = 1" not in sql.query_mappings_calls[0].query
+    assert "domain_semantic_concept" not in sql.query_mappings_calls[0].query
