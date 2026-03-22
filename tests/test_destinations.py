@@ -362,6 +362,7 @@ def test_slack_delivery_uses_certifi_ssl_context():
                     "conditions_failed": [],
                     "query_name": "Test Query",
                     "severity": "info",
+                    "workspace_id": 1,
                 },
             )(),
             {"webhook_url": "https://hooks.slack.com/services/test"},

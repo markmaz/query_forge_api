@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any, Dict, Optional
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
@@ -335,6 +336,9 @@ class SemanticRegistryService:
                 out[field] = int(out[field])
         if "id" in out and out["id"] is not None:
             out["id"] = int(out["id"])
+        for field in ("created_at", "updated_at"):
+            if field in out:
+                out[field] = _json_ready_datetime(out[field])
         return out
 
     @staticmethod
@@ -377,6 +381,14 @@ def _coerce_bool(value: Any, *, field: str) -> bool:
         if lowered in {"0", "false", "no", "n", "off"}:
             return False
     raise ForgeError(f"{field} must be boolean", status_code=400)
+
+
+def _json_ready_datetime(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
 
 
 def _raise_write_error(exc: Exception) -> None:

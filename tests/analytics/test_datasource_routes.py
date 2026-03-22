@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 
 import app.routes.datasource_routes as datasource_routes
+import app.services.rbac_service as rbac_service
 from app.services.analytics.registry import AnalyticsDatasourceRegistry
 
 
@@ -31,23 +32,28 @@ def _mock_catalog(monkeypatch, datasources: list[dict] | None = None, *, error: 
     monkeypatch.setattr(datasource_routes, "DatasourceCatalogService", _Svc)
 
 
-def _mock_token(monkeypatch):
+def _mock_token(monkeypatch, *, is_admin: bool = True, roles: set[str] | None = None):
     """Patch token verification to always succeed."""
     from app.decorators import security
 
     monkeypatch.setattr(
         security.auth_service,
         "verify_token",
-        lambda _token: {"sub": "user-1", "username": "user-1", "is_admin": True},
+        lambda _token: {"sub": "user-1", "username": "user-1", "is_admin": is_admin},
     )
     monkeypatch.setattr(
         security.workspace_access_service,
         "assert_workspace_access",
         lambda *, user_id, workspace_id: workspace_id,
     )
+    monkeypatch.setattr(
+        rbac_service,
+        "get_effective_roles",
+        lambda user_id, workspace_id=None: set({"workspace_admin"} if roles is None else roles),
+    )
 
 
-_VALID_HEADERS = {"Authorization": "Bearer test-token"}
+_VALID_HEADERS = {"Authorization": "Bearer test-token", "X-Workspace-Id": "ws-1"}
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +143,34 @@ def test_get_datasources_returns_503_when_registry_missing(client, monkeypatch):
 def test_get_datasources_requires_auth(client):
     resp = client.get("/api/v1/datasources/")
     assert resp.status_code == 403
+
+
+def test_get_datasources_allows_workspace_admin(client, monkeypatch):
+    _mock_token(monkeypatch, is_admin=False, roles={"workspace_admin"})
+    _mock_catalog(monkeypatch, [])
+
+    registry = _make_registry([{"name": "primary", "type": "databricks"}])
+    with client.application.app_context():
+        client.application.extensions["analytics_registry"] = registry
+
+    resp = client.get("/api/v1/datasources/", headers=_VALID_HEADERS)
+
+    assert resp.status_code == 200
+    assert resp.json == [{"name": "primary", "type": "databricks"}]
+
+
+def test_get_datasources_rejects_non_admin_role(client, monkeypatch):
+    _mock_token(monkeypatch, is_admin=False, roles={"ingestion:user"})
+    _mock_catalog(monkeypatch, [])
+
+    registry = _make_registry([{"name": "primary", "type": "databricks"}])
+    with client.application.app_context():
+        client.application.extensions["analytics_registry"] = registry
+
+    resp = client.get("/api/v1/datasources/", headers=_VALID_HEADERS)
+
+    assert resp.status_code == 403
+    assert "Workspace admin access required." in resp.json["message"]
 
 
 def test_get_datasources_rejects_invalid_token(client, invalid_auth_headers):

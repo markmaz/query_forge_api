@@ -94,7 +94,7 @@ def test_mapping_create_with_table_and_column() -> None:
 def test_mapping_rejects_missing_identifiers() -> None:
     svc = SemanticMappingService(sql=FakeForgeQueryPort())
 
-    with pytest.raises(ForgeError, match=r"mapping requires model_column_id or table_name\+column_name"):
+    with pytest.raises(ForgeError, match=r"mapping requires workspace_column_id or table_name\+column_name"):
         svc.create_mapping({"semantic_registry_id": 1})
 
 
@@ -149,7 +149,7 @@ def test_resolve_best_column_for_concept_prefers_priority_then_confidence() -> N
 def test_find_concepts_for_column_requires_identifier() -> None:
     svc = SemanticMappingService(sql=FakeForgeQueryPort())
 
-    with pytest.raises(ForgeError, match=r"model_column_id or table_name\+column_name is required"):
+    with pytest.raises(ForgeError, match=r"workspace_column_id or table_name\+column_name is required"):
         svc.find_concepts_for_column(workspace_id="ws1")
 
 
@@ -191,5 +191,5 @@ def test_mapping_create_with_workspace_column_id_resolves_model_column() -> None
 
     svc = SemanticMappingService(sql=sql)
     row = svc.create_mapping({"semantic_registry_id": 42, "workspace_column_id": 77, "priority_rank": 1})
-    assert row["model_column_id"] == 123
+    assert row["model_column_id"] == 77
     assert row["workspace_column_id"] == 77

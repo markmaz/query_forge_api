@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from app.exceptions.forge_error import ForgeError
@@ -159,3 +161,39 @@ def test_registry_update_and_delete() -> None:
 
     svc.delete_entry(7)
     assert len(sql.write_calls) == 2
+
+
+def test_registry_list_normalizes_datetime_fields() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [
+            {
+                "id": 9,
+                "vertical": "education",
+                "vertical_norm": "education",
+                "concept_key": "student.birth_date",
+                "semantic_type": "time",
+                "sub_type": None,
+                "entity": "student",
+                "description": "Birth date",
+                "granularity_rank": 0,
+                "filter_allowed": 1,
+                "group_by_allowed": 1,
+                "aggregation_allowed": 0,
+                "is_identifier": 0,
+                "is_metric": 0,
+                "display_priority": 1,
+                "sensitive": 1,
+                "created_at": datetime(2026, 3, 22, 10, 30, 45),
+                "updated_at": datetime(2026, 3, 22, 10, 31, 0),
+            }
+        ],
+        [{"total": 1}],
+    ]
+
+    svc = SemanticRegistryService(sql=sql)
+    result = svc.list_entries(page=1, page_size=25)
+
+    row = result["rows"][0]
+    assert row["created_at"] == "2026-03-22T10:30:45"
+    assert row["updated_at"] == "2026-03-22T10:31:00"

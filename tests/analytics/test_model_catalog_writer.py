@@ -117,6 +117,10 @@ def test_upsert_columns_skips_unknown_table():
 
 def test_mark_columns_missing_issues_update():
     mysql, tx = _make_mysql()
+    # The repository resolves table_id → table_name via execute_query_mappings before
+    # issuing the UPDATE. Provide a stubbed response so name_map gets populated and
+    # execute_write is ultimately called.
+    mysql.execute_query_mappings.return_value = [{"id": 1, "table_name": "orders"}]
     writer = ModelCatalogWriter(mysql=mysql)
     writer.mark_columns_missing(cols_by_table_id={1: {"old_col"}}, origin="databricks")
 

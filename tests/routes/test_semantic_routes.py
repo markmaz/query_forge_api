@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import app.routes.semantic_mappings as semantic_mappings
 import app.routes.semantic_registry as semantic_registry
 import app.routes.semantic_relationships as semantic_relationships
+from app.services.semantic.semantic_registry_service import SemanticRegistryService
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def _headers(monkeypatch):
@@ -44,6 +48,42 @@ def test_semantic_registry_list_route(client, monkeypatch):
     resp = client.get("/api/v1/semantic/registry", headers=_headers(monkeypatch))
     assert resp.status_code == 200
     assert resp.json["total"] == 0
+
+
+def test_semantic_registry_list_route_serializes_datetimes(client, monkeypatch):
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [
+            {
+                "id": 1,
+                "vertical": "education",
+                "vertical_norm": "education",
+                "concept_key": "student.id",
+                "semantic_type": "identifier",
+                "sub_type": None,
+                "entity": "student",
+                "description": "Student id",
+                "granularity_rank": 0,
+                "filter_allowed": 1,
+                "group_by_allowed": 1,
+                "aggregation_allowed": 0,
+                "is_identifier": 1,
+                "is_metric": 0,
+                "display_priority": 0,
+                "sensitive": 0,
+                "created_at": datetime(2026, 3, 22, 11, 15, 0),
+                "updated_at": datetime(2026, 3, 22, 11, 16, 30),
+            }
+        ],
+        [{"total": 1}],
+    ]
+    svc = SemanticRegistryService(sql=sql)
+    monkeypatch.setattr(semantic_registry, "SemanticRegistryService", lambda: svc)
+
+    resp = client.get("/api/v1/semantic/registry?limit=1", headers=_headers(monkeypatch))
+    assert resp.status_code == 200
+    assert resp.json["rows"][0]["created_at"] == "2026-03-22T11:15:00"
+    assert resp.json["rows"][0]["updated_at"] == "2026-03-22T11:16:30"
 
 
 def test_semantic_registry_invalid_semantic_type_returns_400(client, monkeypatch):

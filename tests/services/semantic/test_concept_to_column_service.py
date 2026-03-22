@@ -58,15 +58,15 @@ def test_concept_mapping_query_returns_columns() -> None:
     assert out["concepts"] == ["GRADE_LEVEL", "RACE"]
     assert len(out["mapped_columns"]) == 2
     assert set(out["candidate_workspace_column_ids"]) == {1000, 1001}
-    assert set(out["candidate_model_column_ids"]) == {100, 101}
+    assert set(out["candidate_model_column_ids"]) == {1000, 1001}
     assert out["mapped_columns"][0]["concept_key"] == "GRADE_LEVEL"
     assert out["mapped_columns"][0]["workspace_column_id"] == 1000
     assert out["mapped_columns"][0]["source"] == "m2m"
     assert out["mapped_columns"][0]["final_score"] == 4.5
     assert out["mapped_columns"][1]["source"] == "fallback_primary"
     assert out["ranked_candidates_by_concept"]["GRADE_LEVEL"][0]["workspace_column_id"] == 1000
-    assert out["ranked_candidates_by_concept"]["GRADE_LEVEL"][0]["model_column_id"] == 100
-    assert out["ranked_candidates_by_concept"]["RACE"][0]["model_column_id"] == 101
+    assert out["ranked_candidates_by_concept"]["GRADE_LEVEL"][0]["model_column_id"] == 1000
+    assert out["ranked_candidates_by_concept"]["RACE"][0]["model_column_id"] == 1001
 
     assert len(sql.query_mappings_calls) == 2
     m2m_query = sql.query_mappings_calls[0].query
@@ -143,7 +143,7 @@ def test_concept_mapping_entity_intent_ranks_student_name_over_staff_name() -> N
     sql.query_mappings_responses = [
         [
             {
-                "model_column_id": 201,
+                "workspace_column_id": 201,
                 "workspace_table_id": 11,
                 "table_name": "dim_staff",
                 "column_name": "last_name",
@@ -163,7 +163,7 @@ def test_concept_mapping_entity_intent_ranks_student_name_over_staff_name() -> N
                 "source": "m2m",
             },
             {
-                "model_column_id": 202,
+                "workspace_column_id": 202,
                 "workspace_table_id": 12,
                 "table_name": "dim_student",
                 "column_name": "last_name",
@@ -194,7 +194,7 @@ def test_concept_mapping_entity_intent_ranks_student_name_over_staff_name() -> N
         intent_entity="student",
     )
 
-    assert out["mapped_columns"][0]["model_column_id"] == 202
+    assert out["mapped_columns"][0]["workspace_column_id"] == 202
     assert out["mapped_columns"][0]["effective_weight"] > out["mapped_columns"][1]["effective_weight"]
 
 

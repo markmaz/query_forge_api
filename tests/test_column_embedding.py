@@ -36,8 +36,8 @@ def test_build_workspace_column_payload_schema() -> None:
     assert payload["workspace_id"] == "ws1"
     assert payload["workspace_table_id"] == 10
     assert payload["workspace_column_id"] == 55
-    assert payload["model_table_id"] == 3
-    assert payload["model_column_id"] == 9
+    assert payload["model_table_id"] == 10
+    assert payload["model_column_id"] == 55
     assert payload["column_name"] == "student_id"
     assert payload["data_type"] == "INT"
     assert payload["semantic_type"] == "identifier.student_id"

@@ -865,3 +865,122 @@ Last updated: 2026-03-19
 - Verification completed:
   - `python3 -m pytest tests/tasks/test_skill_runner.py tests/test_query_analysis.py -q`
     - Result: `20 passed, 6 skipped`
+
+## Latest frontend workspace-table contract cleanup
+
+- Resumed the frontend cleanup for legacy `model_table` / `model_column` usage after backend compatibility work had already landed.
+- Updated UI service/contracts in the UI repo so workspace-first table naming is normalized instead of relying on legacy table-name fields:
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/shared/services/queryStudioAdminApi.ts`
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/shared/services/semantic/schemas.ts`
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/shared/services/semantic/conceptColumnMaps.ts`
+- UI behavior updates:
+  - Concept Column Maps now reads/displays `workspace_table_name` and labels that column as `Workspace Table`.
+  - Domain Studio surfaces now refer to `Primary table` / `table` instead of `Model` in the affected domain-management screens.
+  - Query Forge domain selection fallback now prefers `primary_table_name` when present.
+- Updated UI files:
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/semantic-admin/ui/ConceptColumnMapsPage.tsx`
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/domain-studio/ui/components/DomainDrawer.tsx`
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/domain-studio/ui/components/DomainsTab.tsx`
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/domain-studio/ui/components/DomainDrawerTablesTab.tsx`
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/domain-studio/ui/components/DomainTableModal.tsx`
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/query-forge/ui/components/DomainSection.tsx`
+- Tests updated:
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/shared/services/__tests__/semanticServices.test.ts`
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/shared/services/__tests__/queryStudioRouteContracts.test.ts`
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/semantic-admin/ui/__tests__/ConceptColumnMapsPage.test.tsx`
+- Verification completed:
+  - `npm test -- --run src/shared/services/__tests__/semanticServices.test.ts src/shared/services/__tests__/queryStudioRouteContracts.test.ts src/features/semantic-admin/ui/__tests__/ConceptColumnMapsPage.test.tsx`
+  - Result: `47 passed`
+  - Existing warning remains: `Missing VITE_API_URL. Add it to your .env file.`
+- Additional verification attempted:
+  - `npx tsc --noEmit`
+  - Result: fails due to many unrelated pre-existing TypeScript errors in untouched areas (`domain-graph`, `identity`, `skills`, `forgeMatch`, `semantic-catalog`, etc.); no reported errors were in the files touched for this cleanup.
+
+## Latest frontend TypeScript cleanup pass
+
+- Continued the UI repo cleanup to eliminate the previously noted pre-existing `npx tsc --noEmit` failures.
+- Non-ForgeMatch cleanup completed in the affected files:
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/query-forge/ui/ai/__tests__/AiCopilotDrawer.test.tsx`
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/system-admin/ui/domains/DomainProfileList.test.tsx`
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/system-admin/ui/tenancy/TenancyOrganizationsPage.tsx`
+- ForgeMatch cleanup completed by separating local workbook-analysis types from the API response contracts instead of forcing both flows through one incompatible shape:
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/shared/services/forgeMatch/contracts.ts`
+    - added explicit local pipeline types such as `ForgeMatchCandidate`, `ForgeMatchConfidenceBreakdown`, `ForgeMatchSession`, `ForgeMatchPipelineSourceRecord`, `ForgeMatchPipelineMapping`, `ForgeMatchPipelineSummary`, and `ForgeMatchPipelineAnalyzeResponse`
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/shared/services/forgeMatch/pipeline.ts`
+    - switched workbook parsing / local analysis helpers to the new pipeline-specific types
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/shared/services/forgeMatch/persistence.ts`
+    - updated local storage session persistence to use the pipeline-specific types
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/shared/services/forgeMatch/__tests__/pipeline.test.ts`
+    - pipeline tests now compile cleanly against the restored local types
+- Also updated a stale AI copilot test expectation to match current behavior:
+  - deferred `planDomainNextActions()` requests currently include `workspace_id`, `prompt`, `plan_json_v2`, `base_domain_id`, `conversation_id`, and `trace_id`, but not a top-level `vertical_norm`
+- Verification completed:
+  - `npx tsc --noEmit`
+    - Result: passes with no TypeScript errors
+  - `npm test -- --run src/shared/services/forgeMatch/__tests__/contracts.test.ts src/shared/services/forgeMatch/__tests__/pipeline.test.ts src/features/query-forge/ui/ai/__tests__/AiCopilotDrawer.test.tsx src/features/system-admin/ui/domains/DomainProfileList.test.tsx`
+    - Result: `33 passed`
+    - Existing warning remains: `Missing VITE_API_URL. Add it to your .env file.`
+
+## Latest frontend removal of dead news/cohort surfaces
+
+- User asked to remove the frontend references to `news` and cohort visibility because those routes should not exist on the frontend at all.
+- Removed the dead news API/UI surface in the UI repo:
+  - deleted `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/shared/services/news.ts`
+  - deleted `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/landing/ui/NewsArticles.tsx`
+- Removed the dead cohort visibility API wrapper and mock fixture:
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/shared/services/queryStudioAdminApi.ts`
+    - removed `CohortVisibilityRow`
+    - removed `CohortVisibilityResponse`
+    - removed `getVisibleCohorts()`
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/qa/msw/handlers.ts`
+    - removed the `/saved-queries/cohorts/visible` handler
+  - deleted `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/qa/fixtures/queryForge/cohortVisibility.json`
+- Removed the dormant cohort join UI path from Query Forge domain selection while preserving the ability to clear any legacy `cohortAttachment` state already present in `sqlJson`:
+  - `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-ui/src/features/query-forge/ui/components/DomainSection.tsx`
+    - removed the cohort visibility import/types
+    - removed the cohort join modal and cohort join section
+    - updated copy from `cohorts/value overrides` to `value overrides`
+    - kept the existing `cohortAttachment` summary/clear path so legacy state is still visible/removable
+- Verification completed:
+  - `npx tsc --noEmit`
+    - Result: passes
+  - `npm test -- --run src/shared/services/__tests__/queryStudioRouteContracts.test.ts`
+    - Result: `12 passed`
+
+## Latest semantic registry datetime serialization fix
+
+- A live backend request to `GET /api/v1/semantic/registry?limit=1` failed with:
+  - `TypeError: Object of type datetime is not JSON serializable`
+- Root cause:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/services/semantic/semantic_registry_service.py`
+  - `SemanticRegistryService._normalize_row()` coerced bool/int fields but left `created_at` and `updated_at` as raw `datetime` objects when returned from MySQL.
+- Fix implemented:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/services/semantic/semantic_registry_service.py`
+    - added `_json_ready_datetime()`
+    - now converts `datetime` / `date` values in `created_at` and `updated_at` to ISO 8601 strings during row normalization
+- Regression coverage added:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/services/semantic/test_semantic_registry_service.py`
+    - added service-level test proving datetime fields are normalized to strings
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/routes/test_semantic_routes.py`
+    - added route-level test exercising `/api/v1/semantic/registry` through the real service over a fake SQL port and asserting JSON-safe timestamps
+- Verification completed:
+  - `python3 -m pytest tests/services/semantic/test_semantic_registry_service.py tests/routes/test_semantic_routes.py -q`
+    - Result: `12 passed`
+
+## Latest datasource RBAC cleanup
+
+- Smoke testing exposed that `GET /api/v1/datasources/` still required `system:admin`, which blocked the normal smoke user even though datasources are intended to be a workspace-admin surface.
+- Fix implemented:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/routes/datasource_routes.py`
+    - replaced `@require_role("system:admin")` with `@require_admin()`
+    - datasources now follow the same workspace-admin access model as the broader ingestion area
+- Regression coverage tightened:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/analytics/test_datasource_routes.py`
+    - expanded auth mocking to control effective roles explicitly
+    - added a route test proving `workspace_admin` can list datasources without the legacy `is_admin` flag
+    - added a route test proving a non-admin feature role still gets `403`
+- Verification completed:
+  - `pytest tests/analytics/test_datasource_routes.py -q`
+    - Result: `9 passed`
+  - `pytest tests/test_smoke_test.py -q`
+    - Result: `35 passed`

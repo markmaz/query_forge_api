@@ -14,12 +14,12 @@ class _StubCardService:
         self._cards = cards
         self._served = False
 
-    def count_columns(self, *, model_table_id: Optional[int] = None) -> int:
-        del model_table_id
+    def count_columns(self, *, workspace_table_id: Optional[int] = None) -> int:
+        del workspace_table_id
         return len(self._cards)
 
-    def build_column_cards(self, *, offset: int, limit: int, model_table_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        del limit, model_table_id
+    def build_column_cards(self, *, offset: int, limit: int, workspace_table_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        del limit, workspace_table_id
         if self._served or offset > 0:
             return []
         self._served = True
@@ -214,8 +214,8 @@ def test_execute_run_stores_normalized_concept_key_and_rewritten_reasons() -> No
 
     cards = [
         {
-            "modelColumnId": 999,
-            "modelTableId": 11,
+            "workspaceColumnId": 999,
+            "workspaceTableId": 11,
             "tableName": "dim_course",
             "columnName": "k_course",
             "dataType": "string",

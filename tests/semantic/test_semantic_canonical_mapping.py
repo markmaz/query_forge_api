@@ -12,12 +12,12 @@ class _StubCardService:
         self._cards = cards
         self._served = False
 
-    def count_columns(self, *, model_table_id: Optional[int] = None) -> int:
-        del model_table_id
+    def count_columns(self, *, workspace_table_id: Optional[int] = None) -> int:
+        del workspace_table_id
         return len(self._cards)
 
-    def build_column_cards(self, *, offset: int, limit: int, model_table_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        del limit, model_table_id
+    def build_column_cards(self, *, offset: int, limit: int, workspace_table_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        del limit, workspace_table_id
         if self._served or offset > 0:
             return []
         self._served = True
@@ -290,8 +290,8 @@ def test_execute_run_stores_canonical_concept_fields() -> None:
 
     cards = [
         {
-            "modelColumnId": 201,
-            "modelTableId": 11,
+            "workspaceColumnId": 201,
+            "workspaceTableId": 11,
             "tableName": "dim_school",
             "columnName": "k_school",
             "dataType": "string",
@@ -300,8 +300,8 @@ def test_execute_run_stores_canonical_concept_fields() -> None:
             "signals": {"all_numeric": False, "boolean_like": False, "date_like": False, "contains_county_word": False, "unique_ratio_estimate": None},
         },
         {
-            "modelColumnId": 202,
-            "modelTableId": 11,
+            "workspaceColumnId": 202,
+            "workspaceTableId": 11,
             "tableName": "dim_school",
             "columnName": "school_year",
             "dataType": "string",
@@ -310,8 +310,8 @@ def test_execute_run_stores_canonical_concept_fields() -> None:
             "signals": {"all_numeric": False, "boolean_like": False, "date_like": True, "contains_county_word": False, "unique_ratio_estimate": None},
         },
         {
-            "modelColumnId": 203,
-            "modelTableId": 11,
+            "workspaceColumnId": 203,
+            "workspaceTableId": 11,
             "tableName": "dim_school",
             "columnName": "city",
             "dataType": "string",
@@ -395,8 +395,8 @@ def test_alias_override_k_school_to_school_id() -> None:
 
     cards = [
         {
-            "modelColumnId": 301,
-            "modelTableId": 11,
+            "workspaceColumnId": 301,
+            "workspaceTableId": 11,
             "tableName": "dim_school",
             "columnName": "k_school",
             "dataType": "string",

@@ -51,6 +51,12 @@ def client(monkeypatch: pytest.MonkeyPatch):
         "assert_workspace_access",
         lambda *, user_id, workspace_id: workspace_id,
     )
+
+    def _bypass_semantic(*args, **kwargs):
+        raise RuntimeError("semantic bridge bypassed for test")
+
+    monkeypatch.setattr(ai_routes, "_plan_response_as_suggest", _bypass_semantic)
+
     api = Api(app)
     api.add_namespace(ai_ns, path="/api/ai")
     return app.test_client()
