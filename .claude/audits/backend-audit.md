@@ -878,4 +878,78 @@ The `model_catalog_writer.py`, `metadata_sync_service.py`, and `metadata_provide
 - Implemented `list_columns()` with two-phase empty-check: main query then table existence check
 - Implemented `search_columns()` with LIKE search across column_name, description, and table_name
 - All 6 tests in the file pass (2 pre-existing + 4 new)
+
+---
+
+## 2026-03-23 — Super admin workspace filter bypass fix
+
+**Files changed:**
+- `app/routes/user_routes.py`
+- `tests/routes/test_user_routes.py`
+
+**Bug:** `UserList.get` always passed the `X-Workspace-Id` header value as
+`workspace_id` to `UserService.get_users`, even for super_admin callers. Super
+admins could not see users outside their current header workspace.
+
+**Fix applied to `app/routes/user_routes.py`:**
+- Added `g` to the Flask import (`from flask import g, jsonify, request`).
+- Added a 2-line guard after the header read: if `"super_admin"` is in
+  `g.effective_roles`, `workspace_id` is forced to `None`. This is safe because
+  `@require_admin()` already calls `_ensure_roles_loaded()` before the handler.
+
+**Tests added to `tests/routes/test_user_routes.py`:**
+- `test_super_admin_bypasses_workspace_filter`: stubs token + roles to
+  `{"super_admin"}`, sends `X-Workspace-Id: ws-specific`, asserts
+  `UserService.get_users` called with `workspace_id=None`.
+- `test_non_super_admin_scoped_to_workspace`: injects `{"workspace_admin"}` and
+  asserts `workspace_id` passes through unchanged as `"ws-1"`.
+
+**Test results:** 6 passed, 5 skipped (skipped require live credentials).
 | Column name SQL injection (MySQL) | `app/adapters/analytics/mysql_metadata_provider.py` | `_safe_ident()` called on all column names in steps 2 and 3 |
+
+---
+
+## Task — RBAC workspace_admin grant permission change (2026-03-23)
+
+### Date
+2026-03-23
+
+### Files Reviewed
+- `app/routes/rbac_routes.py`
+- `app/models/rbac.py`
+- `tests/routes/test_rbac_routes.py`
+- `tests/test_rbac.py`
+- `tests/conftest.py`
+
+### Change Made
+Removed `workspace_admin` from the set of roles that require `super_admin` to grant or revoke.
+
+**`app/routes/rbac_routes.py` line 45:**
+
+Before:
+```python
+def _requires_super_admin(role_name: str) -> bool:
+    return role_name in {"workspace_admin", *GLOBAL_ROLES}
+```
+
+After:
+```python
+def _requires_super_admin(role_name: str) -> bool:
+    return role_name in GLOBAL_ROLES
+```
+
+### Behavioral Effect
+- `workspace_admin` can now grant/revoke `workspace_admin` within their own workspace
+- `workspace_admin` still cannot grant/revoke `super_admin` or `library_admin`
+- `super_admin` retains full grant/revoke capability
+- Self-revocation of `workspace_admin` is now permitted (no longer treated as global admin for this guard)
+
+### Test Changes (`tests/routes/test_rbac_routes.py`)
+- Updated `test_rbac_user_role_delete_prevents_workspace_admin_self_demotion` → renamed to `test_rbac_user_role_delete_workspace_admin_self_revoke_is_allowed`, expected status changed 403→200
+- Added `test_workspace_admin_can_grant_workspace_admin` (expects 201)
+- Added `test_workspace_admin_cannot_grant_super_admin` (expects 403)
+- Added `test_workspace_admin_cannot_grant_library_admin` (expects 403)
+- Added `test_super_admin_can_grant_workspace_admin` (expects 201, regression guard)
+
+### Test Results
+17/17 passed.

@@ -43,7 +43,7 @@ def _normalize_role_workspace(role_name: str, workspace_id: str) -> str | None:
 
 
 def _requires_super_admin(role_name: str) -> bool:
-    return role_name in {"workspace_admin", *GLOBAL_ROLES}
+    return role_name in GLOBAL_ROLES
 
 
 def _find_existing_user_role(user_id: str, role_id: int, workspace_id: str | None) -> UserRole | None:

@@ -241,19 +241,22 @@ def test_rbac_user_role_delete_success(client, monkeypatch):
     assert resp.json == {"revoked": True}
 
 
-def test_rbac_user_role_delete_prevents_workspace_admin_self_demotion(client, monkeypatch):
+def test_rbac_user_role_delete_workspace_admin_self_revoke_is_allowed(client, monkeypatch):
+    """workspace_admin is no longer a global role, so self-revocation is permitted."""
     monkeypatch.setattr(rbac_routes, "extract_workspace_id", lambda: "ws-1")
     monkeypatch.setattr(
         rbac_routes,
         "_find_user_role_row",
         lambda user_id, user_role_id: _UserRoleRow(user_role_id, 2, "workspace_admin", None, workspace_id="ws-1"),
     )
+    monkeypatch.setattr(rbac_routes, "revoke_role_by_id", lambda **kwargs: True)
 
     resp = client.delete(
         "/api/v1/rbac/users/admin-1/roles/12",
         headers=_headers(monkeypatch, actor_id="admin-1", roles={"super_admin"}),
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    assert resp.json == {"revoked": True}
 
 
 def test_rbac_user_role_delete_prevents_library_admin_self_demotion(client, monkeypatch):
@@ -269,3 +272,88 @@ def test_rbac_user_role_delete_prevents_library_admin_self_demotion(client, monk
         headers=_headers(monkeypatch, actor_id="admin-1", roles={"super_admin"}),
     )
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# workspace_admin grant/revoke workspace_admin permission tests
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_admin_can_grant_workspace_admin(client, monkeypatch):
+    """workspace_admin should now be permitted to grant workspace_admin within their workspace."""
+    monkeypatch.setattr(rbac_routes, "extract_workspace_id", lambda: "ws-1")
+    monkeypatch.setattr(rbac_routes, "_find_role_by_name", lambda role_name: _RoleRow(2, role_name, None))
+    monkeypatch.setattr(rbac_routes, "_find_existing_user_role", lambda user_id, role_id, workspace_id: None)
+    monkeypatch.setattr(
+        rbac_routes,
+        "assign_role",
+        lambda **kwargs: {
+            "id": 10,
+            "user_id": kwargs["user_id"],
+            "role_id": 2,
+            "role_name": kwargs["role_name"],
+            "granted_by": kwargs["granted_by"],
+            "granted_at": "2026-03-23T00:00:00",
+        },
+    )
+
+    resp = client.post(
+        "/api/v1/rbac/users/u-99/roles",
+        headers=_headers(monkeypatch, roles={"workspace_admin"}),
+        json={"role_name": "workspace_admin"},
+    )
+    assert resp.status_code == 201
+    assert resp.json["user_role"]["role_name"] == "workspace_admin"
+
+
+def test_workspace_admin_cannot_grant_super_admin(client, monkeypatch):
+    """workspace_admin must not be able to escalate to super_admin."""
+    monkeypatch.setattr(rbac_routes, "extract_workspace_id", lambda: "ws-1")
+    monkeypatch.setattr(rbac_routes, "_find_role_by_name", lambda role_name: _RoleRow(1, role_name, None))
+
+    resp = client.post(
+        "/api/v1/rbac/users/u-99/roles",
+        headers=_headers(monkeypatch, roles={"workspace_admin"}),
+        json={"role_name": "super_admin"},
+    )
+    assert resp.status_code == 403
+
+
+def test_workspace_admin_cannot_grant_library_admin(client, monkeypatch):
+    """workspace_admin must not be able to grant the global library_admin role."""
+    monkeypatch.setattr(rbac_routes, "extract_workspace_id", lambda: "ws-1")
+    monkeypatch.setattr(rbac_routes, "_find_role_by_name", lambda role_name: _RoleRow(3, role_name, None))
+
+    resp = client.post(
+        "/api/v1/rbac/users/u-99/roles",
+        headers=_headers(monkeypatch, roles={"workspace_admin"}),
+        json={"role_name": "library_admin"},
+    )
+    assert resp.status_code == 403
+
+
+def test_super_admin_can_grant_workspace_admin(client, monkeypatch):
+    """super_admin must still be able to grant workspace_admin after the permission change."""
+    monkeypatch.setattr(rbac_routes, "extract_workspace_id", lambda: "ws-1")
+    monkeypatch.setattr(rbac_routes, "_find_role_by_name", lambda role_name: _RoleRow(2, role_name, None))
+    monkeypatch.setattr(rbac_routes, "_find_existing_user_role", lambda user_id, role_id, workspace_id: None)
+    monkeypatch.setattr(
+        rbac_routes,
+        "assign_role",
+        lambda **kwargs: {
+            "id": 11,
+            "user_id": kwargs["user_id"],
+            "role_id": 2,
+            "role_name": kwargs["role_name"],
+            "granted_by": kwargs["granted_by"],
+            "granted_at": "2026-03-23T00:00:00",
+        },
+    )
+
+    resp = client.post(
+        "/api/v1/rbac/users/u-99/roles",
+        headers=_headers(monkeypatch, roles={"super_admin"}),
+        json={"role_name": "workspace_admin"},
+    )
+    assert resp.status_code == 201
+    assert resp.json["user_role"]["role_name"] == "workspace_admin"
