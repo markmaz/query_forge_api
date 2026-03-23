@@ -1,6 +1,6 @@
 import logging
 
-from flask import jsonify, request
+from flask import g, jsonify, request
 from flask_restx import Namespace, fields, reqparse
 from app.routes.forge_resource import ForgeResource
 from pydantic import ValidationError
@@ -104,6 +104,9 @@ class UserList(ForgeResource):
         """List users with cursor-based pagination"""
         args = qf_user_parser.parse_args()
         workspace_id = (request.headers.get("X-Workspace-Id") or "").strip() or None
+        # Super admins see all users across all workspaces
+        if "super_admin" in getattr(g, "effective_roles", set()):
+            workspace_id = None
         logger.info(f"Parsed args: {args}")  # Debug query parameters
         logger.info(args['status'])
         try:

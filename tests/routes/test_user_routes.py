@@ -134,3 +134,76 @@ def test_users_put_with_invite_query_token_but_no_bearer_rejected(client):
     resp = client.put("/api/v1/users/u1?token=invite-token-1", json={"first_name": "Nope"})
     assert resp.status_code == 403
     assert "Token is missing" in str(resp.json.get("error") or "")
+
+
+def test_super_admin_bypasses_workspace_filter(client, monkeypatch):
+    """Super admins must receive workspace_id=None so they see all users."""
+    import app.decorators.security as security
+    import app.decorators.rbac as rbac
+    from flask import g
+
+    # Stub token verification so the request passes token_required.
+    monkeypatch.setattr(
+        security.auth_service,
+        "verify_token",
+        lambda _token: {"sub": "super-1", "username": "super-1", "is_admin": True},
+    )
+
+    # Stub get_effective_roles to return super_admin explicitly.
+    monkeypatch.setattr(
+        rbac,
+        "_ensure_roles_loaded",
+        lambda: setattr(g, "effective_roles", {"super_admin"})
+        if not hasattr(g, "effective_roles")
+        else None,
+    )
+
+    received_workspace_ids: list = []
+
+    class _Svc:
+        def get_users(self, **kwargs):
+            received_workspace_ids.append(kwargs.get("workspace_id"))
+            return [], None, None, 0
+
+    monkeypatch.setattr(user_routes, "UserService", _Svc)
+
+    resp = client.get(
+        "/api/v1/users/",
+        headers={
+            "Authorization": "Bearer super-token",
+            "X-Workspace-Id": "ws-specific",
+        },
+    )
+    assert resp.status_code == 200
+    assert received_workspace_ids == [None], (
+        f"Expected workspace_id=None for super_admin but got {received_workspace_ids}"
+    )
+
+
+def test_non_super_admin_scoped_to_workspace(client, auth_headers, monkeypatch):
+    """Workspace admins (non super_admin) must still be scoped to their workspace."""
+    import app.decorators.rbac as rbac
+    from flask import g
+
+    # Override effective_roles to be workspace_admin only (not super_admin).
+    original_ensure = rbac._ensure_roles_loaded
+
+    def _set_workspace_admin_roles():
+        g.effective_roles = {"workspace_admin"}
+
+    monkeypatch.setattr(rbac, "_ensure_roles_loaded", _set_workspace_admin_roles)
+
+    received_workspace_ids: list = []
+
+    class _Svc:
+        def get_users(self, **kwargs):
+            received_workspace_ids.append(kwargs.get("workspace_id"))
+            return [], None, None, 0
+
+    monkeypatch.setattr(user_routes, "UserService", _Svc)
+
+    resp = client.get("/api/v1/users/", headers=auth_headers)
+    assert resp.status_code == 200
+    assert received_workspace_ids == ["ws-1"], (
+        f"Expected workspace_id='ws-1' for workspace_admin but got {received_workspace_ids}"
+    )
