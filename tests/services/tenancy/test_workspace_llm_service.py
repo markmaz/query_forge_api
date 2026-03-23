@@ -148,6 +148,38 @@ def test_delete_llm_raises_on_missing(service, mock_sql):
         service.delete_llm(999)
 
 
+def test_update_llm_clears_endpoint_url_when_explicitly_null(service, mock_sql):
+    """Sending endpoint_url=null must clear the stored value (provider switch e.g. ollama→openai)."""
+    existing = {
+        "id": 5, "workspace_id": "ws1", "name": "My LLM",
+        "provider": "ollama", "model_name": "llama3", "role": "summarizer",
+        "api_key_encrypted": "enc_key", "endpoint_url": "http://ollama.local:11434",
+        "is_active": 1, "config_json": None, "created_at": None, "updated_at": None,
+    }
+    updated = {**existing, "provider": "openai", "model_name": "gpt-4o", "endpoint_url": None}
+    mock_sql.execute_query_mappings.side_effect = [[existing], [], [updated]]
+    mock_sql.execute_write.return_value = None
+    service.update_llm(5, {"provider": "openai", "model_name": "gpt-4o", "endpoint_url": None})
+    write_call = mock_sql.execute_write.call_args
+    # Old ollama URL must NOT appear in the UPDATE query
+    assert "ollama.local" not in str(write_call)
+
+
+def test_update_llm_preserves_endpoint_url_when_field_omitted(service, mock_sql):
+    """Omitting endpoint_url from the payload must preserve the existing value."""
+    existing = {
+        "id": 6, "workspace_id": "ws1", "name": "Ollama LLM",
+        "provider": "ollama", "model_name": "llama3", "role": "summarizer",
+        "api_key_encrypted": None, "endpoint_url": "http://ollama.local:11434",
+        "is_active": 1, "config_json": None, "created_at": None, "updated_at": None,
+    }
+    mock_sql.execute_query_mappings.side_effect = [[existing], [], [existing]]
+    mock_sql.execute_write.return_value = None
+    service.update_llm(6, {"name": "Renamed Ollama"})  # endpoint_url not in payload
+    write_call = mock_sql.execute_write.call_args
+    assert "ollama.local" in str(write_call)
+
+
 def test_update_llm_preserves_existing_api_key_when_not_provided(service, mock_sql):
     existing = {
         "id": 5,

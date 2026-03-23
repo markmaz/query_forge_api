@@ -181,7 +181,11 @@ class WorkspaceLLMService:
         model_name = str(data.get("model_name") or existing.get("model_name") or "").strip()
         role = str(data.get("role") or existing.get("role") or "").strip()
         is_active = bool(data.get("is_active", bool(int(existing.get("is_active") or 1))))
-        endpoint_url = str(data.get("endpoint_url") or existing.get("endpoint_url") or "").strip() or None
+        endpoint_url = (
+            str(data.get("endpoint_url") or "").strip() or None
+            if "endpoint_url" in data
+            else existing.get("endpoint_url")
+        )
 
         if role not in _VALID_ROLES:
             raise ValueError(f"Invalid role '{role}'")
