@@ -161,3 +161,14 @@ def test_500_on_unhandled_llm_failure(client, monkeypatch):
     resp = client.post("/api/v1/query-studio/summarize", headers=headers, json=VALID_BODY)
     assert resp.status_code == 500
     assert resp.json["code"] == "summary_failed"
+
+
+# Workspace mismatch
+
+def test_422_workspace_mismatch(client, monkeypatch):
+    headers = _headers(monkeypatch)  # X-Workspace-Id: ws-1
+    body = {**VALID_BODY, "workspace_id": "ws-other"}
+    resp = client.post("/api/v1/query-studio/summarize", headers=headers, json=body)
+    assert resp.status_code == 422
+    assert resp.json["code"] == "validation_error"
+    assert "workspace_id" in resp.json["error"]
