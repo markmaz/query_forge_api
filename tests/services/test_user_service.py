@@ -327,6 +327,52 @@ def test_get_user_missing() -> None:
         svc.get_user("u1")
 
 
+def test_get_user_uses_users_table_not_legacy_product_role_joins(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeForgeQueryPort()
+    fake.query_mappings_responses = [
+        [
+            {
+                "user_id": "u1",
+                "username": "alice",
+                "password": "pw",
+                "email": "a@example.com",
+                "first_name": "Alice",
+                "last_name": "Jones",
+                "tos_accepted": 1,
+                "eula_accepted": 0,
+                "user_status": "Active",
+                "otp_secret": None,
+                "last_log_in": None,
+                "two_factor_preference": "Email",
+            }
+        ]
+    ]
+    svc = UserService(sql=fake)
+    monkeypatch.setattr(
+        svc,
+        "get_user_workspaces",
+        lambda user_id, scope_workspace_id=None: [{"workspace_id": "ws-1", "is_default": 1}],
+    )
+    monkeypatch.setattr(
+        svc,
+        "get_user_direct_roles",
+        lambda user_id, workspace_id=None: [{"role_id": "1", "role_name": "workspace_admin"}],
+    )
+    monkeypatch.setattr(svc, "_user_is_visible_in_workspace", lambda user_id, workspace_id: True)
+
+    user = svc.get_user("u1", workspace_id="ws-1")
+
+    assert user is not None
+    assert user.user_id == "u1"
+    query = fake.query_mappings_calls[0].query
+    assert "FROM users" in query
+    assert "product_roles" not in query
+    assert "products p" not in query
+    assert "user_product_map" not in query
+    assert user.workspaces[0].workspace_id == "ws-1"
+    assert user.rbac_role_names == ["workspace_admin"]
+
+
 def test_get_users_empty() -> None:
     fake = FakeForgeQueryPort()
     fake.query_mappings_responses = [[]]
