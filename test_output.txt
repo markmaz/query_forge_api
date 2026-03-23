@@ -1,0 +1,53 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.4, pytest-8.3.4, pluggy-1.5.0 -- /Library/Frameworks/Python.framework/Versions/3.12/bin/python3
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /Users/mmaslak/Local Documents/projects/query_forge/query-forge-api/tests
+configfile: pytest.ini
+plugins: cov-5.0.0, typeguard-3.0.2, anyio-4.4.0, hypothesis-6.151.5, time-machine-2.14.1, subtests-0.15.0, schemathesis-4.9.2, dash-2.18.2
+collecting ... collected 30 items
+
+tests/routes/test_query_studio_summary_routes.py::test_200_with_rows PASSED [  3%]
+tests/routes/test_query_studio_summary_routes.py::test_200_with_empty_rows PASSED [  6%]
+tests/routes/test_query_studio_summary_routes.py::test_422_missing_workspace_id PASSED [ 10%]
+tests/routes/test_query_studio_summary_routes.py::test_422_missing_query_name PASSED [ 13%]
+tests/routes/test_query_studio_summary_routes.py::test_422_missing_column_names PASSED [ 16%]
+tests/routes/test_query_studio_summary_routes.py::test_422_missing_rows PASSED [ 20%]
+tests/routes/test_query_studio_summary_routes.py::test_422_non_string_workspace_id PASSED [ 23%]
+tests/routes/test_query_studio_summary_routes.py::test_422_non_array_rows PASSED [ 26%]
+tests/routes/test_query_studio_summary_routes.py::test_absent_prompt_hint_passed_as_empty_string PASSED [ 30%]
+tests/routes/test_query_studio_summary_routes.py::test_null_prompt_hint_passed_as_empty_string PASSED [ 33%]
+tests/routes/test_query_studio_summary_routes.py::test_503_on_llm_unavailable PASSED [ 36%]
+tests/routes/test_query_studio_summary_routes.py::test_500_on_unhandled_llm_failure PASSED [ 40%]
+tests/routes/test_query_studio_summary_routes.py::test_422_workspace_mismatch PASSED [ 43%]
+tests/services/test_query_studio_summary_service.py::test_happy_path_returns_normalized_fields PASSED [ 46%]
+tests/services/test_query_studio_summary_service.py::test_capped_false_when_rows_under_max PASSED [ 50%]
+tests/services/test_query_studio_summary_service.py::test_capped_true_when_rows_exceed_max PASSED [ 53%]
+tests/services/test_query_studio_summary_service.py::test_only_max_rows_sent_to_llm PASSED [ 56%]
+tests/services/test_query_studio_summary_service.py::test_original_row_count_passed_to_user_prompt PASSED [ 60%]
+tests/services/test_query_studio_summary_service.py::test_cap_disclaimer_appended_to_prompt_hint PASSED [ 63%]
+tests/services/test_query_studio_summary_service.py::test_include_comparison_false_passed_to_system_prompt PASSED [ 66%]
+tests/services/test_query_studio_summary_service.py::test_previous_highlights_and_run_date_are_none PASSED [ 70%]
+tests/services/test_query_studio_summary_service.py::test_empty_rows_accepted_capped_false PASSED [ 73%]
+tests/services/test_query_studio_summary_service.py::test_llm_unavailable_raises_llm_unavailable_error_404 PASSED [ 76%]
+tests/services/test_query_studio_summary_service.py::test_llm_unavailable_raises_llm_unavailable_error_400 PASSED [ 80%]
+tests/services/test_query_studio_summary_service.py::test_llm_failure_propagates PASSED [ 83%]
+tests/services/test_query_studio_summary_service.py::test_normalizes_missing_highlights_to_empty_list PASSED [ 86%]
+tests/services/test_query_studio_summary_service.py::test_normalizes_none_highlights_to_empty_list PASSED [ 90%]
+tests/services/test_query_studio_summary_service.py::test_normalizes_missing_narrative_to_empty_string PASSED [ 93%]
+tests/services/test_query_studio_summary_service.py::test_comparison_passed_through_null PASSED [ 96%]
+tests/services/test_query_studio_summary_service.py::test_comparison_passed_through_string PASSED [100%]
+
+=============================== warnings summary ===============================
+../../../../../../Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/site-packages/flask_restx/api.py:19
+  /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/site-packages/flask_restx/api.py:19: DeprecationWarning: jsonschema.RefResolver is deprecated as of v4.18.0, in favor of the https://github.com/python-jsonschema/referencing library, which provides more compliant referencing behavior as well as more flexible APIs for customization. A future release will remove RefResolver. Please file a feature request (on referencing) if you are missing an API for the kind of customization you need.
+    from jsonschema import RefResolver
+
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: Type google._upb._message.MessageMapContainer uses PyType_Spec with a metaclass that has custom tp_new. This is deprecated and will no longer be allowed in Python 3.14.
+
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: Type google._upb._message.ScalarMapContainer uses PyType_Spec with a metaclass that has custom tp_new. This is deprecated and will no longer be allowed in Python 3.14.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 30 passed, 3 warnings in 6.79s ========================

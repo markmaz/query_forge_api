@@ -984,3 +984,55 @@ Last updated: 2026-03-19
     - Result: `9 passed`
   - `pytest tests/test_smoke_test.py -q`
     - Result: `35 passed`
+
+## Latest users legacy-query regression check
+
+- A live `GET /api/v1/users/<id>` failure log referenced the removed `product_roles` / `products` join path in `app.services.user_service`.
+- Current source on disk no longer contains any of those legacy joins; both `get_user()` and `find_user_by_username()` read directly from `users` and attach workspaces/RBAC separately.
+- Added regressions to pin that behavior:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/services/test_user_service.py`
+    - added a `get_user()` test asserting the primary query uses `FROM users` and never references `product_roles`, `products`, or `user_product_map`
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/routes/test_user_routes.py`
+    - added a `/api/v1/users/<id>` route test proving the detail endpoint redacts `password` and `otp_secret` and forwards `X-Workspace-Id`
+- Verification completed:
+  - `pytest tests/services/test_user_service.py tests/routes/test_user_routes.py -q`
+    - Result: `43 passed, 4 skipped`
+  - `pytest tests/routes/test_auth_routes.py -q`
+    - Result: `16 passed`
+- Operational note:
+  - If that exact `product_roles` SQL still appears at runtime, the app server is running stale code and needs to be restarted/reloaded.
+
+## Query Studio AI Summary feature (2026-03-22)
+
+Both repos bumped to version 0.3.0.
+
+### What was built
+
+A stateless `POST /api/v1/query-studio/summarize` endpoint that accepts a result-set payload from the client, caps it to a configurable row limit, passes it through the shared `analysis_utils` LLM pipeline, and returns a natural-language summary of the data.
+
+### Backend files
+
+- `app/routes/query_studio_summary_routes.py` — Flask-RestX namespace, single POST resource, registered under the `query_studio` feature
+- `app/services/query_studio_summary_service.py` — service layer; enforces `QUERY_STUDIO_SUMMARY_MAX_ROWS` (default 100) row cap before calling the LLM pipeline; uses the shared `analysis_utils` helpers
+- `app/exceptions/llm_unavailable_error.py` — `LLMUnavailableError` exception class
+
+### Error handling
+
+- `LLMUnavailableError` raised by the service maps to HTTP 503
+- Any other unhandled exception maps to HTTP 500
+- Both return the standard JSON envelope `{ "status", "message", "data" }`
+
+### Configuration
+
+- `QUERY_STUDIO_SUMMARY_MAX_ROWS` env/config key (default `100`) — rows beyond this limit are silently truncated before the LLM call
+
+### Frontend files (query-forge-ui)
+
+- `src/features/query-forge/ui/hooks/useResultSummary.ts` — React Query mutation hook; posts rows to `/api/v1/query-studio/summarize`, manages loading/error state
+- `src/features/query-forge/ui/components/ResultSummary.tsx` — UI component rendering the AI summary panel (trigger button, loading skeleton, summary text, error message)
+- `src/features/query-forge/ui/components/PreviewSection.tsx` — wired in `ResultSummary` below the query result grid; passes current result rows into the hook
+
+### Version bumps
+
+- `query-forge-api`: `pyproject.toml` / `app/__init__.py` → `0.3.0`
+- `query-forge-ui`: `package.json` → `0.3.0`

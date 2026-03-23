@@ -100,6 +100,30 @@ def test_users_put_redacts_sensitive_fields(client, monkeypatch):
     assert "otp_secret" not in resp.json
 
 
+def test_users_get_detail_redacts_sensitive_fields_and_scopes_workspace(client, auth_headers, monkeypatch):
+    class _Svc:
+        def get_user(self, user_id: str, workspace_id: str | None = None):
+            assert user_id == "u1"
+            assert workspace_id == "ws-1"
+            return User(
+                user_id=user_id,
+                user_name="alice",
+                first_name="Alice",
+                password="hashed-secret",
+                otp_secret="otp-secret",
+                email="a@example.com",
+            )
+
+    monkeypatch.setattr(user_routes, "UserService", _Svc)
+
+    resp = client.get("/api/v1/users/u1", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json["user_id"] == "u1"
+    assert "password" not in resp.json
+    assert "otp_secret" not in resp.json
+
+
 def test_users_put_without_bearer_or_invite_token_rejected(client):
     resp = client.put("/api/v1/users/u1", json={"first_name": "Nope"})
     assert resp.status_code == 403
