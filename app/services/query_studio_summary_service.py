@@ -74,10 +74,12 @@ def generate_preview_summary(
             max_tokens=600,
         )
     except ForgeError as exc:
-        # ForgeError 404 = no LLM config found for role
         # ForgeError 400 = LLM misconfigured (missing model/endpoint/api_key)
-        # Both represent "workspace LLM not available" from the caller's perspective.
-        if exc.status_code in (400, 404):
+        # ForgeError 404 = no LLM config found for role
+        # ForgeError 503 = LLM endpoint unreachable (ConnectError — DNS failure, wrong host)
+        # ForgeError 504 = LLM request timed out
+        # All four represent "LLM unavailable" from the caller's perspective.
+        if exc.status_code in (400, 404, 503, 504):
             raise LLMUnavailableError(str(exc)) from exc
         raise
 

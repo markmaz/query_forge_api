@@ -185,6 +185,38 @@ def test_llm_unavailable_raises_llm_unavailable_error_400():
         _stop_patches(patches)
 
 
+def test_llm_unavailable_raises_llm_unavailable_error_503():
+    """ForgeError 503 = LLM endpoint unreachable (ConnectError) → LLMUnavailableError."""
+    from app.exceptions.forge_error import ForgeError
+    patches = [
+        patch.object(svc_module, "build_analysis_system_prompt", return_value="sys"),
+        patch.object(svc_module, "build_analysis_user_prompt", return_value="usr"),
+        patch.object(svc_module, "call_analysis_llm", side_effect=ForgeError("LLM provider unavailable", status_code=503)),
+    ]
+    _apply_patches(patches)
+    try:
+        with pytest.raises(LLMUnavailableError):
+            generate_preview_summary("ws-1", "Q", ["col"], ROWS_10)
+    finally:
+        _stop_patches(patches)
+
+
+def test_llm_unavailable_raises_llm_unavailable_error_504():
+    """ForgeError 504 = LLM request timed out → LLMUnavailableError."""
+    from app.exceptions.forge_error import ForgeError
+    patches = [
+        patch.object(svc_module, "build_analysis_system_prompt", return_value="sys"),
+        patch.object(svc_module, "build_analysis_user_prompt", return_value="usr"),
+        patch.object(svc_module, "call_analysis_llm", side_effect=ForgeError("LLM request timed out", status_code=504)),
+    ]
+    _apply_patches(patches)
+    try:
+        with pytest.raises(LLMUnavailableError):
+            generate_preview_summary("ws-1", "Q", ["col"], ROWS_10)
+    finally:
+        _stop_patches(patches)
+
+
 def test_llm_failure_propagates():
     patches = [
         patch.object(svc_module, "build_analysis_system_prompt", return_value="sys"),
