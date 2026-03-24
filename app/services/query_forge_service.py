@@ -1494,9 +1494,6 @@ class QueryForgeService:
                 f"  SELECT DISTINCT {self._qf_safe_ident(qf_base_alias)}.{two_phase_key_col_sql}\n"
                 f"  FROM {plan.primary.full_name} {self._qf_safe_ident(qf_base_alias)}\n"
                 + (f"  WHERE {' AND '.join(base_where_parts)}\n" if base_where_parts else "")
-                + (f"  ORDER BY {order_sql}\n" if order_sql else "")
-                + f"  LIMIT {int(limit)}\n"
-                + f"  OFFSET {int(offset)}\n"
                 + ")"
             )
             base_patients_cte_count = (
@@ -1577,7 +1574,7 @@ class QueryForgeService:
         if order_sql:
             sql += f"\nORDER BY {order_sql}"
 
-        if mode == "preview" and not use_two_phase:
+        if mode == "preview":
             sql += f"\nLIMIT {int(limit)}\nOFFSET {int(offset)}"
 
         return ForgeCompiledQuery(sql=sql, qf_count_sql=qf_count_sql, params=params, qf_output_cols=qf_output_cols)

@@ -12,6 +12,12 @@ def map_plan_v2_to_sqljson(
     capabilities: Mapping[str, Any],
     prompt: str,
 ) -> Dict[str, Any]:
+    time_block = dict(plan_json.get("time") or {}) if isinstance(plan_json.get("time"), dict) else {}
+    custom_time_column_key = (
+        _norm_key(time_block.get("time_column_key"))
+        if _should_apply_custom_time_filter(time_block)
+        else ""
+    )
     dim_lookup = {
         _norm_key(row.get("column_key")): dict(row)
         for row in list(capabilities.get("dimensions") or []) + list(capabilities.get("time_columns") or [])
@@ -53,6 +59,11 @@ def map_plan_v2_to_sqljson(
         edits.append(AddSelectEdit(op="addSelect", col=col, alias=item.get("label")))
 
     for item in list(plan_json.get("filters") or []):
+        if custom_time_column_key and _is_relative_time_placeholder_filter(
+            item,
+            time_column_key=custom_time_column_key,
+        ):
+            continue
         key = _norm_key(item.get("column_key"))
         col = _to_sql_column_key(filter_lookup.get(key))
         if col is None:
@@ -120,7 +131,6 @@ def map_plan_v2_to_sqljson(
         aggs["metrics"] = []
         aggs["groupBy"] = []
 
-    time_block = dict(plan_json.get("time") or {}) if isinstance(plan_json.get("time"), dict) else {}
     if time_block:
         sql_json.setdefault("meta", {})
         if isinstance(sql_json.get("meta"), dict):
@@ -519,6 +529,48 @@ def _filter_value_for_op(*, item: Mapping[str, Any], op: str) -> Any:
     if op in {"in", "not_in", "between"} and isinstance(item.get("values"), list):
         return list(item.get("values") or [])
     return item.get("value")
+
+
+def _is_relative_time_placeholder_filter(
+    item: Mapping[str, Any],
+    *,
+    time_column_key: str,
+) -> bool:
+    if _norm_key(item.get("column_key")) != time_column_key:
+        return False
+    if _canonical_relative_time_token(item.get("value")) != "":
+        return True
+    values = item.get("values")
+    if isinstance(values, list) and any(_canonical_relative_time_token(value) != "" for value in values):
+        return True
+    value = item.get("value")
+    if isinstance(value, Mapping):
+        if _canonical_relative_time_token(value.get("time_range")) != "":
+            return True
+        if _canonical_relative_time_token(value.get("time_period")) != "":
+            return True
+    return False
+
+
+def _canonical_relative_time_token(value: Any) -> str:
+    token = _norm_key(value).replace(" ", "_")
+    aliases = {
+        "this_month": "this_month",
+        "current_month": "this_month",
+        "last_month": "last_month",
+        "previous_month": "last_month",
+        "this_quarter": "this_quarter",
+        "current_quarter": "this_quarter",
+        "last_quarter": "last_quarter",
+        "previous_quarter": "last_quarter",
+        "fiscal_this_quarter": "fiscal_this_quarter",
+        "fiscal_last_quarter": "fiscal_last_quarter",
+        "this_year": "this_year",
+        "current_year": "this_year",
+        "last_year": "last_year",
+        "previous_year": "last_year",
+    }
+    return aliases.get(token, "")
 
 
 def _should_apply_custom_time_filter(time_block: Mapping[str, Any]) -> bool:

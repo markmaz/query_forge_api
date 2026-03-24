@@ -76,6 +76,15 @@ class DatabricksForgeQueryPort:
         response_payload = self._post_json(_STATEMENTS_API_PATH, payload)
         response_payload = self._with_statement_id_aliases(response_payload)
 
+        # Log immediately if Databricks returns a terminal failure in the initial response
+        initial_state = (response_payload.get("status") or {}).get("state")
+        if initial_state == "FAILED":
+            initial_error = self._extract_status_error_message(response_payload)
+            logger.warning(
+                "Databricks statement failed immediately: error=%s",
+                initial_error,
+            )
+
         if not wait:
             return response_payload
 
@@ -103,7 +112,7 @@ class DatabricksForgeQueryPort:
                 state,
                 error_message,
             )
-            raise RuntimeError(f"Databricks statement failed: {state}")
+            raise RuntimeError(f"Databricks statement failed: {state} — {error_message}")
 
         if qf_result_fmt == "ARROW_STREAM":
             table = self.fetch_arrow_table(qf_statement_id)
@@ -266,11 +275,10 @@ class DatabricksForgeQueryPort:
 
     def _post_json(self, path: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         response = self._post(path, json=payload)
-        logger.warning(
-            "_post_json status=%s content_length=%s content_preview=%r",
+        logger.debug(
+            "_post_json status=%s content_length=%s",
             response.status_code,
             len(response.content),
-            response.content[:200],
         )
         response.raise_for_status()
         try:

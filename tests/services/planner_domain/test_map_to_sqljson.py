@@ -599,3 +599,94 @@ def test_map_to_sqljson_infers_amount_metric_field_without_coercing_agg() -> Non
     metric = metrics[0]
     assert metric["fn"] == "count"
     assert (metric.get("field") or {}).get("columnName") == "total_net_amount"
+
+
+def test_map_to_sqljson_drops_relative_time_placeholder_filters_when_custom_time_exists() -> None:
+    capabilities = {
+        "domain_id": 9,
+        "domain_version": 1,
+        "dimensions": [
+            {
+                "column_key": "wt552.school_name",
+                "label": "School Name",
+                "data_type": "string",
+                "filterable": True,
+                "workspace_table_id": 552,
+                "model_column_id": 14649,
+                "column_name": "school_name",
+            }
+        ],
+        "filter_columns": [
+            {
+                "column_key": "wt594.calendar_date",
+                "label": "Calendar Date",
+                "data_type": "date",
+                "filterable": True,
+                "workspace_table_id": 594,
+                "model_column_id": 15503,
+                "column_name": "calendar_date",
+            },
+            {
+                "column_key": "wt594.is_absent",
+                "label": "Is Absent",
+                "data_type": "int",
+                "filterable": True,
+                "workspace_table_id": 594,
+                "model_column_id": 15506,
+                "column_name": "is_absent",
+            },
+        ],
+        "time_columns": [
+            {
+                "column_key": "wt594.calendar_date",
+                "label": "Calendar Date",
+                "data_type": "date",
+                "filterable": True,
+                "workspace_table_id": 594,
+                "model_column_id": 15503,
+                "column_name": "calendar_date",
+            }
+        ],
+        "domain_metrics": [],
+        "user_metrics": [],
+        "overlay_metrics": [],
+    }
+    plan = {
+        "schema_version": 2,
+        "trace_id": "trace-time-1",
+        "workspace_id": "ws-1",
+        "vertical_norm": "education",
+        "base_domain_id": 9,
+        "intent": "aggregate",
+        "selects": {
+            "dimensions": [{"column_key": "wt552.school_name"}],
+            "metrics": [],
+        },
+        "filters": [
+            {"column_key": "wt594.calendar_date", "op": ">=", "value": "this month"},
+            {"column_key": "wt594.calendar_date", "op": "<=", "value": "this month"},
+            {"column_key": "wt594.is_absent", "op": "=", "value": 1},
+        ],
+        "time": {
+            "time_range": "custom",
+            "start_date": "2026-03-01",
+            "end_date": "2026-03-23",
+            "time_grain": "month",
+            "time_column_key": "wt594.calendar_date",
+        },
+        "grouping": {"group_by": ["wt552.school_name"], "order_by": []},
+    }
+
+    out = map_plan_v2_to_sqljson(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="Which schools have the highest number of absences this month?",
+    )
+
+    children = ((out.get("filters") or {}).get("children") or [])
+    assert len(children) == 2
+    assert children[0]["op"] == "equals"
+    assert children[0]["field"]["columnName"] == "is_absent"
+    assert children[1]["op"] == "between"
+    assert children[1]["field"]["columnName"] == "calendar_date"
+    assert children[1]["value"] == ["2026-03-01", "2026-03-23"]

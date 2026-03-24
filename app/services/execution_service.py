@@ -324,6 +324,19 @@ class ExecutionService:
         status = ctx.sql_exec.get_statement_status(job["statement_id"])
         state = (status.get("status") or {}).get("state") or status.get("status")
 
+        if str(state or "").upper() == "FAILED":
+            error = (status.get("status") or {}).get("error") or {}
+            error_code = error.get("error_code", "UNKNOWN")
+            error_message = error.get("message", "No message returned")
+            logger.warning(
+                "Databricks statement failed: job_id=%s statement_id=%s error_code=%s message=%s sql=%s",
+                job_id,
+                job["statement_id"],
+                error_code,
+                error_message,
+                job.get("sql"),
+            )
+
         return {
             "jobId": job_id,
             "statementId": job["statement_id"],

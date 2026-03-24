@@ -1002,6 +1002,30 @@ Last updated: 2026-03-19
 - Operational note:
   - If that exact `product_roles` SQL still appears at runtime, the app server is running stale code and needs to be restarted/reloaded.
 
+## Latest planner relative-time SQL mapping fix
+
+- A live planner result for the prompt "Which schools have the highest number of absences this month?" showed correct normalized `plan_json_v2.time` output (`2026-03-01` through current date), but the compiled `sql_json` still contained the original placeholder filters:
+  - `calendar_date >= "this month"`
+  - `calendar_date <= "this month"`
+  - plus the normalized `between ["2026-03-01", "2026-03-23"]`
+- Root cause:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/services/planner_domain/map_to_sqljson.py`
+  - the mapper copied plan filters first, then always appended the normalized custom time `between` filter without stripping same-column relative placeholders.
+- Fix implemented:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/app/services/planner_domain/map_to_sqljson.py`
+    - when `time.time_range == "custom"` and `time.time_column_key` is present, the mapper now drops same-column relative-time placeholder filters before adding the executable `between` filter
+    - covers canonical relative tokens such as `this month`, `last month`, `this quarter`, `last quarter`, `this year`, and `last year`
+- Regression coverage added:
+  - `/Users/mmaslak/Local Documents/projects/query-forge-api/tests/services/planner_domain/test_map_to_sqljson.py`
+    - added a mapper test proving relative placeholder filters are removed and only the normalized `between` predicate remains
+- Verification completed:
+  - `pytest tests/services/planner_domain/test_map_to_sqljson.py -q`
+    - Result: `12 passed`
+  - `pytest tests/services/planner_domain/test_service.py -q`
+    - Result: `47 passed`
+- Behavior note:
+  - planner `"this month"` currently means month-to-date for the current month, anchored by the domain time policy timezone when configured.
+
 ## Query Studio AI Summary feature (2026-03-22)
 
 Both repos bumped to version 0.3.0.
