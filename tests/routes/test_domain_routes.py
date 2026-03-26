@@ -291,8 +291,10 @@ def test_domain_time_policy_get_success(client, auth_headers, monkeypatch):
                 "has_policy": True,
                 "can_edit": True,
                 "policy": {
-                    "calendar_mode": "fiscal",
+                    "calendar_mode": "school_year",
                     "fiscal_year_start_month": 7,
+                    "school_year_start_month": 8,
+                    "school_year_end_month": 5,
                     "week_start": "monday",
                 },
             }
@@ -300,7 +302,7 @@ def test_domain_time_policy_get_success(client, auth_headers, monkeypatch):
     monkeypatch.setattr(domain_routes, "DomainTimePolicyService", _Svc)
     resp = client.get("/api/v1/domains/3/time-policy", headers=auth_headers)
     assert resp.status_code == 200
-    assert resp.json["policy"]["calendar_mode"] == "fiscal"
+    assert resp.json["policy"]["calendar_mode"] == "school_year"
 
 
 def test_domain_time_policy_put_success(client, auth_headers, monkeypatch):
@@ -322,6 +324,8 @@ def test_domain_time_policy_put_success(client, auth_headers, monkeypatch):
             "policy": {
                 "calendar_mode": "fiscal",
                 "fiscal_year_start_month": 7,
+                "school_year_start_month": 8,
+                "school_year_end_month": 5,
                 "default_grain": "quarter",
                 "allow_relative_ranges": True,
                 "relative_map": {"this_quarter": "current_fiscal_quarter"},
@@ -335,7 +339,7 @@ def test_domain_time_policy_put_success(client, auth_headers, monkeypatch):
 def test_domain_time_policy_put_service_error(client, auth_headers, monkeypatch):
     class _Svc:
         def update_policy(self, *, workspace_id: str, user_id: str, domain_id: int, policy_payload):
-            raise ForgeError("policy.calendar_mode must be 'calendar' or 'fiscal'", status_code=400)
+            raise ForgeError("policy.calendar_mode must be 'calendar', 'fiscal', or 'school_year'", status_code=400)
 
     monkeypatch.setattr(domain_routes, "DomainTimePolicyService", _Svc)
     resp = client.put(
@@ -345,3 +349,382 @@ def test_domain_time_policy_put_service_error(client, auth_headers, monkeypatch)
     )
     assert resp.status_code == 400
     assert "calendar_mode" in resp.json["error"]
+
+
+def test_planner_rerank_policies_get_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def list_policies(self, *, workspace_id: str, user_id: str, base_domain_id, vertical_norm: str, include_inactive: bool):
+            assert workspace_id == "ws-1"
+            assert user_id == "user-1"
+            assert base_domain_id == 9
+            assert vertical_norm == "education"
+            assert include_inactive is True
+            return {
+                "workspace_id": workspace_id,
+                "vertical_norm": vertical_norm,
+                "base_domain_id": base_domain_id,
+                "domain_name": "Student Enrollment",
+                "can_edit": True,
+                "policies": [
+                    {
+                        "policy_key": "student_listing_school_literal",
+                        "scope_type": "workspace_domain",
+                        "policy_json": {"version": 1, "when_signals_all": ["student_listing"], "boost": 0.2},
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(domain_routes, "PlannerRerankPolicyService", _Svc)
+    resp = client.get(
+        "/api/v1/domains/planner-rerank-policies?base_domain_id=9&vertical_norm=education&include_inactive=true",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json["policies"][0]["policy_key"] == "student_listing_school_literal"
+
+
+def test_planner_rerank_policies_put_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def upsert_policy(self, *, workspace_id: str, actor_user_id: str, payload):
+            assert workspace_id == "ws-1"
+            assert actor_user_id == "user-1"
+            return {
+                "policy_id": 14,
+                "policy_key": payload["policy_key"],
+                "scope_type": payload["scope_type"],
+                "scope_base_domain_id": payload["scope_base_domain_id"],
+                "policy_json": dict(payload["policy_json"]),
+            }
+
+    monkeypatch.setattr(domain_routes, "PlannerRerankPolicyService", _Svc)
+    resp = client.put(
+        "/api/v1/domains/planner-rerank-policies",
+        headers=auth_headers,
+        json={
+            "policy": {
+                "policy_key": "student_listing_school_literal",
+                "name": "Student listing school literal",
+                "scope_type": "workspace_domain",
+                "scope_base_domain_id": 9,
+                "policy_json": {
+                    "version": 1,
+                    "when_signals_all": ["student_listing", "school_literal_present"],
+                    "prefer_capabilities": ["STUDENT_IDENTITY", "SCHOOL_NAME"],
+                    "boost": 0.2,
+                    "penalty": 0.3,
+                    "max_effect": 0.3,
+                },
+            }
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json["policy_id"] == 14
+    assert resp.json["scope_base_domain_id"] == 9
+
+
+def test_planner_rerank_policies_delete_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def delete_policy(self, *, workspace_id: str, actor_user_id: str, policy_id: int):
+            assert workspace_id == "ws-1"
+            assert actor_user_id == "user-1"
+            assert policy_id == 14
+            return {"deleted": True, "policy_id": 14}
+
+    monkeypatch.setattr(domain_routes, "PlannerRerankPolicyService", _Svc)
+    resp = client.delete(
+        "/api/v1/domains/planner-rerank-policies/14",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json == {"deleted": True, "policy_id": 14}
+
+
+def test_planner_rerank_policies_put_service_error(client, auth_headers, monkeypatch):
+    class _Svc:
+        def upsert_policy(self, *, workspace_id: str, actor_user_id: str, payload):
+            raise ForgeError("workspace scope must match the active workspace", status_code=400)
+
+    monkeypatch.setattr(domain_routes, "PlannerRerankPolicyService", _Svc)
+    resp = client.put(
+        "/api/v1/domains/planner-rerank-policies",
+        headers=auth_headers,
+        json={
+            "policy": {
+                "policy_key": "bad_rule",
+                "name": "Bad Rule",
+                "scope_type": "workspace",
+                "scope_workspace_id": "ws-2",
+                "policy_json": {
+                    "version": 1,
+                    "when_signals_all": ["student_listing"],
+                    "prefer_capabilities": ["STUDENT_IDENTITY"],
+                    "boost": 0.2,
+                    "max_effect": 0.2,
+                },
+            }
+        },
+    )
+    assert resp.status_code == 400
+    assert "workspace scope" in resp.json["error"]
+
+
+def test_planner_domain_capabilities_get_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def list_capabilities(self, *, workspace_id: str, user_id: str, base_domain_id: int, vertical_norm: str, include_inactive: bool):
+            assert workspace_id == "ws-1"
+            assert user_id == "user-1"
+            assert base_domain_id == 9
+            assert vertical_norm == "education"
+            assert include_inactive is True
+            return {
+                "workspace_id": workspace_id,
+                "base_domain_id": base_domain_id,
+                "vertical_norm": vertical_norm,
+                "domain_name": "Student Enrollment",
+                "can_edit": True,
+                "capabilities": [
+                    {"capability_key": "SCHOOL_NAME", "scope_type": "workspace_domain", "is_inherited": False}
+                ],
+            }
+
+    monkeypatch.setattr(domain_routes, "PlannerDomainCapabilityService", _Svc)
+    resp = client.get(
+        "/api/v1/domains/planner-domain-capabilities?base_domain_id=9&vertical_norm=education&include_inactive=true",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json["capabilities"][0]["capability_key"] == "SCHOOL_NAME"
+
+
+def test_planner_domain_capabilities_put_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def upsert_capability(self, *, workspace_id: str, actor_user_id: str, payload):
+            assert workspace_id == "ws-1"
+            assert actor_user_id == "user-1"
+            return {
+                "capability_id": 12,
+                "capability_key": payload["capability_key"],
+                "base_domain_id": payload["base_domain_id"],
+            }
+
+    monkeypatch.setattr(domain_routes, "PlannerDomainCapabilityService", _Svc)
+    resp = client.put(
+        "/api/v1/domains/planner-domain-capabilities",
+        headers=auth_headers,
+        json={
+            "capability": {
+                "scope_type": "workspace_domain",
+                "base_domain_id": 9,
+                "capability_key": "SCHOOL_NAME",
+                "support_level": "direct",
+                "source_type": "semantic_concept",
+            }
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json["capability_id"] == 12
+
+
+def test_planner_domain_capabilities_delete_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def delete_capability(self, *, workspace_id: str, actor_user_id: str, capability_id: int):
+            assert workspace_id == "ws-1"
+            assert actor_user_id == "user-1"
+            assert capability_id == 12
+            return {"deleted": True, "capability_id": 12}
+
+    monkeypatch.setattr(domain_routes, "PlannerDomainCapabilityService", _Svc)
+    resp = client.delete(
+        "/api/v1/domains/planner-domain-capabilities/12",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json == {"deleted": True, "capability_id": 12}
+
+
+def test_planner_rerank_policy_candidates_get_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def list_candidates(self, *, workspace_id: str, review_status, vertical_norm):
+            assert workspace_id == "ws-1"
+            assert review_status == "pending"
+            assert vertical_norm == "education"
+            return {
+                "workspace_id": workspace_id,
+                "review_status": review_status,
+                "vertical_norm": vertical_norm,
+                "candidates": [
+                    {"id": 4, "candidate_key": "candidate_1", "review_status": "pending"}
+                ],
+            }
+
+    monkeypatch.setattr(domain_routes, "PlannerRerankPolicyCandidateService", _Svc)
+    resp = client.get(
+        "/api/v1/domains/planner-rerank-policy-candidates?review_status=pending&vertical_norm=education",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json["candidates"][0]["candidate_key"] == "candidate_1"
+
+
+def test_planner_rerank_policy_candidates_post_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def create_candidate(self, *, workspace_id: str, payload):
+            assert workspace_id == "ws-1"
+            return {
+                "candidate_id": 21,
+                "candidate_key": payload["candidate_key"],
+                "review_status": "pending",
+            }
+
+    monkeypatch.setattr(domain_routes, "PlannerRerankPolicyCandidateService", _Svc)
+    resp = client.post(
+        "/api/v1/domains/planner-rerank-policy-candidates",
+        headers=auth_headers,
+        json={
+            "candidate": {
+                "candidate_key": "candidate_1",
+                "candidate_policy": {
+                    "version": 1,
+                    "when_signals_all": ["student_listing"],
+                    "prefer_capabilities": ["STUDENT_IDENTITY"],
+                    "boost": 0.2,
+                    "max_effect": 0.2,
+                },
+            }
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json["candidate_id"] == 21
+
+
+def test_planner_rerank_policy_candidates_put_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def create_candidate(self, *, workspace_id: str, payload):
+            assert workspace_id == "ws-1"
+            assert payload["id"] == 21
+            return {
+                "candidate_id": 21,
+                "candidate_key": payload["candidate_key"],
+                "review_status": "pending",
+            }
+
+    monkeypatch.setattr(domain_routes, "PlannerRerankPolicyCandidateService", _Svc)
+    resp = client.put(
+        "/api/v1/domains/planner-rerank-policy-candidates",
+        headers=auth_headers,
+        json={
+            "candidate": {
+                "id": 21,
+                "candidate_key": "candidate_1",
+                "candidate_policy": {
+                    "version": 1,
+                    "when_signals_all": ["student_listing"],
+                    "prefer_capabilities": ["STUDENT_IDENTITY"],
+                    "boost": 0.2,
+                    "max_effect": 0.2,
+                },
+            }
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json["candidate_id"] == 21
+
+
+def test_planner_rerank_policy_candidates_delete_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def delete_candidate(self, *, workspace_id: str, candidate_id: int):
+            assert workspace_id == "ws-1"
+            assert candidate_id == 21
+            return {"deleted": True, "candidate_id": 21}
+
+    monkeypatch.setattr(domain_routes, "PlannerRerankPolicyCandidateService", _Svc)
+    resp = client.delete(
+        "/api/v1/domains/planner-rerank-policy-candidates/21",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json == {"deleted": True, "candidate_id": 21}
+
+
+def test_planner_rerank_policy_candidate_approve_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def approve_candidate(self, *, workspace_id: str, actor_user_id: str, candidate_id: int, payload):
+            assert workspace_id == "ws-1"
+            assert actor_user_id == "user-1"
+            assert candidate_id == 21
+            return {
+                "candidate_id": candidate_id,
+                "review_status": "approved",
+                "approved_policy_id": 77,
+            }
+
+    monkeypatch.setattr(domain_routes, "PlannerRerankPolicyCandidateService", _Svc)
+    resp = client.post(
+        "/api/v1/domains/planner-rerank-policy-candidates/21/approve",
+        headers=auth_headers,
+        json={
+            "approval": {
+                "name": "Student listing school literal",
+                "scope_type": "workspace_domain",
+                "scope_base_domain_id": 9,
+            }
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json["approved_policy_id"] == 77
+
+
+def test_planner_rerank_policy_candidate_suggest_success(client, auth_headers, monkeypatch):
+    class _Svc:
+        def suggest_candidate(self, *, workspace_id: str, user_id: str, payload):
+            assert workspace_id == "ws-1"
+            assert user_id == "user-1"
+            assert payload["expected_base_domain_id"] == 9
+            return {
+                "candidate": {
+                    "candidate_id": 41,
+                    "candidate_key": "student_school_enrollment_bias",
+                    "review_status": "pending",
+                },
+                "prompt_signals": ["student_listing", "school_literal_present", "status_enrolled"],
+                "expected_domain": {"base_domain_id": 9, "domain_name": "Student Enrollment"},
+                "observed_domain": {"base_domain_id": 15, "domain_name": "Student Programs"},
+            }
+
+    monkeypatch.setattr(domain_routes, "PlannerRerankPolicyCandidateSuggestionService", _Svc)
+    resp = client.post(
+        "/api/v1/domains/planner-rerank-policy-candidates/suggest",
+        headers=auth_headers,
+        json={
+            "suggestion": {
+                "prompt": "Show me all the students enrolled at Barksdale Elementary",
+                "expected_base_domain_id": 9,
+                "observed_base_domain_id": 15,
+                "vertical_norm": "generic",
+            }
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json["candidate"]["candidate_id"] == 41
+
+
+def test_planner_rerank_policy_candidate_suggest_returns_validation_error(client, auth_headers, monkeypatch):
+    class _Svc:
+        def suggest_candidate(self, *, workspace_id: str, user_id: str, payload):
+            del workspace_id, user_id, payload
+            raise ForgeError("AI helper could not derive a capability-grounded suggestion for this prompt.", status_code=422)
+
+    monkeypatch.setattr(domain_routes, "PlannerRerankPolicyCandidateSuggestionService", _Svc)
+    resp = client.post(
+        "/api/v1/domains/planner-rerank-policy-candidates/suggest",
+        headers=auth_headers,
+        json={
+            "suggestion": {
+                "prompt": "How many days off are there in December?",
+                "expected_base_domain_id": 6,
+                "vertical_norm": "education",
+            }
+        },
+    )
+    assert resp.status_code == 422
+    assert "capability-grounded suggestion" in resp.json["error"]

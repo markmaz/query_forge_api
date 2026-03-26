@@ -162,6 +162,52 @@ def test_test_datasource_success_updates_status(monkeypatch):
     assert sql.last_params["last_test_status"] == "ok"
 
 
+def test_list_datasource_namespaces_returns_catalogs_and_schemas(monkeypatch):
+    class _Executor:
+        def execute(self, sql):
+            assert sql == "SHOW DATABASES"
+            return [{"name": "ANALYTICS"}, {"name": "RAW"}]
+
+    class _Provider:
+        def list_schemas(self, catalog):
+            assert catalog == "ANALYTICS"
+            return ["PUBLIC", "REPORTING"]
+
+    class _SQL:
+        def execute_query_mappings(self, query, _params=None):
+            if "FROM datasource" in query and "WHERE id = :id" in query:
+                return [
+                    {
+                        "id": 4,
+                        "organization_id": "org-1",
+                        "name": "primary",
+                        "slug": "primary",
+                        "type": "snowflake",
+                        "description": None,
+                        "is_active": 1,
+                        "secret_ref": None,
+                        "config_json": {"account": "acct", "user": "svc", "database": "ANALYTICS", "password": "p"},
+                        "last_tested_at": None,
+                        "last_test_status": None,
+                        "last_test_message": None,
+                        "created_at": None,
+                        "updated_at": None,
+                    }
+                ]
+            return []
+
+    monkeypatch.setattr("app.services.tenancy.tenancy_admin_service.ExecutorFactory.create", lambda *_args, **_kwargs: _Executor())
+    monkeypatch.setattr("app.services.tenancy.tenancy_admin_service.MetadataProviderFactory.create", lambda *_args, **_kwargs: _Provider())
+
+    svc = TenancyAdminService(sql=_SQL())
+    out = svc.list_datasource_namespaces(datasource_id=4)
+
+    assert out["catalogs"] == ["ANALYTICS", "RAW"]
+    assert out["schemas"] == ["PUBLIC", "REPORTING"]
+    assert out["current_catalog"] == "ANALYTICS"
+    assert out["current_schema"] == "PUBLIC"
+
+
 def test_upsert_workspace_membership_missing_workspace_raises_404():
     class _SQL:
         def execute_query_mappings(self, query, _params=None):
@@ -768,3 +814,83 @@ def test_create_workspace_rejects_datasource_org_mismatch():
             )
         )
     assert exc.value.status_code == 400
+
+
+def test_delete_workspace_soft_sets_inactive():
+    class _SQL:
+        def __init__(self):
+            self.writes = []
+
+        def execute_query_mappings(self, query, params=None):
+            if "FROM workspace w" in query and "WHERE w.id = :workspace_id" in query:
+                return [
+                    {
+                        "workspace_id": params["workspace_id"],
+                        "workspace_name": "Acme Workspace",
+                        "workspace_description": None,
+                        "workspace_is_active": 1,
+                        "default_catalog": None,
+                        "default_schema": None,
+                        "organization_id": "org-1",
+                        "organization_name": "Org",
+                        "organization_is_active": 1,
+                        "datasource_id": None,
+                        "datasource_name": None,
+                        "datasource_slug": None,
+                        "datasource_type": None,
+                        "datasource_is_active": None,
+                        "created_at": None,
+                        "updated_at": None,
+                    }
+                ]
+            return []
+
+        def execute_write(self, query, params=None):
+            self.writes.append((query, dict(params or {})))
+            return 1
+
+    sql = _SQL()
+    svc = TenancyAdminService(sql=sql)
+    out = svc.delete_workspace(workspace_id="ws-1")
+    assert out == {"workspace_id": "ws-1", "deleted": True, "mode": "soft"}
+    assert ("UPDATE workspace SET is_active = 0 WHERE id = :id", {"id": "ws-1"}) in sql.writes
+
+
+def test_delete_workspace_hard_removes_row():
+    class _SQL:
+        def __init__(self):
+            self.writes = []
+
+        def execute_query_mappings(self, query, params=None):
+            if "FROM workspace w" in query and "WHERE w.id = :workspace_id" in query:
+                return [
+                    {
+                        "workspace_id": params["workspace_id"],
+                        "workspace_name": "Acme Workspace",
+                        "workspace_description": None,
+                        "workspace_is_active": 1,
+                        "default_catalog": None,
+                        "default_schema": None,
+                        "organization_id": "org-1",
+                        "organization_name": "Org",
+                        "organization_is_active": 1,
+                        "datasource_id": None,
+                        "datasource_name": None,
+                        "datasource_slug": None,
+                        "datasource_type": None,
+                        "datasource_is_active": None,
+                        "created_at": None,
+                        "updated_at": None,
+                    }
+                ]
+            return []
+
+        def execute_write(self, query, params=None):
+            self.writes.append((query, dict(params or {})))
+            return 1
+
+    sql = _SQL()
+    svc = TenancyAdminService(sql=sql)
+    out = svc.delete_workspace(workspace_id="ws-1", hard=True)
+    assert out == {"workspace_id": "ws-1", "deleted": True, "mode": "hard"}
+    assert ("DELETE FROM workspace WHERE id = :id", {"id": "ws-1"}) in sql.writes

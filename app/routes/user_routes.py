@@ -78,6 +78,13 @@ def _public_user_payload(user: User) -> dict:
     return user.model_dump(mode="json", exclude=SENSITIVE_USER_FIELDS)
 
 
+def _admin_user_scope_workspace_id() -> str | None:
+    effective_roles = getattr(g, "effective_roles", set()) or set()
+    if bool(getattr(g, "is_admin", False)) or "super_admin" in effective_roles:
+        return None
+    return (request.headers.get("X-Workspace-Id") or "").strip() or None
+
+
 @qf_user_ns.route("/")
 class UserList(ForgeResource):
     @qf_user_ns.response(201, "User invite created")
@@ -103,10 +110,7 @@ class UserList(ForgeResource):
     def get(self):
         """List users with cursor-based pagination"""
         args = qf_user_parser.parse_args()
-        workspace_id = (request.headers.get("X-Workspace-Id") or "").strip() or None
-        # Super admins see all users across all workspaces
-        if "super_admin" in getattr(g, "effective_roles", set()):
-            workspace_id = None
+        workspace_id = _admin_user_scope_workspace_id()
         logger.info(f"Parsed args: {args}")  # Debug query parameters
         logger.info(args['status'])
         try:
@@ -149,7 +153,7 @@ class UserUpdates(ForgeResource):
         result = userService.update_user(
             user_id=user_id,
             update_data=user,
-            workspace_id=(request.headers.get("X-Workspace-Id") or "").strip() or None,
+            workspace_id=_admin_user_scope_workspace_id(),
         )
         
         return jsonify(_public_user_payload(result))
@@ -177,7 +181,7 @@ class UserUpdates(ForgeResource):
         userService = UserService()
         result = userService.get_user(
             user_id,
-            workspace_id=(request.headers.get("X-Workspace-Id") or "").strip() or None,
+            workspace_id=_admin_user_scope_workspace_id(),
         )
         return jsonify(_public_user_payload(result))
     

@@ -63,6 +63,8 @@ from app.infra.embedding_model import EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
 from app.services.domains.capabilities_service import DomainCapabilitiesService
 from app.services.domain.domain_time_policy_service import DomainTimePolicyService
+from app.services.domain.planner_domain_capability_service import PlannerDomainCapabilityService
+from app.services.domain.planner_rerank_policy_service import PlannerRerankPolicyService
 from app.services.llm.llm_client import LLMClient
 from app.services.llm.prompts_plan_v2 import (
     NEXT_ACTIONS_JSON_SCHEMA,
@@ -78,8 +80,9 @@ from app.services.llm.prompts_plan_v2 import (
 )
 from app.services.planner.unified_llm_planner import build_plan_and_slots
 from app.services.planner.compact_planner import build_compact_plan_and_project
+from app.services.planner.semantic_grounding_service import SemanticGroundingService
 from app.services.planner.value_normalizers.country import is_country_iso2_column, normalize_country_values
-from app.services.planner.value_normalizers.school_year import is_school_year_column, normalize_school_year_values
+from app.services.planner.value_normalizers.school_year import current_school_year, is_school_year_column, normalize_school_year_values
 from app.services.planner.value_normalizers.semester import is_semester_column, normalize_semester_values
 from app.services.planner_domain.conversation_store import (
     HybridPlannerDomainConversationStore,
@@ -89,6 +92,8 @@ from app.services.planner_domain.conversation_store import (
     new_conversation_id,
 )
 from app.services.planner_domain.map_to_sqljson import map_plan_v2_to_sqljson
+from app.services.planner_domain.prompt_signal_service import PromptSignalService
+from app.services.planner_domain.rerank_policy_engine import PlannerDomainRerankPolicyEngine
 from app.services.planner_domain.schema_v2 import plan_v2_json_schema
 from app.services.planner_domain.validate_v2 import validate_and_repair_plan_v2
 from app.services.semantic.value_alias_resolution_service import ValueAliasResolutionService
@@ -374,7 +379,11 @@ class PlannerDomainService:
         embedding_model: Optional[EmbeddingModel] = None,
         column_qdrant: Optional[QdrantClientWrapper] = None,
         value_alias_resolver: Optional[ValueAliasResolutionService] = None,
+        semantic_grounding_service: Optional[SemanticGroundingService] = None,
         domain_time_policy_service: Optional[DomainTimePolicyService] = None,
+        planner_domain_capability_service: Optional[PlannerDomainCapabilityService] = None,
+        planner_rerank_policy_service: Optional[PlannerRerankPolicyService] = None,
+        prompt_signal_service: Optional[PromptSignalService] = None,
         conversation_store: Optional[PlannerDomainConversationStore] = None,
         conversation_ttl_seconds: Optional[int] = None,
     ) -> None:
@@ -389,9 +398,19 @@ class PlannerDomainService:
         self._embedding = embedding_model
         self._column_qdrant = column_qdrant
         self._value_alias_resolver_svc = value_alias_resolver
+        self._semantic_grounding_service_svc = semantic_grounding_service
         self._domain_time_policy = domain_time_policy_service or DomainTimePolicyService()
+        self._planner_domain_capabilities = planner_domain_capability_service or PlannerDomainCapabilityService()
+        self._planner_rerank_policies = planner_rerank_policy_service or PlannerRerankPolicyService()
+        self._prompt_signal_service = prompt_signal_service or PromptSignalService()
+        self._rerank_policy_engine = PlannerDomainRerankPolicyEngine(
+            prompt_signal_service=self._prompt_signal_service,
+            capability_service=self._planner_domain_capabilities,
+            policy_service=self._planner_rerank_policies,
+        )
         self._conversation_store = conversation_store or HybridPlannerDomainConversationStore()
         self._conversation_ttl_seconds = max(60, int(conversation_ttl_seconds or default_conversation_ttl_seconds()))
+        self._semantic_grounding_bundle_ctx = None
         self._llm_runtime_meta: Dict[str, Any] = {
             "source": "bootstrap",
             "role": LLMRole.PLANNER,
@@ -504,6 +523,7 @@ class PlannerDomainService:
             "prompt": req.prompt,
             "fast_mode": fast_mode,
             "planner_unified_llm": bool(PLANNER_UNIFIED_LLM),
+            "planner_compact_enabled": bool(QF_PLAN_DOMAIN_COMPACT_PLANNER_ENABLED),
             "llm_resolution": dict(self._llm_runtime_meta),
             "steps": [],
         }
@@ -560,12 +580,12 @@ class PlannerDomainService:
             step="domain_selection",
             data={
                 "provided_domain_id": effective_domain_id,
-                "domain_candidates": domain_candidates,
+                "domain_candidates": _serialize_domain_candidates_for_debug(domain_candidates),
             },
         )
 
         t_caps = perf_counter()
-        selected_domain_id, capabilities, shortlisted_columns, ranking_debug = self._select_domain_and_shortlist_columns(
+        selected_domain_id, capabilities, shortlisted_columns, ranking_debug, rerank_signals = self._select_domain_and_shortlist_columns(
             workspace_id=req.workspace_id,
             user_id=str(user_id),
             vertical_norm=vertical,
@@ -628,10 +648,30 @@ class PlannerDomainService:
             step="time_policy",
             data={"domain_time_policy": domain_time_policy},
         )
-        semantic_value_alias_constraints = self._semantic_value_alias_constraints(
-            prompt=normalized_prompt,
-            vertical_norm=vertical,
-        )
+        semantic_grounding_bundle = None
+        semantic_value_alias_constraints: List[Dict[str, Any]] = []
+        semantic_grounding_debug: Optional[Dict[str, Any]] = None
+        if QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED:
+            semantic_capabilities = self._compact_capabilities_for_llm(
+                capabilities=capabilities,
+                shortlisted_columns=shortlisted_columns,
+                prompt=normalized_prompt,
+                slot_hints=None,
+                fast_mode=fast_mode,
+            )
+            semantic_grounding_bundle = self._semantic_grounding_service().build_grounding_bundle(
+                prompt=normalized_prompt,
+                workspace_id=req.workspace_id,
+                vertical_norm=vertical,
+                base_domain_id=int(selected_domain_id),
+                base_domain_name=selected_domain_name,
+                capabilities_compact=semantic_capabilities,
+                include_candidates=bool(QF_PLAN_DOMAIN_COMPACT_PLANNER_ENABLED or req.debug),
+                include_alias_constraints=True,
+            )
+            semantic_value_alias_constraints = list(semantic_grounding_bundle.alias_constraints or [])
+            if req.debug:
+                semantic_grounding_debug = semantic_grounding_bundle.to_debug_payload()
         unified_trace: Dict[str, Any] = {}
         schema = plan_v2_json_schema()
 
@@ -723,7 +763,13 @@ class PlannerDomainService:
             )
             return slots_local, slot_hints_local, capabilities_llm_local, llm_local
 
-        if PLANNER_UNIFIED_LLM:
+        compact_first_enabled = bool(
+            QF_PLAN_DOMAIN_COMPACT_PLANNER_ENABLED
+            and not fast_mode
+            and not req.profile_pipeline
+            and not req.profile_pipeline_data
+        )
+        if PLANNER_UNIFIED_LLM or compact_first_enabled:
             t_caps_compact = perf_counter()
             capabilities_llm = self._compact_capabilities_for_llm(
                 capabilities=capabilities,
@@ -750,6 +796,7 @@ class PlannerDomainService:
             )
             t_llm = perf_counter()
             try:
+                self._semantic_grounding_bundle_ctx = semantic_grounding_bundle
                 unified_result = self._call_llm_unified(
                     prompt=req.prompt,
                     normalized_prompt=normalized_prompt,
@@ -850,6 +897,8 @@ class PlannerDomainService:
                     data=unified_trace,
                 )
                 slots_result, slot_hints, capabilities_llm, llm_result = _run_legacy_llm_path()
+            finally:
+                self._semantic_grounding_bundle_ctx = None
         else:
             slots_result, slot_hints, capabilities_llm, llm_result = _run_legacy_llm_path()
 
@@ -866,6 +915,12 @@ class PlannerDomainService:
             prompt=normalized_prompt,
             candidate_plan=llm_plan,
             prior_plan=(context.prior_plan_json_v2 if context is not None and context.followup_mode else None),
+            capabilities=capabilities_full,
+        )
+        llm_plan, semantic_alias_issues, semantic_alias_debug = self._normalize_semantic_value_alias_filters_in_plan(
+            plan_json=llm_plan,
+            workspace_id=req.workspace_id,
+            vertical_norm=vertical,
             capabilities=capabilities_full,
         )
         llm_plan, country_issues, country_debug = _normalize_country_filters_in_plan(
@@ -914,7 +969,8 @@ class PlannerDomainService:
             prompt=normalized_prompt,
         )
         normalization_issues = (
-            country_issues
+            semantic_alias_issues
+            + country_issues
             + school_year_issues
             + year_keyword_issues
             + semester_issues
@@ -938,6 +994,7 @@ class PlannerDomainService:
             data={
                 "normalized_plan_json_v2": llm_plan,
                 "normalization_issues": normalization_issues,
+                "semantic_value_alias_normalization": semantic_alias_debug,
             },
         )
 
@@ -1027,6 +1084,12 @@ class PlannerDomainService:
                 prior_plan=(context.prior_plan_json_v2 if context is not None and context.followup_mode else None),
                 capabilities=capabilities_full,
             )
+            retry_plan, retry_semantic_alias_issues, retry_semantic_alias_debug = self._normalize_semantic_value_alias_filters_in_plan(
+                plan_json=retry_plan,
+                workspace_id=req.workspace_id,
+                vertical_norm=vertical,
+                capabilities=capabilities_full,
+            )
             retry_plan, retry_country_issues, retry_country_debug = _normalize_country_filters_in_plan(
                 plan_json=retry_plan,
                 capabilities=capabilities_full,
@@ -1072,7 +1135,8 @@ class PlannerDomainService:
                 prompt=normalized_prompt,
             )
             retry_normalization_issues = (
-                retry_country_issues
+                retry_semantic_alias_issues
+                + retry_country_issues
                 + retry_school_year_issues
                 + retry_year_keyword_issues
                 + retry_semester_issues
@@ -1116,6 +1180,7 @@ class PlannerDomainService:
                 },
             )
             llm_result = llm_retry
+            semantic_alias_debug = retry_semantic_alias_debug
             country_debug = retry_country_debug
             school_year_debug = retry_school_year_debug
             _ = retry_year_keyword_debug
@@ -1251,6 +1316,7 @@ class PlannerDomainService:
                 "conversation_id": conversation_id,
                 "fast_mode": fast_mode,
                 "planner_unified_llm": bool(PLANNER_UNIFIED_LLM),
+                "planner_compact_enabled": bool(QF_PLAN_DOMAIN_COMPACT_PLANNER_ENABLED),
                 "llm_resolution": dict(self._llm_runtime_meta),
             },
             "timings_ms": timings,
@@ -1271,12 +1337,15 @@ class PlannerDomainService:
                 "selected_domain_id": selected_domain_id,
                 "capabilities": capabilities,
                 "capabilities_llm": capabilities_llm,
-                "domain_candidates": domain_candidates,
+                "domain_candidates": _serialize_domain_candidates_for_debug(domain_candidates),
                 "domain_ranking": ranking_debug,
+                "rerank_signals": rerank_signals,
                 "column_shortlist_count": len(shortlisted_columns),
                 "slot_hints": slot_hints,
                 "semantic_assist_enabled": QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED,
                 "semantic_value_alias_constraints": semantic_value_alias_constraints,
+                "semantic_value_alias_normalization": semantic_alias_debug,
+                "semantic_grounding": semantic_grounding_debug,
                 "semester_indicator_columns": semester_indicator_columns,
                 "slot_raw_json": slots_result.raw_content,
                 "slot_attempts": slots_result.attempts,
@@ -1300,6 +1369,7 @@ class PlannerDomainService:
                     "conversation_id": conversation_id,
                     "fast_mode": fast_mode,
                     "planner_unified_llm": bool(PLANNER_UNIFIED_LLM),
+                    "planner_compact_enabled": bool(QF_PLAN_DOMAIN_COMPACT_PLANNER_ENABLED),
                     "llm_resolution": dict(self._llm_runtime_meta),
                 },
             }
@@ -1356,6 +1426,7 @@ class PlannerDomainService:
                     "conversation_id": conversation_id,
                     "fast_mode": fast_mode,
                     "planner_unified_llm": bool(PLANNER_UNIFIED_LLM),
+                    "planner_compact_enabled": bool(QF_PLAN_DOMAIN_COMPACT_PLANNER_ENABLED),
                 },
             },
         )
@@ -1509,6 +1580,7 @@ class PlannerDomainService:
                 "trace_id": trace_id,
                 "conversation_id": conversation_id,
                 "llm_resolution": dict(self._llm_runtime_meta),
+                "planner_compact_enabled": bool(QF_PLAN_DOMAIN_COMPACT_PLANNER_ENABLED),
             },
             "timings_ms": {"next_actions": timing_ms},
             "debug": {"next_actions_trace": next_actions_trace} if next_actions_trace else {},
@@ -1526,9 +1598,19 @@ class PlannerDomainService:
         if provided is not None and provided > 0:
             return [{"domain_id": provided, "name": f"domain_{provided}", "score": 1.0, "source": "provided"}]
 
-        query_texts = _build_domain_query_texts(prompt)
+        semantic_constraints = self._semantic_value_alias_constraints(
+            prompt=prompt,
+            vertical_norm=vertical_norm,
+        )
+        query_specs = _build_domain_query_specs(
+            prompt=prompt,
+            semantic_constraints=semantic_constraints,
+        )
         rows: List[Dict[str, Any]] = []
-        for query_text in query_texts:
+        for query_spec in query_specs:
+            query_text = str(query_spec.get("query") or "").strip()
+            if query_text == "":
+                continue
             result = self._domain_vector.search_domains(
                 workspace_id=workspace_id,
                 query=query_text,
@@ -1536,7 +1618,17 @@ class PlannerDomainService:
                 score_threshold=0.0,
                 include_payload=False,
             )
-            rows.extend(row for row in list(result.get("results") or []) if isinstance(row, dict))
+            semantic_boost = float(query_spec.get("score_boost") or 0.0)
+            semantic_reasons = list(query_spec.get("reasons") or [])
+            query_source = str(query_spec.get("source") or "vector")
+            for row in list(result.get("results") or []):
+                if not isinstance(row, dict):
+                    continue
+                merged_row = dict(row)
+                merged_row["_semantic_boost"] = semantic_boost
+                merged_row["_semantic_reasons"] = semantic_reasons
+                merged_row["_query_source"] = query_source
+                rows.append(merged_row)
         out: List[Dict[str, Any]] = []
         by_domain: Dict[int, Dict[str, Any]] = {}
         seen: set[int] = set()
@@ -1544,23 +1636,31 @@ class PlannerDomainService:
             domain_id = _to_int(row.get("domain_id"))
             if domain_id is None:
                 continue
-            current_score = float(row.get("score") or 0.0)
+            current_score = float(row.get("score") or 0.0) + float(row.get("_semantic_boost") or 0.0)
+            query_reasons = _dedupe_text_items(
+                [
+                    *list(row.get("reason") or []),
+                    *list(row.get("_semantic_reasons") or []),
+                ]
+            )
+            query_source = str(row.get("_query_source") or "vector")
             existing = by_domain.get(domain_id)
             if existing is None:
                 by_domain[domain_id] = {
                     "domain_id": domain_id,
                     "name": str(row.get("name") or f"domain_{domain_id}"),
                     "score": current_score,
-                    "reason": list(row.get("reason") or []),
-                    "source": "vector",
+                    "reason": query_reasons,
+                    "source": query_source,
                 }
                 continue
             existing_reasons = list(existing.get("reason") or [])
-            new_reasons = list(row.get("reason") or [])
+            new_reasons = query_reasons
             existing["reason"] = _dedupe_text_items(existing_reasons + new_reasons)
             if current_score > float(existing.get("score") or 0.0):
                 existing["score"] = current_score
                 existing["name"] = str(row.get("name") or existing.get("name") or f"domain_{domain_id}")
+                existing["source"] = query_source
         for domain_id, row in by_domain.items():
             if domain_id in seen:
                 continue
@@ -1580,10 +1680,11 @@ class PlannerDomainService:
         vertical_norm: str,
         prompt: str,
         domain_candidates: Sequence[Mapping[str, Any]],
-    ) -> Tuple[int, Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    ) -> Tuple[int, Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
         ranking: List[Dict[str, Any]] = []
         best_row: Optional[Dict[str, Any]] = None
         first_error: Optional[ForgeError] = None
+        prompt_signals = self._rerank_policy_engine.extract_prompt_signals(prompt=prompt)
 
         for candidate in list(domain_candidates or [])[:3]:
             domain_id = _to_int(candidate.get("domain_id"))
@@ -1607,16 +1708,58 @@ class PlannerDomainService:
                 workspace_id=workspace_id,
                 capabilities=capabilities,
             )
+            semantic_score = 0.0
+            if QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED:
+                semantic_capabilities = self._compact_capabilities_for_llm(
+                    capabilities=capabilities,
+                    shortlisted_columns=shortlist,
+                    prompt=prompt,
+                    slot_hints=None,
+                    fast_mode=False,
+                )
+                grounding_bundle = self._semantic_grounding_service().build_grounding_bundle(
+                    prompt=prompt,
+                    workspace_id=workspace_id,
+                    vertical_norm=vertical_norm,
+                    base_domain_id=int(domain_id),
+                    base_domain_name=str(candidate.get("name") or f"domain_{domain_id}"),
+                    capabilities_compact=semantic_capabilities,
+                    include_candidates=True,
+                    include_alias_constraints=True,
+                )
+                semantic_score = self._score_semantic_grounding_bundle(
+                    prompt=prompt,
+                    grounding_bundle=grounding_bundle,
+                )
             score = self._score_domain_candidate(
                 prompt=prompt,
                 candidate=candidate,
                 capabilities=capabilities,
                 shortlisted_columns=shortlist,
             )
+            base_score = round(score + semantic_score, 5)
+            policy_eval = self._rerank_policy_engine.evaluate_candidate(
+                prompt=prompt,
+                workspace_id=workspace_id,
+                vertical_norm=vertical_norm,
+                base_domain_id=int(domain_id),
+                base_score=base_score,
+                capabilities=capabilities,
+                shortlisted_columns=shortlist,
+                prompt_signals=prompt_signals,
+            )
+            score = float(policy_eval["final_score"])
             row = {
                 "domain_id": domain_id,
                 "score": score,
+                "base_score": base_score,
+                "semantic_score": semantic_score,
                 "vector_score": float(candidate.get("score") or 0.0),
+                "policy_adjustment": float((policy_eval.get("rerank_summary") or {}).get("policy_adjustment") or 0.0),
+                "rerank_signals": list(policy_eval.get("prompt_signals") or []),
+                "domain_capabilities": dict(policy_eval.get("domain_capabilities") or {}),
+                "policy_effects": list(policy_eval.get("policy_effects") or []),
+                "rerank_summary": dict(policy_eval.get("rerank_summary") or {}),
                 "column_shortlist_count": len(shortlist),
                 "dimension_count": len(list(capabilities.get("dimensions") or [])),
                 "source": str(candidate.get("source") or "vector"),
@@ -1637,6 +1780,7 @@ class PlannerDomainService:
             dict(best_row["capabilities"]),
             list(best_row["shortlisted_columns"]),
             ranking,
+            prompt_signals,
         )
 
     def _score_domain_candidate(
@@ -1665,10 +1809,57 @@ class PlannerDomainService:
                 score += 0.2
             if _has_adm_metric(capabilities):
                 score += 0.12
+        if _prompt_has_age_extreme(prompt):
+            if _has_birth_date_columns(shortlisted_columns):
+                score += 0.2
+            if _has_age_columns(shortlisted_columns):
+                score += 0.16
+        if _prompt_has_birth_month_constraint(prompt):
+            if _has_birth_date_columns(shortlisted_columns):
+                score += 0.24
+        if _prompt_has_calendar_days_off(prompt):
+            if _has_calendar_day_columns(shortlisted_columns):
+                score += 0.16
+            if _has_school_day_flag_columns(shortlisted_columns):
+                score += 0.18
         score += _domain_name_intent_bias(prompt=prompt, candidate=candidate)
         if len(shortlisted_columns) < 5:
             score -= 0.1
         return round(score, 5)
+
+    def _score_semantic_grounding_bundle(
+        self,
+        *,
+        prompt: str,
+        grounding_bundle: Any,
+    ) -> float:
+        candidates = getattr(grounding_bundle, "candidates", None)
+        alias_constraints = list(getattr(grounding_bundle, "alias_constraints", []) or [])
+        if candidates is None:
+            return 0.02 if alias_constraints else 0.0
+
+        score = 0.0
+        metric_count = len(list(getattr(candidates, "metric_candidates", []) or []))
+        dimension_count = len(list(getattr(candidates, "dimension_candidates", []) or []))
+        filter_count = len(list(getattr(candidates, "filter_candidates", []) or []))
+        time_count = len(list(getattr(candidates, "time_candidates", []) or []))
+
+        if metric_count > 0:
+            score += 0.06
+        if dimension_count > 0:
+            score += 0.05
+        if filter_count > 0:
+            score += 0.04
+        if time_count > 0 and _extract_time_phrases(prompt):
+            score += 0.03
+        if alias_constraints:
+            score += min(0.04, 0.02 * len(alias_constraints))
+
+        metadata = dict(getattr(candidates, "metadata", {}) or {})
+        if metadata.get("semantic_source") not in {None, "", "fallback_capabilities"}:
+            score += 0.02
+
+        return round(min(0.22, score), 5)
 
     def _shortlist_columns_for_domain(
         self,
@@ -2160,6 +2351,11 @@ class PlannerDomainService:
                 conversation_context=conversation_payload,
                 trace_id=trace_id,
                 llm_client=self._llm,
+                precomputed_candidates=(
+                    getattr(self._semantic_grounding_bundle_ctx, "candidates", None)
+                    if self._semantic_grounding_bundle_ctx is not None
+                    else None
+                ),
                 max_tokens=compact_max_tokens,
                 fast_mode=fast_mode,
             )
@@ -2223,30 +2419,10 @@ class PlannerDomainService:
     ) -> List[Dict[str, Any]]:
         if not QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED:
             return []
-        try:
-            rows = self._value_alias_resolver().resolve(prompt=prompt, vertical_norm=vertical_norm)
-        except Exception as exc:
-            logger.warning("planner_domain semantic alias resolution failed err=%s", exc)
-            return []
-
-        constraints: List[Dict[str, Any]] = []
-        for row in list(rows or []):
-            if not isinstance(row, Mapping):
-                continue
-            canonical = str(row.get("canonical_value") or "").strip()
-            if canonical == "":
-                continue
-            concept_key = str(row.get("concept_key") or "").strip().upper()
-            matched_alias = str(row.get("matched_alias") or "").strip()
-            constraints.append(
-                {
-                    "kind": "unknown",
-                    "text": matched_alias or canonical,
-                    "op": "eq",
-                    "value_hint": canonical,
-                    "notes": f"semantic_alias:{concept_key}" if concept_key else "semantic_alias",
-                }
-            )
+        constraints = self._semantic_grounding_service().resolve_alias_constraints(
+            prompt=prompt,
+            vertical_norm=vertical_norm,
+        )
         return _dedupe_constraints(constraints)
 
     def _call_llm_plan(
@@ -2353,6 +2529,13 @@ class PlannerDomainService:
             self._value_alias_resolver_svc = ValueAliasResolutionService()
         return self._value_alias_resolver_svc
 
+    def _semantic_grounding_service(self) -> SemanticGroundingService:
+        if self._semantic_grounding_service_svc is None:
+            self._semantic_grounding_service_svc = SemanticGroundingService(
+                value_alias_resolver=self._value_alias_resolver(),
+            )
+        return self._semantic_grounding_service_svc
+
     def _resolve_semester_indicator_columns(
         self,
         *,
@@ -2361,7 +2544,7 @@ class PlannerDomainService:
         capabilities: Mapping[str, Any],
     ) -> Dict[str, str]:
         inferred = _infer_semester_indicator_columns_from_capabilities(capabilities=capabilities)
-        semantic = self._resolve_semester_indicator_columns_from_semantic_registry(
+        semantic = self._resolve_semester_indicator_columns_from_semantic_concepts(
             workspace_id=workspace_id,
             vertical_norm=vertical_norm,
             capabilities=capabilities,
@@ -2370,7 +2553,257 @@ class PlannerDomainService:
         out.update(semantic)
         return out
 
-    def _resolve_semester_indicator_columns_from_semantic_registry(
+    def _normalize_semantic_value_alias_filters_in_plan(
+        self,
+        *,
+        plan_json: Mapping[str, Any],
+        workspace_id: str,
+        vertical_norm: str,
+        capabilities: Mapping[str, Any],
+    ) -> Tuple[Dict[str, Any], List[str], Dict[str, Any]]:
+        if not QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED:
+            return dict(plan_json or {}), [], {"applied": 0, "changes": []}
+
+        raw_filters = plan_json.get("filters")
+        if not isinstance(raw_filters, list) or not raw_filters:
+            return dict(plan_json or {}), [], {"applied": 0, "changes": []}
+
+        column_to_concept = self._load_filter_column_concept_keys(
+            workspace_id=workspace_id,
+            vertical_norm=vertical_norm,
+            capabilities=capabilities,
+        )
+        if not column_to_concept:
+            return dict(plan_json or {}), [], {"applied": 0, "changes": []}
+
+        boolean_filter_columns = _boolean_like_filter_column_keys(capabilities)
+        alias_map = self._load_semantic_value_alias_map(
+            vertical_norm=vertical_norm,
+            concept_keys=sorted(set(column_to_concept.values())),
+        )
+        if not alias_map:
+            return dict(plan_json or {}), [], {"applied": 0, "changes": []}
+
+        normalized_filters: List[Dict[str, Any]] = []
+        issues: List[str] = []
+        changes: List[Dict[str, Any]] = []
+        for item in raw_filters:
+            if not isinstance(item, Mapping):
+                normalized_filters.append(dict(item) if isinstance(item, dict) else item)
+                continue
+            next_item = dict(item)
+            column_key = _norm_key(next_item.get("column_key"))
+            concept_key = str(column_to_concept.get(column_key) or "").strip().upper()
+            if concept_key:
+                normalized_value, changed = _normalize_filter_value_with_semantic_alias_map(
+                    concept_key=concept_key,
+                    value=next_item.get("value"),
+                    alias_map=alias_map,
+                )
+                if changed:
+                    coerced_boolean = False
+                    if column_key in boolean_filter_columns:
+                        normalized_value, coerced_boolean = _coerce_boolean_alias_value(normalized_value)
+                    change_row: Dict[str, Any] = {
+                        "column_key": column_key,
+                        "concept_key": concept_key,
+                        "from_value": next_item.get("value"),
+                        "to_value": normalized_value,
+                    }
+                    if coerced_boolean:
+                        change_row["coerced_boolean"] = True
+                    changes.append(
+                        change_row
+                    )
+                    issues.append(f"semantic_value_alias_normalized:{column_key}:{concept_key}")
+                    next_item["value"] = normalized_value
+            normalized_filters.append(next_item)
+
+        if not changes:
+            return dict(plan_json or {}), [], {"applied": 0, "changes": []}
+
+        out = dict(plan_json or {})
+        out["filters"] = normalized_filters
+        return out, issues, {"applied": len(changes), "changes": changes}
+
+    def _load_filter_column_concept_keys(
+        self,
+        *,
+        workspace_id: str,
+        vertical_norm: str,
+        capabilities: Mapping[str, Any],
+    ) -> Dict[str, str]:
+        workspace_to_key: Dict[int, str] = {}
+        for row in list(capabilities.get("filter_columns") or []):
+            if not isinstance(row, Mapping):
+                continue
+            column_key = _norm_key(row.get("column_key"))
+            workspace_column_id = _to_int(row.get("workspace_column_id")) or _to_int(row.get("model_column_id"))
+            if column_key == "" or workspace_column_id is None:
+                continue
+            workspace_to_key.setdefault(workspace_column_id, column_key)
+        if not workspace_to_key:
+            return {}
+
+        out: Dict[str, str] = {}
+        direct_rows = self._load_workspace_column_semantic_concepts(
+            workspace_id=workspace_id,
+            workspace_column_ids=sorted(workspace_to_key.keys()),
+        )
+        unresolved_ids: List[int] = []
+        for workspace_column_id in sorted(workspace_to_key.keys()):
+            column_key = workspace_to_key.get(workspace_column_id)
+            direct_concept_key = str(direct_rows.get(workspace_column_id) or "").strip().upper()
+            if column_key and direct_concept_key:
+                out[column_key] = direct_concept_key
+                continue
+            unresolved_ids.append(workspace_column_id)
+
+        if not unresolved_ids:
+            return out
+
+        params: Dict[str, Any] = {
+            "vertical_norm": str(vertical_norm or "generic").strip().lower() or "generic",
+        }
+        placeholders: List[str] = []
+        for idx, workspace_column_id in enumerate(unresolved_ids):
+            token = f"wcid_{idx}"
+            placeholders.append(f":{token}")
+            params[token] = int(workspace_column_id)
+
+        sql = f"""
+            SELECT
+              m.workspace_column_id,
+              UPPER(TRIM(sc.concept_key)) AS concept_key
+            FROM workspace_column_semantic_concept_map m
+            JOIN semantic_concept sc
+              ON sc.id = m.semantic_concept_id
+            WHERE LOWER(COALESCE(m.vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
+              AND m.workspace_column_id IN ({", ".join(placeholders)})
+            ORDER BY
+              CASE WHEN LOWER(COALESCE(m.vertical_norm, 'generic')) = :vertical_norm THEN 0 ELSE 1 END,
+              CASE WHEN LOWER(COALESCE(m.relationship_kind, 'primary')) = 'primary' THEN 0 ELSE 1 END,
+              COALESCE(m.weight, 1.0) DESC,
+              m.id ASC
+        """
+        try:
+            rows = ForgeMetaSQL().execute_query_mappings(sql, params)
+        except Exception as exc:
+            logger.warning("planner_domain semantic concept lookup failed err=%s", exc)
+            return out
+
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            workspace_column_id = _to_int(row.get("workspace_column_id"))
+            concept_key = str(row.get("concept_key") or "").strip().upper()
+            if workspace_column_id is None or concept_key == "":
+                continue
+            column_key = workspace_to_key.get(workspace_column_id)
+            if column_key and column_key not in out:
+                out[column_key] = concept_key
+        return out
+
+    def _load_workspace_column_semantic_concepts(
+        self,
+        *,
+        workspace_id: str,
+        workspace_column_ids: Sequence[int],
+    ) -> Dict[int, str]:
+        normalized_ids = sorted({int(item) for item in workspace_column_ids if _to_int(item) is not None})
+        if not normalized_ids:
+            return {}
+
+        params: Dict[str, Any] = {
+            "workspace_id": str(workspace_id or "").strip(),
+        }
+        placeholders: List[str] = []
+        for idx, workspace_column_id in enumerate(normalized_ids):
+            token = f"wcd_{idx}"
+            placeholders.append(f":{token}")
+            params[token] = int(workspace_column_id)
+
+        sql = f"""
+            SELECT
+              wc.id AS workspace_column_id,
+              UPPER(TRIM(wc.semantic_concept_key)) AS concept_key
+            FROM workspace_column wc
+            JOIN workspace_table wt
+              ON wt.id = wc.workspace_table_id
+             AND wt.workspace_id = :workspace_id
+            WHERE wc.id IN ({", ".join(placeholders)})
+              AND wc.semantic_concept_key IS NOT NULL
+              AND TRIM(wc.semantic_concept_key) <> ''
+        """
+        try:
+            rows = ForgeMetaSQL().execute_query_mappings(sql, params)
+        except Exception as exc:
+            logger.warning("planner_domain workspace column semantic concept lookup failed err=%s", exc)
+            return {}
+
+        out: Dict[int, str] = {}
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            workspace_column_id = _to_int(row.get("workspace_column_id"))
+            concept_key = str(row.get("concept_key") or "").strip().upper()
+            if workspace_column_id is None or concept_key == "":
+                continue
+            out.setdefault(workspace_column_id, concept_key)
+        return out
+
+    def _load_semantic_value_alias_map(
+        self,
+        *,
+        vertical_norm: str,
+        concept_keys: Sequence[str],
+    ) -> Dict[Tuple[str, str], Any]:
+        normalized_keys = sorted({str(key or "").strip().upper() for key in concept_keys if str(key or "").strip()})
+        if not normalized_keys:
+            return {}
+
+        params: Dict[str, Any] = {
+            "vertical_norm": str(vertical_norm or "generic").strip().lower() or "generic",
+        }
+        placeholders: List[str] = []
+        for idx, concept_key in enumerate(normalized_keys):
+            token = f"ck_{idx}"
+            placeholders.append(f":{token}")
+            params[token] = concept_key
+
+        sql = f"""
+            SELECT
+              UPPER(TRIM(sc.concept_key)) AS concept_key,
+              LOWER(TRIM(va.alias_value)) AS alias_value,
+              va.canonical_value
+            FROM semantic_value_alias va
+            JOIN semantic_concept sc
+              ON sc.id = va.semantic_concept_id
+            WHERE UPPER(TRIM(sc.concept_key)) IN ({", ".join(placeholders)})
+              AND LOWER(COALESCE(va.vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
+            ORDER BY
+              CASE WHEN LOWER(COALESCE(va.vertical_norm, 'generic')) = :vertical_norm THEN 0 ELSE 1 END,
+              COALESCE(va.weight, 1.0) DESC,
+              va.id ASC
+        """
+        try:
+            rows = ForgeMetaSQL().execute_query_mappings(sql, params)
+        except Exception as exc:
+            logger.warning("planner_domain semantic value alias lookup failed err=%s", exc)
+            return {}
+
+        out: Dict[Tuple[str, str], Any] = {}
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            concept_key = str(row.get("concept_key") or "").strip().upper()
+            alias_value = str(row.get("alias_value") or "").strip().lower()
+            if concept_key == "" or alias_value == "":
+                continue
+            out.setdefault((concept_key, alias_value), row.get("canonical_value"))
+        return out
+
+    def _resolve_semester_indicator_columns_from_semantic_concepts(
         self,
         *,
         workspace_id: str,
@@ -2397,41 +2830,59 @@ class PlannerDomainService:
         if not workspace_to_key:
             return {}
 
+        best: Dict[str, Tuple[float, str]] = {}
+        direct_rows = self._load_workspace_column_semantic_concepts(
+            workspace_id=workspace_id,
+            workspace_column_ids=sorted(workspace_to_key.keys()),
+        )
+        unresolved_ids: List[int] = []
+        for workspace_column_id in sorted(workspace_to_key.keys()):
+            column_key = workspace_to_key.get(workspace_column_id)
+            if not column_key:
+                continue
+            concept_key = str(direct_rows.get(workspace_column_id) or "")
+            bucket = _semester_bucket_from_text(concept_key)
+            if bucket == "":
+                unresolved_ids.append(workspace_column_id)
+                continue
+            best[bucket] = (1000.0, column_key)
+
+        if not unresolved_ids:
+            return {bucket: value for bucket, (_score, value) in best.items() if value}
+
         params: Dict[str, Any] = {
-            "workspace_norm": str(workspace_id or "").strip() or "__global__",
             "vertical_norm": _norm_vertical(vertical_norm),
         }
         placeholders: List[str] = []
-        for idx, workspace_column_id in enumerate(sorted(workspace_to_key.keys())):
+        for idx, workspace_column_id in enumerate(unresolved_ids):
             token = f"wid_{idx}"
             placeholders.append(f":{token}")
             params[token] = int(workspace_column_id)
 
         sql = f"""
             SELECT
-              scm.workspace_column_id,
-              sr.concept_key,
-              sr.semantic_type,
-              scm.priority_rank,
-              scm.confidence_score
-            FROM semantic_column_map scm
-            JOIN semantic_registry sr
-              ON sr.id = scm.semantic_registry_id
-            WHERE scm.workspace_norm IN (:workspace_norm, '__global__')
-              AND sr.vertical_norm IN (:vertical_norm, 'generic')
-              AND scm.workspace_column_id IN ({", ".join(placeholders)})
+              m.workspace_column_id,
+              UPPER(TRIM(sc.concept_key)) AS concept_key,
+              LOWER(COALESCE(sc.semantic_type, '')) AS semantic_type,
+              LOWER(COALESCE(m.relationship_kind, 'primary')) AS relationship_kind,
+              COALESCE(m.weight, 1.0) AS weight
+            FROM workspace_column_semantic_concept_map m
+            JOIN semantic_concept sc
+              ON sc.id = m.semantic_concept_id
+            WHERE LOWER(COALESCE(m.vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
+              AND m.workspace_column_id IN ({", ".join(placeholders)})
             ORDER BY
-              scm.priority_rank DESC,
-              scm.confidence_score DESC,
-              scm.id DESC
+              CASE WHEN LOWER(COALESCE(m.vertical_norm, 'generic')) = :vertical_norm THEN 0 ELSE 1 END,
+              CASE WHEN LOWER(COALESCE(m.relationship_kind, 'primary')) = 'primary' THEN 0 ELSE 1 END,
+              COALESCE(m.weight, 1.0) DESC,
+              m.id ASC
         """
         try:
             rows = ForgeMetaSQL().execute_query_mappings(sql, params)
         except Exception as exc:
             logger.warning("planner_domain semantic semester indicator lookup failed err=%s", exc)
-            return {}
+            return {bucket: value for bucket, (_score, value) in best.items() if value}
 
-        best: Dict[str, Tuple[float, str]] = {}
         for row in rows:
             if not isinstance(row, Mapping):
                 continue
@@ -2446,7 +2897,9 @@ class PlannerDomainService:
             if bucket == "":
                 continue
 
-            score = float(row.get("priority_rank") or 0) * 10.0 + float(row.get("confidence_score") or 0.0)
+            score = float(row.get("weight") or 0.0)
+            if str(row.get("relationship_kind") or "").strip().lower() == "primary":
+                score += 2.0
             if str(row.get("semantic_type") or "").strip().lower() == "flag":
                 score += 1.0
 
@@ -3454,6 +3907,27 @@ def _dedupe_constraints(values: Sequence[Mapping[str, Any]]) -> List[Dict[str, A
     return out
 
 
+def _semantic_alias_concept_key(constraint: Mapping[str, Any]) -> str:
+    notes = str(constraint.get("notes") or "").strip()
+    if ":" not in notes:
+        return ""
+    prefix, concept_key = notes.split(":", 1)
+    if prefix.strip().lower() != "semantic_alias":
+        return ""
+    return str(concept_key or "").strip().upper()
+
+
+def _replace_prompt_phrase(*, text: str, needle: str, replacement: str) -> str:
+    base = str(text or "").strip()
+    source = str(needle or "").strip()
+    target = str(replacement or "").strip()
+    if base == "" or source == "" or target == "":
+        return base
+    pattern = re.compile(rf"\b{re.escape(source)}\b", flags=re.IGNORECASE)
+    rewritten = pattern.sub(target, base, count=1)
+    return " ".join(rewritten.split())
+
+
 def _looks_like_list_students_prompt(prompt: str) -> bool:
     text = str(prompt or "").strip()
     if text == "":
@@ -3505,6 +3979,38 @@ def _selected_domain_name(*, domain_candidates: Sequence[Mapping[str, Any]], sel
     return None
 
 
+def _serialize_domain_candidates_for_debug(
+    domain_candidates: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for row in list(domain_candidates or []):
+        if not isinstance(row, Mapping):
+            continue
+        reasons = _dedupe_text_items([str(item) for item in list(row.get("reason") or []) if str(item).strip()])
+        source = str(row.get("source") or "vector").strip() or "vector"
+        semantic_reasons = [reason for reason in reasons if reason.startswith("semantic_")]
+        semantic_recall = bool(source == "semantic_vector" or semantic_reasons)
+        if source == "provided":
+            recall_mode = "provided"
+        elif semantic_recall:
+            recall_mode = "semantic"
+        else:
+            recall_mode = "vector"
+        out.append(
+            {
+                "domain_id": _to_int(row.get("domain_id")),
+                "name": str(row.get("name") or "").strip() or None,
+                "score": round(float(row.get("score") or 0.0), 5),
+                "source": source,
+                "reason": reasons,
+                "semantic_recall": semantic_recall,
+                "semantic_reasons": semantic_reasons,
+                "recall_mode": recall_mode,
+            }
+        )
+    return out
+
+
 def _prompt_has_subgroup(prompt: str) -> bool:
     return _SUBGROUP_HINT_RE.search(str(prompt or "")) is not None
 
@@ -3520,6 +4026,51 @@ def _prompt_has_nativity(prompt: str) -> bool:
         "date entered us",
     )
     return any(term in text for term in nativity_terms)
+
+
+def _prompt_has_calendar_days_off(prompt: str) -> bool:
+    text = f" {str(prompt or '').strip().lower()} "
+    if text.strip() == "":
+        return False
+    phrases = (
+        " days off ",
+        " day off ",
+        " off day ",
+        " off days ",
+        " no school ",
+        " school closed ",
+        " non instructional ",
+        " non-instructional ",
+    )
+    return any(phrase in text for phrase in phrases)
+
+
+def _prompt_has_age_extreme(prompt: str) -> bool:
+    text = f" {str(prompt or '').strip().lower()} "
+    if text.strip() == "":
+        return False
+    return any(token in text for token in (" oldest ", " youngest ", " eldest "))
+
+
+def _prompt_has_birth_month_constraint(prompt: str) -> bool:
+    text = f" {str(prompt or '').strip().lower()} "
+    if text.strip() == "":
+        return False
+    has_birth_context = any(
+        token in text
+        for token in (
+            " birthday ",
+            " birthdays ",
+            " birth month ",
+            " birthdate ",
+            " date of birth ",
+            " born in ",
+            " births in ",
+        )
+    )
+    if not has_birth_context:
+        return False
+    return _extract_named_month_number(text) is not None
 
 
 def _prompt_has_name_constraint(prompt: str) -> bool:
@@ -3655,6 +4206,10 @@ def _build_column_query_texts(prompt: str) -> List[str]:
         out.extend(["student race ethnicity", "student subgroup"])
     if _looks_like_list_students_prompt(text):
         out.extend(["student list", "student roster", "student demographics"])
+    if _prompt_has_age_extreme(text):
+        out.extend(["student birth date", "student date of birth", "student age"])
+    if _prompt_has_birth_month_constraint(text):
+        out.extend(["student birthday month", "student birth date month"])
     if _prompt_implies_staff_work_context(text):
         out.extend(["staff roster", "staff assignments", "teacher workplace", "employee school"])
     if _prompt_prefers_staff_role_title_filter(text):
@@ -3688,6 +4243,10 @@ def _build_domain_query_texts(prompt: str) -> List[str]:
         out.extend(["staff assignments", "staff workplace", "teacher employment", "employee roster"])
     if _prompt_implies_student_school_context(text):
         out.extend(["student enrollment", "student demographics", "student profile"])
+    if _prompt_has_age_extreme(text):
+        out.extend(["student demographics birth date age", "student profile date of birth"])
+    if _prompt_has_birth_month_constraint(text):
+        out.extend(["student demographics birth date birthday month", "student profile date of birth month"])
     if _DISCIPLINE_HINT_RE.search(text) is not None:
         out.extend(["discipline incidents", "student behavior"])
     if "district" in text_l or "lea" in text_l:
@@ -3700,7 +4259,160 @@ def _build_domain_query_texts(prompt: str) -> List[str]:
                 "enrollment adm report period school year",
             ]
         )
+    if _prompt_has_calendar_days_off(text):
+        out.extend(
+            [
+                "academic calendar days off",
+                "school calendar no school non instructional days",
+                "calendar school day holiday schedule",
+            ]
+        )
     return _dedupe_text_items(out)
+
+
+def _build_domain_query_specs(
+    *,
+    prompt: str,
+    semantic_constraints: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    specs: List[Dict[str, Any]] = [
+        {
+            "query": query_text,
+            "score_boost": 0.0,
+            "reasons": [],
+            "source": "vector",
+        }
+        for query_text in _build_domain_query_texts(prompt)
+    ]
+    specs.extend(_build_semantic_domain_query_specs(prompt=prompt, semantic_constraints=semantic_constraints))
+
+    merged: Dict[str, Dict[str, Any]] = {}
+    for raw_spec in specs:
+        query_text = " ".join(str(raw_spec.get("query") or "").strip().split())
+        if query_text == "":
+            continue
+        key = query_text.lower()
+        reasons = _dedupe_text_items(list(raw_spec.get("reasons") or []))
+        score_boost = float(raw_spec.get("score_boost") or 0.0)
+        source = str(raw_spec.get("source") or "vector")
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = {
+                "query": query_text,
+                "score_boost": score_boost,
+                "reasons": reasons,
+                "source": source,
+            }
+            continue
+        existing["score_boost"] = max(float(existing.get("score_boost") or 0.0), score_boost)
+        existing["reasons"] = _dedupe_text_items(list(existing.get("reasons") or []) + reasons)
+        if source != "vector":
+            existing["source"] = source
+    return list(merged.values())
+
+
+def _build_semantic_domain_query_specs(
+    *,
+    prompt: str,
+    semantic_constraints: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    text = str(prompt or "").strip()
+    if text == "":
+        return []
+    constraints = _dedupe_constraints(semantic_constraints)
+    if not constraints:
+        return []
+
+    concept_keys = {
+        key
+        for key in (_semantic_alias_concept_key(item) for item in constraints)
+        if key
+    }
+    specs: List[Dict[str, Any]] = []
+
+    for constraint in constraints:
+        raw_text = str(constraint.get("text") or "").strip()
+        canonical = str(constraint.get("value_hint") or "").strip()
+        if raw_text == "" or canonical == "" or raw_text.lower() == canonical.lower():
+            continue
+        rewritten_prompt = _replace_prompt_phrase(text=text, needle=raw_text, replacement=canonical)
+        if rewritten_prompt and rewritten_prompt != text:
+            concept_key = _semantic_alias_concept_key(constraint)
+            reason = f"semantic_alias:{concept_key}" if concept_key else "semantic_alias"
+            specs.append(
+                {
+                    "query": rewritten_prompt,
+                    "score_boost": 0.02,
+                    "reasons": [reason],
+                    "source": "semantic_vector",
+                }
+            )
+
+    if _prompt_has_nativity(text) or any("COUNTRY" in key for key in concept_keys):
+        specs.extend(
+            [
+                {
+                    "query": "student demographics birth country nativity",
+                    "score_boost": 0.06,
+                    "reasons": ["semantic_query:nativity"],
+                    "source": "semantic_vector",
+                },
+                {
+                    "query": "country of birth student profile demographics",
+                    "score_boost": 0.04,
+                    "reasons": ["semantic_query:nativity"],
+                    "source": "semantic_vector",
+                },
+            ]
+        )
+    if _prompt_has_calendar_days_off(text) or any(
+        any(token in key for token in ("SCHOOL_DAY", "INSTRUCTIONAL_DAY", "NON_INSTRUCTIONAL", "DAY_OFF", "HOLIDAY"))
+        for key in concept_keys
+    ):
+        specs.extend(
+            [
+                {
+                    "query": "academic calendar days off no school school day",
+                    "score_boost": 0.08,
+                    "reasons": ["semantic_query:calendar_days_off"],
+                    "source": "semantic_vector",
+                },
+                {
+                    "query": "non instructional days school calendar holiday schedule",
+                    "score_boost": 0.06,
+                    "reasons": ["semantic_query:calendar_days_off"],
+                    "source": "semantic_vector",
+                },
+            ]
+        )
+    if any("SEMESTER" in key or "TERM" in key for key in concept_keys):
+        specs.append(
+            {
+                "query": "academic calendar semester terms",
+                "score_boost": 0.05,
+                "reasons": ["semantic_query:semester"],
+                "source": "semantic_vector",
+            }
+        )
+    if any("SCHOOL_YEAR" in key or key.endswith("_YEAR") for key in concept_keys):
+        specs.append(
+            {
+                "query": "school year academic calendar enrollment",
+                "score_boost": 0.04,
+                "reasons": ["semantic_query:school_year"],
+                "source": "semantic_vector",
+            }
+        )
+    if _prompt_has_subgroup(text):
+        specs.append(
+            {
+                "query": "student subgroup demographics race ethnicity language",
+                "score_boost": 0.04,
+                "reasons": ["semantic_query:subgroup"],
+                "source": "semantic_vector",
+            }
+        )
+    return specs
 
 
 def _required_column_keys(*, prompt: str, rows: Sequence[Mapping[str, Any]]) -> List[str]:
@@ -3788,6 +4500,9 @@ def _column_heuristic_boost(*, prompt: str, row: Mapping[str, Any]) -> float:
     prefer_staff_role_title_filter = _prompt_prefers_staff_role_title_filter(text)
     prefer_canonical_name_columns = _prompt_prefers_canonical_name_columns(text)
     prompt_has_adm_intent = _prompt_has_adm_intent(text)
+    prompt_has_age_extreme = _prompt_has_age_extreme(text)
+    prompt_has_birth_month = _prompt_has_birth_month_constraint(text)
+    prompt_has_calendar_days_off = _prompt_has_calendar_days_off(text)
     if _has_group_entity(group_entities, "account"):
         if col_name == "account_name":
             score += 0.42
@@ -3808,6 +4523,20 @@ def _column_heuristic_boost(*, prompt: str, row: Mapping[str, Any]) -> float:
             score += 0.42
         elif any(token in col_name for token in ("calendar", "term", "semester", "grading_period")):
             score -= 0.18
+    if prompt_has_age_extreme:
+        if _is_birth_date_column_name(col_name):
+            score += 0.56
+        if _is_age_column_name(col_name):
+            score += 0.48
+    if prompt_has_birth_month and _is_birth_date_column_name(col_name):
+        score += 0.62
+    if prompt_has_calendar_days_off:
+        if _is_calendar_day_column_name(col_name):
+            score += 0.48
+        if _is_school_day_flag_column_name(col_name):
+            score += 0.52
+        if _is_non_instructional_day_column_name(col_name):
+            score += 0.54
     if city_state_pattern:
         if _is_city_column_name(col_name):
             score += 0.36
@@ -4072,6 +4801,22 @@ def _domain_name_intent_bias(*, prompt: str, candidate: Mapping[str, Any]) -> fl
         if any(token in name for token in ("calendar", "academic time", "term", "semester")):
             bias -= 0.24
 
+    if _prompt_has_age_extreme(prompt_text):
+        if any(token in name for token in ("demographic", "profile", "student")):
+            bias += 0.18
+        if any(token in name for token in ("program", "service", "membership")):
+            bias -= 0.16
+
+    if _prompt_has_birth_month_constraint(prompt_text):
+        if any(token in name for token in ("demographic", "profile", "student")):
+            bias += 0.2
+        if any(token in name for token in ("program", "service", "membership")):
+            bias -= 0.18
+
+    if _prompt_has_calendar_days_off(prompt_text):
+        if any(token in name for token in ("calendar", "scheduling", "schedule", "term", "semester")):
+            bias += 0.18
+
     return bias
 
 
@@ -4124,6 +4869,72 @@ def _has_preferred_state_column(*, rows: Sequence[Mapping[str, Any]]) -> bool:
     for row in rows:
         col_name = str(row.get("column_name") or "").strip().lower()
         if _is_preferred_state_column_name(col_name):
+            return True
+    return False
+
+
+def _is_calendar_day_column_name(col_name: str) -> bool:
+    token = str(col_name or "").strip().lower()
+    if token == "":
+        return False
+    return token in {"calendar_date", "school_calendar_date"} or ("calendar" in token and "date" in token)
+
+
+def _is_birth_date_column_name(col_name: str) -> bool:
+    token = str(col_name or "").strip().lower()
+    if token == "":
+        return False
+    return token in {"birth_date", "date_of_birth", "dob"} or ("birth" in token and "date" in token)
+
+
+def _is_age_column_name(col_name: str) -> bool:
+    token = str(col_name or "").strip().lower()
+    if token == "":
+        return False
+    return token == "age" or token.endswith("_age") or token.startswith("age_")
+
+
+def _is_school_day_flag_column_name(col_name: str) -> bool:
+    token = str(col_name or "").strip().lower()
+    if token == "":
+        return False
+    return token in {"is_school_day", "school_day_flag", "instructional_day_flag"} or (
+        "school_day" in token or "instructional_day" in token
+    )
+
+
+def _is_non_instructional_day_column_name(col_name: str) -> bool:
+    token = str(col_name or "").strip().lower()
+    if token == "":
+        return False
+    return "non_instructional" in token or "noninstructional" in token or "day_off" in token or "days_off" in token
+
+
+def _has_calendar_day_columns(rows: Sequence[Mapping[str, Any]]) -> bool:
+    for row in rows:
+        if _is_calendar_day_column_name(str(row.get("column_name") or "")):
+            return True
+    return False
+
+
+def _has_birth_date_columns(rows: Sequence[Mapping[str, Any]]) -> bool:
+    for row in rows:
+        if _is_birth_date_column_name(str(row.get("column_name") or "")):
+            return True
+    return False
+
+
+def _has_age_columns(rows: Sequence[Mapping[str, Any]]) -> bool:
+    for row in rows:
+        if _is_age_column_name(str(row.get("column_name") or "")):
+            return True
+    return False
+
+
+def _has_school_day_flag_columns(rows: Sequence[Mapping[str, Any]]) -> bool:
+    for row in rows:
+        col_name = str(row.get("column_name") or "")
+        if _is_school_day_flag_column_name(col_name) or _is_non_instructional_day_column_name(col_name):
             return True
     return False
 
@@ -4879,6 +5690,12 @@ def _normalize_relative_time_in_plan(
     policy = _normalize_domain_time_policy(domain_time_policy)
     if not bool(policy.get("allow_relative_ranges", True)):
         return plan, [], []
+    if _prompt_has_birth_month_constraint(prompt_norm) and _has_birth_date_columns(
+        list(capabilities.get("filter_columns") or [])
+        + list(capabilities.get("dimensions") or [])
+        + list(capabilities.get("time_columns") or [])
+    ):
+        return plan, [], [{"action": "relative_time_skipped", "reason": "birth_month_prompt_uses_date_part"}]
 
     relative_token = _resolve_relative_time_token(
         prompt_norm=prompt_norm,
@@ -4886,15 +5703,33 @@ def _normalize_relative_time_in_plan(
         filters=filters,
         relative_map=policy.get("relative_map") if isinstance(policy.get("relative_map"), Mapping) else {},
     )
-    if relative_token == "":
-        return plan, [], []
-
     anchor = _policy_anchor_date(today=today, timezone_name=str(policy.get("timezone") or ""))
-    start_date, end_date, relative_phrase = _compute_relative_range(
-        token=relative_token,
-        anchor=anchor,
-        policy=policy,
-    )
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    relative_phrase = ""
+    normalization_action = "normalized_relative_time"
+    debug_payload: Dict[str, Any] = {}
+
+    if relative_token != "":
+        start_date, end_date, relative_phrase = _compute_relative_range(
+            token=relative_token,
+            anchor=anchor,
+            policy=policy,
+        )
+        debug_payload["relative_token"] = relative_token
+    else:
+        named_month = _resolve_named_month_range(prompt_norm=prompt_norm, anchor=anchor, policy=policy)
+        if named_month is None:
+            return plan, [], []
+        start_date, end_date, relative_phrase, matched_month, matched_year, school_year_anchored = named_month
+        normalization_action = "normalized_named_month_time"
+        debug_payload.update(
+            {
+                "matched_month": matched_month,
+                "matched_year": matched_year,
+                "school_year_anchored": school_year_anchored,
+            }
+        )
 
     if start_date is None or end_date is None:
         return plan, [], []
@@ -4948,8 +5783,7 @@ def _normalize_relative_time_in_plan(
 
     debug_rows: List[Dict[str, Any]] = [
         {
-            "action": "normalized_relative_time",
-            "relative_token": relative_token,
+            "action": normalization_action,
             "relative_phrase": relative_phrase,
             "policy_calendar_mode": policy.get("calendar_mode"),
             "policy_timezone": policy.get("timezone"),
@@ -4957,6 +5791,7 @@ def _normalize_relative_time_in_plan(
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
             "dropped_time_filters": dropped_keys,
+            **debug_payload,
         }
     ]
     return plan, [], debug_rows
@@ -5205,6 +6040,89 @@ def _prompt_relative_month_phrase(prompt_norm: str) -> str:
     return ""
 
 
+def _extract_named_month_number(text: str) -> Optional[int]:
+    prompt_text = str(text or "").strip().lower()
+    if prompt_text == "":
+        return None
+    month_map = {
+        "january": 1,
+        "february": 2,
+        "march": 3,
+        "april": 4,
+        "may": 5,
+        "june": 6,
+        "july": 7,
+        "august": 8,
+        "september": 9,
+        "october": 10,
+        "november": 11,
+        "december": 12,
+    }
+    match = re.search(
+        r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b",
+        prompt_text,
+    )
+    if match is None:
+        return None
+    return month_map.get(str(match.group(1) or "").lower())
+
+
+def _resolve_named_month_range(
+    *,
+    prompt_norm: str,
+    anchor: date,
+    policy: Mapping[str, Any],
+) -> Optional[Tuple[date, date, str, str, int, bool]]:
+    text = str(prompt_norm or "").strip().lower()
+    if text == "":
+        return None
+
+    month_map = {
+        "january": 1,
+        "february": 2,
+        "march": 3,
+        "april": 4,
+        "may": 5,
+        "june": 6,
+        "july": 7,
+        "august": 8,
+        "september": 9,
+        "october": 10,
+        "november": 11,
+        "december": 12,
+    }
+    match = re.search(
+        r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b(?:\s+(\d{4}))?",
+        text,
+    )
+    if match is None:
+        return None
+
+    month_name = str(match.group(1) or "").lower()
+    month_num = _extract_named_month_number(month_name)
+    if month_num is None:
+        return None
+    explicit_year = match.group(2)
+    school_year_anchored = False
+    if explicit_year:
+        year = int(explicit_year)
+    elif _norm_key(policy.get("calendar_mode")) == "school_year":
+        school_year_start_month = _to_int(policy.get("school_year_start_month")) or QF_SCHOOL_YEAR_START_MONTH
+        school_year_end_month = _to_int(policy.get("school_year_end_month")) or QF_SCHOOL_YEAR_END_MONTH
+        current_sy = current_school_year(
+            today=anchor,
+            school_year_start_month=school_year_start_month,
+            school_year_end_month=school_year_end_month,
+        )
+        year = current_sy - 1 if month_num >= school_year_start_month else current_sy
+        school_year_anchored = True
+    else:
+        year = anchor.year
+    start_date = date(year, month_num, 1)
+    end_date = _add_months(start_date, 1) - timedelta(days=1)
+    return start_date, end_date, month_name, month_name, year, school_year_anchored
+
+
 def _prompt_relative_year_phrase(prompt_norm: str) -> str:
     text = str(prompt_norm or "").strip().lower()
     if re.search(r"\b(last|previous)\s+year\b", text) is not None:
@@ -5341,6 +6259,8 @@ def _normalize_domain_time_policy(policy: Optional[Mapping[str, Any]]) -> Dict[s
     out: Dict[str, Any] = {
         "calendar_mode": "calendar",
         "fiscal_year_start_month": None,
+        "school_year_start_month": None,
+        "school_year_end_month": None,
         "timezone": None,
         "default_time_concept_key": None,
         "allow_relative_ranges": True,
@@ -5350,11 +6270,17 @@ def _normalize_domain_time_policy(policy: Optional[Mapping[str, Any]]) -> Dict[s
     if not isinstance(policy, Mapping):
         return out
     calendar_mode = _norm_key(policy.get("calendar_mode"))
-    if calendar_mode in {"calendar", "fiscal"}:
+    if calendar_mode in {"calendar", "fiscal", "school_year"}:
         out["calendar_mode"] = calendar_mode
     fiscal_month = _to_int(policy.get("fiscal_year_start_month"))
     if fiscal_month is not None and 1 <= fiscal_month <= 12:
         out["fiscal_year_start_month"] = fiscal_month
+    school_year_start = _to_int(policy.get("school_year_start_month"))
+    if school_year_start is not None and 1 <= school_year_start <= 12:
+        out["school_year_start_month"] = school_year_start
+    school_year_end = _to_int(policy.get("school_year_end_month"))
+    if school_year_end is not None and 1 <= school_year_end <= 12:
+        out["school_year_end_month"] = school_year_end
     timezone_name = str(policy.get("timezone") or "").strip()
     out["timezone"] = timezone_name or None
     default_time_key = _norm_key(policy.get("default_time_concept_key"))
@@ -6488,6 +7414,88 @@ def _normalize_next_action_filter_op(value: Any) -> str:
     if alias not in _NEXT_ACTION_ALLOWED_FILTER_OPS:
         return ""
     return alias
+
+
+def _normalize_filter_value_with_semantic_alias_map(
+    *,
+    concept_key: str,
+    value: Any,
+    alias_map: Mapping[Tuple[str, str], Any],
+) -> Tuple[Any, bool]:
+    normalized_concept_key = str(concept_key or "").strip().upper()
+    if normalized_concept_key == "":
+        return value, False
+    if isinstance(value, str):
+        token = value.strip().lower()
+        if token == "":
+            return value, False
+        canonical = alias_map.get((normalized_concept_key, token))
+        if canonical is None or canonical == value:
+            return value, False
+        return canonical, True
+    if isinstance(value, list):
+        changed = False
+        out: List[Any] = []
+        for item in value:
+            normalized_item, item_changed = _normalize_filter_value_with_semantic_alias_map(
+                concept_key=normalized_concept_key,
+                value=item,
+                alias_map=alias_map,
+            )
+            out.append(normalized_item)
+            changed = changed or item_changed
+        return out, changed
+    return value, False
+
+
+def _boolean_like_filter_column_keys(capabilities: Mapping[str, Any]) -> set[str]:
+    out: set[str] = set()
+    for row in list(capabilities.get("filter_columns") or []):
+        if not isinstance(row, Mapping):
+            continue
+        column_key = _norm_key(row.get("column_key"))
+        if column_key == "":
+            continue
+        semantic_type = str(row.get("semantic_type") or "").strip().lower()
+        data_type = str(row.get("data_type") or "").strip().lower()
+        if semantic_type in {"flag", "boolean"} or any(token in data_type for token in ("bool", "bit", "tinyint")):
+            out.add(column_key)
+    return out
+
+
+def _coerce_boolean_alias_value(value: Any) -> Tuple[Any, bool]:
+    if isinstance(value, list):
+        changed = False
+        out: List[Any] = []
+        for item in value:
+            normalized_item, item_changed = _coerce_boolean_alias_value(item)
+            out.append(normalized_item)
+            changed = changed or item_changed
+        return out, changed
+    normalized = _optional_bool_literal(value)
+    if normalized is None:
+        return value, False
+    if isinstance(value, bool) and value is normalized:
+        return value, False
+    return normalized, True
+
+
+def _optional_bool_literal(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        if value in (0, 1):
+            return bool(value)
+        return None
+    if isinstance(value, str):
+        token = value.strip().lower()
+        if token in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if token in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    return None
 
 
 __all__ = ["PlannerDomainService", "normalize_plan_prompt"]

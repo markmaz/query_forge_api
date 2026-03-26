@@ -23,6 +23,12 @@ from app.services.domain.domain_table_write_service import DomainTableWriteServi
 from app.services.domain.domain_time_policy_service import DomainTimePolicyService
 from app.services.domain.domain_user_read_service import UserDomainReadService
 from app.services.domain.domain_user_write_service import DomainUserWriteService
+from app.services.domain.planner_domain_capability_service import PlannerDomainCapabilityService
+from app.services.domain.planner_rerank_policy_candidate_service import PlannerRerankPolicyCandidateService
+from app.services.domain.planner_rerank_policy_candidate_suggestion_service import (
+    PlannerRerankPolicyCandidateSuggestionService,
+)
+from app.services.domain.planner_rerank_policy_service import PlannerRerankPolicyService
 from app.services.domains.capabilities_service import DomainCapabilitiesService
 
 logger = logging.getLogger(__name__)
@@ -668,6 +674,255 @@ class DomainTimePolicy(ForgeResource):
             handler,
             log_message=f"Domain time policy update failed domain_id={domain_id}",
             client_error="Domain time policy update failed",
+        )
+
+
+@qf_domains_ns.route("/planner-rerank-policies")
+class DomainPlannerRerankPolicies(ForgeResource):
+    @token_required
+    @require_access("catalog")
+    def get(self):
+        def handler() -> Tuple[Any, int]:
+            domain_id_raw = request.args.get("base_domain_id")
+            domain_id = int(domain_id_raw) if (domain_id_raw or "").strip() else None
+            vertical_norm = (request.args.get("vertical_norm") or "generic").strip().lower() or "generic"
+            payload = PlannerRerankPolicyService().list_policies(
+                workspace_id=_workspace_id(),
+                user_id=require_user_id(),
+                base_domain_id=domain_id,
+                vertical_norm=vertical_norm,
+                include_inactive=bool(_bool_arg("include_inactive", default=False)),
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message="Planner rerank policy fetch failed",
+            client_error="Planner rerank policy fetch failed",
+        )
+
+    @token_required
+    @require_access("catalog", role="admin")
+    def put(self):
+        def handler() -> Tuple[Any, int]:
+            body = _json_body_dict()
+            policy_payload = body.get("policy", body)
+            payload = PlannerRerankPolicyService().upsert_policy(
+                workspace_id=_workspace_id(),
+                actor_user_id=require_user_id(),
+                payload=policy_payload,
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message="Planner rerank policy update failed",
+            client_error="Planner rerank policy update failed",
+        )
+
+
+@qf_domains_ns.route("/planner-rerank-policies/<int:policy_id>")
+class DomainPlannerRerankPolicyDetail(ForgeResource):
+    @token_required
+    @require_access("catalog", role="admin")
+    def delete(self, policy_id: int):
+        def handler() -> Tuple[Any, int]:
+            payload = PlannerRerankPolicyService().delete_policy(
+                workspace_id=_workspace_id(),
+                actor_user_id=require_user_id(),
+                policy_id=policy_id,
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message=f"Planner rerank policy delete failed policy_id={policy_id}",
+            client_error="Planner rerank policy delete failed",
+        )
+
+
+@qf_domains_ns.route("/planner-domain-capabilities")
+class DomainPlannerCapabilities(ForgeResource):
+    @token_required
+    @require_access("catalog")
+    def get(self):
+        def handler() -> Tuple[Any, int]:
+            domain_id_raw = request.args.get("base_domain_id")
+            if not (domain_id_raw or "").strip():
+                raise ForgeError("base_domain_id is required", status_code=400)
+            vertical_norm = (request.args.get("vertical_norm") or "generic").strip().lower() or "generic"
+            payload = PlannerDomainCapabilityService().list_capabilities(
+                workspace_id=_workspace_id(),
+                user_id=require_user_id(),
+                base_domain_id=int(domain_id_raw),
+                vertical_norm=vertical_norm,
+                include_inactive=bool(_bool_arg("include_inactive", default=False)),
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message="Planner domain capability fetch failed",
+            client_error="Planner domain capability fetch failed",
+        )
+
+    @token_required
+    @require_access("catalog", role="admin")
+    def put(self):
+        def handler() -> Tuple[Any, int]:
+            body = _json_body_dict()
+            capability_payload = body.get("capability", body)
+            payload = PlannerDomainCapabilityService().upsert_capability(
+                workspace_id=_workspace_id(),
+                actor_user_id=require_user_id(),
+                payload=capability_payload,
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message="Planner domain capability update failed",
+            client_error="Planner domain capability update failed",
+        )
+
+
+@qf_domains_ns.route("/planner-domain-capabilities/<int:capability_id>")
+class DomainPlannerCapabilityDetail(ForgeResource):
+    @token_required
+    @require_access("catalog", role="admin")
+    def delete(self, capability_id: int):
+        def handler() -> Tuple[Any, int]:
+            payload = PlannerDomainCapabilityService().delete_capability(
+                workspace_id=_workspace_id(),
+                actor_user_id=require_user_id(),
+                capability_id=capability_id,
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message=f"Planner domain capability delete failed capability_id={capability_id}",
+            client_error="Planner domain capability delete failed",
+        )
+
+
+@qf_domains_ns.route("/planner-rerank-policy-candidates")
+class DomainPlannerRerankPolicyCandidates(ForgeResource):
+    @token_required
+    @require_access("catalog")
+    def get(self):
+        def handler() -> Tuple[Any, int]:
+            payload = PlannerRerankPolicyCandidateService().list_candidates(
+                workspace_id=_workspace_id(),
+                review_status=(request.args.get("review_status") or "").strip() or None,
+                vertical_norm=(request.args.get("vertical_norm") or "").strip().lower() or None,
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message="Planner rerank policy candidate fetch failed",
+            client_error="Planner rerank policy candidate fetch failed",
+        )
+
+    @token_required
+    @require_access("catalog", role="admin")
+    def post(self):
+        def handler() -> Tuple[Any, int]:
+            body = _json_body_dict()
+            candidate_payload = body.get("candidate", body)
+            payload = PlannerRerankPolicyCandidateService().create_candidate(
+                workspace_id=_workspace_id(),
+                payload=candidate_payload,
+            )
+            return payload, 201
+
+        return _run(
+            handler,
+            log_message="Planner rerank policy candidate create failed",
+            client_error="Planner rerank policy candidate create failed",
+        )
+
+    @token_required
+    @require_access("catalog", role="admin")
+    def put(self):
+        def handler() -> Tuple[Any, int]:
+            body = _json_body_dict()
+            candidate_payload = body.get("candidate", body)
+            payload = PlannerRerankPolicyCandidateService().create_candidate(
+                workspace_id=_workspace_id(),
+                payload=candidate_payload,
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message="Planner rerank policy candidate update failed",
+            client_error="Planner rerank policy candidate update failed",
+        )
+
+
+@qf_domains_ns.route("/planner-rerank-policy-candidates/<int:candidate_id>")
+class DomainPlannerRerankPolicyCandidateDetail(ForgeResource):
+    @token_required
+    @require_access("catalog", role="admin")
+    def delete(self, candidate_id: int):
+        def handler() -> Tuple[Any, int]:
+            payload = PlannerRerankPolicyCandidateService().delete_candidate(
+                workspace_id=_workspace_id(),
+                candidate_id=candidate_id,
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message=f"Planner rerank policy candidate delete failed candidate_id={candidate_id}",
+            client_error="Planner rerank policy candidate delete failed",
+        )
+
+
+@qf_domains_ns.route("/planner-rerank-policy-candidates/<int:candidate_id>/approve")
+class DomainPlannerRerankPolicyCandidateApprove(ForgeResource):
+    @token_required
+    @require_access("catalog", role="admin")
+    def post(self, candidate_id: int):
+        def handler() -> Tuple[Any, int]:
+            body = _json_body_dict()
+            approval_payload = body.get("approval", body)
+            payload = PlannerRerankPolicyCandidateService().approve_candidate(
+                workspace_id=_workspace_id(),
+                actor_user_id=require_user_id(),
+                candidate_id=candidate_id,
+                payload=approval_payload,
+            )
+            return payload, 200
+
+        return _run(
+            handler,
+            log_message=f"Planner rerank policy candidate approve failed candidate_id={candidate_id}",
+            client_error="Planner rerank policy candidate approve failed",
+        )
+
+
+@qf_domains_ns.route("/planner-rerank-policy-candidates/suggest")
+class DomainPlannerRerankPolicyCandidateSuggest(ForgeResource):
+    @token_required
+    @require_access("catalog", role="admin")
+    def post(self):
+        def handler() -> Tuple[Any, int]:
+            body = _json_body_dict()
+            suggestion_payload = body.get("suggestion", body)
+            payload = PlannerRerankPolicyCandidateSuggestionService().suggest_candidate(
+                workspace_id=_workspace_id(),
+                user_id=require_user_id(),
+                payload=suggestion_payload,
+            )
+            return payload, 201
+
+        return _run(
+            handler,
+            log_message="Planner rerank policy candidate suggestion failed",
+            client_error="Planner rerank policy candidate suggestion failed",
         )
 
 

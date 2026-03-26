@@ -124,6 +124,40 @@ def test_users_get_detail_redacts_sensitive_fields_and_scopes_workspace(client, 
     assert "otp_secret" not in resp.json
 
 
+def test_users_get_detail_ignores_workspace_scope_for_token_admin(client, monkeypatch):
+    import app.decorators.security as security
+
+    monkeypatch.setattr(
+        security.auth_service,
+        "verify_token",
+        lambda _token: {"sub": "admin-1", "username": "admin-1", "is_admin": True},
+    )
+
+    class _Svc:
+        def get_user(self, user_id: str, workspace_id: str | None = None):
+            assert user_id == "u1"
+            assert workspace_id is None
+            return User(
+                user_id=user_id,
+                user_name="alice",
+                first_name="Alice",
+                email="a@example.com",
+            )
+
+    monkeypatch.setattr(user_routes, "UserService", _Svc)
+
+    resp = client.get(
+        "/api/v1/users/u1",
+        headers={
+          "Authorization": "Bearer admin-token",
+          "X-Workspace-Id": "ws-admin",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json["user_id"] == "u1"
+
+
 def test_users_put_without_bearer_or_invite_token_rejected(client):
     resp = client.put("/api/v1/users/u1", json={"first_name": "Nope"})
     assert resp.status_code == 403

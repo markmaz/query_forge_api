@@ -708,6 +708,40 @@ def test_admin_organization_datasource_create(client, monkeypatch):
     assert resp.json["id"] == 99
 
 
+def test_admin_organization_datasource_list_allows_workspace_admin_for_current_org(client, monkeypatch):
+    class _FakeSvc:
+        def get_workspace_binding(self, workspace_id):
+            assert workspace_id == "ws-1"
+            return {"workspace_id": "ws-1", "organization_id": "org-1"}
+
+        def list_datasources(self, **kwargs):
+            assert kwargs["organization_id"] == "org-1"
+            return {"rows": [{"id": 99, "organization_id": "org-1", "name": "Primary"}], "count": 1, "total": 1, "limit": 100, "offset": 0}
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/organizations/org-1/datasources",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json["rows"][0]["id"] == 99
+
+
+def test_admin_organization_datasource_list_blocks_workspace_admin_for_other_org(client, monkeypatch):
+    class _FakeSvc:
+        def get_workspace_binding(self, workspace_id):
+            assert workspace_id == "ws-1"
+            return {"workspace_id": "ws-1", "organization_id": "org-1"}
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/organizations/org-2/datasources",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 403
+    assert "current workspace organization" in resp.json["error"]
+
+
 def test_admin_datasource_connection_test(client, monkeypatch):
     class _FakeSvc:
         def test_datasource(self, *, datasource_id):
@@ -718,6 +752,60 @@ def test_admin_datasource_connection_test(client, monkeypatch):
     resp = client.post("/api/v1/admin/datasources/22/test", headers=_headers(monkeypatch))
     assert resp.status_code == 200
     assert resp.json["result"]["status"] == "ok"
+
+
+def test_admin_datasource_connection_test_allows_workspace_admin_for_current_org(client, monkeypatch):
+    class _FakeSvc:
+        def get_workspace_binding(self, workspace_id):
+            assert workspace_id == "ws-1"
+            return {"workspace_id": "ws-1", "organization_id": "org-1"}
+
+        def get_datasource(self, datasource_id):
+            assert datasource_id == 22
+            return {"id": 22, "organization_id": "org-1", "type": "snowflake"}
+
+        def test_datasource(self, *, datasource_id):
+            assert datasource_id == 22
+            return {"datasource_id": 22, "status": "ok", "latency_ms": 10}
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.post(
+        "/api/v1/admin/datasources/22/test",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json["result"]["status"] == "ok"
+
+
+def test_admin_datasource_namespaces(client, monkeypatch):
+    class _FakeSvc:
+        def get_datasource(self, datasource_id):
+            return {"datasource_id": datasource_id, "organization_id": "org-1"}
+
+        def get_workspace_binding(self, workspace_id):
+            assert workspace_id == "ws-1"
+            return {"workspace_id": workspace_id, "organization_id": "org-1"}
+
+        def list_datasource_namespaces(self, *, datasource_id, catalog=None):
+            assert datasource_id == 22
+            assert catalog == "ANALYTICS"
+            return {
+                "datasource_id": 22,
+                "datasource_type": "snowflake",
+                "catalogs": ["ANALYTICS", "RAW"],
+                "schemas": ["PUBLIC", "REPORTING"],
+                "current_catalog": "ANALYTICS",
+                "current_schema": "PUBLIC",
+            }
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/datasources/22/namespaces?catalog=ANALYTICS",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json["catalogs"] == ["ANALYTICS", "RAW"]
+    assert resp.json["schemas"] == ["PUBLIC", "REPORTING"]
 
 
 def test_admin_workspace_membership_create(client, monkeypatch):
@@ -823,6 +911,23 @@ def test_admin_workspace_create(client, monkeypatch):
     )
     assert resp.status_code == 201
     assert resp.json["workspace_id"] == "ws-new-1"
+
+
+def test_admin_workspace_delete(client, monkeypatch):
+    class _FakeSvc:
+        def delete_workspace(self, *, workspace_id, hard):
+            assert workspace_id == "ws-1"
+            assert hard is False
+            return {"workspace_id": workspace_id, "deleted": True, "mode": "soft"}
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.delete(
+        "/api/v1/admin/workspaces/ws-1",
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["workspace_id"] == "ws-1"
+    assert resp.json["mode"] == "soft"
 
 
 def test_admin_workspace_binding_update(client, monkeypatch):

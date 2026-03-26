@@ -928,14 +928,16 @@ class OrganizationMembershipDetail(ForgeResource):
 @admin_ns.route("/organizations/<string:organization_id>/datasources")
 class OrganizationDatasourceListCreate(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def get(self, organization_id: str):
         try:
             _require_admin()
+            service = TenancyAdminService()
+            _assert_workspace_admin_organization_access(service, organization_id)
             include_inactive = _as_bool(request.args.get("include_inactive"), default=False)
             limit = request.args.get("limit", default=100, type=int) or 100
             offset = request.args.get("offset", default=0, type=int) or 0
-            result = TenancyAdminService().list_datasources(
+            result = service.list_datasources(
                 organization_id=organization_id,
                 include_inactive=include_inactive,
                 limit=limit,
@@ -949,13 +951,15 @@ class OrganizationDatasourceListCreate(ForgeResource):
             return {"error": "organization datasource list failed"}, 500
 
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     @admin_ns.expect(datasource_create_model, validate=False)
     def post(self, organization_id: str):
         try:
             _require_admin()
+            service = TenancyAdminService()
+            _assert_workspace_admin_organization_access(service, organization_id)
             req = DatasourceCreateRequest(**(request.get_json(silent=True) or {}))
-            result = TenancyAdminService().create_datasource(organization_id=organization_id, req=req)
+            result = service.create_datasource(organization_id=organization_id, req=req)
             return result, 201
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -967,11 +971,13 @@ class OrganizationDatasourceListCreate(ForgeResource):
 @admin_ns.route("/datasources/<int:datasource_id>")
 class DatasourceDetail(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def get(self, datasource_id: int):
         try:
             _require_admin()
-            return TenancyAdminService().get_datasource(datasource_id), 200
+            service = TenancyAdminService()
+            row = _assert_workspace_admin_datasource_access(service, datasource_id)
+            return row, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
@@ -979,13 +985,15 @@ class DatasourceDetail(ForgeResource):
             return {"error": "datasource get failed"}, 500
 
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     @admin_ns.expect(datasource_update_model, validate=False)
     def patch(self, datasource_id: int):
         try:
             _require_admin()
+            service = TenancyAdminService()
+            _assert_workspace_admin_datasource_access(service, datasource_id)
             req = DatasourceUpdateRequest(**(request.get_json(silent=True) or {}))
-            result = TenancyAdminService().update_datasource(datasource_id=datasource_id, req=req)
+            result = service.update_datasource(datasource_id=datasource_id, req=req)
             return result, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -994,12 +1002,14 @@ class DatasourceDetail(ForgeResource):
             return {"error": "datasource update failed"}, 500
 
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def delete(self, datasource_id: int):
         try:
             _require_admin()
+            service = TenancyAdminService()
+            _assert_workspace_admin_datasource_access(service, datasource_id)
             hard = _as_bool(request.args.get("hard"), default=False)
-            result = TenancyAdminService().delete_datasource(datasource_id=datasource_id, hard=hard)
+            result = service.delete_datasource(datasource_id=datasource_id, hard=hard)
             return result, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -1011,17 +1021,40 @@ class DatasourceDetail(ForgeResource):
 @admin_ns.route("/datasources/<int:datasource_id>/test")
 class DatasourceConnectionTest(ForgeResource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def post(self, datasource_id: int):
         try:
             _require_admin()
-            result = TenancyAdminService().test_datasource(datasource_id=datasource_id)
+            service = TenancyAdminService()
+            _assert_workspace_admin_datasource_access(service, datasource_id)
+            result = service.test_datasource(datasource_id=datasource_id)
             return {"result": result}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
             logger.exception("datasource test failed")
             return {"error": "datasource test failed"}, 500
+
+
+@admin_ns.route("/datasources/<int:datasource_id>/namespaces")
+class DatasourceNamespaces(ForgeResource):
+    @token_required
+    @require_admin()
+    def get(self, datasource_id: int):
+        try:
+            _require_admin()
+            service = TenancyAdminService()
+            _assert_workspace_admin_datasource_access(service, datasource_id)
+            result = service.list_datasource_namespaces(
+                datasource_id=datasource_id,
+                catalog=(request.args.get("catalog") or "").strip() or None,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("datasource namespaces failed")
+            return {"error": "datasource namespaces failed"}, 500
 
 
 @admin_ns.route("/workspaces")
@@ -1107,6 +1140,23 @@ class WorkspaceBindingDetail(ForgeResource):
             return {"error": "workspace binding update failed"}, 500
 
 
+@admin_ns.route("/workspaces/<string:workspace_id>")
+class WorkspaceDetail(ForgeResource):
+    @token_required
+    @require_role("system:admin")
+    def delete(self, workspace_id: str):
+        try:
+            _require_admin()
+            hard = _as_bool(request.args.get("hard"), default=False)
+            result = TenancyAdminService().delete_workspace(workspace_id=workspace_id, hard=hard)
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("workspace delete failed")
+            return {"error": "workspace delete failed"}, 500
+
+
 @admin_ns.route("/workspaces/<string:workspace_id>/memberships")
 class WorkspaceMembershipListCreate(ForgeResource):
     @token_required
@@ -1189,8 +1239,10 @@ class WorkspaceMembershipDetail(ForgeResource):
 # ---------------------------------------------------------------------------
 
 def _require_admin() -> None:
-    if not bool(getattr(g, "is_admin", False)):
-        raise ForgeError("Admin access required", status_code=403)
+    effective_roles = getattr(g, "effective_roles", set()) or set()
+    if bool(getattr(g, "is_admin", False)) or "super_admin" in effective_roles or "workspace_admin" in effective_roles:
+        return
+    raise ForgeError("Admin access required", status_code=403)
 
 
 def _is_super_admin_request() -> bool:
@@ -1203,6 +1255,24 @@ def _current_workspace_binding(service: TenancyAdminService) -> dict:
     if not workspace_id:
         raise ForgeError("X-Workspace-Id header is required for workspace-scoped admin access", status_code=400)
     return service.get_workspace_binding(workspace_id)
+
+
+def _assert_workspace_admin_organization_access(service: TenancyAdminService, organization_id: str) -> None:
+    if _is_super_admin_request():
+        return
+    scoped_binding = _current_workspace_binding(service)
+    scoped_org_id = str(scoped_binding.get("organization_id") or "").strip()
+    requested_org_id = str(organization_id or "").strip()
+    if not scoped_org_id or requested_org_id != scoped_org_id:
+        raise ForgeError("Workspace admin access is limited to the current workspace organization", status_code=403)
+
+
+def _assert_workspace_admin_datasource_access(service: TenancyAdminService, datasource_id: int) -> dict:
+    if _is_super_admin_request():
+        return {}
+    row = service.get_datasource(int(datasource_id))
+    _assert_workspace_admin_organization_access(service, str(row.get("organization_id") or ""))
+    return row
 
 
 def _paged_rows(rows: list[dict], *, limit: int, offset: int) -> dict:

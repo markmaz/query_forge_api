@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from app.models.query.ai_suggest import AddFilterEdit, AddGroupByEdit, AddSelectEdit, AddSortEdit, SetDomainEdit, SqlColumnKey
@@ -146,6 +147,12 @@ def map_plan_v2_to_sqljson(
                 prompt=prompt,
             )
             sql_json = time_filter_sql
+
+    sql_json = _apply_birth_month_date_part_filter(
+        sql_json=sql_json,
+        capabilities=capabilities,
+        prompt=prompt,
+    )
 
     sql_json = _apply_plan_order_by_sorting(sql_json=sql_json, plan_json=plan_json, dim_lookup=dim_lookup, prompt=prompt)
     _apply_default_sorting(sql_json)
@@ -576,6 +583,141 @@ def _canonical_relative_time_token(value: Any) -> str:
 def _should_apply_custom_time_filter(time_block: Mapping[str, Any]) -> bool:
     time_range = _norm_key(time_block.get("time_range"))
     return time_range == "custom" and bool(time_block.get("time_column_key"))
+
+
+def _apply_birth_month_date_part_filter(
+    *,
+    sql_json: Mapping[str, Any],
+    capabilities: Mapping[str, Any],
+    prompt: str,
+) -> Dict[str, Any]:
+    prompt_text = str(prompt or "").strip().lower()
+    month_num = _extract_named_month_number(prompt_text)
+    if month_num is None or not _prompt_has_birth_month_constraint(prompt_text):
+        return dict(sql_json or {})
+
+    birth_col = _resolve_birth_date_column(capabilities=capabilities)
+    if birth_col is None:
+        return dict(sql_json or {})
+
+    out = dict(sql_json or {})
+    data_prep = dict(out.get("dataPrep") or {}) if isinstance(out.get("dataPrep"), Mapping) else {}
+    rules = [dict(item) for item in list(data_prep.get("rules") or []) if isinstance(item, Mapping)]
+
+    base_ref = (
+        f"id:{birth_col.get('modelColumnId')}"
+        if birth_col.get("modelColumnId") is not None
+        else f"name:{birth_col.get('columnName') or 'birth_date'}"
+    )
+    expr_id = f"dp:date_part:month:{base_ref}"
+    alias = f"{str(birth_col.get('columnName') or 'birth_date').strip() or 'birth_date'}_month"
+    output_col = {
+        "modelColumnId": None,
+        "columnName": alias,
+        "workspaceTableId": None,
+        "exprId": expr_id,
+        "alias": alias,
+    }
+
+    if not any(str(rule.get("id") or "") == expr_id for rule in rules):
+        rules.append(
+            {
+                "id": expr_id,
+                "enabled": True,
+                "op": "date_part",
+                "part": "month",
+                "target": dict(birth_col),
+                "output": output_col,
+                "applyScope": "query_wide",
+            }
+        )
+    data_prep["enabled"] = True
+    data_prep["rules"] = rules
+    out["dataPrep"] = data_prep
+
+    root = out.get("filters")
+    if not isinstance(root, dict) or root.get("type") != "group":
+        root = {"type": "group", "id": "birth-month-root", "match": "and", "children": []}
+    children = [dict(item) for item in list(root.get("children") or []) if isinstance(item, Mapping)]
+    if not any(
+        isinstance(child.get("field"), Mapping)
+        and str((child.get("field") or {}).get("exprId") or "") == expr_id
+        and str(child.get("op") or "").lower() == "equals"
+        and child.get("value") == month_num
+        for child in children
+    ):
+        children.append(
+            {
+                "type": "condition",
+                "id": f"birth-month-{month_num}",
+                "field": output_col,
+                "op": "equals",
+                "value": month_num,
+            }
+        )
+    root["children"] = children
+    out["filters"] = root
+    return out
+
+
+def _prompt_has_birth_month_constraint(prompt: str) -> bool:
+    text = f" {str(prompt or '').strip().lower()} "
+    if text.strip() == "":
+        return False
+    has_birth_context = any(
+        token in text
+        for token in (
+            " birthday ",
+            " birthdays ",
+            " birth month ",
+            " birthdate ",
+            " date of birth ",
+            " born in ",
+            " births in ",
+        )
+    )
+    return has_birth_context
+
+
+def _extract_named_month_number(text: str) -> Optional[int]:
+    month_map = {
+        "january": 1,
+        "february": 2,
+        "march": 3,
+        "april": 4,
+        "may": 5,
+        "june": 6,
+        "july": 7,
+        "august": 8,
+        "september": 9,
+        "october": 10,
+        "november": 11,
+        "december": 12,
+    }
+    match = re.search(
+        r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b",
+        str(text or "").strip().lower(),
+    )
+    if match is None:
+        return None
+    return month_map.get(str(match.group(1) or "").lower())
+
+
+def _resolve_birth_date_column(*, capabilities: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    rows = (
+        list(capabilities.get("filter_columns") or [])
+        + list(capabilities.get("dimensions") or [])
+        + list(capabilities.get("time_columns") or [])
+    )
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        col_name = str(row.get("column_name") or "").strip().lower()
+        if col_name in {"birth_date", "date_of_birth", "dob"} or ("birth" in col_name and "date" in col_name):
+            col = _to_sql_column_key(row)
+            if col is not None:
+                return col.model_dump(mode="json", exclude_none=False)
+    return None
 
 
 __all__ = ["map_plan_v2_to_sqljson"]

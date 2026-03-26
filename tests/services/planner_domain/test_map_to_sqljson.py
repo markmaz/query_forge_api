@@ -53,6 +53,71 @@ def test_map_to_sqljson_resolves_domain_metric() -> None:
     assert (sorting[0].get("col") or {}).get("columnName") == "county_fips_code"
 
 
+def test_map_to_sqljson_adds_birth_month_date_part_filter() -> None:
+    capabilities = {
+        "domain_id": 21,
+        "domain_version": 1,
+        "dimensions": [
+            {
+                "column_key": "wt552.birth_date",
+                "label": "Birth Date",
+                "data_type": "date",
+                "filterable": True,
+                "workspace_table_id": 552,
+                "model_column_id": 14670,
+                "column_name": "birth_date",
+            },
+            {
+                "column_key": "wt552.first_name",
+                "label": "First Name",
+                "data_type": "string",
+                "filterable": True,
+                "workspace_table_id": 552,
+                "model_column_id": 14671,
+                "column_name": "first_name",
+            },
+        ],
+        "filter_columns": [],
+        "time_columns": [],
+        "domain_metrics": [],
+        "user_metrics": [],
+        "overlay_metrics": [],
+    }
+    plan = {
+        "schema_version": 2,
+        "trace_id": "trace-bday-1",
+        "workspace_id": "ws-1",
+        "vertical_norm": "education",
+        "base_domain_id": 21,
+        "intent": "list",
+        "selects": {
+            "dimensions": [{"column_key": "wt552.first_name"}],
+            "metrics": [],
+        },
+        "filters": [],
+        "time": {},
+        "grouping": {"group_by": ["wt552.first_name"], "order_by": []},
+    }
+
+    out = map_plan_v2_to_sqljson(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="Show me all the students who have a birthday in March",
+    )
+
+    rules = ((out.get("dataPrep") or {}).get("rules") or [])
+    assert rules
+    assert rules[0]["op"] == "date_part"
+    assert rules[0]["part"] == "month"
+    assert (rules[0].get("target") or {}).get("columnName") == "birth_date"
+
+    children = ((out.get("filters") or {}).get("children") or [])
+    assert len(children) == 1
+    assert children[0]["op"] == "equals"
+    assert children[0]["value"] == 3
+    assert (children[0].get("field") or {}).get("exprId") == "dp:date_part:month:id:14670"
+
+
 def test_map_to_sqljson_emits_overlay_metric_node() -> None:
     plan = {
         "schema_version": 2,
