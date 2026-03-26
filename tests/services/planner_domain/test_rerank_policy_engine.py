@@ -61,6 +61,14 @@ def test_prompt_signal_service_extracts_birth_month_signal() -> None:
     assert "student_listing" in signals
 
 
+def test_prompt_signal_service_extracts_birth_month_signal_for_plural_birthdays() -> None:
+    svc = PromptSignalService()
+    signals = svc.extract_signals(prompt="Show me all the students with birthdays in March")
+    assert "birth_month_prompt" in signals
+    assert "time_constraint_present" in signals
+    assert "student_listing" in signals
+
+
 def test_capability_service_prefers_explicit_workspace_scope_over_vertical_scope() -> None:
     class _SQL:
         def execute_query_mappings(self, query, params=None):

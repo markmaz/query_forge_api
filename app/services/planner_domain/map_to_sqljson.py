@@ -638,6 +638,11 @@ def _apply_birth_month_date_part_filter(
     root = out.get("filters")
     if not isinstance(root, dict) or root.get("type") != "group":
         root = {"type": "group", "id": "birth-month-root", "match": "and", "children": []}
+    else:
+        root = _remove_direct_birth_month_filters(
+            root=root,
+            birth_col=birth_col,
+        )
     children = [dict(item) for item in list(root.get("children") or []) if isinstance(item, Mapping)]
     if not any(
         isinstance(child.get("field"), Mapping)
@@ -658,6 +663,88 @@ def _apply_birth_month_date_part_filter(
     root["children"] = children
     out["filters"] = root
     return out
+
+
+def _remove_direct_birth_month_filters(
+    *,
+    root: Mapping[str, Any],
+    birth_col: Mapping[str, Any],
+) -> Dict[str, Any]:
+    def _prune(node: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+        node_type = str(node.get("type") or "").strip().lower()
+        if node_type == "condition":
+            return None if _is_direct_birth_month_filter(node=node, birth_col=birth_col) else dict(node)
+        if node_type != "group":
+            return dict(node)
+
+        children_in = list(node.get("children") or [])
+        children_out: List[Dict[str, Any]] = []
+        for child in children_in:
+            if not isinstance(child, Mapping):
+                continue
+            pruned = _prune(child)
+            if pruned is not None:
+                children_out.append(pruned)
+
+        out = dict(node)
+        out["children"] = children_out
+        return out
+
+    return _prune(root) or {"type": "group", "id": str(root.get("id") or "birth-month-root"), "match": str(root.get("match") or "and"), "children": []}
+
+
+def _is_direct_birth_month_filter(
+    *,
+    node: Mapping[str, Any],
+    birth_col: Mapping[str, Any],
+) -> bool:
+    field = node.get("field")
+    if not isinstance(field, Mapping):
+        return False
+    if not _same_sql_column(field=field, birth_col=birth_col):
+        return False
+    op = str(node.get("op") or "").strip().lower()
+    if op not in {"equals", "in", "contains", "starts_with"}:
+        return False
+
+    month_literals = {
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    }
+
+    values: List[Any] = []
+    if isinstance(node.get("value"), list):
+        values.extend(list(node.get("value") or []))
+    else:
+        values.append(node.get("value"))
+    if isinstance(node.get("values"), list):
+        values.extend(list(node.get("values") or []))
+
+    for value in values:
+        token = str(value or "").strip().lower()
+        if token in month_literals:
+            return True
+    return False
+
+
+def _same_sql_column(*, field: Mapping[str, Any], birth_col: Mapping[str, Any]) -> bool:
+    field_model_id = _to_int(field.get("modelColumnId"))
+    birth_model_id = _to_int(birth_col.get("modelColumnId"))
+    if field_model_id is not None and birth_model_id is not None:
+        return field_model_id == birth_model_id
+    field_name = _norm_key(field.get("columnName"))
+    birth_name = _norm_key(birth_col.get("columnName"))
+    return field_name != "" and field_name == birth_name
 
 
 def _prompt_has_birth_month_constraint(prompt: str) -> bool:

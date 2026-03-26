@@ -26,7 +26,7 @@ _MONTH_RE = re.compile(
     re.IGNORECASE,
 )
 _BIRTH_MONTH_RE = re.compile(
-    r"\b(birthday|birth month|birthdate|date of birth|born in|born during|births in)\b",
+    r"\b(birthday|birthdays|birth month|birth months|birthdate|birthdates|birth date|birth dates|date of birth|dates of birth|born in|born during|births in)\b",
     re.IGNORECASE,
 )
 _ENROLLED_RE = re.compile(r"\b(currently enrolled|enrolled|active enrollment|is enrolled|enrollment)\b", re.IGNORECASE)
