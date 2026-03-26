@@ -50,6 +50,7 @@ def build_compact_plan_and_project(
     trace_id: str,
     llm_client: Optional[LLMClient] = None,
     retrieval_service: Optional[SemanticRetrievalService] = None,
+    precomputed_candidates: Optional[SemanticCandidatePayload] = None,
     validation_service: Optional[PlannerValidationService] = None,
     compiler: Optional[SemanticPlanCompiler] = None,
     max_tokens: Optional[int] = None,
@@ -69,15 +70,17 @@ def build_compact_plan_and_project(
     validator = validation_service or PlannerValidationService()
     plan_compiler = compiler or SemanticPlanCompiler()
 
-    candidates = retrieval.retrieve(
-        prompt=normalized_prompt or prompt,
-        workspace_id=workspace_id,
-        base_domain_id=int(base_domain_id),
-        base_domain_name=domain_name,
-        vertical_norm=vertical_norm,
-        capabilities_compact=capabilities_compact,
-        max_per_type=(12 if fast_mode else 20),
-    )
+    candidates = precomputed_candidates
+    if candidates is None:
+        candidates = retrieval.retrieve(
+            prompt=normalized_prompt or prompt,
+            workspace_id=workspace_id,
+            base_domain_id=int(base_domain_id),
+            base_domain_name=domain_name,
+            vertical_norm=vertical_norm,
+            capabilities_compact=capabilities_compact,
+            max_per_type=(12 if fast_mode else 20),
+        )
     candidate_summary = _candidate_summary(candidates)
     logger.info(
         "planner_semantic_retrieval trace_id=%s workspace_id=%s base_domain_id=%s summary=%s source=%s",

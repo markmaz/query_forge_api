@@ -7,7 +7,7 @@ from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
 
-_ALLOWED_CALENDAR_MODE = {"calendar", "fiscal"}
+_ALLOWED_CALENDAR_MODE = {"calendar", "fiscal", "school_year"}
 _ALLOWED_WEEK_START = {"monday", "sunday"}
 _ALLOWED_GRAIN = {"day", "week", "month", "quarter", "year"}
 
@@ -48,6 +48,8 @@ class DomainTimePolicyService:
             "domain_id": int(domain_id),
             "calendar_mode": normalized["calendar_mode"],
             "fiscal_year_start_month": normalized["fiscal_year_start_month"],
+            "school_year_start_month": normalized["school_year_start_month"],
+            "school_year_end_month": normalized["school_year_end_month"],
             "timezone": normalized["timezone"],
             "week_start": normalized["week_start"],
             "default_time_concept_key": normalized["default_time_concept_key"],
@@ -68,6 +70,8 @@ class DomainTimePolicyService:
                       domain_id,
                       calendar_mode,
                       fiscal_year_start_month,
+                      school_year_start_month,
+                      school_year_end_month,
                       timezone,
                       week_start,
                       default_time_concept_key,
@@ -82,6 +86,8 @@ class DomainTimePolicyService:
                       :domain_id,
                       :calendar_mode,
                       :fiscal_year_start_month,
+                      :school_year_start_month,
+                      :school_year_end_month,
                       :timezone,
                       :week_start,
                       :default_time_concept_key,
@@ -101,6 +107,8 @@ class DomainTimePolicyService:
                     UPDATE domain_time_policy
                     SET calendar_mode = :calendar_mode,
                         fiscal_year_start_month = :fiscal_year_start_month,
+                        school_year_start_month = :school_year_start_month,
+                        school_year_end_month = :school_year_end_month,
                         timezone = :timezone,
                         week_start = :week_start,
                         default_time_concept_key = :default_time_concept_key,
@@ -130,6 +138,8 @@ class DomainTimePolicyService:
               tp.id AS policy_id,
               tp.calendar_mode,
               tp.fiscal_year_start_month,
+              tp.school_year_start_month,
+              tp.school_year_end_month,
               tp.timezone,
               tp.week_start,
               tp.default_time_concept_key,
@@ -167,6 +177,8 @@ def _default_policy() -> Dict[str, Any]:
     return {
         "calendar_mode": "calendar",
         "fiscal_year_start_month": None,
+        "school_year_start_month": None,
+        "school_year_end_month": None,
         "timezone": None,
         "week_start": "monday",
         "default_time_concept_key": None,
@@ -191,6 +203,14 @@ def _policy_from_row(row: Mapping[str, Any]) -> Dict[str, Any]:
     fiscal_month = row.get("fiscal_year_start_month")
     if isinstance(fiscal_month, int) and 1 <= fiscal_month <= 12:
         out["fiscal_year_start_month"] = fiscal_month
+
+    school_start = row.get("school_year_start_month")
+    if isinstance(school_start, int) and 1 <= school_start <= 12:
+        out["school_year_start_month"] = school_start
+
+    school_end = row.get("school_year_end_month")
+    if isinstance(school_end, int) and 1 <= school_end <= 12:
+        out["school_year_end_month"] = school_end
 
     timezone = str(row.get("timezone") or "").strip()
     out["timezone"] = timezone or None
@@ -224,7 +244,7 @@ def _normalize_policy_payload(*, payload: Mapping[str, Any], base: Mapping[str, 
     if "calendar_mode" in payload:
         mode = str(payload.get("calendar_mode") or "").strip().lower()
         if mode not in _ALLOWED_CALENDAR_MODE:
-            raise ForgeError("policy.calendar_mode must be 'calendar' or 'fiscal'", status_code=400)
+            raise ForgeError("policy.calendar_mode must be 'calendar', 'fiscal', or 'school_year'", status_code=400)
         out["calendar_mode"] = mode
 
     if "fiscal_year_start_month" in payload:
@@ -235,6 +255,24 @@ def _normalize_policy_payload(*, payload: Mapping[str, Any], base: Mapping[str, 
             out["fiscal_year_start_month"] = fiscal
         else:
             raise ForgeError("policy.fiscal_year_start_month must be an integer between 1 and 12", status_code=400)
+
+    if "school_year_start_month" in payload:
+        school_start = payload.get("school_year_start_month")
+        if school_start is None or str(school_start).strip() == "":
+            out["school_year_start_month"] = None
+        elif isinstance(school_start, int) and 1 <= school_start <= 12:
+            out["school_year_start_month"] = school_start
+        else:
+            raise ForgeError("policy.school_year_start_month must be an integer between 1 and 12", status_code=400)
+
+    if "school_year_end_month" in payload:
+        school_end = payload.get("school_year_end_month")
+        if school_end is None or str(school_end).strip() == "":
+            out["school_year_end_month"] = None
+        elif isinstance(school_end, int) and 1 <= school_end <= 12:
+            out["school_year_end_month"] = school_end
+        else:
+            raise ForgeError("policy.school_year_end_month must be an integer between 1 and 12", status_code=400)
 
     if "timezone" in payload:
         tz = str(payload.get("timezone") or "").strip()
@@ -328,4 +366,3 @@ def _json_dumps(value: Any) -> Optional[str]:
 
 
 __all__ = ["DomainTimePolicyService"]
-

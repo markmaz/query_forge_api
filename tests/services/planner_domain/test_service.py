@@ -6,11 +6,14 @@ import logging
 import pytest
 
 from app.exceptions.forge_error import ForgeError
+from app.services.planner.semantic_candidate_models import SemanticCandidatePayload, SemanticConceptCandidate
+from app.services.planner.semantic_grounding_service import SemanticGroundingBundle
 from app.services.planner_domain import service as planner_domain_service_module
 from app.services.planner_domain.service import (
     LLMPlanResult,
     PlannerDomainService,
     SlotExtractionResult,
+    _serialize_domain_candidates_for_debug,
     _column_heuristic_boost,
     _district_county_retry_hint,
     _normalize_relative_time_in_plan,
@@ -203,6 +206,91 @@ class _FakeValueAliasResolver:
         del prompt, vertical_norm
         if self.should_raise:
             raise RuntimeError("boom")
+        return list(self.rows)
+
+
+class _FakeSemanticGroundingService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def resolve_alias_constraints(self, *, prompt: str, vertical_norm: str):
+        del prompt, vertical_norm
+        return [
+            {
+                "kind": "unknown",
+                "text": "US",
+                "op": "eq",
+                "value_hint": "United States",
+                "notes": "semantic_alias:COUNTRY",
+            }
+        ]
+
+    def build_grounding_bundle(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return SemanticGroundingBundle(
+            alias_constraints=[
+                {
+                    "kind": "unknown",
+                    "text": "US",
+                    "op": "eq",
+                    "value_hint": "United States",
+                    "notes": "semantic_alias:COUNTRY",
+                }
+            ],
+            warnings=[],
+        )
+
+
+class _RankingSemanticGroundingService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def build_grounding_bundle(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        domain_id = int(kwargs["base_domain_id"])
+        if domain_id == 5:
+            candidates = SemanticCandidatePayload(
+                prompt="prompt",
+                workspace_id="ws-1",
+                vertical_norm="education",
+                base_domain_id=5,
+                base_domain_key="STAFF",
+                metric_candidates=[
+                    SemanticConceptCandidate(concept_key="STAFF_COUNT", label="Staff Count", metric_ref="domain_metric:staff_count")
+                ],
+                dimension_candidates=[
+                    SemanticConceptCandidate(concept_key="STAFF_NAME", label="Staff Name", source_column_key="wt23.staff_unique_id")
+                ],
+                filter_candidates=[
+                    SemanticConceptCandidate(concept_key="SCHOOL_NAME", label="School Name", source_column_key="wt20.school_name")
+                ],
+                metadata={"semantic_source": "registry"},
+            )
+            return SemanticGroundingBundle(candidates=candidates, alias_constraints=[{"value_hint": "Rossview Elementary"}])
+        candidates = SemanticCandidatePayload(
+            prompt="prompt",
+            workspace_id="ws-1",
+            vertical_norm="education",
+            base_domain_id=6,
+            base_domain_key="STUDENTS",
+            dimension_candidates=[
+                SemanticConceptCandidate(concept_key="STUDENT_NAME", label="Student Name", source_column_key="wt24.student_unique_id")
+            ],
+            metadata={"semantic_source": "fallback_capabilities"},
+        )
+        return SemanticGroundingBundle(candidates=candidates, alias_constraints=[])
+
+    def resolve_alias_constraints(self, *, prompt: str, vertical_norm: str):
+        del prompt, vertical_norm
+        return []
+
+
+class _FakePlannerRerankPolicyService:
+    def __init__(self, rows=None) -> None:
+        self.rows = list(rows or [])
+
+    def get_applicable_policies(self, *, workspace_id: str, vertical_norm: str, base_domain_id: int):
+        del workspace_id, vertical_norm, base_domain_id
         return list(self.rows)
 
 
@@ -1826,6 +1914,117 @@ def test_score_domain_candidate_adm_prompt_penalizes_calendar_domain_name() -> N
     assert adm_score > calendar_score
 
 
+def test_score_domain_candidate_days_off_prompt_prefers_calendar_domain() -> None:
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+    )
+    candidate = {"score": 0.45, "name": "Academic Calendar And Scheduling"}
+    non_calendar_candidate = {"score": 0.45, "name": "Students: Demographics And Groupings"}
+
+    calendar_score = svc._score_domain_candidate(  # noqa: SLF001
+        prompt="Show me all the days off barksdale elementary has in December",
+        candidate=candidate,
+        capabilities={"dimensions": [{"column_key": "wt594.calendar_date"}] * 20, "domain_metrics": []},
+        shortlisted_columns=[
+            {"column_name": "calendar_date"},
+            {"column_name": "is_school_day"},
+            {"column_name": "school_name"},
+            {"column_name": "non_instructional_reason"},
+            {"column_name": "holiday_name"},
+        ],
+    )
+    non_calendar_score = svc._score_domain_candidate(  # noqa: SLF001
+        prompt="Show me all the days off barksdale elementary has in December",
+        candidate=non_calendar_candidate,
+        capabilities={"dimensions": [{"column_key": "wt552.school_name"}] * 20, "domain_metrics": []},
+        shortlisted_columns=[
+            {"column_name": "school_name"},
+            {"column_name": "entry_date"},
+            {"column_name": "exit_withdraw_date"},
+            {"column_name": "is_active_enrollment"},
+            {"column_name": "school_year"},
+        ],
+    )
+
+    assert calendar_score > non_calendar_score
+
+
+def test_score_domain_candidate_age_extreme_prompt_prefers_demographics_domain() -> None:
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+    )
+    demographics_candidate = {"score": 0.56, "name": "Student Demographics And Enrollment"}
+    programs_candidate = {"score": 0.568, "name": "Student Programs And Services"}
+
+    demographics_score = svc._score_domain_candidate(  # noqa: SLF001
+        prompt="Show me the eldest student",
+        candidate=demographics_candidate,
+        capabilities={"dimensions": [{"column_key": "wt552.birth_date"}] * 20, "domain_metrics": []},
+        shortlisted_columns=[
+            {"column_name": "birth_date"},
+            {"column_name": "first_name"},
+            {"column_name": "last_name"},
+            {"column_name": "student_unique_id"},
+            {"column_name": "school_name"},
+        ],
+    )
+    programs_score = svc._score_domain_candidate(  # noqa: SLF001
+        prompt="Show me the eldest student",
+        candidate=programs_candidate,
+        capabilities={"dimensions": [{"column_key": "wt590.k_student_xyear"}] * 20, "domain_metrics": []},
+        shortlisted_columns=[
+            {"column_name": "k_student_xyear"},
+            {"column_name": "k_student"},
+            {"column_name": "program_enroll_begin_date"},
+            {"column_name": "program_enroll_end_date"},
+            {"column_name": "school_year"},
+        ],
+    )
+
+    assert demographics_score > programs_score
+
+
+def test_score_domain_candidate_birth_month_prompt_prefers_demographics_domain() -> None:
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+    )
+    demographics_candidate = {"score": 0.56, "name": "Student Demographics And Enrollment"}
+    programs_candidate = {"score": 0.568, "name": "Student Programs And Services"}
+
+    demographics_score = svc._score_domain_candidate(  # noqa: SLF001
+        prompt="Show me all the students who have a birthday in March",
+        candidate=demographics_candidate,
+        capabilities={"dimensions": [{"column_key": "wt552.birth_date"}] * 20, "domain_metrics": []},
+        shortlisted_columns=[
+            {"column_name": "birth_date"},
+            {"column_name": "first_name"},
+            {"column_name": "last_name"},
+            {"column_name": "student_unique_id"},
+            {"column_name": "school_name"},
+        ],
+    )
+    programs_score = svc._score_domain_candidate(  # noqa: SLF001
+        prompt="Show me all the students who have a birthday in March",
+        candidate=programs_candidate,
+        capabilities={"dimensions": [{"column_key": "wt590.k_student_xyear"}] * 20, "domain_metrics": []},
+        shortlisted_columns=[
+            {"column_name": "k_student_xyear"},
+            {"column_name": "k_student"},
+            {"column_name": "program_enroll_begin_date"},
+            {"column_name": "program_enroll_end_date"},
+            {"column_name": "school_year"},
+        ],
+    )
+
+    assert demographics_score > programs_score
+
+
 def test_get_domain_candidates_expands_work_prompt_and_includes_staff_domain() -> None:
     class _CapturingDomainVector:
         def __init__(self) -> None:
@@ -1893,6 +2092,166 @@ def test_get_domain_candidates_expands_adm_prompt_and_includes_adm_domain() -> N
     assert any(int(row.get("domain_id") or 0) == 4 for row in out)
 
 
+def test_get_domain_candidates_uses_semantic_alias_queries_to_improve_recall(monkeypatch) -> None:
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
+
+    class _SemanticRecallDomainVector:
+        def __init__(self) -> None:
+            self.queries = []
+
+        def search_domains(self, **kwargs):
+            query = str(kwargs.get("query") or "")
+            self.queries.append(query)
+            query_l = query.lower()
+            if "united states" in query_l:
+                return {"results": [{"domain_id": 6, "name": "Students – Profile & Demographics", "score": 0.88}]}
+            if "nativity" in query_l or "birth country" in query_l:
+                return {"results": [{"domain_id": 6, "name": "Students – Profile & Demographics", "score": 0.9}]}
+            return {"results": [{"domain_id": 4, "name": "Academic Calendar & Time", "score": 0.91}]}
+
+    vector = _SemanticRecallDomainVector()
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=vector,
+        llm_client=_FakeLLM(),
+        value_alias_resolver=_FakeValueAliasResolver(
+            [{"concept_key": "COUNTRY", "canonical_value": "United States", "matched_alias": "US"}]
+        ),
+    )
+
+    out = svc._get_domain_candidates(  # noqa: SLF001
+        workspace_id="ws-1",
+        vertical_norm="education",
+        prompt="Show students not born in the US",
+        provided_domain_id=None,
+    )
+
+    assert any("United States" in query for query in vector.queries)
+    assert any("nativity" in query.lower() for query in vector.queries)
+    assert out[0]["domain_id"] == 6
+    assert out[0]["source"] == "semantic_vector"
+    assert any("semantic_alias:COUNTRY" == reason for reason in list(out[0].get("reason") or []))
+    debug_rows = _serialize_domain_candidates_for_debug(out)
+    assert debug_rows[0]["semantic_recall"] is True
+    assert debug_rows[0]["recall_mode"] == "semantic"
+    assert "semantic_alias:COUNTRY" in debug_rows[0]["semantic_reasons"]
+
+
+def test_score_semantic_grounding_bundle_prefers_richer_semantic_signal() -> None:
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+    )
+
+    empty_score = svc._score_semantic_grounding_bundle(  # noqa: SLF001
+        prompt="Show students by county",
+        grounding_bundle=SemanticGroundingBundle(),
+    )
+    alias_only_score = svc._score_semantic_grounding_bundle(  # noqa: SLF001
+        prompt="Show students in the US",
+        grounding_bundle=SemanticGroundingBundle(alias_constraints=[{"value_hint": "United States"}]),
+    )
+    rich_score = svc._score_semantic_grounding_bundle(  # noqa: SLF001
+        prompt="Show staff count by school last year",
+        grounding_bundle=_RankingSemanticGroundingService().build_grounding_bundle(base_domain_id=5),
+    )
+
+    assert empty_score == 0.0
+    assert alias_only_score == 0.02
+    assert rich_score > alias_only_score
+    assert rich_score <= 0.22
+
+
+def test_select_domain_and_shortlist_columns_uses_semantic_reranking_when_enabled(monkeypatch) -> None:
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
+
+    class _DualCapabilitiesService:
+        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
+            del workspace_id, user_id, vertical_norm
+            if domain_id == 5:
+                return {
+                    "domain_id": 5,
+                    "domain_version": 1,
+                    "dimensions": [
+                        {
+                            "column_key": "wt20.school_name",
+                            "label": "School Name",
+                            "data_type": "string",
+                            "filterable": True,
+                            "workspace_table_id": 20,
+                            "model_column_id": 99,
+                            "column_name": "school_name",
+                        }
+                    ],
+                    "domain_metrics": [{"metric_key": "staff_count", "label": "Staff Count", "kind": "count", "agg": "count"}],
+                    "user_metrics": [],
+                    "overlay_metrics": [],
+                    "time_columns": [],
+                }
+            if domain_id == 6:
+                return {
+                    "domain_id": 6,
+                    "domain_version": 1,
+                    "dimensions": [
+                        {
+                            "column_key": "wt24.student_unique_id",
+                            "label": "Student",
+                            "data_type": "string",
+                            "filterable": True,
+                            "workspace_table_id": 24,
+                            "model_column_id": 100,
+                            "column_name": "student_unique_id",
+                        }
+                    ],
+                    "domain_metrics": [{"metric_key": "student_count", "label": "Student Count", "kind": "count", "agg": "count"}],
+                    "user_metrics": [],
+                    "overlay_metrics": [],
+                    "time_columns": [],
+                }
+            raise AssertionError(f"unexpected domain_id={domain_id}")
+
+    grounding = _RankingSemanticGroundingService()
+    svc = PlannerDomainService(
+        capabilities_service=_DualCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+        semantic_grounding_service=grounding,
+    )
+
+    monkeypatch.setattr(
+        PlannerDomainService,
+        "_shortlist_columns_for_domain",
+        lambda self, *, prompt, workspace_id, capabilities: list(capabilities.get("dimensions") or []),
+    )
+    monkeypatch.setattr(
+        PlannerDomainService,
+        "_score_domain_candidate",
+        lambda self, *, prompt, candidate, capabilities, shortlisted_columns: 0.5,
+    )
+
+    selected_domain_id, _capabilities, shortlisted_columns, ranking, rerank_signals = svc._select_domain_and_shortlist_columns(  # noqa: SLF001
+        workspace_id="ws-1",
+        user_id="user-1",
+        vertical_norm="education",
+        prompt="Show staff count by school",
+        domain_candidates=[
+            {"domain_id": 6, "name": "Students", "score": 0.8},
+            {"domain_id": 5, "name": "Staff & Assignments", "score": 0.8},
+        ],
+    )
+
+    assert selected_domain_id == 5
+    assert "aggregate_intent" in rerank_signals
+    assert "grouped_aggregate" in rerank_signals
+    assert "school_aggregate" in rerank_signals
+    assert "staff_listing" in rerank_signals
+    assert shortlisted_columns[0]["column_key"] == "wt20.school_name"
+    ranking_by_domain = {int(row["domain_id"]): row for row in ranking}
+    assert ranking_by_domain[5]["semantic_score"] > ranking_by_domain[6]["semantic_score"]
+    assert grounding.calls and {int(call["base_domain_id"]) for call in grounding.calls} == {5, 6}
+
+
 def test_semantic_value_alias_constraints_feature_flag_off(monkeypatch) -> None:
     monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", False)
     svc = PlannerDomainService(
@@ -1909,6 +2268,120 @@ def test_semantic_value_alias_constraints_feature_flag_off(monkeypatch) -> None:
         vertical_norm="education",
     )
     assert constraints == []
+
+
+def test_rerank_policies_prefer_enrollment_domain_for_school_enrollment_listing(monkeypatch) -> None:
+    class _SchoolEnrollmentCapabilitiesService:
+        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
+            del workspace_id, user_id, vertical_norm
+            if domain_id == 9:
+                return {
+                    "domain_id": 9,
+                    "domain_version": 1,
+                    "dimensions": [
+                        {"column_key": "wt552.school_name", "column_name": "school_name", "semantic_type": "attribute.school.name"},
+                        {"column_key": "wt556.first_name", "column_name": "first_name"},
+                        {"column_key": "wt556.last_name", "column_name": "last_name"},
+                        {"column_key": "wt570.is_enrolled", "column_name": "is_enrolled"},
+                    ],
+                    "domain_metrics": [],
+                    "user_metrics": [],
+                    "overlay_metrics": [],
+                    "time_columns": [],
+                }
+            if domain_id == 15:
+                return {
+                    "domain_id": 15,
+                    "domain_version": 1,
+                    "dimensions": [
+                        {"column_key": "wt590.k_student_xyear", "column_name": "k_student_xyear"},
+                        {"column_key": "wt590.program_enroll_begin_date", "column_name": "program_enroll_begin_date"},
+                    ],
+                    "domain_metrics": [],
+                    "user_metrics": [],
+                    "overlay_metrics": [],
+                    "time_columns": [],
+                }
+            raise AssertionError(f"unexpected domain_id={domain_id}")
+
+    svc = PlannerDomainService(
+        capabilities_service=_SchoolEnrollmentCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+        planner_rerank_policy_service=_FakePlannerRerankPolicyService(
+            [
+                {
+                    "policy_key": "student_listing_school_literal",
+                    "scope_type": "global",
+                    "priority": 100,
+                    "stop_on_match": 0,
+                    "policy_json": {
+                        "version": 1,
+                        "when_signals_all": ["student_listing", "school_literal_present"],
+                        "prefer_capabilities": ["SCHOOL_NAME", "STUDENT_IDENTITY"],
+                        "penalize_missing": ["SCHOOL_NAME"],
+                        "require_for_bonus": ["STUDENT_IDENTITY"],
+                        "boost": 0.2,
+                        "penalty": 0.3,
+                        "max_effect": 0.3,
+                    },
+                },
+                {
+                    "policy_key": "student_listing_enrollment_status",
+                    "scope_type": "global",
+                    "priority": 110,
+                    "stop_on_match": 0,
+                    "policy_json": {
+                        "version": 1,
+                        "when_signals_all": ["student_listing", "status_enrolled"],
+                        "prefer_capabilities": ["ENROLLMENT_STATUS"],
+                        "penalize_missing": ["ENROLLMENT_STATUS"],
+                        "require_for_bonus": ["ENROLLMENT_STATUS"],
+                        "boost": 0.15,
+                        "penalty": 0.2,
+                        "max_effect": 0.2,
+                    },
+                },
+            ]
+        ),
+    )
+
+    monkeypatch.setattr(
+        PlannerDomainService,
+        "_shortlist_columns_for_domain",
+        lambda self, *, prompt, workspace_id, capabilities: list(capabilities.get("dimensions") or []),
+    )
+    monkeypatch.setattr(
+        PlannerDomainService,
+        "_score_domain_candidate",
+        lambda self, *, prompt, candidate, capabilities, shortlisted_columns: 0.94266
+        if int(candidate["domain_id"]) == 9
+        else 1.0242,
+    )
+
+    selected_domain_id, _capabilities, _shortlisted_columns, ranking, rerank_signals = svc._select_domain_and_shortlist_columns(  # noqa: SLF001
+        workspace_id="ws-1",
+        user_id="user-1",
+        vertical_norm="education",
+        prompt="Show me all the students enrolled at Barksdale Elementary",
+        domain_candidates=[
+            {"domain_id": 9, "name": "Student Enrollment And Attendance", "score": 0.5964},
+            {"domain_id": 15, "name": "Student Programs And Services", "score": 0.568},
+        ],
+    )
+
+    ranking_by_domain = {int(row["domain_id"]): row for row in ranking}
+    assert selected_domain_id == 9
+    assert "school_literal_present" in rerank_signals
+    assert "status_enrolled" in rerank_signals
+    assert ranking_by_domain[9]["policy_adjustment"] > 0
+    assert ranking_by_domain[15]["policy_adjustment"] < 0
+    assert ranking_by_domain[9]["score"] > ranking_by_domain[15]["score"]
+    assert ranking_by_domain[9]["domain_capabilities"]["present"] == [
+        "ENROLLMENT_STATUS",
+        "SCHOOL_NAME",
+        "STUDENT_IDENTITY",
+    ]
 
 
 def test_semantic_value_alias_constraints_feature_flag_on_merges_into_slot_hints(monkeypatch) -> None:
@@ -1953,33 +2426,200 @@ def test_semantic_value_alias_constraints_feature_flag_on_is_resilient_to_errors
     assert constraints == []
 
 
+def test_plan_debug_includes_semantic_grounding_bundle_when_enabled(monkeypatch) -> None:
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
+    grounding = _FakeSemanticGroundingService()
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+        semantic_grounding_service=grounding,
+    )
+
+    out = svc.plan(
+        {
+            "workspace_id": "ws-1",
+            "vertical_norm": "education",
+            "base_domain_id": 6,
+            "prompt": "students per teacher by county",
+            "debug": True,
+        },
+        user_id="user-1",
+    )
+
+    debug = out["debug"]
+    assert debug["semantic_grounding"]["alias_constraints"][0]["value_hint"] == "United States"
+    assert grounding.calls
+    assert grounding.calls[0]["base_domain_id"] == 6
+    assert grounding.calls[0]["workspace_id"] == "ws-1"
+
+
+def test_plan_normalizes_semantic_value_aliases_in_fallback_path(monkeypatch) -> None:
+    class _RaceCapsService:
+        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
+            del workspace_id, user_id, vertical_norm
+            assert domain_id == 6
+            return {
+                "domain_id": 6,
+                "domain_version": 1,
+                "dimensions": [
+                    {
+                        "column_key": "wt24.student_unique_id",
+                        "label": "Student Id",
+                        "data_type": "string",
+                        "filterable": True,
+                        "workspace_table_id": 24,
+                        "workspace_column_id": 1001,
+                        "model_column_id": 1001,
+                        "column_name": "student_unique_id",
+                    },
+                    {
+                        "column_key": "wt24.first_name",
+                        "label": "First Name",
+                        "data_type": "string",
+                        "filterable": True,
+                        "workspace_table_id": 24,
+                        "workspace_column_id": 1002,
+                        "model_column_id": 1002,
+                        "column_name": "first_name",
+                    },
+                    {
+                        "column_key": "wt24.last_name",
+                        "label": "Last Name",
+                        "data_type": "string",
+                        "filterable": True,
+                        "workspace_table_id": 24,
+                        "workspace_column_id": 1003,
+                        "model_column_id": 1003,
+                        "column_name": "last_name",
+                    },
+                    {
+                        "column_key": "wt24.race_ethnicity",
+                        "label": "Race Ethnicity",
+                        "data_type": "string",
+                        "filterable": True,
+                        "workspace_table_id": 24,
+                        "workspace_column_id": 1004,
+                        "model_column_id": 1004,
+                        "column_name": "race_ethnicity",
+                    },
+                    {
+                        "column_key": "wt24.is_enrolled",
+                        "label": "Is Enrolled",
+                        "data_type": "int",
+                        "filterable": True,
+                        "workspace_table_id": 24,
+                        "workspace_column_id": 1005,
+                        "model_column_id": 1005,
+                        "column_name": "is_enrolled",
+                    },
+                ],
+                "domain_metrics": [],
+                "user_metrics": [],
+                "overlay_metrics": [],
+                "time_columns": [],
+            }
+
+    class _RaceAliasFallbackLLM:
+        def chat_json_with_trace(self, **kwargs):
+            user_prompt = str(kwargs.get("user_prompt") or "")
+            if "Task: Extract lightweight planning slots" in user_prompt:
+                return {
+                    "parsed": {
+                        "intent": "list",
+                        "entity": "students",
+                        "constraints": [],
+                        "time_phrases": [],
+                    },
+                    "content": "{}",
+                    "raw_text": "{}",
+                }
+            return {
+                "parsed": {
+                    "intent": "list",
+                    "selects": {
+                        "dimensions": [
+                            {"column_key": "wt24.student_unique_id"},
+                            {"column_key": "wt24.first_name"},
+                            {"column_key": "wt24.last_name"},
+                        ],
+                        "metrics": [],
+                    },
+                    "filters": [
+                        {"column_key": "wt24.race_ethnicity", "op": "=", "value": "African American"},
+                        {"column_key": "wt24.is_enrolled", "op": "=", "value": 1},
+                    ],
+                    "time": {},
+                    "grouping": {
+                        "group_by": ["wt24.student_unique_id", "wt24.first_name", "wt24.last_name"],
+                        "order_by": [],
+                        "limit": None,
+                    },
+                },
+                "content": "{}",
+                "raw_text": "{}",
+            }
+
+    class _FakeSql:
+        def execute_query_mappings(self, query, params):
+            del params
+            if "FROM semantic_column_map scm" in query:
+                return []
+            if "FROM workspace_column_semantic_concept_map m" in query:
+                return [{"workspace_column_id": 1004, "concept_key": "RACE_ETHNICITY"}]
+            if "FROM semantic_value_alias va" in query:
+                return [
+                    {
+                        "concept_key": "RACE_ETHNICITY",
+                        "alias_value": "african american",
+                        "canonical_value": "Black",
+                    }
+                ]
+            return []
+
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_COMPACT_PLANNER_ENABLED", False)
+    monkeypatch.setattr(planner_domain_service_module, "ForgeMetaSQL", lambda: _FakeSql())
+
+    svc = PlannerDomainService(
+        capabilities_service=_RaceCapsService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_RaceAliasFallbackLLM(),
+    )
+
+    out = svc.plan(
+        {
+            "workspace_id": "ws-1",
+            "vertical_norm": "generic",
+            "base_domain_id": 6,
+            "prompt": "Show me all the african american students currently enrolled",
+            "debug": True,
+        },
+        user_id="user-1",
+    )
+
+    filters = out["plan_json_v2"]["filters"]
+    assert out["validation"]["is_valid"] is True
+    assert filters[0]["column_key"] == "wt24.race_ethnicity"
+    assert filters[0]["value"] == "Black"
+    assert out["sql_json"]["filters"]["children"][0]["value"] == "Black"
+    assert out["debug"]["semantic_value_alias_normalization"]["applied"] == 1
+    assert out["debug"]["semantic_value_alias_normalization"]["changes"][0]["concept_key"] == "RACE_ETHNICITY"
+
+
 def test_semester_indicator_resolution_uses_explicit_semantic_concept_keys(monkeypatch) -> None:
     class _FakeSql:
         def execute_query_mappings(self, query, params):
-            del query, params
-            return [
-                {
-                    "model_column_id": 9001,
-                    "concept_key": "SEMESTER_SPRING_FLAG",
-                    "semantic_type": "flag",
-                    "priority_rank": 100,
-                    "confidence_score": 0.99,
-                },
-                {
-                    "model_column_id": 9002,
-                    "concept_key": "SEMESTER_FALL_FLAG",
-                    "semantic_type": "flag",
-                    "priority_rank": 100,
-                    "confidence_score": 0.99,
-                },
-                {
-                    "model_column_id": 9003,
-                    "concept_key": "SEMESTER_YEAR_ROUND_FLAG",
-                    "semantic_type": "flag",
-                    "priority_rank": 100,
-                    "confidence_score": 0.99,
-                },
-            ]
+            del params
+            if "FROM workspace_column wc" in query:
+                return [
+                    {"workspace_column_id": 9001, "concept_key": "SEMESTER_SPRING_FLAG"},
+                    {"workspace_column_id": 9002, "concept_key": "SEMESTER_FALL_FLAG"},
+                    {"workspace_column_id": 9003, "concept_key": "SEMESTER_YEAR_ROUND_FLAG"},
+                ]
+            if "FROM workspace_column_semantic_concept_map m" in query:
+                return []
+            return []
 
     monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
     monkeypatch.setattr(planner_domain_service_module, "ForgeMetaSQL", lambda: _FakeSql())
@@ -2022,6 +2662,72 @@ def test_semester_indicator_resolution_uses_explicit_semantic_concept_keys(monke
     assert out["spring"] == "wt24.is_spring_block"
     assert out["fall"] == "wt24.is_fall_block"
     assert out["year_round"] == "wt24.is_year_round_block"
+
+
+def test_semantic_value_alias_normalization_coerces_boolean_flag_values(monkeypatch) -> None:
+    class _FakeSql:
+        def execute_query_mappings(self, query, params):
+            del params
+            if "FROM semantic_column_map scm" in query:
+                return []
+            if "FROM workspace_column_semantic_concept_map m" in query:
+                return [{"workspace_column_id": 2002, "concept_key": "IS_SCHOOL_DAY"}]
+            if "FROM semantic_value_alias va" in query:
+                return [
+                    {
+                        "concept_key": "IS_SCHOOL_DAY",
+                        "alias_value": "off day",
+                        "canonical_value": "false",
+                    }
+                ]
+            return []
+
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
+    monkeypatch.setattr(planner_domain_service_module, "ForgeMetaSQL", lambda: _FakeSql())
+
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+    )
+
+    plan_json = {
+        "filters": [
+            {"column_key": "wt24.is_school_day", "op": "=", "value": "off day"},
+        ]
+    }
+    capabilities = {
+        "dimensions": [],
+        "filter_columns": [
+            {
+                "column_key": "wt24.is_school_day",
+                "label": "Is School Day",
+                "data_type": "boolean",
+                "semantic_type": "flag",
+                "filterable": True,
+                "workspace_table_id": 24,
+                "workspace_column_id": 2002,
+                "model_column_id": 2002,
+                "column_name": "is_school_day",
+            }
+        ],
+        "time_columns": [],
+    }
+
+    normalized_plan, issues, debug = svc._normalize_semantic_value_alias_filters_in_plan(  # noqa: SLF001
+        plan_json=plan_json,
+        workspace_id="ws-1",
+        vertical_norm="generic",
+        capabilities=capabilities,
+    )
+
+    filters = normalized_plan["filters"]
+    assert issues == ["semantic_value_alias_normalized:wt24.is_school_day:IS_SCHOOL_DAY"]
+    assert filters[0]["column_key"] == "wt24.is_school_day"
+    assert filters[0]["value"] is False
+    assert debug["applied"] == 1
+    assert debug["changes"][0]["concept_key"] == "IS_SCHOOL_DAY"
+    assert debug["changes"][0]["coerced_boolean"] is True
 
 
 def test_validation_uses_full_capabilities_not_compact_subset() -> None:
@@ -2344,6 +3050,88 @@ def test_normalize_relative_time_this_month_to_custom_calendar_range() -> None:
     assert out["time"]["end_date"] == "2026-03-11"
     assert out["filters"] == []
     assert debug and debug[0]["relative_phrase"] == "this month"
+
+
+def test_normalize_named_month_to_custom_calendar_range() -> None:
+    plan = {"time": {}, "filters": []}
+    capabilities = {
+        "dimensions": [],
+        "filter_columns": [],
+        "time_columns": [
+            {"column_key": "wt536.calendar_date", "column_name": "calendar_date", "data_type": "date"},
+        ],
+    }
+
+    out, issues, debug = _normalize_relative_time_in_plan(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="Show me all the days off Barksdale Elementary has in December",
+        today=date(2026, 3, 25),
+    )
+
+    assert issues == []
+    assert out["time"]["time_range"] == "custom"
+    assert out["time"]["start_date"] == "2026-12-01"
+    assert out["time"]["end_date"] == "2026-12-31"
+    assert out["time"]["time_column_key"] == "wt536.calendar_date"
+    assert debug and debug[0]["action"] == "normalized_named_month_time"
+    assert debug[0]["matched_month"] == "december"
+    assert debug[0]["matched_year"] == 2026
+
+
+def test_normalize_named_month_uses_school_year_time_policy() -> None:
+    plan = {"time": {}, "filters": []}
+    capabilities = {
+        "dimensions": [],
+        "filter_columns": [],
+        "time_columns": [
+            {"column_key": "wt536.calendar_date", "column_name": "calendar_date", "data_type": "date"},
+        ],
+    }
+
+    out, issues, debug = _normalize_relative_time_in_plan(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="Show me all the days off Barksdale Elementary has in December",
+        domain_time_policy={
+            "calendar_mode": "school_year",
+            "school_year_start_month": 8,
+            "school_year_end_month": 5,
+        },
+        today=date(2026, 3, 25),
+    )
+
+    assert issues == []
+    assert out["time"]["time_range"] == "custom"
+    assert out["time"]["start_date"] == "2025-12-01"
+    assert out["time"]["end_date"] == "2025-12-31"
+    assert out["time"]["time_column_key"] == "wt536.calendar_date"
+    assert debug and debug[0]["matched_year"] == 2025
+    assert debug[0]["school_year_anchored"] is True
+
+
+def test_normalize_relative_time_skips_named_month_for_birth_month_prompt() -> None:
+    plan = {"time": {}, "filters": []}
+    capabilities = {
+        "dimensions": [
+            {"column_key": "wt552.birth_date", "column_name": "birth_date", "data_type": "date"},
+        ],
+        "filter_columns": [],
+        "time_columns": [
+            {"column_key": "wt536.calendar_date", "column_name": "calendar_date", "data_type": "date"},
+        ],
+    }
+
+    out, issues, debug = _normalize_relative_time_in_plan(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="Show me all the students who have a birthday in March",
+        today=date(2026, 3, 25),
+    )
+
+    assert issues == []
+    assert out["time"] == {}
+    assert debug and debug[0]["reason"] == "birth_month_prompt_uses_date_part"
 
 
 def test_normalize_relative_time_does_not_rewrite_last_30_days_prompt() -> None:

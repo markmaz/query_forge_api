@@ -23,6 +23,7 @@ from app.models.tenancy.tenancy_admin import (
 )
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.analytics.executor_factory import ExecutorFactory
+from app.services.analytics.metadata_provider_factory import MetadataProviderFactory
 from app.services.tenancy.datasource_config_crypto import (
     decrypt_datasource_config,
     encrypt_datasource_config,
@@ -433,15 +434,7 @@ class TenancyAdminService:
     def test_datasource(self, *, datasource_id: int) -> Dict[str, Any]:
         row = _coerce_datasource_row(self._get_datasource_row(datasource_id), public=False)
         ds_type = _normalize_datasource_type(row.get("type"))
-        config_json = dict(row.get("config_json") or {})
-        secret_ref = _optional_text(row.get("secret_ref"))
-        auth_method = str(config_json.get("auth_method") or "").strip().lower()
-
-        if ds_type == "databricks":
-            if auth_method != "oauth_client_credentials":
-                config_json = self._secrets.inject_if_missing(config_json, secret_ref=secret_ref, key="token")
-        elif ds_type in {"snowflake", "mysql", "postgres", "bigquery"}:
-            config_json = self._secrets.inject_if_missing(config_json, secret_ref=secret_ref, key="password")
+        config_json = self._build_executor_config(row=row, datasource_type=ds_type)
 
         start = time.perf_counter()
         status = "ok"
@@ -474,6 +467,47 @@ class TenancyAdminService:
             "status": status,
             "latency_ms": latency_ms,
             "message": message,
+        }
+
+    def list_datasource_namespaces(
+        self,
+        *,
+        datasource_id: int,
+        catalog: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        row = _coerce_datasource_row(self._get_datasource_row(datasource_id), public=False)
+        ds_type = _normalize_datasource_type(row.get("type"))
+        config_json = self._build_executor_config(row=row, datasource_type=ds_type)
+
+        configured_catalog = _optional_text(
+            config_json.get("catalog")
+            or config_json.get("database")
+        )
+        configured_schema = _optional_text(config_json.get("schema"))
+        requested_catalog = _optional_text(catalog)
+
+        catalogs = self._list_catalog_options(
+            datasource_type=ds_type,
+            config_json=config_json,
+            configured_catalog=configured_catalog,
+        )
+        current_catalog = requested_catalog or configured_catalog or (catalogs[0] if catalogs else None)
+
+        schemas = self._list_schema_options(
+            datasource_type=ds_type,
+            config_json=config_json,
+            catalog=current_catalog,
+            configured_schema=configured_schema,
+        )
+        current_schema = configured_schema if configured_schema in schemas else (schemas[0] if schemas else configured_schema)
+
+        return {
+            "datasource_id": int(row["id"]),
+            "datasource_type": ds_type,
+            "catalogs": catalogs,
+            "schemas": schemas,
+            "current_catalog": current_catalog,
+            "current_schema": current_schema,
         }
 
     # ------------------------------------------------------------------
@@ -545,6 +579,71 @@ class TenancyAdminService:
             "offset": page_offset,
         }
 
+    def _build_executor_config(self, *, row: Dict[str, Any], datasource_type: str) -> Dict[str, Any]:
+        config_json = dict(row.get("config_json") or {})
+        secret_ref = _optional_text(row.get("secret_ref"))
+        auth_method = str(config_json.get("auth_method") or "").strip().lower()
+
+        if datasource_type == "databricks":
+            if auth_method != "oauth_client_credentials":
+                return self._secrets.inject_if_missing(config_json, secret_ref=secret_ref, key="token")
+            return config_json
+        if datasource_type in {"snowflake", "mysql", "postgres", "bigquery"}:
+            return self._secrets.inject_if_missing(config_json, secret_ref=secret_ref, key="password")
+        return config_json
+
+    def _list_catalog_options(
+        self,
+        *,
+        datasource_type: str,
+        config_json: Dict[str, Any],
+        configured_catalog: Optional[str],
+    ) -> list[str]:
+        fallback = _dedupe_namespace_values([configured_catalog])
+        if datasource_type not in {"databricks", "snowflake", "mysql"}:
+            return fallback
+
+        executor = ExecutorFactory.create(datasource_type, config_json)
+        try:
+            if datasource_type == "databricks":
+                rows = executor.execute("SHOW CATALOGS")
+                values = [
+                    row.get("catalog")
+                    or row.get("catalog_name")
+                    or row.get("name")
+                    for row in rows
+                ]
+                return _dedupe_namespace_values([*values, configured_catalog])
+            if datasource_type == "snowflake":
+                rows = executor.execute("SHOW DATABASES")
+                values = [row.get("name") or row.get("database_name") for row in rows]
+                return _dedupe_namespace_values([*values, configured_catalog])
+            rows = executor.execute("SHOW DATABASES")
+            values = [row.get("Database") or row.get("database") or row.get("name") for row in rows]
+            return _dedupe_namespace_values([*values, configured_catalog])
+        except Exception:
+            return fallback
+
+    def _list_schema_options(
+        self,
+        *,
+        datasource_type: str,
+        config_json: Dict[str, Any],
+        catalog: Optional[str],
+        configured_schema: Optional[str],
+    ) -> list[str]:
+        fallback = _dedupe_namespace_values([configured_schema])
+        if datasource_type not in {"databricks", "snowflake", "mysql"}:
+            return fallback
+
+        executor = ExecutorFactory.create(datasource_type, config_json)
+        try:
+            provider = MetadataProviderFactory.create(datasource_type, executor)
+            values = provider.list_schemas(catalog)
+            return _dedupe_namespace_values([*values, configured_schema])
+        except Exception:
+            return fallback
+
     def create_workspace(self, req: WorkspaceCreateRequest) -> Dict[str, Any]:
         organization_id = _required_text(req.organization_id, "organization_id")
         self.get_organization(organization_id)
@@ -605,6 +704,18 @@ class TenancyAdminService:
             },
         )
         return self.get_workspace_binding(workspace_id)
+
+    def delete_workspace(self, *, workspace_id: str, hard: bool = False) -> Dict[str, Any]:
+        ws = _required_text(workspace_id, "workspace_id")
+        self.get_workspace_binding(ws)
+        if hard:
+            self._sql.execute_write("DELETE FROM workspace WHERE id = :id", {"id": ws})
+            return {"workspace_id": ws, "deleted": True, "mode": "hard"}
+        self._sql.execute_write(
+            "UPDATE workspace SET is_active = 0 WHERE id = :id",
+            {"id": ws},
+        )
+        return {"workspace_id": ws, "deleted": True, "mode": "soft"}
 
     def get_workspace_binding(self, workspace_id: str) -> Dict[str, Any]:
         ws = _required_text(workspace_id, "workspace_id")
@@ -1021,6 +1132,21 @@ def _coerce_workspace_binding_row(row: Dict[str, Any]) -> Dict[str, Any]:
         row,
         ("workspace_is_active", "organization_is_active", "datasource_is_active"),
     )
+    return out
+
+
+def _dedupe_namespace_values(values: list[Any]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        text = _optional_text(value)
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
     return out
 
 

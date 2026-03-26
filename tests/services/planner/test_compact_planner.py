@@ -34,6 +34,12 @@ class _FakeRetrieval:
         return self._payload
 
 
+class _FailingRetrieval:
+    def retrieve(self, **kwargs):
+        del kwargs
+        raise AssertionError("retrieve should not be called when precomputed_candidates are supplied")
+
+
 def _capabilities() -> dict:
     return {
         "dimensions": [
@@ -189,6 +195,54 @@ def test_compact_planner_returns_projected_plan_v2() -> None:
     assert out["plan_json_v2"]["filters"][0]["value"] == "Northeast"
     assert out["plan_json_v2"]["time"]["time_column_key"] == "wt179.order_date"
     assert out["attempts"] == 1
+
+
+def test_compact_planner_uses_precomputed_candidates_without_retrieval() -> None:
+    payload = {
+        "base_domain_key": "sales_performance",
+        "intent": "aggregate",
+        "metrics": ["sales_amount"],
+        "dimensions": ["account_name"],
+        "filters": [],
+        "time": {
+            "time_concept_key": "order_date",
+            "time_range": None,
+            "time_grain": None,
+            "start_date": None,
+            "end_date": None,
+        },
+        "needs_clarification": False,
+        "clarification_question": None,
+        "confidence": 0.9,
+    }
+    llm = _FakeLLM(
+        [
+            {
+                "parsed": payload,
+                "content": json.dumps(payload),
+                "raw_text": json.dumps(payload),
+                "finish_reason": "stop",
+            }
+        ]
+    )
+    out = build_compact_plan_and_project(
+        prompt="Show total sales by account",
+        normalized_prompt="Show total sales by account",
+        workspace_id="ws-1",
+        vertical_norm="generic",
+        base_domain_id=3,
+        domain_name="Sales Performance",
+        capabilities_compact=_capabilities(),
+        conversation_context={},
+        trace_id="trace-compact-precomputed",
+        llm_client=llm,
+        retrieval_service=_FailingRetrieval(),
+        precomputed_candidates=_semantic_candidates(),
+        max_tokens=500,
+        fast_mode=False,
+    )
+    assert out["planner_mode"] == "compact_semantic_v2"
+    assert out["plan_json_v2"]["selects"]["metrics"][0]["metric_ref"] == "domain_metric:sales_revenue"
 
 
 def test_compact_planner_truncation_retries_once() -> None:

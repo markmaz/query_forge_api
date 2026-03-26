@@ -62,6 +62,8 @@ def _base_row(
         "policy_id": policy_id,
         "calendar_mode": "fiscal" if policy_id else None,
         "fiscal_year_start_month": 7 if policy_id else None,
+        "school_year_start_month": 8 if policy_id else None,
+        "school_year_end_month": 5 if policy_id else None,
         "timezone": "America/Chicago" if policy_id else None,
         "week_start": "monday" if policy_id else None,
         "default_time_concept_key": "ORDER_DATE" if policy_id else None,
@@ -117,6 +119,30 @@ def test_update_policy_validation_error() -> None:
     assert exc_info.value.status_code == 400
 
 
+def test_update_policy_accepts_school_year_mode() -> None:
+    sql = _FakeSQL(
+        rows_by_call=[
+            [_base_row(policy_id=11, relative_map=json.dumps({}))],
+            [[{**_base_row(policy_id=11, relative_map=json.dumps({})), "calendar_mode": "school_year"}][0]],
+        ]
+    )
+    svc = DomainTimePolicyService(sql=sql)
+    out = svc.update_policy(
+        workspace_id="ws-1",
+        user_id="user-1",
+        domain_id=3,
+        policy_payload={
+            "calendar_mode": "school_year",
+            "school_year_start_month": 8,
+            "school_year_end_month": 5,
+        },
+    )
+    assert out["policy"]["calendar_mode"] == "school_year"
+    assert sql.last_write_params is not None
+    assert sql.last_write_params["school_year_start_month"] == 8
+    assert sql.last_write_params["school_year_end_month"] == 5
+
+
 def test_update_policy_requires_edit_permission() -> None:
     sql = _FakeSQL(rows_by_call=[[_base_row(can_edit=0, policy_id=11)]])
     svc = DomainTimePolicyService(sql=sql)
@@ -128,4 +154,3 @@ def test_update_policy_requires_edit_permission() -> None:
             policy_payload={"calendar_mode": "calendar"},
         )
     assert exc_info.value.status_code == 403
-
