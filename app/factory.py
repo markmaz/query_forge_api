@@ -37,7 +37,7 @@ from app.config import (
 from app.config.logging_config import configure_logging
 from app.config.mail_config import ForgeMailConfig
 from app.exceptions.forge_error import ForgeError
-from app.extensions import mail
+from app.extensions import db, mail
 from app.api_config import NAME, VERSION, build_url
 from app.features import register_features
 from app.services.analytics.registry import AnalyticsDatasourceRegistry
@@ -179,6 +179,18 @@ def create_app():
 
         response.headers["X-Correlation-ID"] = g.correlation_id
         return response
+
+    @app.teardown_appcontext
+    def cleanup_db_session(exception: Optional[BaseException]) -> None:
+        del exception
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        try:
+            db.session.remove()
+        except Exception:
+            pass
 
     @app.errorhandler(ForgeError)
     def handle_service_error(error):
