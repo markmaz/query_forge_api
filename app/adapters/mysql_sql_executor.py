@@ -23,6 +23,7 @@ engine = create_engine(
     max_overflow=MAX_OVERFLOW,
     pool_timeout=POOL_TIMEOUT,
     pool_recycle=POOL_RECYCLE,
+    pool_pre_ping=True,
 )
 
 
