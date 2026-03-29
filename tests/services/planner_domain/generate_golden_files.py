@@ -23,6 +23,7 @@ if str(_API_ROOT) not in sys.path:
     sys.path.insert(0, str(_API_ROOT))
 
 from app.services.planner_domain import service as _svc_module  # noqa: E402
+import app.services.planner_domain.pipeline_trace as pipeline_trace_module  # noqa: E402
 from app.services.planner_domain.service import PlannerDomainService  # noqa: E402
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
@@ -75,12 +76,31 @@ def strip_nondeterministic(debug: Dict[str, Any]) -> Dict[str, Any]:
         uit["llm_prompt_trace"] = lpt
         out["unified_llm_trace"] = uit
 
+    if isinstance(out.get("shared_pipeline"), dict):
+        out["shared_pipeline"] = _normalize_nested_pipeline_debug(out["shared_pipeline"])
+
     return out
+
+
+def _normalize_nested_pipeline_debug(value: Any) -> Any:
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            if key == "ms":
+                continue
+            if key == "timings_ms" and isinstance(item, dict):
+                normalized[key] = {str(name): 0 for name in item}
+                continue
+            normalized[str(key)] = _normalize_nested_pipeline_debug(item)
+        return normalized
+    if isinstance(value, list):
+        return [_normalize_nested_pipeline_debug(item) for item in value]
+    return value
 
 
 def _reset_loggers(tmp_dir: str) -> None:
     """Isolate pipeline loggers so they do not write to production log files."""
-    import app.services.planner_domain.service as m
+    m = pipeline_trace_module
     m.QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE = str(Path(tmp_dir) / "profile.log")
     m.QF_PLAN_DOMAIN_PIPELINE_TRACE_LOG_FILE = str(Path(tmp_dir) / "trace.jsonl")
 

@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import app.routes.planner_domain as planner_domain_route
 from app.exceptions.forge_error import ForgeError
+
+
+_GOLDEN_DIR = Path(__file__).resolve().parent.parent / "services" / "planner_domain" / "golden"
 
 
 def _headers(monkeypatch):
@@ -33,6 +39,10 @@ def _headers(monkeypatch):
     }
 
 
+def _load_golden_debug(name: str) -> dict:
+    return json.loads((_GOLDEN_DIR / f"{name}.json").read_text())
+
+
 def test_plan_domain_route_returns_service_payload(client, monkeypatch):
     class _Svc:
         def plan(self, payload, *, user_id):
@@ -54,6 +64,155 @@ def test_plan_domain_route_returns_service_payload(client, monkeypatch):
     )
     assert resp.status_code == 200
     assert resp.json["plan_json_v2"]["schema_version"] == 2
+
+
+def test_plan_domain_route_calendar_days_off_workflow_payload_survives_http_boundary(client, monkeypatch):
+    prompt = "Show me all the days off barksdale elementary has in December"
+    golden_debug = _load_golden_debug("calendar_days_off")
+
+    class _Svc:
+        def plan(self, payload, *, user_id):
+            assert payload["prompt"] == prompt
+            assert payload["vertical_norm"] == "education"
+            assert payload["workspace_id"] == "ws-1"
+            assert user_id == "user-1"
+            return {
+                "plan_json_v2": {
+                    "schema_version": 2,
+                    "base_domain_id": 6,
+                    "domain_name": "Academic Calendar And Scheduling",
+                },
+                "sql_json": {
+                    "version": 1,
+                    "domainId": 6,
+                    "filters": {
+                        "type": "group",
+                        "match": "and",
+                        "children": [
+                            {"op": "equals", "value": "Barksdale Elementary"},
+                            {"op": "equals", "value": False},
+                            {"op": "between", "value": ["2025-12-01", "2025-12-31"]},
+                        ],
+                    },
+                    "meta": {"prompt": prompt},
+                },
+                "validation": {"is_valid": True, "errors": [], "repairs_applied": []},
+                "debug": golden_debug,
+                "trace_id": "trace-calendar",
+                "timings_ms": {"total": 10},
+            }
+
+    monkeypatch.setattr(planner_domain_route, "PlannerDomainService", _Svc)
+    resp = client.post(
+        "/api/v1/planner/plan_domain",
+        json={"workspace_id": "ws-1", "prompt": prompt, "vertical_norm": "education", "debug": True},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["plan_json_v2"]["base_domain_id"] == 6
+    assert "calendar_days_off_prompt" in resp.json["debug"]["rerank_signals"]
+    assert resp.json["sql_json"]["filters"]["children"][2]["value"] == ["2025-12-01", "2025-12-31"]
+
+
+def test_plan_domain_route_age_extreme_workflow_payload_survives_http_boundary(client, monkeypatch):
+    prompt = "Show me the eldest student"
+    golden_debug = _load_golden_debug("age_extreme")
+
+    class _Svc:
+        def plan(self, payload, *, user_id):
+            assert payload["prompt"] == prompt
+            assert payload["workspace_id"] == "ws-1"
+            assert user_id == "user-1"
+            return {
+                "plan_json_v2": {
+                    "schema_version": 2,
+                    "base_domain_id": 21,
+                    "domain_name": "Student Demographics And Enrollment",
+                    "grouping": {"limit": 1, "order_by": [{"by": "wt24.birth_date", "dir": "asc"}]},
+                },
+                "sql_json": {
+                    "version": 1,
+                    "domainId": 21,
+                    "sorting": [{"col": {"columnName": "birth_date"}, "dir": "asc"}],
+                    "meta": {"prompt": prompt},
+                },
+                "validation": {"is_valid": True, "errors": [], "repairs_applied": []},
+                "debug": golden_debug,
+                "trace_id": "trace-age",
+                "timings_ms": {"total": 10},
+            }
+
+    monkeypatch.setattr(planner_domain_route, "PlannerDomainService", _Svc)
+    resp = client.post(
+        "/api/v1/planner/plan_domain",
+        json={"workspace_id": "ws-1", "prompt": prompt, "debug": True},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["plan_json_v2"]["base_domain_id"] == 21
+    assert "age_extreme_prompt" in resp.json["debug"]["rerank_signals"]
+    assert resp.json["sql_json"]["sorting"][0]["col"]["columnName"] == "birth_date"
+
+
+def test_plan_domain_route_birth_month_workflow_payload_survives_http_boundary(client, monkeypatch):
+    prompt = "Show me all the students who have a birthday in March"
+    golden_debug = _load_golden_debug("birth_month")
+
+    class _Svc:
+        def plan(self, payload, *, user_id):
+            assert payload["prompt"] == prompt
+            assert payload["workspace_id"] == "ws-1"
+            assert user_id == "user-1"
+            return {
+                "plan_json_v2": {
+                    "schema_version": 2,
+                    "base_domain_id": 21,
+                    "domain_name": "Student Demographics And Enrollment",
+                },
+                "sql_json": {
+                    "version": 1,
+                    "domainId": 21,
+                    "filters": {
+                        "type": "group",
+                        "match": "and",
+                        "children": [
+                            {
+                                "type": "condition",
+                                "field": {"exprId": "dp:date_part:month:id:14750", "columnName": "birth_date_month"},
+                                "op": "equals",
+                                "value": 3,
+                            }
+                        ],
+                    },
+                    "dataPrep": {
+                        "rules": [
+                            {
+                                "id": "dp:date_part:month:id:14750",
+                                "op": "date_part",
+                                "part": "month",
+                                "output": {"exprId": "dp:date_part:month:id:14750", "columnName": "birth_date_month"},
+                            }
+                        ]
+                    },
+                    "meta": {"prompt": prompt},
+                },
+                "validation": {"is_valid": True, "errors": [], "repairs_applied": []},
+                "debug": golden_debug,
+                "trace_id": "trace-birth-month",
+                "timings_ms": {"total": 10},
+            }
+
+    monkeypatch.setattr(planner_domain_route, "PlannerDomainService", _Svc)
+    resp = client.post(
+        "/api/v1/planner/plan_domain",
+        json={"workspace_id": "ws-1", "prompt": prompt, "debug": True},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["plan_json_v2"]["base_domain_id"] == 21
+    assert "birth_month_prompt" in resp.json["debug"]["rerank_signals"]
+    assert resp.json["sql_json"]["dataPrep"]["rules"][0]["part"] == "month"
+    assert resp.json["sql_json"]["filters"]["children"][0]["value"] == 3
 
 
 def test_plan_domain_route_workspace_mismatch(client, monkeypatch):

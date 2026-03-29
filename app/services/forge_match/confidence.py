@@ -26,6 +26,7 @@ class ForgeMatchConfidenceScorer:
         lexical = float(selected_candidate.get("lexical_score") or 0.0)
         vector = float(selected_candidate.get("vector_score") or 0.0)
         retrieval = float(selected_candidate.get("combined_retrieval_score") or 0.0)
+        reranked = float(selected_candidate.get("final_score") or retrieval)
         dtype = type_compatibility(source_record.source_type, selected_candidate.get("data_type"))
 
         desc_sim = token_overlap_score(
@@ -34,21 +35,35 @@ class ForgeMatchConfidenceScorer:
         )
         table_align = token_overlap_score(
             token_set(source_record.source_object_name),
-            token_set(selected_candidate.get("table_name"), selected_candidate.get("domain_name")),
+            token_set(selected_candidate.get("table_name")),
         )
 
         llm_conf = float(llm_result.get("llm_confidence") or 0.0)
         llm_conf = max(0.0, min(1.0, llm_conf))
+        llm_reason_codes = {str(code) for code in list(llm_result.get("reason_codes") or []) if str(code).strip()}
 
         score_norm = (
             (lexical * 0.24)
             + (vector * 0.24)
-            + (retrieval * 0.18)
+            + (reranked * 0.18)
             + (dtype * 0.12)
             + (desc_sim * 0.08)
             + (table_align * 0.06)
             + (llm_conf * 0.08)
         )
+
+        definition_adjustment = 0.0
+        if bool(token_set(source_record.source_description)):
+            if "definition_alignment" in llm_reason_codes:
+                definition_adjustment += 0.08
+            if "definition_conflict" in llm_reason_codes:
+                definition_adjustment -= 0.16
+            elif desc_sim < 0.12:
+                definition_adjustment -= 0.14
+            elif desc_sim < 0.25:
+                definition_adjustment -= 0.06
+
+        score_norm += definition_adjustment
 
         # Penalize close second-best candidates to reflect ambiguity.
         ambiguity_penalty = self._ambiguity_penalty(candidates=candidates)
@@ -68,9 +83,13 @@ class ForgeMatchConfidenceScorer:
     def _ambiguity_penalty(*, candidates: Sequence[Dict[str, Any]]) -> float:
         if len(candidates) < 2:
             return 0.0
-        ranked = sorted(candidates, key=lambda row: float(row.get("combined_retrieval_score") or 0.0), reverse=True)
-        top = float(ranked[0].get("combined_retrieval_score") or 0.0)
-        second = float(ranked[1].get("combined_retrieval_score") or 0.0)
+        ranked = sorted(
+            candidates,
+            key=lambda row: float(row.get("final_score") or row.get("combined_retrieval_score") or 0.0),
+            reverse=True,
+        )
+        top = float(ranked[0].get("final_score") or ranked[0].get("combined_retrieval_score") or 0.0)
+        second = float(ranked[1].get("final_score") or ranked[1].get("combined_retrieval_score") or 0.0)
         gap = max(0.0, top - second)
         if gap >= 0.25:
             return 0.0

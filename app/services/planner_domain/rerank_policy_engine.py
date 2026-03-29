@@ -25,6 +25,18 @@ class PlannerDomainRerankPolicyEngine:
     def extract_prompt_signals(self, *, prompt: str) -> List[str]:
         return self._signals.extract_signals(prompt=prompt)
 
+    @property
+    def prompt_signal_service(self) -> PromptSignalService:
+        return self._signals
+
+    @property
+    def capability_service(self) -> PlannerDomainCapabilityService:
+        return self._capabilities
+
+    @property
+    def policy_service(self) -> PlannerRerankPolicyService:
+        return self._policies
+
     def evaluate_candidate(
         self,
         *,
