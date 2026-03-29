@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import tempfile
 
+import app.services.planner_domain.pipeline_trace as pipeline_trace_module
+from app.services.planner_domain.pipeline_trace import _list_pipeline_profiles_from_log
 
 
 SAMPLE_LOG = """\
@@ -28,15 +30,13 @@ prompt=enrollment by grade level
 
 
 def test_list_pipeline_profiles_from_log(monkeypatch):
-    from app.services.planner_domain import service as svc_mod
-
     with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
         f.write(SAMPLE_LOG)
         log_path = f.name
 
     try:
-        monkeypatch.setattr(svc_mod, "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE", log_path)
-        result = svc_mod._list_pipeline_profiles_from_log(limit=50)
+        monkeypatch.setattr(pipeline_trace_module, "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE", log_path)
+        result = _list_pipeline_profiles_from_log(limit=50)
         assert len(result) == 3
         assert result[0]["trace_id"] == "ccc-333"
         assert result[1]["trace_id"] == "bbb-222"
@@ -46,38 +46,32 @@ def test_list_pipeline_profiles_from_log(monkeypatch):
 
 
 def test_list_pipeline_profiles_respects_limit(monkeypatch):
-    from app.services.planner_domain import service as svc_mod
-
     with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
         f.write(SAMPLE_LOG)
         log_path = f.name
 
     try:
-        monkeypatch.setattr(svc_mod, "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE", log_path)
-        result = svc_mod._list_pipeline_profiles_from_log(limit=2)
+        monkeypatch.setattr(pipeline_trace_module, "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE", log_path)
+        result = _list_pipeline_profiles_from_log(limit=2)
         assert len(result) == 2
     finally:
         os.unlink(log_path)
 
 
 def test_list_pipeline_profiles_empty_when_no_log(monkeypatch):
-    from app.services.planner_domain import service as svc_mod
-
-    monkeypatch.setattr(svc_mod, "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE", "/nonexistent/path.log")
-    result = svc_mod._list_pipeline_profiles_from_log(limit=50)
+    monkeypatch.setattr(pipeline_trace_module, "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE", "/nonexistent/path.log")
+    result = _list_pipeline_profiles_from_log(limit=50)
     assert result == []
 
 
 def test_list_pipeline_profiles_has_steps(monkeypatch):
-    from app.services.planner_domain import service as svc_mod
-
     with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
         f.write(SAMPLE_LOG)
         log_path = f.name
 
     try:
-        monkeypatch.setattr(svc_mod, "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE", log_path)
-        result = svc_mod._list_pipeline_profiles_from_log(limit=50)
+        monkeypatch.setattr(pipeline_trace_module, "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE", log_path)
+        result = _list_pipeline_profiles_from_log(limit=50)
         first = result[0]
         assert first["total_ms"] == 1200
         assert len(first["steps"]) == 4

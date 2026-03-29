@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.planner_domain.service import _normalize_school_name_filters_in_plan
+from app.services.planner_domain.normalizers.entity import _normalize_school_name_filters_in_plan
 
 
 def test_school_name_filter_rewrites_k_school_to_school_name() -> None:

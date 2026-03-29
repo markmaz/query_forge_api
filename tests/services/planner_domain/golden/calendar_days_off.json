@@ -1,0 +1,528 @@
+{
+  "normalized_prompt": "show me the days off at Barksdale Elementary in December",
+  "conversation_id": "<conversation_id>",
+  "conversation_context_used": false,
+  "followup_mode": false,
+  "conversation_seeded_from_client": false,
+  "selected_domain_id": 7,
+  "capabilities": {
+    "domain_id": 7,
+    "domain_version": 1,
+    "dimensions": [
+      {
+        "column_key": "wt30.day_date",
+        "label": "Day Date",
+        "data_type": "date",
+        "filterable": true,
+        "workspace_table_id": 30,
+        "model_column_id": 301,
+        "column_name": "day_date"
+      },
+      {
+        "column_key": "wt30.event_type",
+        "label": "Event Type",
+        "data_type": "string",
+        "filterable": true,
+        "workspace_table_id": 30,
+        "model_column_id": 302,
+        "column_name": "event_type"
+      },
+      {
+        "column_key": "wt20.school_name",
+        "label": "School Name",
+        "data_type": "string",
+        "filterable": true,
+        "workspace_table_id": 20,
+        "model_column_id": 201,
+        "column_name": "school_name"
+      }
+    ],
+    "domain_metrics": [],
+    "user_metrics": [],
+    "overlay_metrics": [],
+    "time_columns": []
+  },
+  "capabilities_llm": {
+    "domain_id": 7,
+    "domain_version": 1,
+    "dimensions": [
+      {
+        "column_key": "wt20.school_name",
+        "label": "School Name",
+        "data_type": "string",
+        "filterable": true,
+        "workspace_table_id": 20,
+        "model_column_id": 201,
+        "column_name": "school_name"
+      },
+      {
+        "column_key": "wt30.day_date",
+        "label": "Day Date",
+        "data_type": "date",
+        "filterable": true,
+        "workspace_table_id": 30,
+        "model_column_id": 301,
+        "column_name": "day_date"
+      },
+      {
+        "column_key": "wt30.event_type",
+        "label": "Event Type",
+        "data_type": "string",
+        "filterable": true,
+        "workspace_table_id": 30,
+        "model_column_id": 302,
+        "column_name": "event_type"
+      }
+    ],
+    "time_columns": [],
+    "filter_columns": [
+      {
+        "column_key": "wt20.school_name",
+        "label": "School Name",
+        "data_type": "string",
+        "filterable": true,
+        "workspace_table_id": 20,
+        "model_column_id": 201,
+        "column_name": "school_name"
+      },
+      {
+        "column_key": "wt30.day_date",
+        "label": "Day Date",
+        "data_type": "date",
+        "filterable": true,
+        "workspace_table_id": 30,
+        "model_column_id": 301,
+        "column_name": "day_date"
+      },
+      {
+        "column_key": "wt30.event_type",
+        "label": "Event Type",
+        "data_type": "string",
+        "filterable": true,
+        "workspace_table_id": 30,
+        "model_column_id": 302,
+        "column_name": "event_type"
+      }
+    ],
+    "domain_metrics": [],
+    "user_metrics": [],
+    "overlay_metrics": []
+  },
+  "domain_candidates": [
+    {
+      "domain_id": 7,
+      "name": "domain_7",
+      "score": 1.0,
+      "source": "provided",
+      "reason": [],
+      "semantic_recall": false,
+      "semantic_reasons": [],
+      "recall_mode": "provided"
+    }
+  ],
+  "domain_ranking": [
+    {
+      "domain_id": 7,
+      "score": 1.05,
+      "base_score": 1.05,
+      "semantic_score": 0.15,
+      "vector_score": 1.0,
+      "policy_adjustment": 0.0,
+      "rerank_signals": [
+        "calendar_days_off_prompt",
+        "needs_school_filter",
+        "school_literal_present",
+        "time_constraint_present"
+      ],
+      "domain_capabilities": {
+        "present": [
+          "SCHOOL_NAME"
+        ],
+        "missing": []
+      },
+      "policy_effects": [],
+      "rerank_summary": {
+        "base_score": 1.05,
+        "policy_adjustment": 0.0,
+        "final_score": 1.05
+      },
+      "column_shortlist_count": 3,
+      "dimension_count": 3,
+      "source": "provided"
+    }
+  ],
+  "rerank_signals": [
+    "calendar_days_off_prompt",
+    "needs_school_filter",
+    "school_literal_present",
+    "time_constraint_present"
+  ],
+  "column_shortlist_count": 3,
+  "slot_hints": {
+    "intent": "list",
+    "entity": "",
+    "subgroups": [
+      "false",
+      "IN"
+    ],
+    "constraints": [
+      {
+        "kind": "unknown",
+        "text": "days off",
+        "op": "eq",
+        "value_hint": "false",
+        "notes": "semantic_alias:IS_SCHOOL_DAY"
+      },
+      {
+        "kind": "unknown",
+        "text": "IN",
+        "op": "eq",
+        "value_hint": "IN",
+        "notes": "semantic_alias:BIRTH_COUNTRY"
+      }
+    ],
+    "time_phrases": []
+  },
+  "semantic_assist_enabled": true,
+  "semantic_value_alias_constraints": [
+    {
+      "kind": "unknown",
+      "text": "days off",
+      "op": "eq",
+      "value_hint": "false",
+      "notes": "semantic_alias:IS_SCHOOL_DAY"
+    },
+    {
+      "kind": "unknown",
+      "text": "IN",
+      "op": "eq",
+      "value_hint": "IN",
+      "notes": "semantic_alias:BIRTH_COUNTRY"
+    }
+  ],
+  "semantic_value_alias_normalization": {
+    "applied": 0,
+    "changes": []
+  },
+  "semantic_grounding": {
+    "warnings": [],
+    "alias_constraints": [
+      {
+        "kind": "unknown",
+        "text": "days off",
+        "op": "eq",
+        "value_hint": "false",
+        "notes": "semantic_alias:IS_SCHOOL_DAY"
+      },
+      {
+        "kind": "unknown",
+        "text": "IN",
+        "op": "eq",
+        "value_hint": "IN",
+        "notes": "semantic_alias:BIRTH_COUNTRY"
+      }
+    ],
+    "candidate_summary": {
+      "base_domain_id": 7,
+      "base_domain_key": "DOMAIN_ACADEMIC_CALENDAR_AND_SCHEDULING",
+      "semantic_source": "semantic_catalog+filter_capability_fallback",
+      "metric_count": 0,
+      "dimension_count": 2,
+      "filter_count": 1,
+      "time_count": 0,
+      "value_count": 0,
+      "metrics": [],
+      "dimensions": [
+        "SCHOOL_NAME",
+        "DAY_DATE"
+      ],
+      "filters": [
+        "EVENT_TYPE"
+      ],
+      "times": []
+    }
+  },
+  "semester_indicator_columns": {},
+  "slot_raw_json": "{}",
+  "slot_attempts": 1,
+  "slot_repaired": false,
+  "country_value_normalization": [],
+  "school_year_value_normalization": [],
+  "semester_value_normalization": [],
+  "school_name_filter_normalization": [],
+  "staff_role_filter_normalization": [],
+  "adm_filter_normalization": [],
+  "district_county_retry_hint": null,
+  "llm_raw_json": "{}",
+  "llm_attempts": 1,
+  "llm_repaired": false,
+  "planner_unified_llm": false,
+  "unified_llm_trace": {
+    "llm_model": "qwen2.5:14b-instruct-16k",
+    "llm_tokens": {},
+    "planner_mode": "compact_semantic_v2",
+    "finish_reason": "",
+    "candidate_summary": {
+      "domain_count": 5,
+      "metric_count": 0,
+      "dimension_count": 2,
+      "filter_count": 1,
+      "time_count": 0,
+      "value_count": 0,
+      "base_domain_key": "DOMAIN_ACADEMIC_CALENDAR_AND_SCHEDULING"
+    },
+    "validation_warnings": [],
+    "llm_prompt_trace": {
+      "system_prompt": "You are a query planner that returns STRICT JSON only. Never return prose, markdown, comments, or code fences.",
+      "developer_prompt": "You are a constrained semantic query planner.\nReturn strict JSON only matching the response schema.\nNever generate SQL.\nUse only provided candidate concept keys.\nNever invent concept keys, metrics, dimensions, filters, values, or domains.\nPrefer NAME/LABEL concepts for grouping when user says 'by X'.\nDo not add filters unless user asked for a restriction.\nDo not infer time range or time grain unless user asked for time.\nFor relative phrases like this/last month/quarter/year, set time.time_range and keep time.time_concept_key null unless it exists in time_candidates.\nIf a business term maps to multiple metrics and no default is provided, ask for clarification.\nUse intent='aggregate' for totals, sums, counts, averages, and grouped 'by' requests.\nNo markdown, prose, code fences, or comments.\n",
+      "response_format": {
+        "type": "json_schema",
+        "json_schema": {
+          "name": "compact_semantic_plan_v2",
+          "strict": true,
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "base_domain_key",
+              "intent",
+              "metrics",
+              "dimensions",
+              "filters",
+              "time",
+              "needs_clarification",
+              "clarification_question",
+              "confidence"
+            ],
+            "properties": {
+              "base_domain_key": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "intent": {
+                "type": "string",
+                "enum": [
+                  "aggregate",
+                  "list",
+                  "trend"
+                ]
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 0
+              },
+              "dimensions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 0
+              },
+              "filters": {
+                "type": "array",
+                "minItems": 0,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "field_concept_key",
+                    "operator",
+                    "value"
+                  ],
+                  "properties": {
+                    "field_concept_key": {
+                      "type": "string"
+                    },
+                    "operator": {
+                      "type": "string",
+                      "enum": [
+                        "eq",
+                        "neq",
+                        "in",
+                        "not_in",
+                        "gt",
+                        "gte",
+                        "lt",
+                        "lte",
+                        "between",
+                        "contains"
+                      ]
+                    },
+                    "value": {}
+                  }
+                }
+              },
+              "time": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "time_concept_key",
+                  "time_range",
+                  "time_grain",
+                  "start_date",
+                  "end_date"
+                ],
+                "properties": {
+                  "time_concept_key": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "time_range": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "time_grain": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "day",
+                      "week",
+                      "month",
+                      "quarter",
+                      "year",
+                      null
+                    ]
+                  },
+                  "start_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "end_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              },
+              "needs_clarification": {
+                "type": "boolean"
+              },
+              "clarification_question": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          }
+        }
+      },
+      "max_tokens": 700
+    },
+    "needs_clarification": false,
+    "clarification_question": null,
+    "confidence": 0.0
+  },
+  "explanation_summary_trace": {
+    "enabled": true,
+    "used": false,
+    "error": null,
+    "finish_reason": null,
+    "content_preview": "{}"
+  },
+  "next_actions_trace": {
+    "enabled": true,
+    "used": false,
+    "deferred": true
+  },
+  "technical_details": {
+    "trace_id": "<trace_id>",
+    "conversation_id": "<conversation_id>",
+    "fast_mode": false,
+    "planner_unified_llm": false,
+    "planner_compact_enabled": true,
+    "llm_resolution": {
+      "source": "bootstrap",
+      "role": "planner",
+      "llm_id": null,
+      "provider": "generic",
+      "model": "",
+      "endpoint": ""
+    }
+  },
+  "pipeline_profile": [
+    {
+      "step": "conversation_context",
+      "label": "Load and prepare conversation context"
+    },
+    {
+      "step": "normalize_prompt_and_vertical",
+      "label": "Normalize prompt and effective vertical"
+    },
+    {
+      "step": "domain_selection",
+      "label": "Select candidate domains from vector index"
+    },
+    {
+      "step": "capabilities",
+      "label": "Load capabilities, shortlist columns, resolve semester indicators"
+    },
+    {
+      "step": "capabilities_compaction",
+      "label": "Compact capabilities payload for plan generation"
+    },
+    {
+      "step": "llm_unified",
+      "label": "Generate slots+plan with LLM (unified)"
+    },
+    {
+      "step": "plan_normalization",
+      "label": "Normalize plan and apply deterministic value/filter normalizers"
+    },
+    {
+      "step": "validation",
+      "label": "Validate and repair plan against capabilities"
+    },
+    {
+      "step": "llm_retry",
+      "label": "Retry PlanV2 generation after validation feedback"
+    },
+    {
+      "step": "retry_plan_normalization",
+      "label": "Normalize retry plan and re-apply deterministic normalizers"
+    },
+    {
+      "step": "validation_retry",
+      "label": "Validate and repair retry plan"
+    },
+    {
+      "step": "map_to_sqljson",
+      "label": "Map validated plan to SQL JSON"
+    },
+    {
+      "step": "explanation_build",
+      "label": "Build deterministic explanation object"
+    },
+    {
+      "step": "explanation_polish",
+      "label": "Optionally polish explanation summary with LLM"
+    },
+    {
+      "step": "next_actions",
+      "label": "Defer next action generation (async)"
+    },
+    {
+      "step": "conversation_state_save",
+      "label": "Persist conversation state for follow-up context"
+    }
+  ]
+}

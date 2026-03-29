@@ -4,6 +4,7 @@ import json
 
 import app.services.planner_domain.service as planner_domain_service_module
 from app.services.planner.unified_llm_planner import build_plan_and_slots
+from app.services.planner_domain.llm_planning_service import LLMPlanningService
 from app.services.planner_domain.service import PlannerDomainService
 
 
@@ -159,6 +160,7 @@ def test_unified_pipeline_invalid_columns_are_repaired(monkeypatch):
         conversation_context=None,
         trace_id,
         fast_mode=False,
+        grounding_bundle=None,
     ):
         del (
             self,
@@ -172,6 +174,7 @@ def test_unified_pipeline_invalid_columns_are_repaired(monkeypatch):
             conversation_context,
             trace_id,
             fast_mode,
+            grounding_bundle,
         )
         return {
             "slot_hints": {"intent": "list", "entity": "students", "constraints": [], "time_phrases": []},
@@ -192,7 +195,7 @@ def test_unified_pipeline_invalid_columns_are_repaired(monkeypatch):
             "repaired": False,
         }
 
-    monkeypatch.setattr(PlannerDomainService, "_call_llm_unified", _fake_unified)
+    monkeypatch.setattr(LLMPlanningService, "_call_llm_unified", _fake_unified)
 
     svc = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),

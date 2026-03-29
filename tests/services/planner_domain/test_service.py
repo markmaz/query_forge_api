@@ -9,19 +9,25 @@ from app.exceptions.forge_error import ForgeError
 from app.services.planner.semantic_candidate_models import SemanticCandidatePayload, SemanticConceptCandidate
 from app.services.planner.semantic_grounding_service import SemanticGroundingBundle
 from app.services.planner_domain import service as planner_domain_service_module
-from app.services.planner_domain.service import (
-    LLMPlanResult,
-    PlannerDomainService,
-    SlotExtractionResult,
-    _serialize_domain_candidates_for_debug,
-    _column_heuristic_boost,
+import app.services.planner_domain.next_actions_service as next_actions_service_module
+import app.services.planner_domain.pipeline_trace as pipeline_trace_module
+import app.services.planner_domain.semantic_integration_service as semantic_integration_module
+from app.services.planner_domain.conversation_context import _prompt_is_followup_edit
+from app.services.planner_domain.domain_selection_service import DomainSelectionService
+from app.services.planner_domain.llm_planning_service import LLMPlanningService
+from app.services.planner_domain.plan_helpers import (
     _district_county_retry_hint,
+    _serialize_domain_candidates_for_debug,
+)
+from app.services.planner_domain.service import (
+    PlannerDomainService,
+    _column_heuristic_boost,
     _normalize_relative_time_in_plan,
     _normalize_top_bottom_ranking_in_plan,
     _normalize_year_keyword_filters_in_plan,
-    _prompt_is_followup_edit,
     _required_column_keys,
 )
+from app.services.planner_domain.types import LLMPlanResult, SlotExtractionResult
 
 
 @pytest.fixture(autouse=True)
@@ -32,32 +38,32 @@ def _disable_unified_llm(monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolate_pipeline_logs(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        planner_domain_service_module,
+        pipeline_trace_module,
         "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE",
         str(tmp_path / "plan_domain_pipeline_timing.log"),
     )
     monkeypatch.setattr(
-        planner_domain_service_module,
+        pipeline_trace_module,
         "QF_PLAN_DOMAIN_PIPELINE_TRACE_LOG_FILE",
         str(tmp_path / "plan_domain_pipeline_trace.jsonl"),
     )
 
-    profile_logger = logging.getLogger(planner_domain_service_module._PROFILE_LOGGER_NAME)
+    profile_logger = logging.getLogger(pipeline_trace_module._PROFILE_LOGGER_NAME)
     for handler in list(profile_logger.handlers):
         profile_logger.removeHandler(handler)
         try:
             handler.close()
         except Exception:
             pass
-    trace_logger = logging.getLogger(planner_domain_service_module._TRACE_LOGGER_NAME)
+    trace_logger = logging.getLogger(pipeline_trace_module._TRACE_LOGGER_NAME)
     for handler in list(trace_logger.handlers):
         trace_logger.removeHandler(handler)
         try:
             handler.close()
         except Exception:
             pass
-    monkeypatch.setattr(planner_domain_service_module, "_PROFILE_LOGGER_INITIALIZED", False)
-    monkeypatch.setattr(planner_domain_service_module, "_TRACE_LOGGER_INITIALIZED", False)
+    monkeypatch.setattr(pipeline_trace_module, "_PROFILE_LOGGER_INITIALIZED", False)
+    monkeypatch.setattr(pipeline_trace_module, "_TRACE_LOGGER_INITIALIZED", False)
 
 
 class _FakeCapabilitiesService:
@@ -582,10 +588,16 @@ def test_golden_students_per_teacher_by_county_prefers_overlay_metric() -> None:
 
 def test_plan_pipeline_profile_can_be_enabled_per_request(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_TIMING_PROFILE_ENABLED", False)
+    log_file = str(tmp_path / "plan_domain_pipeline_timing.log")
     monkeypatch.setattr(
         planner_domain_service_module,
         "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE",
-        str(tmp_path / "plan_domain_pipeline_timing.log"),
+        log_file,
+    )
+    monkeypatch.setattr(
+        pipeline_trace_module,
+        "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE",
+        log_file,
     )
     svc = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
@@ -677,8 +689,8 @@ def test_plan_fast_mode_is_passed_to_slot_and_plan_calls(monkeypatch) -> None:
             repaired=False,
         )
 
-    monkeypatch.setattr(PlannerDomainService, "_call_llm_slots", _fake_slots)
-    monkeypatch.setattr(PlannerDomainService, "_call_llm_plan", _fake_plan)
+    monkeypatch.setattr(LLMPlanningService, "_call_llm_slots", _fake_slots)
+    monkeypatch.setattr(LLMPlanningService, "_call_llm_plan", _fake_plan)
 
     svc = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
@@ -782,8 +794,8 @@ def test_fast_mode_retries_when_first_plan_is_invalid(monkeypatch) -> None:
             repaired=False,
         )
 
-    monkeypatch.setattr(PlannerDomainService, "_call_llm_slots", _fake_slots)
-    monkeypatch.setattr(PlannerDomainService, "_call_llm_plan", _fake_plan)
+    monkeypatch.setattr(LLMPlanningService, "_call_llm_slots", _fake_slots)
+    monkeypatch.setattr(LLMPlanningService, "_call_llm_plan", _fake_plan)
 
     svc = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
@@ -824,6 +836,7 @@ def test_unified_llm_invalid_json_falls_back_to_legacy_path(monkeypatch) -> None
         conversation_context=None,
         trace_id,
         fast_mode=False,
+        grounding_bundle=None,
     ):
         del (
             self,
@@ -837,6 +850,7 @@ def test_unified_llm_invalid_json_falls_back_to_legacy_path(monkeypatch) -> None
             conversation_context,
             trace_id,
             fast_mode,
+            grounding_bundle,
         )
         raise ForgeError(
             "plan_domain unified invalid model JSON",
@@ -906,9 +920,9 @@ def test_unified_llm_invalid_json_falls_back_to_legacy_path(monkeypatch) -> None
             repaired=False,
         )
 
-    monkeypatch.setattr(PlannerDomainService, "_call_llm_unified", _fake_unified)
-    monkeypatch.setattr(PlannerDomainService, "_call_llm_slots", _fake_slots)
-    monkeypatch.setattr(PlannerDomainService, "_call_llm_plan", _fake_plan)
+    monkeypatch.setattr(LLMPlanningService, "_call_llm_unified", _fake_unified)
+    monkeypatch.setattr(LLMPlanningService, "_call_llm_slots", _fake_slots)
+    monkeypatch.setattr(LLMPlanningService, "_call_llm_plan", _fake_plan)
 
     svc = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
@@ -1041,9 +1055,10 @@ def test_plan_domain_can_defer_next_actions_async(monkeypatch) -> None:
 
     def _fail_if_called(*args, **kwargs):
         del args, kwargs
-        raise AssertionError("_maybe_generate_next_actions should not be called when async is enabled")
+        raise AssertionError("maybe_generate should not be called when async is enabled")
 
-    monkeypatch.setattr(PlannerDomainService, "_maybe_generate_next_actions", _fail_if_called)
+    from app.services.planner_domain.next_actions_service import NextActionsService
+    monkeypatch.setattr(NextActionsService, "maybe_generate", _fail_if_called)
     svc = PlannerDomainService(
         capabilities_service=_FakeStaffCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
@@ -1173,7 +1188,7 @@ def test_compact_capabilities_prepends_student_identity_for_show_students_prompt
     }
     shortlisted = [{"column_key": "wt24.birth_country", "column_name": "birth_country", "workspace_table_id": 24}]
 
-    compact = svc._compact_capabilities_for_llm(  # noqa: SLF001
+    compact = DomainSelectionService.compact_capabilities_for_llm(
         capabilities=capabilities,
         shortlisted_columns=shortlisted,
         prompt="Show students not born in the US",
@@ -1226,7 +1241,7 @@ def test_compact_capabilities_prepends_student_identity_from_slot_hints() -> Non
     }
     shortlisted = [{"column_key": "wt24.birth_country", "column_name": "birth_country", "workspace_table_id": 24}]
 
-    compact = svc._compact_capabilities_for_llm(  # noqa: SLF001
+    compact = DomainSelectionService.compact_capabilities_for_llm(
         capabilities=capabilities,
         shortlisted_columns=shortlisted,
         prompt="students not born in the US",
@@ -1284,7 +1299,7 @@ def test_compact_capabilities_includes_nativity_filter_columns() -> None:
         {"column_key": "wt24.first_name"},
     ]
 
-    compact = svc._compact_capabilities_for_llm(  # noqa: SLF001
+    compact = DomainSelectionService.compact_capabilities_for_llm(
         capabilities=capabilities,
         shortlisted_columns=shortlisted,
         prompt="list all the students not born in the us",
@@ -1345,7 +1360,7 @@ def test_compact_capabilities_prepends_school_listing_identity_columns() -> None
     }
     shortlisted = [{"column_key": "wt20.nces_school_code", "column_name": "nces_school_code", "workspace_table_id": 20}]
 
-    compact = svc._compact_capabilities_for_llm(  # noqa: SLF001
+    compact = DomainSelectionService.compact_capabilities_for_llm(
         capabilities=capabilities,
         shortlisted_columns=shortlisted,
         prompt="Show me all the schools in Clarksville, TN",
@@ -1410,7 +1425,7 @@ def test_compact_capabilities_city_state_prefers_state_code_over_state_school_co
     }
     shortlisted = [{"column_key": "wt20.state_school_code", "column_name": "state_school_code", "workspace_table_id": 20}]
 
-    compact = svc._compact_capabilities_for_llm(  # noqa: SLF001
+    compact = DomainSelectionService.compact_capabilities_for_llm(
         capabilities=capabilities,
         shortlisted_columns=shortlisted,
         prompt="Show me all the schools in Clarksville, TN",
@@ -1467,7 +1482,7 @@ def test_compact_capabilities_staff_school_name_filter_avoids_k_school() -> None
     }
     shortlisted = [{"column_key": "wt30.k_school", "column_name": "k_school", "workspace_table_id": 30}]
 
-    compact = svc._compact_capabilities_for_llm(  # noqa: SLF001
+    compact = DomainSelectionService.compact_capabilities_for_llm(
         capabilities=capabilities,
         shortlisted_columns=shortlisted,
         prompt="Show me all the staff for Rossview Elementary",
@@ -1515,7 +1530,7 @@ def test_compact_capabilities_principal_school_name_filter_avoids_k_school() -> 
     }
     shortlisted = [{"column_key": "wt30.k_school", "column_name": "k_school", "workspace_table_id": 30}]
 
-    compact = svc._compact_capabilities_for_llm(  # noqa: SLF001
+    compact = DomainSelectionService.compact_capabilities_for_llm(
         capabilities=capabilities,
         shortlisted_columns=shortlisted,
         prompt="Show me the principal for Barksdale Elementary",
@@ -1575,7 +1590,7 @@ def test_compact_capabilities_staff_role_filter_prefers_position_title_over_clas
         }
     ]
 
-    compact = svc._compact_capabilities_for_llm(  # noqa: SLF001
+    compact = DomainSelectionService.compact_capabilities_for_llm(
         capabilities=capabilities,
         shortlisted_columns=shortlisted,
         prompt="Who is the principal at Rossview Elementary",
@@ -1640,7 +1655,7 @@ def test_compact_capabilities_person_lookup_prefers_canonical_name_columns_over_
         },
     ]
 
-    compact = svc._compact_capabilities_for_llm(  # noqa: SLF001
+    compact = DomainSelectionService.compact_capabilities_for_llm(
         capabilities=capabilities,
         shortlisted_columns=shortlisted,
         prompt="Show me where Jennifer Gilstrap works",
@@ -1712,7 +1727,7 @@ def test_compact_capabilities_explicit_preferred_name_request_keeps_preferred_na
         },
     ]
 
-    compact = svc._compact_capabilities_for_llm(  # noqa: SLF001
+    compact = DomainSelectionService.compact_capabilities_for_llm(
         capabilities=capabilities,
         shortlisted_columns=shortlisted,
         prompt="Show me Jennifer Gilstrap preferred name",
@@ -1748,13 +1763,13 @@ def test_score_domain_candidate_prefers_staff_columns_for_work_prompt() -> None:
         {"column_name": "school_name"},
     ]
 
-    staff_score = svc._score_domain_candidate(  # noqa: SLF001
+    staff_score = DomainSelectionService._score_domain_candidate(
         prompt="Show me where Jennifer Gilstrap works",
         candidate=candidate,
         capabilities=capabilities,
         shortlisted_columns=staff_shortlist,
     )
-    student_score = svc._score_domain_candidate(  # noqa: SLF001
+    student_score = DomainSelectionService._score_domain_candidate(
         prompt="Show me where Jennifer Gilstrap works",
         candidate=candidate,
         capabilities=capabilities,
@@ -1784,13 +1799,13 @@ def test_score_domain_candidate_work_prompt_penalizes_discipline_domain_name() -
     staff_candidate = {"score": 0.5, "name": "Staff & Assignments"}
     discipline_candidate = {"score": 0.5, "name": "Discipline"}
 
-    staff_score = svc._score_domain_candidate(  # noqa: SLF001
+    staff_score = DomainSelectionService._score_domain_candidate(
         prompt="Show me where Jennifer Gilstrap works",
         candidate=staff_candidate,
         capabilities=capabilities,
         shortlisted_columns=shortlist,
     )
-    discipline_score = svc._score_domain_candidate(  # noqa: SLF001
+    discipline_score = DomainSelectionService._score_domain_candidate(
         prompt="Show me where Jennifer Gilstrap works",
         candidate=discipline_candidate,
         capabilities=capabilities,
@@ -1820,13 +1835,13 @@ def test_score_domain_candidate_work_prompt_penalizes_student_domain_name() -> N
     staff_candidate = {"score": 0.5, "name": "Staff & Assignments"}
     student_candidate = {"score": 0.5, "name": "Students – Profile & Demographics"}
 
-    staff_score = svc._score_domain_candidate(  # noqa: SLF001
+    staff_score = DomainSelectionService._score_domain_candidate(
         prompt="Show me where Jennifer Gilstrap works",
         candidate=staff_candidate,
         capabilities=capabilities,
         shortlisted_columns=shortlist,
     )
-    student_score = svc._score_domain_candidate(  # noqa: SLF001
+    student_score = DomainSelectionService._score_domain_candidate(
         prompt="Show me where Jennifer Gilstrap works",
         candidate=student_candidate,
         capabilities=capabilities,
@@ -1862,13 +1877,13 @@ def test_score_domain_candidate_prefers_adm_columns_for_adm_prompt() -> None:
         {"column_name": "school_calendar_name"},
     ]
 
-    adm_score = svc._score_domain_candidate(  # noqa: SLF001
+    adm_score = DomainSelectionService._score_domain_candidate(
         prompt="Show base ADM by report period for school year 2026",
         candidate=candidate,
         capabilities=capabilities,
         shortlisted_columns=adm_shortlist,
     )
-    calendar_score = svc._score_domain_candidate(  # noqa: SLF001
+    calendar_score = DomainSelectionService._score_domain_candidate(
         prompt="Show base ADM by report period for school year 2026",
         candidate=candidate,
         capabilities={"dimensions": [{"column_key": "wt40.calendar_date"}] * 20, "domain_metrics": []},
@@ -1898,13 +1913,13 @@ def test_score_domain_candidate_adm_prompt_penalizes_calendar_domain_name() -> N
     adm_candidate = {"score": 0.5, "name": "ADM & Enrollment"}
     calendar_candidate = {"score": 0.5, "name": "Academic Calendar & Terms"}
 
-    adm_score = svc._score_domain_candidate(  # noqa: SLF001
+    adm_score = DomainSelectionService._score_domain_candidate(
         prompt="Show base ADM by report period for school year 2026",
         candidate=adm_candidate,
         capabilities=capabilities,
         shortlisted_columns=shortlist,
     )
-    calendar_score = svc._score_domain_candidate(  # noqa: SLF001
+    calendar_score = DomainSelectionService._score_domain_candidate(
         prompt="Show base ADM by report period for school year 2026",
         candidate=calendar_candidate,
         capabilities=capabilities,
@@ -1923,7 +1938,7 @@ def test_score_domain_candidate_days_off_prompt_prefers_calendar_domain() -> Non
     candidate = {"score": 0.45, "name": "Academic Calendar And Scheduling"}
     non_calendar_candidate = {"score": 0.45, "name": "Students: Demographics And Groupings"}
 
-    calendar_score = svc._score_domain_candidate(  # noqa: SLF001
+    calendar_score = DomainSelectionService._score_domain_candidate(
         prompt="Show me all the days off barksdale elementary has in December",
         candidate=candidate,
         capabilities={"dimensions": [{"column_key": "wt594.calendar_date"}] * 20, "domain_metrics": []},
@@ -1935,7 +1950,7 @@ def test_score_domain_candidate_days_off_prompt_prefers_calendar_domain() -> Non
             {"column_name": "holiday_name"},
         ],
     )
-    non_calendar_score = svc._score_domain_candidate(  # noqa: SLF001
+    non_calendar_score = DomainSelectionService._score_domain_candidate(
         prompt="Show me all the days off barksdale elementary has in December",
         candidate=non_calendar_candidate,
         capabilities={"dimensions": [{"column_key": "wt552.school_name"}] * 20, "domain_metrics": []},
@@ -1960,7 +1975,7 @@ def test_score_domain_candidate_age_extreme_prompt_prefers_demographics_domain()
     demographics_candidate = {"score": 0.56, "name": "Student Demographics And Enrollment"}
     programs_candidate = {"score": 0.568, "name": "Student Programs And Services"}
 
-    demographics_score = svc._score_domain_candidate(  # noqa: SLF001
+    demographics_score = DomainSelectionService._score_domain_candidate(
         prompt="Show me the eldest student",
         candidate=demographics_candidate,
         capabilities={"dimensions": [{"column_key": "wt552.birth_date"}] * 20, "domain_metrics": []},
@@ -1972,7 +1987,7 @@ def test_score_domain_candidate_age_extreme_prompt_prefers_demographics_domain()
             {"column_name": "school_name"},
         ],
     )
-    programs_score = svc._score_domain_candidate(  # noqa: SLF001
+    programs_score = DomainSelectionService._score_domain_candidate(
         prompt="Show me the eldest student",
         candidate=programs_candidate,
         capabilities={"dimensions": [{"column_key": "wt590.k_student_xyear"}] * 20, "domain_metrics": []},
@@ -1997,7 +2012,7 @@ def test_score_domain_candidate_birth_month_prompt_prefers_demographics_domain()
     demographics_candidate = {"score": 0.56, "name": "Student Demographics And Enrollment"}
     programs_candidate = {"score": 0.568, "name": "Student Programs And Services"}
 
-    demographics_score = svc._score_domain_candidate(  # noqa: SLF001
+    demographics_score = DomainSelectionService._score_domain_candidate(
         prompt="Show me all the students who have a birthday in March",
         candidate=demographics_candidate,
         capabilities={"dimensions": [{"column_key": "wt552.birth_date"}] * 20, "domain_metrics": []},
@@ -2009,7 +2024,7 @@ def test_score_domain_candidate_birth_month_prompt_prefers_demographics_domain()
             {"column_name": "school_name"},
         ],
     )
-    programs_score = svc._score_domain_candidate(  # noqa: SLF001
+    programs_score = DomainSelectionService._score_domain_candidate(
         prompt="Show me all the students who have a birthday in March",
         candidate=programs_candidate,
         capabilities={"dimensions": [{"column_key": "wt590.k_student_xyear"}] * 20, "domain_metrics": []},
@@ -2046,7 +2061,7 @@ def test_get_domain_candidates_expands_work_prompt_and_includes_staff_domain() -
         llm_client=_FakeLLM(),
     )
 
-    out = svc._get_domain_candidates(  # noqa: SLF001
+    out = svc._domain_selection._get_domain_candidates(
         workspace_id="ws-1",
         vertical_norm="education",
         prompt="Show me where Jennifer Gilstrap works",
@@ -2079,7 +2094,7 @@ def test_get_domain_candidates_expands_adm_prompt_and_includes_adm_domain() -> N
         llm_client=_FakeLLM(),
     )
 
-    out = svc._get_domain_candidates(  # noqa: SLF001
+    out = svc._domain_selection._get_domain_candidates(
         workspace_id="ws-1",
         vertical_norm="education",
         prompt="Show base ADM by report period for school year 2026",
@@ -2119,7 +2134,7 @@ def test_get_domain_candidates_uses_semantic_alias_queries_to_improve_recall(mon
         ),
     )
 
-    out = svc._get_domain_candidates(  # noqa: SLF001
+    out = svc._domain_selection._get_domain_candidates(
         workspace_id="ws-1",
         vertical_norm="education",
         prompt="Show students not born in the US",
@@ -2144,15 +2159,15 @@ def test_score_semantic_grounding_bundle_prefers_richer_semantic_signal() -> Non
         llm_client=_FakeLLM(),
     )
 
-    empty_score = svc._score_semantic_grounding_bundle(  # noqa: SLF001
+    empty_score = DomainSelectionService._score_semantic_grounding_bundle(
         prompt="Show students by county",
         grounding_bundle=SemanticGroundingBundle(),
     )
-    alias_only_score = svc._score_semantic_grounding_bundle(  # noqa: SLF001
+    alias_only_score = DomainSelectionService._score_semantic_grounding_bundle(
         prompt="Show students in the US",
         grounding_bundle=SemanticGroundingBundle(alias_constraints=[{"value_hint": "United States"}]),
     )
-    rich_score = svc._score_semantic_grounding_bundle(  # noqa: SLF001
+    rich_score = DomainSelectionService._score_semantic_grounding_bundle(
         prompt="Show staff count by school last year",
         grounding_bundle=_RankingSemanticGroundingService().build_grounding_bundle(base_domain_id=5),
     )
@@ -2220,17 +2235,17 @@ def test_select_domain_and_shortlist_columns_uses_semantic_reranking_when_enable
     )
 
     monkeypatch.setattr(
-        PlannerDomainService,
+        DomainSelectionService,
         "_shortlist_columns_for_domain",
         lambda self, *, prompt, workspace_id, capabilities: list(capabilities.get("dimensions") or []),
     )
     monkeypatch.setattr(
-        PlannerDomainService,
+        DomainSelectionService,
         "_score_domain_candidate",
-        lambda self, *, prompt, candidate, capabilities, shortlisted_columns: 0.5,
+        lambda *args, **kwargs: 0.5,
     )
 
-    selected_domain_id, _capabilities, shortlisted_columns, ranking, rerank_signals = svc._select_domain_and_shortlist_columns(  # noqa: SLF001
+    selected_domain_id, _capabilities, shortlisted_columns, ranking, rerank_signals = svc._domain_selection._select_domain_and_shortlist_columns(
         workspace_id="ws-1",
         user_id="user-1",
         vertical_norm="education",
@@ -2254,6 +2269,7 @@ def test_select_domain_and_shortlist_columns_uses_semantic_reranking_when_enable
 
 def test_semantic_value_alias_constraints_feature_flag_off(monkeypatch) -> None:
     monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", False)
+    monkeypatch.setattr(semantic_integration_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", False)
     svc = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
@@ -2263,7 +2279,7 @@ def test_semantic_value_alias_constraints_feature_flag_off(monkeypatch) -> None:
         ),
     )
 
-    constraints = svc._semantic_value_alias_constraints(  # noqa: SLF001
+    constraints = svc._semantic_integration.resolve_alias_constraints(  # noqa: SLF001
         prompt="Show students not born in the US",
         vertical_norm="education",
     )
@@ -2347,19 +2363,19 @@ def test_rerank_policies_prefer_enrollment_domain_for_school_enrollment_listing(
     )
 
     monkeypatch.setattr(
-        PlannerDomainService,
+        DomainSelectionService,
         "_shortlist_columns_for_domain",
         lambda self, *, prompt, workspace_id, capabilities: list(capabilities.get("dimensions") or []),
     )
     monkeypatch.setattr(
-        PlannerDomainService,
+        DomainSelectionService,
         "_score_domain_candidate",
-        lambda self, *, prompt, candidate, capabilities, shortlisted_columns: 0.94266
-        if int(candidate["domain_id"]) == 9
+        lambda *args, **kwargs: 0.94266
+        if int(kwargs.get("candidate", {}).get("domain_id", 0)) == 9
         else 1.0242,
     )
 
-    selected_domain_id, _capabilities, _shortlisted_columns, ranking, rerank_signals = svc._select_domain_and_shortlist_columns(  # noqa: SLF001
+    selected_domain_id, _capabilities, _shortlisted_columns, ranking, rerank_signals = svc._domain_selection._select_domain_and_shortlist_columns(
         workspace_id="ws-1",
         user_id="user-1",
         vertical_norm="education",
@@ -2386,6 +2402,7 @@ def test_rerank_policies_prefer_enrollment_domain_for_school_enrollment_listing(
 
 def test_semantic_value_alias_constraints_feature_flag_on_merges_into_slot_hints(monkeypatch) -> None:
     monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
+    monkeypatch.setattr(semantic_integration_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
     svc = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
@@ -2395,13 +2412,13 @@ def test_semantic_value_alias_constraints_feature_flag_on_merges_into_slot_hints
         ),
     )
 
-    constraints = svc._semantic_value_alias_constraints(  # noqa: SLF001
+    constraints = svc._semantic_integration.resolve_alias_constraints(  # noqa: SLF001
         prompt="Show students not born in the US",
         vertical_norm="education",
     )
     assert constraints and constraints[0]["value_hint"] == "United States"
 
-    merged = svc._merge_slot_hints(  # noqa: SLF001
+    merged = svc._llm_planning._merge_slot_hints(
         prompt="Show students not born in the US",
         slot_payload={"intent": "list", "entity": "students", "constraints": [], "time_phrases": []},
         semantic_constraints=constraints,
@@ -2412,6 +2429,7 @@ def test_semantic_value_alias_constraints_feature_flag_on_merges_into_slot_hints
 
 def test_semantic_value_alias_constraints_feature_flag_on_is_resilient_to_errors(monkeypatch) -> None:
     monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
+    monkeypatch.setattr(semantic_integration_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
     svc = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
@@ -2419,7 +2437,7 @@ def test_semantic_value_alias_constraints_feature_flag_on_is_resilient_to_errors
         value_alias_resolver=_FakeValueAliasResolver(should_raise=True),
     )
 
-    constraints = svc._semantic_value_alias_constraints(  # noqa: SLF001
+    constraints = svc._semantic_integration.resolve_alias_constraints(  # noqa: SLF001
         prompt="Show students not born in the US",
         vertical_norm="education",
     )
@@ -2580,6 +2598,7 @@ def test_plan_normalizes_semantic_value_aliases_in_fallback_path(monkeypatch) ->
     monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
     monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_COMPACT_PLANNER_ENABLED", False)
     monkeypatch.setattr(planner_domain_service_module, "ForgeMetaSQL", lambda: _FakeSql())
+    monkeypatch.setattr(semantic_integration_module, "ForgeMetaSQL", lambda: _FakeSql())
 
     svc = PlannerDomainService(
         capabilities_service=_RaceCapsService(),
@@ -2623,6 +2642,8 @@ def test_semester_indicator_resolution_uses_explicit_semantic_concept_keys(monke
 
     monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
     monkeypatch.setattr(planner_domain_service_module, "ForgeMetaSQL", lambda: _FakeSql())
+    monkeypatch.setattr(semantic_integration_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
+    monkeypatch.setattr(semantic_integration_module, "ForgeMetaSQL", lambda: _FakeSql())
 
     svc = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
@@ -2654,7 +2675,7 @@ def test_semester_indicator_resolution_uses_explicit_semantic_concept_keys(monke
         "time_columns": [],
     }
 
-    out = svc._resolve_semester_indicator_columns(  # noqa: SLF001
+    out = svc._semantic_integration.resolve_semester_indicator_columns(  # noqa: SLF001
         workspace_id="ws-1",
         vertical_norm="education",
         capabilities=capabilities,
@@ -2684,6 +2705,8 @@ def test_semantic_value_alias_normalization_coerces_boolean_flag_values(monkeypa
 
     monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
     monkeypatch.setattr(planner_domain_service_module, "ForgeMetaSQL", lambda: _FakeSql())
+    monkeypatch.setattr(semantic_integration_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
+    monkeypatch.setattr(semantic_integration_module, "ForgeMetaSQL", lambda: _FakeSql())
 
     svc = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
@@ -2714,7 +2737,7 @@ def test_semantic_value_alias_normalization_coerces_boolean_flag_values(monkeypa
         "time_columns": [],
     }
 
-    normalized_plan, issues, debug = svc._normalize_semantic_value_alias_filters_in_plan(  # noqa: SLF001
+    normalized_plan, issues, debug = svc._semantic_integration.normalize_semantic_value_alias_filters(  # noqa: SLF001
         plan_json=plan_json,
         workspace_id="ws-1",
         vertical_norm="generic",
@@ -2789,7 +2812,7 @@ def test_validation_uses_full_capabilities_not_compact_subset() -> None:
     )
 
     # Simulate compact shortlist that omits required identity columns.
-    svc._compact_capabilities_for_llm = lambda **kwargs: {  # type: ignore[method-assign]
+    svc._domain_selection.compact_capabilities_for_llm = lambda *args, **kwargs: {  # type: ignore[method-assign]
         "domain_id": 6,
         "domain_version": 1,
         "dimensions": [
@@ -2964,7 +2987,7 @@ def test_district_county_retry_hint_does_not_trigger_for_geography_prompt() -> N
 
 
 def test_normalize_llm_plan_accepts_metric_ref_aliases() -> None:
-    out = PlannerDomainService._normalize_llm_plan(  # noqa: SLF001
+    out = LLMPlanningService._normalize_llm_plan(
         raw_plan={
             "selects": {
                 "dimensions": [{"columnKey": "wt187.territory_name"}],
