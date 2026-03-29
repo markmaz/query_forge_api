@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.planner_domain.service import _normalize_next_actions
+from app.services.planner_domain.next_actions_service import _normalize_next_actions
 
 
 def test_next_actions_remap_keys_by_unique_column_name() -> None:

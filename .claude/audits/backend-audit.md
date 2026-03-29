@@ -1,7 +1,42 @@
 # Backend Agent Audit
 
 ## Date
-2026-03-18 (last updated)
+2026-03-28 (last updated)
+
+---
+
+## Phase 7 — Extract ExplanationService and NextActionsService (2026-03-28)
+
+### Files Created
+- `app/services/planner_domain/explanation_service.py` — `ExplanationService` class with `build_explanation()` method; copies of `_build_plan_explanation`, `_explanation_column_lookup`, `_column_label_for_explanation`, `_friendly_filter_op`, `_friendly_filter_clause`, `_humanize_token`, `_human_list`, `_normalize_explanation_summary`, `_selected_domain_name`, plus local `_to_int` and `_norm_key` helpers
+- `app/services/planner_domain/next_actions_service.py` — `NextActionsService` class with `maybe_generate()` method; copies of all `_next_action_*`, `_normalize_next_actions`, `_normalize_next_action_item`, `_column_name_from_key`, `_unique_allowed_key_by_column_name`, `_repair_allowed_key`, `_allowed_metric_refs_from_capabilities` helpers, plus local `_to_int`, `_norm_key`, `_NEXT_ACTION_ALLOWED_FILTER_OPS` constant
+
+### Files Modified
+- `app/services/planner_domain/service.py` — added imports for `ExplanationService` and `NextActionsService`; wired `self._explanation` and `self._next_actions` in `__init__`; replaced `_build_plan_explanation(...)` call with `self._explanation.build_explanation(..., norm_debug={...})`; replaced both `self._maybe_generate_next_actions(...)` calls with `self._next_actions.maybe_generate(...)`; removed `_maybe_generate_next_actions` instance method and all moved module-level functions; kept `_normalize_explanation_summary` (still used by `_maybe_polish_explanation_summary`) and `_selected_domain_name` (used at multiple call sites in `plan()`)
+- `tests/services/planner_domain/test_next_actions_normalization.py` — updated import from `service` to `next_actions_service`
+- `tests/services/planner_domain/test_service.py` — updated `test_plan_domain_can_defer_next_actions_async` to patch `NextActionsService.maybe_generate` instead of `PlannerDomainService._maybe_generate_next_actions`; added `import app.services.planner_domain.next_actions_service as next_actions_service_module`
+
+### Files Created (Tests)
+- `tests/services/planner_domain/test_explanation_service.py` — 7 tests covering construction, key presence, domain name resolution, norm_debug mapping
+- `tests/services/planner_domain/test_next_actions_service.py` — 7 tests covering construction, `_normalize_next_actions` edge cases, `maybe_generate` disabled path
+
+### Version
+- `version.json` bumped from `0.3.8` to `0.3.9`
+
+### Test Results
+- 1964 passed, 77 skipped (baseline was 1950 passed, 77 skipped; +14 new tests)
+
+### Key Design Decisions
+- `_norm_key` in both new modules copies the actual service.py definition (`str(value or "").strip().lower()`) — NOT the variant with `.replace(" ", "_")` mentioned in the spec
+- `_selected_domain_name` is copied locally into `explanation_service.py` to avoid circular imports; it stays in `service.py` for its other call sites there
+- `_normalize_explanation_summary` is kept in `service.py` because `_maybe_polish_explanation_summary` still uses it
+- `_parse_text_list` and `_parse_constraints` were not moved to `next_actions_service.py` — they are only defined but never called in service.py (their real implementations are in `llm_planning_service.py`)
+- Boolean filter helpers (`_normalize_filter_value_with_semantic_alias_map`, etc.) are not needed by next_actions functions; they remain in service.py and also exist in `semantic_integration_service.py`
+
+---
+
+## Date
+2026-03-18 (previous)
 
 ---
 
@@ -953,3 +988,41 @@ def _requires_super_admin(role_name: str) -> bool:
 
 ### Test Results
 17/17 passed.
+
+---
+
+## Phase 6 — Normalizer extraction into `normalizers/` package (2026-03-28)
+
+### Task
+Extract 9 normalizer functions from `service.py` into a structured `normalizers/` package following TDD.
+
+### Files Created
+- `app/services/planner_domain/normalizers/__init__.py` — empty package marker
+- `app/services/planner_domain/normalizers/entity.py` — country, school name, staff role normalizers + helpers
+- `app/services/planner_domain/normalizers/metric.py` — ADM defaults, top/bottom ranking normalizers + helpers
+- `app/services/planner_domain/normalizers/time.py` — relative time, year keywords, school year, semester normalizers + helpers
+- `tests/services/planner_domain/normalizers/__init__.py` — empty
+- `tests/services/planner_domain/normalizers/test_entity.py` — 3 RED→GREEN tests
+- `tests/services/planner_domain/normalizers/test_metric.py` — 2 RED→GREEN tests
+- `tests/services/planner_domain/normalizers/test_time.py` — 6 RED→GREEN tests
+
+### Files Modified
+- `app/services/planner_domain/service.py`:
+  - Added imports from normalizers modules and `NormalizationPipeline`
+  - Added `self._normalization = NormalizationPipeline(...)` in `__init__`
+  - Replaced initial normalization block (~939-995) with `norm_result = self._normalization.run(...)`
+  - Replaced retry normalization block (~1106-1161) with `retry_norm_result = self._normalization.run(...)`
+  - Extracted per-normalizer debug from `norm_result.debug` and `retry_norm_result.debug`
+  - Removed ~1519 lines of moved function definitions
+  - Removed now-unused constants: `_NON_WORD_RE`, `_STAFF_ROLE_VALUE_RE`, `_STAFF_ROLE_CANONICAL`, `_SEMESTER_BUCKET_CONCEPT_KEYS`, `_TOP_BOTTOM_LIMIT_RE`
+  - Added extra imports for helpers used by `_district_county_retry_hint`: `_normalize_text_for_match`, `_district_term_positions`, `_appears_near_district`, `_looks_like_proper_noun_value`, `_extract_filter_values`
+- `tests/services/planner_domain/test_semester_normalization.py` — updated import to normalizers.time
+- `tests/services/planner_domain/test_adm_filter_normalization.py` — updated import to normalizers.metric
+- `tests/services/planner_domain/test_school_year_normalization.py` — updated import to normalizers.time
+- `tests/services/planner_domain/test_country_normalization.py` — updated import to normalizers.entity
+- `tests/services/planner_domain/test_staff_role_normalization.py` — updated import to normalizers.entity
+- `tests/services/planner_domain/test_school_name_normalization.py` — updated import to normalizers.entity
+- `version.json` — bumped 0.3.7 → 0.3.8
+
+### Test Results
+1950 passed, 77 skipped (auth-dependent), 35 warnings.

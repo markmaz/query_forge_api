@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.planner_domain.service import _normalize_staff_role_filters_in_plan
+from app.services.planner_domain.normalizers.entity import _normalize_staff_role_filters_in_plan
 
 
 def test_staff_role_filter_is_appended_when_prompt_mentions_single_role() -> None:

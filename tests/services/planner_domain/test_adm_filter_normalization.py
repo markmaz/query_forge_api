@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.planner_domain.service import _normalize_adm_default_filters_in_plan
+from app.services.planner_domain.normalizers.metric import _normalize_adm_default_filters_in_plan
 
 
 def test_adm_defaults_are_dropped_for_person_specific_prompt() -> None:

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import app.services.planner_domain.service as planner_domain_service_module
-from app.exceptions.forge_error import ForgeError
-from app.services.planner_domain.service import _read_pipeline_profile_from_log
+import app.services.planner_domain.pipeline_trace as pipeline_trace_module
+from app.services.planner_domain.pipeline_trace import _read_pipeline_profile_from_log
 
 
 def test_read_pipeline_profile_from_log_returns_latest_match(monkeypatch, tmp_path) -> None:
@@ -23,7 +22,7 @@ def test_read_pipeline_profile_from_log_returns_latest_match(monkeypatch, tmp_pa
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE", str(log_file))
+    monkeypatch.setattr(pipeline_trace_module, "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE", str(log_file))
 
     out = _read_pipeline_profile_from_log(
         trace_id="trace-abc",
@@ -50,16 +49,11 @@ def test_read_pipeline_profile_from_log_respects_workspace_and_user(monkeypatch,
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE", str(log_file))
+    monkeypatch.setattr(pipeline_trace_module, "QF_PLAN_DOMAIN_TIMING_PROFILE_LOG_FILE", str(log_file))
 
-    try:
-        _read_pipeline_profile_from_log(
-            trace_id="trace-xyz",
-            workspace_id="ws-1",
-            user_id="user-1",
-        )
-    except ForgeError as exc:
-        assert exc.status_code == 404
-        assert "trace-xyz" in str(exc.details or {})
-    else:
-        raise AssertionError("Expected ForgeError for workspace/user mismatch")
+    result = _read_pipeline_profile_from_log(
+        trace_id="trace-xyz",
+        workspace_id="ws-1",
+        user_id="user-1",
+    )
+    assert result is None, "Expected None when workspace/user does not match"

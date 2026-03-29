@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.planner_domain.service import _normalize_country_filters_in_plan
+from app.services.planner_domain.normalizers.entity import _normalize_country_filters_in_plan
 from app.services.planner_domain.validate_v2 import validate_and_repair_plan_v2
 
 

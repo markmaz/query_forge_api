@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from app.services.planner_domain.service import _normalize_school_year_filters_in_plan
+from app.services.planner_domain.normalizers.time import _normalize_school_year_filters_in_plan
 
 
 def test_school_year_filter_normalizes_current_school_year() -> None:

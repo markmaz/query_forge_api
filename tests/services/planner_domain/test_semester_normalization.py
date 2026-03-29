@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from app.services.planner_domain.service import _normalize_semester_filters_in_plan, _semester_bucket_from_text
+from app.services.planner_domain.normalizers.time import _normalize_semester_filters_in_plan, _semester_bucket_from_text
 
 
 def test_semester_filter_normalizes_current_semester_to_spring() -> None:
