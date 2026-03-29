@@ -156,6 +156,49 @@ def test_pipeline_profiles_list_allows_workspace_admin(client, monkeypatch):
     assert resp.json["count"] == 1
 
 
+def test_pipeline_profile_detail_route_returns_service_payload(client, monkeypatch):
+    class _FakePlannerSvc:
+        def get_pipeline_profile(self, *, trace_id, workspace_id, user_id):
+            assert trace_id == "trace-123"
+            assert workspace_id == "ws-1"
+            assert user_id == "user-1"
+            return {
+                "trace_id": "trace-123",
+                "workspace_id": "ws-1",
+                "user_id": "user-1",
+                "total_ms": 500,
+                "steps": [{"index": 1, "label": "Domain selection", "ms": 25}],
+                "pipeline_trace": {"steps": [{"step": "domain_selection", "data": {"winner": 6}}]},
+            }
+
+    from app.services import planner_domain as pd_mod
+
+    monkeypatch.setattr(pd_mod, "PlannerDomainService", _FakePlannerSvc)
+    resp = client.get("/api/v1/admin/pipeline-profiles/trace-123", headers=_headers(monkeypatch))
+    assert resp.status_code == 200
+    assert resp.json["trace_id"] == "trace-123"
+    assert resp.json["pipeline_trace"]["steps"][0]["step"] == "domain_selection"
+
+
+def test_pipeline_profile_detail_allows_workspace_admin(client, monkeypatch):
+    class _FakePlannerSvc:
+        def get_pipeline_profile(self, *, trace_id, workspace_id, user_id):
+            assert trace_id == "trace-abc"
+            assert workspace_id == "ws-1"
+            assert user_id == "user-1"
+            return {"trace_id": trace_id, "workspace_id": workspace_id, "user_id": user_id, "steps": []}
+
+    from app.services import planner_domain as pd_mod
+
+    monkeypatch.setattr(pd_mod, "PlannerDomainService", _FakePlannerSvc)
+    resp = client.get(
+        "/api/v1/admin/pipeline-profiles/trace-abc",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json["trace_id"] == "trace-abc"
+
+
 # ---------------------------------------------------------------------------
 # Prompt feedback admin
 # ---------------------------------------------------------------------------

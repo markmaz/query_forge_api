@@ -407,6 +407,136 @@
       "endpoint": ""
     }
   },
+  "shared_pipeline": {
+    "domain_selection": {
+      "pipeline_name": "planner_domain_selection_pipeline",
+      "trace_id": "planner_domain_selection:ws-1:education",
+      "vertical_norm": "education",
+      "timings_ms": {
+        "normalize_text": 0,
+        "resolve_capabilities": 0,
+        "extract_signals": 0,
+        "apply_policy_rerank": 0
+      },
+      "debug": {
+        "normalize_text": {
+          "request_text_key": "prompt",
+          "normalized_text": "show me students enrolled at barksdale elementary"
+        },
+        "resolve_capabilities": {
+          "candidate_count": 1,
+          "capability_counts": {
+            "6": 2
+          }
+        },
+        "extract_signals": {
+          "source_text": "show me students enrolled at Barksdale Elementary",
+          "signals": [
+            "listing_intent",
+            "needs_enrollment_status",
+            "needs_school_filter",
+            "needs_student_identity",
+            "school_literal_present",
+            "status_enrolled",
+            "student_listing"
+          ]
+        },
+        "apply_policy_rerank": {
+          "candidate_count": 1,
+          "policy_effect_count": 0,
+          "signals": [
+            "listing_intent",
+            "needs_enrollment_status",
+            "needs_school_filter",
+            "needs_student_identity",
+            "school_literal_present",
+            "status_enrolled",
+            "student_listing"
+          ]
+        }
+      },
+      "trace_nodes": [
+        {
+          "pipeline_name": "planner_domain_selection_pipeline",
+          "node": "normalize_text",
+          "status": "completed",
+          "summary": {
+            "request_text_key": "prompt",
+            "normalized_text": "show me students enrolled at barksdale elementary"
+          },
+          "lineage": [
+            "planner_domain_selection_pipeline"
+          ]
+        },
+        {
+          "pipeline_name": "planner_domain_selection_pipeline",
+          "node": "resolve_capabilities",
+          "status": "completed",
+          "summary": {
+            "candidate_count": 1,
+            "capability_counts": {
+              "6": 2
+            }
+          },
+          "lineage": [
+            "planner_domain_selection_pipeline"
+          ]
+        },
+        {
+          "pipeline_name": "planner_domain_selection_pipeline",
+          "node": "extract_signals",
+          "status": "completed",
+          "summary": {
+            "source_text": "show me students enrolled at Barksdale Elementary",
+            "signals": [
+              "listing_intent",
+              "needs_enrollment_status",
+              "needs_school_filter",
+              "needs_student_identity",
+              "school_literal_present",
+              "status_enrolled",
+              "student_listing"
+            ]
+          },
+          "lineage": [
+            "planner_domain_selection_pipeline"
+          ]
+        },
+        {
+          "pipeline_name": "planner_domain_selection_pipeline",
+          "node": "apply_policy_rerank",
+          "status": "completed",
+          "summary": {
+            "candidate_count": 1,
+            "policy_effect_count": 0,
+            "signals": [
+              "listing_intent",
+              "needs_enrollment_status",
+              "needs_school_filter",
+              "needs_student_identity",
+              "school_literal_present",
+              "status_enrolled",
+              "student_listing"
+            ]
+          },
+          "lineage": [
+            "planner_domain_selection_pipeline"
+          ]
+        }
+      ],
+      "metadata": {
+        "graph_lineage": [],
+        "pipeline_definition": "planner_domain_selection_pipeline",
+        "executed_nodes": [
+          "normalize_text",
+          "resolve_capabilities",
+          "extract_signals",
+          "apply_policy_rerank"
+        ],
+        "skipped_nodes": []
+      }
+    }
+  },
   "pipeline_profile": [
     {
       "step": "conversation_context",

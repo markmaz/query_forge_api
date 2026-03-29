@@ -11,21 +11,20 @@ from app.services.planner.semantic_grounding_service import SemanticGroundingBun
 from app.services.planner_domain import service as planner_domain_service_module
 import app.services.planner_domain.pipeline_trace as pipeline_trace_module
 import app.services.planner_domain.semantic_integration_service as semantic_integration_module
+from app.services.planner_domain.column_scoring import _column_heuristic_boost, _required_column_keys
 from app.services.planner_domain.conversation_context import _prompt_is_followup_edit
 from app.services.planner_domain.domain_selection_service import DomainSelectionService
 from app.services.planner_domain.llm_planning_service import LLMPlanningService
+from app.services.planner_domain.normalizers.metric import _normalize_top_bottom_ranking_in_plan
+from app.services.planner_domain.normalizers.time import (
+    _normalize_relative_time_in_plan,
+    _normalize_year_keyword_filters_in_plan,
+)
 from app.services.planner_domain.plan_helpers import (
     _district_county_retry_hint,
     _serialize_domain_candidates_for_debug,
 )
-from app.services.planner_domain.service import (
-    PlannerDomainService,
-    _column_heuristic_boost,
-    _normalize_relative_time_in_plan,
-    _normalize_top_bottom_ranking_in_plan,
-    _normalize_year_keyword_filters_in_plan,
-    _required_column_keys,
-)
+from app.services.planner_domain.service import PlannerDomainService
 from app.services.planner_domain.types import LLMPlanResult, SlotExtractionResult
 
 
@@ -579,6 +578,14 @@ def test_golden_students_per_teacher_by_county_prefers_overlay_metric() -> None:
     assert out["explanation"]["metrics"][0]["metric_ref"] == "overlay:students_per_teacher"
     assert "I used the" in out["explanation"]["summary"]
     assert out["explanation"]["domain"]["reason"]
+    assert out["debug"]["shared_pipeline"]["domain_selection"]["pipeline_name"] == "planner_domain_selection_pipeline"
+    trace_nodes = out["debug"]["shared_pipeline"]["domain_selection"]["trace_nodes"]
+    assert [node["node"] for node in trace_nodes] == [
+        "normalize_text",
+        "resolve_capabilities",
+        "extract_signals",
+        "apply_policy_rerank",
+    ]
     sql_metrics = ((out["sql_json"].get("aggs") or {}).get("metrics") or [])
     assert sql_metrics
     assert sql_metrics[0]["fn"] == "overlay_metric"

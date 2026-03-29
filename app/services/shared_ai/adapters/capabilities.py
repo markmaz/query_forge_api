@@ -53,9 +53,9 @@ class HeuristicColumnCapabilityAdapter:
         return enriched, artifact
 
 
-class PlannerDomainCapabilityAdapter:
-    def __init__(self, *, service: PlannerDomainCapabilityService | None = None) -> None:
-        self._service = service or PlannerDomainCapabilityService()
+class DomainCapabilityResolverAdapter:
+    def __init__(self, *, resolver: PlannerDomainCapabilityService | None = None) -> None:
+        self._resolver = resolver or PlannerDomainCapabilityService()
 
     def resolve(
         self,
@@ -75,7 +75,7 @@ class PlannerDomainCapabilityAdapter:
             capabilities = attrs.get("capabilities_payload") or {}
             shortlisted_columns = attrs.get("shortlisted_columns") or []
             if workspace_id and base_domain_id > 0 and isinstance(capabilities, Mapping):
-                view = self._service.resolve_capabilities(
+                view = self._resolver.resolve_capabilities(
                     workspace_id=workspace_id,
                     vertical_norm=vertical_norm,
                     base_domain_id=base_domain_id,
@@ -97,7 +97,6 @@ class PlannerDomainCapabilityAdapter:
             debug={"mode": "planner_domain_capabilities"},
         )
         return enriched, artifact
-
 
 def _infer_column_candidate_capabilities(candidate: Candidate) -> set[str]:
     attrs = candidate.attributes

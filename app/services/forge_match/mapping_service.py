@@ -9,12 +9,26 @@ from typing import Any, Dict, List, Optional, Sequence
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
-from app.services.forge_match.candidate_retriever import ForgeMatchCandidateRetriever
+from app.services.forge_match.candidate_retriever import ForgeMatchCandidateRetriever, ForgeMatchColumnRetrievalAdapter
 from app.services.forge_match.confidence import ForgeMatchConfidenceScorer
 from app.services.forge_match.export_service import ForgeMatchExportService
 from app.services.forge_match.field_extractor import ForgeMatchFieldExtractor, SourceFieldRecord
 from app.services.forge_match.file_parser import ForgeMatchFileParser
 from app.services.forge_match.llm_ranker import ForgeMatchLLMRanker
+from app.services.forge_match.pipeline_adapters import (
+    ExistingRetrieverCandidateAdapter,
+    ForgeMatchConfidenceAdapter,
+    ForgeMatchLLMDecisionAdapter,
+)
+from app.services.forge_match.pipeline_definition import (
+    build_forge_match_candidate_pipeline_definition,
+    build_forge_match_row_pipeline_definition,
+)
+from app.services.shared_ai.adapters.candidates import candidate_to_dict
+from app.services.shared_ai.artifacts import ConfidenceArtifact, LLMDecisionArtifact, RerankedCandidatesArtifact
+from app.services.shared_ai.context import PipelineContext
+from app.services.shared_ai.executor import PipelineExecutor
+from app.services.shared_ai.tracing import serialize_pipeline_context
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +55,7 @@ class ForgeMatchMappingService:
         self._ranker = ranker or ForgeMatchLLMRanker()
         self._confidence = confidence or ForgeMatchConfidenceScorer()
         self._exporter = exporter or ForgeMatchExportService(sql=self._sql)
+        self._pipeline_executor = PipelineExecutor()
         self._extended_progress_columns_supported = True
 
     def list_sessions(
@@ -459,27 +474,17 @@ class ForgeMatchMappingService:
                 )
 
                 try:
-                    candidates = self._retriever.retrieve(
+                    candidates, llm_rank, confidence, pipeline_snapshot = self._run_row_pipeline(
                         workspace_id=ws,
                         source_record=source_record,
                         top_n=max(3, int(top_n or 8)),
                         vertical_norm=vertical_norm,
                         domain_id=int(domain_id) if domain_id is not None else None,
-                    )
-                    llm_rank = self._ranker.rank(
-                        workspace_id=ws,
-                        source_record=source_record,
-                        candidates=candidates,
                         llm_id=llm_id,
                     )
                     selected = self._find_candidate(candidates, llm_rank.get("selected_column_id"))
                     alternates = self._find_alternates(candidates, llm_rank.get("alternate_column_ids") or [])
-                    confidence = self._confidence.score(
-                        source_record=source_record,
-                        selected_candidate=selected,
-                        candidates=candidates,
-                        llm_result=llm_rank,
-                    )
+                    llm_rank["shared_pipeline"] = pipeline_snapshot
                     self._upsert_mapping_result(
                         session_id=sid,
                         source_record_id=src_id,
@@ -576,6 +581,74 @@ class ForgeMatchMappingService:
                 completed_at=datetime.now(timezone.utc),
             )
             raise
+
+    def _run_row_pipeline(
+        self,
+        *,
+        workspace_id: str,
+        source_record: SourceFieldRecord,
+        top_n: int,
+        vertical_norm: Optional[str],
+        domain_id: Optional[int],
+        llm_id: Optional[int],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any], dict[str, Any]]:
+        context = PipelineContext(
+            pipeline_name="forge_match_row_pipeline",
+            trace_id=f"forge_match_row:{uuid.uuid4().hex}",
+            workspace_id=workspace_id,
+            user_id=None,
+            vertical_norm=str(vertical_norm or "generic"),
+            request={
+                "prompt": str(
+                    source_record.normalized_search_text
+                    or source_record.source_description
+                    or source_record.source_field_name
+                    or ""
+                ).strip(),
+                "source_record": source_record,
+                "top_n": int(top_n),
+                "domain_id": int(domain_id) if domain_id is not None else None,
+                "llm_id": int(llm_id) if llm_id is not None else None,
+            },
+        )
+        definition = build_forge_match_row_pipeline_definition(
+            candidate_pipeline_factory=lambda _ctx: self._build_candidate_pipeline_definition(),
+            ranking_adapter=ForgeMatchLLMDecisionAdapter(ranker=self._ranker),
+            confidence_adapter=ForgeMatchConfidenceAdapter(scorer=self._confidence),
+        )
+        context = self._pipeline_executor.execute(definition, context)
+
+        reranked = context.get_artifact("reranked_candidates", node_name="forge_match_row_pipeline")
+        decision = context.get_artifact("llm_decision", node_name="forge_match_row_pipeline")
+        confidence = context.get_artifact("confidence", node_name="forge_match_row_pipeline")
+        if not isinstance(reranked, RerankedCandidatesArtifact):
+            raise TypeError("forge_match_row_pipeline expected RerankedCandidatesArtifact.")
+        if not isinstance(decision, LLMDecisionArtifact):
+            raise TypeError("forge_match_row_pipeline expected LLMDecisionArtifact.")
+        if not isinstance(confidence, ConfidenceArtifact):
+            raise TypeError("forge_match_row_pipeline expected ConfidenceArtifact.")
+
+        candidates = [candidate_to_dict(candidate) for candidate in list(reranked.candidates or [])]
+        llm_rank = dict(decision.raw_payload or {})
+        confidence_payload = dict(confidence.details or {})
+        confidence_payload.setdefault("confidence_score", confidence.confidence_score)
+        confidence_payload.setdefault("confidence_band", confidence.confidence_band)
+        return candidates, llm_rank, confidence_payload, serialize_pipeline_context(context)
+
+    def _build_candidate_pipeline_definition(self):
+        retrieval_adapter = self._candidate_retrieval_adapter()
+        capability_adapter = getattr(self._retriever, "_capability_adapter", None)
+        policy_adapter = getattr(self._retriever, "_policy_adapter", None)
+        return build_forge_match_candidate_pipeline_definition(
+            retrieval_adapter=retrieval_adapter,
+            capability_adapter=capability_adapter,
+            policy_adapter=policy_adapter,
+        )
+
+    def _candidate_retrieval_adapter(self):
+        if isinstance(self._retriever, ForgeMatchCandidateRetriever):
+            return ForgeMatchColumnRetrievalAdapter(owner=self._retriever)
+        return ExistingRetrieverCandidateAdapter(retriever=self._retriever)
 
     def get_analysis_status(self, *, workspace_id: str, job_id: str) -> Dict[str, Any]:
         ws = _required_text(workspace_id, "workspace_id")
@@ -1171,6 +1244,7 @@ class ForgeMatchMappingService:
               wt_best.table_name AS best_match_table_name,
               fr.alternate_workspace_column_ids,
               fr.retrieved_candidates_json,
+              fr.llm_response_json,
               fr.match_decision,
               fr.reason_codes_json,
               fr.explanation,
@@ -1221,6 +1295,7 @@ class ForgeMatchMappingService:
 
         alt_ids = _parse_json_list(row.get("alternate_workspace_column_ids"))
         retrieved = _parse_json_list(row.get("retrieved_candidates_json"))
+        llm_response = _parse_json_dict(row.get("llm_response_json")) or {}
         alternates = [item for item in retrieved if int(item.get("column_id") or 0) in {int(v) for v in alt_ids if _safe_int(v) is not None}]
 
         out = {
@@ -1246,6 +1321,8 @@ class ForgeMatchMappingService:
             "manually_selected_workspace_column_id": row.get("manually_selected_workspace_column_id"),
             "manual_selection": None,
             "retrieved_candidates": retrieved,
+            "llm_result": llm_response,
+            "shared_pipeline": dict(llm_response.get("shared_pipeline") or {}),
             "reviewer_user_id": row.get("reviewer_user_id"),
             "reviewed_at": row.get("reviewed_at"),
             "created_at": row.get("created_at"),

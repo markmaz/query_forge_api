@@ -400,6 +400,124 @@
       "endpoint": ""
     }
   },
+  "shared_pipeline": {
+    "domain_selection": {
+      "pipeline_name": "planner_domain_selection_pipeline",
+      "trace_id": "planner_domain_selection:ws-1:education",
+      "vertical_norm": "education",
+      "timings_ms": {
+        "normalize_text": 0,
+        "resolve_capabilities": 0,
+        "extract_signals": 0,
+        "apply_policy_rerank": 0
+      },
+      "debug": {
+        "normalize_text": {
+          "request_text_key": "prompt",
+          "normalized_text": "show me the oldest student"
+        },
+        "resolve_capabilities": {
+          "candidate_count": 1,
+          "capability_counts": {
+            "8": 1
+          }
+        },
+        "extract_signals": {
+          "source_text": "show me the oldest student",
+          "signals": [
+            "age_extreme_prompt",
+            "listing_intent",
+            "needs_student_identity",
+            "student_listing"
+          ]
+        },
+        "apply_policy_rerank": {
+          "candidate_count": 1,
+          "policy_effect_count": 0,
+          "signals": [
+            "age_extreme_prompt",
+            "listing_intent",
+            "needs_student_identity",
+            "student_listing"
+          ]
+        }
+      },
+      "trace_nodes": [
+        {
+          "pipeline_name": "planner_domain_selection_pipeline",
+          "node": "normalize_text",
+          "status": "completed",
+          "summary": {
+            "request_text_key": "prompt",
+            "normalized_text": "show me the oldest student"
+          },
+          "lineage": [
+            "planner_domain_selection_pipeline"
+          ]
+        },
+        {
+          "pipeline_name": "planner_domain_selection_pipeline",
+          "node": "resolve_capabilities",
+          "status": "completed",
+          "summary": {
+            "candidate_count": 1,
+            "capability_counts": {
+              "8": 1
+            }
+          },
+          "lineage": [
+            "planner_domain_selection_pipeline"
+          ]
+        },
+        {
+          "pipeline_name": "planner_domain_selection_pipeline",
+          "node": "extract_signals",
+          "status": "completed",
+          "summary": {
+            "source_text": "show me the oldest student",
+            "signals": [
+              "age_extreme_prompt",
+              "listing_intent",
+              "needs_student_identity",
+              "student_listing"
+            ]
+          },
+          "lineage": [
+            "planner_domain_selection_pipeline"
+          ]
+        },
+        {
+          "pipeline_name": "planner_domain_selection_pipeline",
+          "node": "apply_policy_rerank",
+          "status": "completed",
+          "summary": {
+            "candidate_count": 1,
+            "policy_effect_count": 0,
+            "signals": [
+              "age_extreme_prompt",
+              "listing_intent",
+              "needs_student_identity",
+              "student_listing"
+            ]
+          },
+          "lineage": [
+            "planner_domain_selection_pipeline"
+          ]
+        }
+      ],
+      "metadata": {
+        "graph_lineage": [],
+        "pipeline_definition": "planner_domain_selection_pipeline",
+        "executed_nodes": [
+          "normalize_text",
+          "resolve_capabilities",
+          "extract_signals",
+          "apply_policy_rerank"
+        ],
+        "skipped_nodes": []
+      }
+    }
+  },
   "pipeline_profile": [
     {
       "step": "conversation_context",

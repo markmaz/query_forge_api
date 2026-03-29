@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from app.services.forge_match.pipeline_definition import build_forge_match_candidate_pipeline_definition
+from app.services.forge_match.pipeline_definition import (
+    build_forge_match_candidate_pipeline_definition,
+    build_forge_match_row_pipeline_definition,
+)
 from app.services.planner_domain.pipeline_definition import build_planner_domain_selection_pipeline_definition
 from app.services.shared_ai.artifacts import CandidateSetArtifact, RerankedCandidatesArtifact
 from app.services.shared_ai.context import PipelineContext
@@ -23,6 +26,22 @@ class _PolicyAdapter:
     def rerank(self, *, context: PipelineContext, candidates, prompt_signals, capability_map):
         del context, candidates, prompt_signals, capability_map
         return RerankedCandidatesArtifact()
+
+
+class _RankingAdapter:
+    def rank(self, *, context: PipelineContext, candidates):
+        del context, candidates
+        from app.services.shared_ai.artifacts import LLMDecisionArtifact
+
+        return LLMDecisionArtifact(selected_candidate_id="10", ranked_candidate_ids=["10"], confidence=0.9, raw_payload={})
+
+
+class _ConfidenceAdapter:
+    def score(self, *, context: PipelineContext, candidates, decision):
+        del context, candidates, decision
+        from app.services.shared_ai.artifacts import ConfidenceArtifact
+
+        return ConfidenceArtifact(confidence_score=90, confidence_band="high")
 
 
 def test_forge_match_pipeline_definition_declares_expected_nodes_and_edges() -> None:
@@ -71,4 +90,30 @@ def test_planner_domain_pipeline_definition_declares_expected_nodes_and_edges() 
         ("normalize_text", "extract_signals"),
         ("extract_signals", "apply_policy_rerank"),
         ("resolve_capabilities", "apply_policy_rerank"),
+    }
+
+
+def test_forge_match_row_pipeline_definition_declares_expected_nodes_and_edges() -> None:
+    definition = build_forge_match_row_pipeline_definition(
+        candidate_pipeline_factory=lambda _context: build_forge_match_candidate_pipeline_definition(
+            retrieval_adapter=_RetrievalAdapter(),
+            capability_adapter=_CapabilityAdapter(),
+            policy_adapter=_PolicyAdapter(),
+        ),
+        ranking_adapter=_RankingAdapter(),
+        confidence_adapter=_ConfidenceAdapter(),
+    )
+
+    validate_pipeline_definition(definition)
+
+    assert definition.name == "forge_match_row_pipeline"
+    assert definition.start_nodes == ["dispatch_candidate_pipeline"]
+    assert sorted(definition.nodes.keys()) == [
+        "dispatch_candidate_pipeline",
+        "rank_candidates",
+        "score_confidence",
+    ]
+    assert {(edge.from_node, edge.to_node) for edge in definition.edges} == {
+        ("dispatch_candidate_pipeline", "rank_candidates"),
+        ("rank_candidates", "score_confidence"),
     }

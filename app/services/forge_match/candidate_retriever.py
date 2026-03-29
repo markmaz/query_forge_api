@@ -17,7 +17,7 @@ from app.services.forge_match.pipeline_definition import build_forge_match_candi
 from app.services.forge_match.normalizer import normalize_identifier, normalize_text, token_overlap_score, token_set
 from app.services.shared_ai.adapters.candidates import candidate_from_column_row, candidate_to_dict
 from app.services.shared_ai.adapters.capabilities import CandidateCapabilityAdapter, HeuristicColumnCapabilityAdapter
-from app.services.shared_ai.adapters.policies import CandidatePolicyRerankAdapter, PlannerPolicyRerankAdapter
+from app.services.shared_ai.adapters.policies import CandidatePolicyRerankAdapter, PolicyDrivenRerankAdapter
 from app.services.shared_ai.artifacts import CandidateSetArtifact
 from app.services.shared_ai.context import PipelineContext
 from app.services.shared_ai.executor import PipelineExecutor
@@ -90,7 +90,7 @@ class ForgeMatchCandidateRetriever:
             logger.info("ForgeMatch vector retrieval disabled (FORGE_MATCH_VECTOR_ENABLED=false or macOS default)")
         self._pipeline_executor = pipeline_executor or PipelineExecutor()
         self._capability_adapter = capability_adapter or HeuristicColumnCapabilityAdapter()
-        self._policy_adapter = policy_adapter or PlannerPolicyRerankAdapter()
+        self._policy_adapter = policy_adapter or PolicyDrivenRerankAdapter()
         self._last_pipeline_context: Optional[PipelineContext] = None
 
     def retrieve(

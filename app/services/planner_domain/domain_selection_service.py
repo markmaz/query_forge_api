@@ -637,23 +637,24 @@ class DomainSelectionService:
         semantic_grounding_factory: Callable[[], SemanticGroundingService],
         semantic_alias_constraints_fn: Callable[..., List[Dict[str, Any]]],
     ) -> None:
-        from app.services.shared_ai.adapters.capabilities import PlannerDomainCapabilityAdapter
-        from app.services.shared_ai.adapters.policies import PlannerPolicyRerankAdapter
+        from app.services.shared_ai.adapters.capabilities import DomainCapabilityResolverAdapter
+        from app.services.shared_ai.adapters.policies import PolicyDrivenRerankAdapter
 
         self._domain_vector = domain_vector
         self._capabilities = capabilities_service
         self._rerank_policy_engine = rerank_policy_engine
         self._pipeline_executor = PipelineExecutor()
-        self._planner_capability_adapter = PlannerDomainCapabilityAdapter(
-            service=rerank_policy_engine.capability_service,
+        self._planner_capability_adapter = DomainCapabilityResolverAdapter(
+            resolver=rerank_policy_engine.capability_service,
         )
-        self._planner_policy_adapter = PlannerPolicyRerankAdapter(
-            policy_service=rerank_policy_engine.policy_service,
+        self._planner_policy_adapter = PolicyDrivenRerankAdapter(
+            policy_provider=rerank_policy_engine.policy_service,
         )
         self._embedding_model_factory = embedding_model_factory
         self._column_vector_factory = column_vector_factory
         self._semantic_grounding_factory = semantic_grounding_factory
         self._semantic_alias_constraints_fn = semantic_alias_constraints_fn
+        self._last_pipeline_context: Optional[PipelineContext] = None
 
     def select_domain_and_shortlist(
         self,
@@ -670,6 +671,7 @@ class DomainSelectionService:
             (domain_candidates, selected_domain_id, capabilities,
              shortlisted_columns, ranking_debug, rerank_signals)
         """
+        self._last_pipeline_context = None
         domain_candidates = self._get_domain_candidates(
             workspace_id=workspace_id,
             vertical_norm=vertical_norm,
@@ -1202,6 +1204,7 @@ class DomainSelectionService:
             policy_adapter=self._planner_policy_adapter,
         )
         pipeline_context = self._pipeline_executor.execute(pipeline_definition, pipeline_context)
+        self._last_pipeline_context = pipeline_context
 
         prompt_signals_artifact = pipeline_context.get_artifact(
             "prompt_signals",
@@ -1274,6 +1277,10 @@ class DomainSelectionService:
             ranking,
             list(prompt_signals_artifact.signals),
         )
+
+    @property
+    def last_pipeline_context(self) -> Optional[PipelineContext]:
+        return self._last_pipeline_context
 
     def _shortlist_columns_for_domain(
         self,

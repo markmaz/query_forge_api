@@ -24,9 +24,9 @@ class CandidatePolicyRerankAdapter(Protocol):
         ...
 
 
-class PlannerPolicyRerankAdapter:
-    def __init__(self, *, policy_service: PlannerRerankPolicyService | None = None) -> None:
-        self._policies = policy_service or PlannerRerankPolicyService()
+class PolicyDrivenRerankAdapter:
+    def __init__(self, *, policy_provider: PlannerRerankPolicyService | None = None) -> None:
+        self._policies = policy_provider or PlannerRerankPolicyService()
 
     def rerank(
         self,
@@ -154,7 +154,6 @@ class PlannerPolicyRerankAdapter:
                 "policy_match_count": len(effects),
             },
         )
-
 
 def _candidate_base_score(candidate: Candidate) -> float:
     for key in ("final_score", "base_score", "combined_retrieval_score", "score", "vector_score", "lexical_score"):

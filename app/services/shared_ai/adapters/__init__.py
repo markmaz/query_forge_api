@@ -1,7 +1,7 @@
 from app.services.shared_ai.adapters.capabilities import (
     CandidateCapabilityAdapter,
+    DomainCapabilityResolverAdapter,
     HeuristicColumnCapabilityAdapter,
-    PlannerDomainCapabilityAdapter,
 )
 from app.services.shared_ai.adapters.candidates import (
     candidate_from_column_row,
@@ -10,15 +10,15 @@ from app.services.shared_ai.adapters.candidates import (
 )
 from app.services.shared_ai.adapters.policies import (
     CandidatePolicyRerankAdapter,
-    PlannerPolicyRerankAdapter,
+    PolicyDrivenRerankAdapter,
 )
 
 __all__ = [
     "CandidateCapabilityAdapter",
     "CandidatePolicyRerankAdapter",
+    "DomainCapabilityResolverAdapter",
     "HeuristicColumnCapabilityAdapter",
-    "PlannerDomainCapabilityAdapter",
-    "PlannerPolicyRerankAdapter",
+    "PolicyDrivenRerankAdapter",
     "candidate_from_column_row",
     "candidate_from_domain_row",
     "candidate_to_dict",

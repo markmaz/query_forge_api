@@ -69,23 +69,10 @@ from app.services.planner_domain.types import (
     PlanDomainNextActionsRequest,
     PlanDomainRequest,
 )
-from app.services.planner_domain.normalizers.entity import (
-    _normalize_country_filters_in_plan,
-    _normalize_school_name_filters_in_plan,
-    _normalize_staff_role_filters_in_plan,
-)
-from app.services.planner_domain.normalizers.metric import (
-    _normalize_adm_default_filters_in_plan,
-    _normalize_top_bottom_ranking_in_plan,
-)
-from app.services.planner_domain.normalizers.time import (
-    _normalize_relative_time_in_plan,
-    _normalize_year_keyword_filters_in_plan,
-    _normalize_school_year_filters_in_plan,
-    _normalize_semester_filters_in_plan,
-)
+from app.services.planner_domain.normalizers import entity as entity_normalizers
+from app.services.planner_domain.normalizers import metric as metric_normalizers
+from app.services.planner_domain.normalizers import time as time_normalizers
 from app.services.planner_domain.normalization_pipeline import NormalizationPipeline
-from app.services.planner_domain.column_scoring import _column_heuristic_boost, _required_column_keys
 from app.services.planner_domain.pipeline_trace import (
     _add_pipeline_step,
     _append_pipeline_trace_step,
@@ -98,19 +85,11 @@ from app.services.planner_domain.plan_helpers import (
     _serialize_domain_candidates_for_debug,
     _to_int,
 )
+from app.services.shared_ai.tracing import serialize_pipeline_context
 from app.services.semantic.value_alias_resolution_service import ValueAliasResolutionService
 from app.services.vector import DomainVectorIndexService
 
 logger = logging.getLogger(__name__)
-
-__all__ = [
-    "PlannerDomainService",
-    "_column_heuristic_boost",
-    "_normalize_relative_time_in_plan",
-    "_normalize_top_bottom_ranking_in_plan",
-    "_normalize_year_keyword_filters_in_plan",
-    "_required_column_keys",
-]
 
 
 class PlannerDomainService:
@@ -152,15 +131,15 @@ class PlannerDomainService:
         )
         self._normalization = NormalizationPipeline(
             normalizers=[
-                ("country", _normalize_country_filters_in_plan),
-                ("school_year", _normalize_school_year_filters_in_plan),
-                ("year_keyword", _normalize_year_keyword_filters_in_plan),
-                ("semester", _normalize_semester_filters_in_plan),
-                ("school_name", _normalize_school_name_filters_in_plan),
-                ("staff_role", _normalize_staff_role_filters_in_plan),
-                ("adm_default", _normalize_adm_default_filters_in_plan),
-                ("relative_time", _normalize_relative_time_in_plan),
-                ("top_bottom", _normalize_top_bottom_ranking_in_plan),
+                ("country", entity_normalizers._normalize_country_filters_in_plan),
+                ("school_year", time_normalizers._normalize_school_year_filters_in_plan),
+                ("year_keyword", time_normalizers._normalize_year_keyword_filters_in_plan),
+                ("semester", time_normalizers._normalize_semester_filters_in_plan),
+                ("school_name", entity_normalizers._normalize_school_name_filters_in_plan),
+                ("staff_role", entity_normalizers._normalize_staff_role_filters_in_plan),
+                ("adm_default", metric_normalizers._normalize_adm_default_filters_in_plan),
+                ("relative_time", time_normalizers._normalize_relative_time_in_plan),
+                ("top_bottom", metric_normalizers._normalize_top_bottom_ranking_in_plan),
             ]
         )
         self._domain_time_policy = domain_time_policy_service or DomainTimePolicyService()
@@ -605,6 +584,11 @@ class PlannerDomainService:
         }
         debug_payload = None
         if req.debug:
+            shared_pipeline = {}
+            if self._domain_selection.last_pipeline_context is not None:
+                shared_pipeline["domain_selection"] = serialize_pipeline_context(
+                    self._domain_selection.last_pipeline_context
+                )
             debug_payload = self._response_builder.build_debug_payload(
                 normalized_prompt=normalized_prompt,
                 conversation_id=conversation_id,
@@ -642,6 +626,7 @@ class PlannerDomainService:
                 explanation_summary_trace=explanation_summary_trace,
                 next_actions_trace=next_actions_trace,
                 technical_details=technical_details,
+                shared_pipeline=shared_pipeline,
                 profile_enabled=profile_enabled,
                 pipeline_profile=pipeline_profile_steps,
                 trace_capture_enabled=trace_capture_enabled,

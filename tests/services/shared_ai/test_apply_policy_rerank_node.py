@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.services.shared_ai.adapters.candidates import candidate_from_column_row
-from app.services.shared_ai.adapters.policies import PlannerPolicyRerankAdapter
+from app.services.shared_ai.adapters.policies import PolicyDrivenRerankAdapter
 from app.services.shared_ai.artifacts import CandidateSetArtifact, CapabilityMapArtifact, PromptSignalsArtifact
 from app.services.shared_ai.context import PipelineContext
 from app.services.shared_ai.nodes.apply_policy_rerank import ApplyPolicyRerankNode
@@ -78,7 +78,7 @@ def test_apply_policy_rerank_node_reranks_candidates() -> None:
     )
 
     context = ApplyPolicyRerankNode(
-        adapter=PlannerPolicyRerankAdapter(policy_service=_FakePolicyService())
+        adapter=PolicyDrivenRerankAdapter(policy_provider=_FakePolicyService())
     ).run(context)
 
     reranked = context.artifacts["reranked_candidates"]

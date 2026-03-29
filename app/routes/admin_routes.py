@@ -304,6 +304,29 @@ class PipelineProfileList(ForgeResource):
             return {"error": "pipeline profile list failed"}, 500
 
 
+@admin_ns.route("/pipeline-profiles/<string:trace_id>")
+class PipelineProfileDetail(ForgeResource):
+    @token_required
+    @require_admin()
+    def get(self, trace_id: str):
+        try:
+            from app.services.planner_domain import PlannerDomainService
+
+            workspace_id = extract_workspace_id()
+            user_id = str(getattr(g, "user_id", "") or "")
+            result = PlannerDomainService().get_pipeline_profile(
+                trace_id=trace_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("pipeline profile detail failed")
+            return {"error": "pipeline profile detail failed"}, 500
+
+
 # ---------------------------------------------------------------------------
 # Prompt feedback admin (view/delete)
 # ---------------------------------------------------------------------------

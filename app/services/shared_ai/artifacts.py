@@ -59,6 +59,13 @@ class LLMDecisionArtifact:
 
 
 @dataclass(frozen=True)
+class ConfidenceArtifact:
+    confidence_score: int
+    confidence_band: str
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class ValidationArtifact:
     is_valid: bool
     errors: list[str] = field(default_factory=list)

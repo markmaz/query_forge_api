@@ -529,6 +529,8 @@ def test_analyze_session_workflow_prefers_birth_date_candidate_from_shared_pipel
     assert payload[0]["final_score"] > payload[1]["final_score"]
     llm_payload = json.loads(str(sql.insert_calls[0].params["llm_response_json"]))
     assert llm_payload["selected_column_id"] == 202
+    assert llm_payload["shared_pipeline"]["pipeline_name"] == "forge_match_row_pipeline"
+    assert llm_payload["shared_pipeline"]["trace_nodes"][-1]["node"] == "score_confidence"
 
 
 def test_analyze_session_workflow_prefers_school_day_flag_candidate_from_shared_pipeline() -> None:
@@ -699,6 +701,7 @@ def test_analyze_session_workflow_prefers_school_day_flag_candidate_from_shared_
     assert payload[0]["final_score"] > payload[1]["final_score"]
     llm_payload = json.loads(str(sql.insert_calls[0].params["llm_response_json"]))
     assert llm_payload["selected_column_id"] == 302
+    assert llm_payload["shared_pipeline"]["trace_nodes"][-1]["node"] == "score_confidence"
 
 
 def test_patch_mappings_accepts_remap_action() -> None:
@@ -834,3 +837,89 @@ def test_cancel_analysis_job_marks_row_canceled() -> None:
     assert out["canceled"] is True
     assert out["status"] == "canceled"
     assert sql.write_calls
+
+
+def test_get_session_surfaces_shared_pipeline_debug_for_mapping_rows() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [
+            {
+                "id": "sess-1",
+                "workspace_id": "ws-1",
+                "uploaded_filename": "mapping.csv",
+                "file_type": "csv",
+                "created_by": "user-1",
+                "status": "analyzed",
+                "sheet_count": 1,
+                "source_record_count": 1,
+                "summary_json": None,
+                "created_at": "2026-03-12T00:00:00",
+                "updated_at": "2026-03-12T00:00:00",
+            }
+        ],
+        [
+            {
+                "id": 10,
+                "row_id": "Sheet1:2",
+                "sheet_name": "Sheet1",
+                "row_number": 2,
+                "source_field_name": "BirthDate",
+                "source_description": "Student date of birth",
+                "source_type": "date",
+                "source_object_name": "StudentDemographics",
+                "sample_value": "2010-02-14",
+                "category": None,
+                "normalized_search_text": "BirthDate. Student date of birth",
+                "raw_row_json": '{"field":"BirthDate"}',
+                "created_at": "2026-03-12T00:00:00",
+            }
+        ],
+        [
+            {
+                "mapping_id": "map-1",
+                "session_id": "sess-1",
+                "source_record_id": 10,
+                "source_row_id": "Sheet1:2",
+                "sheet_name": "Sheet1",
+                "row_number": 2,
+                "source_field_name": "BirthDate",
+                "source_description": "Student date of birth",
+                "source_type": "date",
+                "source_object_name": "StudentDemographics",
+                "sample_value": "2010-02-14",
+                "best_match_workspace_column_id": 4812,
+                "best_match_column_name": "student_birth_date",
+                "best_match_table_name": "dim_student",
+                "alternate_workspace_column_ids": "[]",
+                "retrieved_candidates_json": '[{"column_id":4812,"column_name":"student_birth_date"}]',
+                "llm_response_json": (
+                    '{"selected_column_id":4812,'
+                    '"shared_pipeline":{"pipeline_name":"forge_match_row_pipeline",'
+                    '"trace_nodes":[{"node":"dispatch_candidate_pipeline"},{"node":"rank_candidates"}]}}'
+                ),
+                "match_decision": "matched",
+                "reason_codes_json": '["name_similarity"]',
+                "explanation": "Strong name and type alignment.",
+                "ambiguity_note": None,
+                "llm_confidence": 0.91,
+                "confidence_score": 92,
+                "confidence_band": "high",
+                "status": "suggested",
+                "review_notes": None,
+                "manually_selected_workspace_column_id": None,
+                "manual_column_name": None,
+                "manual_table_name": None,
+                "reviewer_user_id": None,
+                "reviewed_at": None,
+                "created_at": "2026-03-12T00:00:00",
+                "updated_at": "2026-03-12T00:00:00",
+            }
+        ],
+    ]
+
+    svc = ForgeMatchMappingService(sql=sql)
+    out = svc.get_session(workspace_id="ws-1", session_id="sess-1")
+
+    assert out["mappings"][0]["llm_result"]["selected_column_id"] == 4812
+    assert out["mappings"][0]["shared_pipeline"]["pipeline_name"] == "forge_match_row_pipeline"
+    assert out["mappings"][0]["shared_pipeline"]["trace_nodes"][1]["node"] == "rank_candidates"
