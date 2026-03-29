@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import platform
+import uuid
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
@@ -12,7 +13,14 @@ from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.embedding.embedding_search_service import EmbeddingSearchService
 from app.services.forge_match.field_extractor import SourceFieldRecord
+from app.services.forge_match.pipeline_definition import build_forge_match_candidate_pipeline_definition
 from app.services.forge_match.normalizer import normalize_identifier, normalize_text, token_overlap_score, token_set
+from app.services.shared_ai.adapters.candidates import candidate_from_column_row, candidate_to_dict
+from app.services.shared_ai.adapters.capabilities import CandidateCapabilityAdapter, HeuristicColumnCapabilityAdapter
+from app.services.shared_ai.adapters.policies import CandidatePolicyRerankAdapter, PlannerPolicyRerankAdapter
+from app.services.shared_ai.artifacts import CandidateSetArtifact
+from app.services.shared_ai.context import PipelineContext
+from app.services.shared_ai.executor import PipelineExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +75,9 @@ class ForgeMatchCandidateRetriever:
         *,
         sql: Optional[ForgeQueryPort] = None,
         vector_search: Optional[EmbeddingSearchService] = None,
+        pipeline_executor: Optional[PipelineExecutor] = None,
+        capability_adapter: Optional[CandidateCapabilityAdapter] = None,
+        policy_adapter: Optional[CandidatePolicyRerankAdapter] = None,
     ) -> None:
         self._sql = sql or ForgeMetaSQL()
         vector_enabled = _is_vector_enabled()
@@ -77,6 +88,10 @@ class ForgeMatchCandidateRetriever:
         else:
             self._vector = None
             logger.info("ForgeMatch vector retrieval disabled (FORGE_MATCH_VECTOR_ENABLED=false or macOS default)")
+        self._pipeline_executor = pipeline_executor or PipelineExecutor()
+        self._capability_adapter = capability_adapter or HeuristicColumnCapabilityAdapter()
+        self._policy_adapter = policy_adapter or PlannerPolicyRerankAdapter()
+        self._last_pipeline_context: Optional[PipelineContext] = None
 
     def retrieve(
         self,
@@ -87,15 +102,51 @@ class ForgeMatchCandidateRetriever:
         vertical_norm: Optional[str] = None,
         domain_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
-        del vertical_norm  # reserved for future ranking constraints
-
         ws = str(workspace_id or "").strip()
         if ws == "":
             raise ForgeError("workspace_id is required", status_code=400)
 
         limit = max(3, min(30, int(top_n or 8)))
-        lexical_rows = self._load_lexical_candidates(
+        context = PipelineContext(
+            pipeline_name="forge_match_candidate_pipeline",
+            trace_id=f"forge_match_{uuid.uuid4().hex}",
             workspace_id=ws,
+            user_id=None,
+            vertical_norm=str(vertical_norm or "generic"),
+            request={
+                "prompt": str(source_record.normalized_search_text or source_record.source_field_name or "").strip(),
+                "source_record": source_record,
+                "top_n": limit,
+                "domain_id": int(domain_id) if domain_id is not None else None,
+            },
+        )
+        definition = build_forge_match_candidate_pipeline_definition(
+            retrieval_adapter=ForgeMatchColumnRetrievalAdapter(owner=self),
+            capability_adapter=self._capability_adapter,
+            policy_adapter=self._policy_adapter,
+        )
+        context = self._pipeline_executor.execute(definition, context)
+        self._last_pipeline_context = context
+
+        reranked = context.get_artifact("reranked_candidates", node_name="forge_match_candidate_pipeline")
+        candidates = list(getattr(reranked, "candidates", []) or [])
+        return [candidate_to_dict(candidate) for candidate in candidates[:limit]]
+
+    @property
+    def last_pipeline_context(self) -> Optional[PipelineContext]:
+        return self._last_pipeline_context
+
+    def _retrieve_initial_candidates(
+        self,
+        *,
+        workspace_id: str,
+        source_record: SourceFieldRecord,
+        top_n: int,
+        domain_id: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        limit = max(3, min(30, int(top_n or 8)))
+        lexical_rows = self._load_lexical_candidates(
+            workspace_id=workspace_id,
             source_record=source_record,
             domain_id=domain_id,
             max_rows=max(120, limit * 12),
@@ -109,7 +160,7 @@ class ForgeMatchCandidateRetriever:
             by_col[col_id] = row
 
         vector_scores = self._load_vector_scores(
-            workspace_id=ws,
+            workspace_id=workspace_id,
             source_record=source_record,
             domain_id=domain_id,
             limit=max(limit * 3, 12),
@@ -118,7 +169,7 @@ class ForgeMatchCandidateRetriever:
         if not by_col and vector_scores:
             # Fallback: hydrate columns from IDs returned by vector index.
             hydrated = self._load_candidates_by_ids(
-                workspace_id=ws,
+                workspace_id=workspace_id,
                 column_ids=list(vector_scores.keys()),
                 domain_id=domain_id,
             )
@@ -152,7 +203,7 @@ class ForgeMatchCandidateRetriever:
             )
 
         scored.sort(key=lambda item: (item.combined_retrieval_score, item.lexical_score, item.vector_score), reverse=True)
-        return [item.to_dict() for item in scored[:limit]]
+        return [item.to_dict() for item in scored]
 
     def _load_lexical_candidates(
         self,
@@ -389,4 +440,33 @@ def _to_int_or_none(value: Any) -> Optional[int]:
     return parsed if parsed > 0 else None
 
 
-__all__ = ["ForgeMatchCandidateRetriever", "RetrievedCandidate"]
+class ForgeMatchColumnRetrievalAdapter:
+    def __init__(self, *, owner: ForgeMatchCandidateRetriever) -> None:
+        self._owner = owner
+
+    def retrieve(self, *, context: PipelineContext) -> CandidateSetArtifact:
+        source_record = context.request.get("source_record")
+        if not isinstance(source_record, SourceFieldRecord):
+            raise TypeError("ForgeMatchColumnRetrievalAdapter requires a SourceFieldRecord in request['source_record'].")
+
+        rows = self._owner._retrieve_initial_candidates(
+            workspace_id=str(context.workspace_id or "").strip(),
+            source_record=source_record,
+            top_n=int(context.request.get("top_n") or 8),
+            domain_id=_to_int_or_none(context.request.get("domain_id")),
+        )
+        return CandidateSetArtifact(
+            candidates=[candidate_from_column_row(row) for row in rows],
+            retrieval_debug={
+                "candidate_count": len(rows),
+                "domain_id": _to_int_or_none(context.request.get("domain_id")),
+                "vertical_norm": str(context.vertical_norm or "generic"),
+            },
+        )
+
+
+__all__ = [
+    "ForgeMatchCandidateRetriever",
+    "ForgeMatchColumnRetrievalAdapter",
+    "RetrievedCandidate",
+]

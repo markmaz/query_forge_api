@@ -10604,3 +10604,861 @@ prompt=Find all students with a first name of Holden and last name of Black
 14. Optionally polish explanation summary with LLM: 0ms
 15. Defer next action generation (async): 0ms
 16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:06:29,976 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=3836f87c-9b0c-4217-81ac-88086ee4daef workspace_id=ws-1 user_id=user-1 conversation_id=pdc_7c371c6a92de412a8237 total_ms=2972
+prompt=students per teacher by county
+1. Load and prepare conversation context: 9ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 2896ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 0ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:06:30,641 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=3087f7ce-cd73-4fa4-b19a-6818170d2fd8 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_7ddd6ee5bb114336b7d0 total_ms=328
+prompt=students per teacher by county
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 259ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Extract intent/constraints slot hints via LLM: 0ms
+6. Compact capabilities payload for plan generation: 0ms
+7. Generate PlanV2 with LLM: 0ms
+8. Normalize plan and apply deterministic value/filter normalizers: 0ms
+9. Validate and repair plan against capabilities: 0ms
+10. Map validated plan to SQL JSON: 0ms
+11. Build deterministic explanation object: 0ms
+12. Optionally polish explanation summary with LLM: 0ms
+13. Defer next action generation (async): 0ms
+14. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:06:30,971 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=a7c15c47-83cc-4672-afa3-39b4c0b7c094 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_2e79ad49e8a541878ec7 total_ms=327
+prompt=students per teacher by county
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 261ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Extract intent/constraints slot hints via LLM: 0ms
+6. Compact capabilities payload for plan generation: 0ms
+7. Generate PlanV2 with LLM: 0ms
+8. Normalize plan and apply deterministic value/filter normalizers: 0ms
+9. Validate and repair plan against capabilities: 0ms
+10. Retry PlanV2 generation after validation feedback: 0ms
+11. Normalize retry plan and re-apply deterministic normalizers: 0ms
+12. Validate and repair retry plan: 0ms
+13. Map validated plan to SQL JSON: 0ms
+14. Build deterministic explanation object: 0ms
+15. Optionally polish explanation summary with LLM: 0ms
+16. Defer next action generation (async): 0ms
+17. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:06:31,297 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=1679a2b8-555b-4ffb-aa2a-a77bc21fc469 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_2739dd85ce814da7bc5d total_ms=324
+prompt=show students by county
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 257ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Extract intent/constraints slot hints via LLM: 0ms
+8. Compact capabilities payload for plan generation: 0ms
+9. Generate PlanV2 with LLM: 0ms
+10. Normalize plan and apply deterministic value/filter normalizers: 0ms
+11. Validate and repair plan against capabilities: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:06:31,596 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=e431d821-9994-4cc0-9cbb-6b871d1096a6 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_4db4b23244754e71a0f2 total_ms=296
+prompt=Show me where Jennifer Gilstrap works
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 224ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 2ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:06:31,919 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=7c84bfd2-df89-4d17-a052-9f31e1786e77 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_45ad8654fcb049539178 total_ms=321
+prompt=Show me the principal for Barksdale Elementary
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 254ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 0ms
+12. Generate in-domain next action suggestions: 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:06:32,187 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=db99c16a-a655-46c7-98ba-52c1c487466e workspace_id=ws-1 user_id=user-1 conversation_id=pdc_4811488de6ae433898a6 total_ms=265
+prompt=Show me the principal for Barksdale Elementary
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 201ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 0ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:06:32,434 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=159902f4-e97b-484b-b9ee-244046dd93d6 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_7a547561a62e4ca39a0d total_ms=243
+prompt=list students by county
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 186ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 0ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 0ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:06:32,928 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=3b2fcf38-fae7-4b16-ace6-9be142b37ebc workspace_id=ws-1 user_id=user-1 conversation_id=pdc_7fd3dfd9dbcf495f988c total_ms=248
+prompt=students per teacher by county
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 174ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 66ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 0ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:06:33,238 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=dd9748a9-7552-47d2-8c22-1bd753ef51b6 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_438ec67d02bf40959ab9 total_ms=307
+prompt=Show me all the african american students currently enrolled
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 249ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 0ms
+5. Extract intent/constraints slot hints via LLM: 0ms
+6. Compact capabilities payload for plan generation: 0ms
+7. Generate PlanV2 with LLM: 0ms
+8. Normalize plan and apply deterministic value/filter normalizers: 0ms
+9. Validate and repair plan against capabilities: 0ms
+10. Map validated plan to SQL JSON: 0ms
+11. Build deterministic explanation object: 0ms
+12. Optionally polish explanation summary with LLM: 0ms
+13. Defer next action generation (async): 0ms
+14. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:06:33,519 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=990e8104-9ffd-480e-a142-1b17ce791145 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_a5de8881b0b3468dab9f total_ms=277
+prompt=students not born in the us
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 217ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 0ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 1ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:06:33,911 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=a555b271-5aaf-4c9f-b145-60cce84db4f8 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_216565ced5304b4b8901 total_ms=390
+prompt=Find all students with a first name of Holden and last name of Black
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 285ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 0ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 1ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:08:37,958 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=4735dc7f-4463-44a6-abb6-b9b918892cde workspace_id=ws-1 user_id=user-1 conversation_id=pdc_847c92e1abad4e459fea total_ms=508
+prompt=students per teacher by county
+1. Load and prepare conversation context: 1ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 425ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 0ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:08:38,557 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=21ffd64f-cb07-4e09-8809-6fc574cdeb3e workspace_id=ws-1 user_id=user-1 conversation_id=pdc_5af341f615f94e6c8729 total_ms=283
+prompt=students per teacher by county
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 225ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Extract intent/constraints slot hints via LLM: 0ms
+6. Compact capabilities payload for plan generation: 0ms
+7. Generate PlanV2 with LLM: 0ms
+8. Normalize plan and apply deterministic value/filter normalizers: 0ms
+9. Validate and repair plan against capabilities: 0ms
+10. Map validated plan to SQL JSON: 0ms
+11. Build deterministic explanation object: 0ms
+12. Optionally polish explanation summary with LLM: 0ms
+13. Defer next action generation (async): 0ms
+14. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:08:38,896 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=077259a2-2fbb-46da-9755-2f64e63643ba workspace_id=ws-1 user_id=user-1 conversation_id=pdc_dbf2229c0b734136a505 total_ms=337
+prompt=students per teacher by county
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 264ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 2ms
+5. Extract intent/constraints slot hints via LLM: 0ms
+6. Compact capabilities payload for plan generation: 0ms
+7. Generate PlanV2 with LLM: 0ms
+8. Normalize plan and apply deterministic value/filter normalizers: 0ms
+9. Validate and repair plan against capabilities: 0ms
+10. Retry PlanV2 generation after validation feedback: 0ms
+11. Normalize retry plan and re-apply deterministic normalizers: 0ms
+12. Validate and repair retry plan: 0ms
+13. Map validated plan to SQL JSON: 0ms
+14. Build deterministic explanation object: 0ms
+15. Optionally polish explanation summary with LLM: 0ms
+16. Defer next action generation (async): 0ms
+17. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:08:39,213 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=071cc01a-91ae-4b2c-876c-b753d71c1597 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_029adc210d644c0ab6d9 total_ms=315
+prompt=show students by county
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 251ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Extract intent/constraints slot hints via LLM: 0ms
+8. Compact capabilities payload for plan generation: 0ms
+9. Generate PlanV2 with LLM: 0ms
+10. Normalize plan and apply deterministic value/filter normalizers: 0ms
+11. Validate and repair plan against capabilities: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:08:39,529 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=6a7dce9a-1117-4585-9e26-7225f8d3287d workspace_id=ws-1 user_id=user-1 conversation_id=pdc_827f77e04a784437baf3 total_ms=314
+prompt=Show me where Jennifer Gilstrap works
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 235ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 2ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 5ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:08:39,856 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=6d7c2051-7f17-44c1-a2d0-94f3e7f95176 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_de1a711fad7949b0ba9a total_ms=324
+prompt=Show me the principal for Barksdale Elementary
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 260ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 0ms
+12. Generate in-domain next action suggestions: 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:08:40,182 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=712732bf-db92-449a-81be-6e90dd0762c6 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_8e0ebc2bdbe44d0295b8 total_ms=323
+prompt=Show me the principal for Barksdale Elementary
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 250ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 0ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:08:40,456 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=639b06ca-146b-4daa-9f6d-28e97337c626 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_863fa57ae20f4fed9dff total_ms=270
+prompt=list students by county
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 202ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 0ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:08:40,917 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=2b0ebe1d-37b0-447f-ba06-975364b66580 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_ee3964a849264391b206 total_ms=257
+prompt=students per teacher by county
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 187ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 2ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 62ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 0ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:08:41,226 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=fbb83226-d2b1-464b-b9c7-d4ae814325ad workspace_id=ws-1 user_id=user-1 conversation_id=pdc_5d5c610a046744c6844f total_ms=306
+prompt=Show me all the african american students currently enrolled
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 246ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 0ms
+5. Extract intent/constraints slot hints via LLM: 0ms
+6. Compact capabilities payload for plan generation: 0ms
+7. Generate PlanV2 with LLM: 0ms
+8. Normalize plan and apply deterministic value/filter normalizers: 0ms
+9. Validate and repair plan against capabilities: 0ms
+10. Map validated plan to SQL JSON: 0ms
+11. Build deterministic explanation object: 0ms
+12. Optionally polish explanation summary with LLM: 0ms
+13. Defer next action generation (async): 0ms
+14. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:08:41,538 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=70ba6c55-1758-4081-b7e4-4df9e0b70be6 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_32002b296a224f14b12e total_ms=308
+prompt=students not born in the us
+1. Load and prepare conversation context: 1ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 236ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 8ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:08:42,083 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=944f7ff8-d370-405a-a5cc-e8d7f34bca53 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_8062bec659594d3899fb total_ms=542
+prompt=Find all students with a first name of Holden and last name of Black
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 434ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 0ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:13,693 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=8ba62cf3-d617-475f-8ed9-a453e6f3ebd0 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_036c2a58ddc34451b7fc total_ms=706
+prompt=show me students by county
+1. Load and prepare conversation context: 1ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 546ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 9ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 2ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 0ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:14,234 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=287d99b4-69f2-476e-b5f9-6703abcc4516 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_822d08f8705648bfab9b total_ms=504
+prompt=show me the staff at barksdale elementary
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 343ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 2ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 2ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:14,591 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=e4afcf05-ae29-4365-97e0-84bb7b5714b3 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_822d08f8705648bfab9b total_ms=356
+prompt=sort by position
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 219ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 2ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 2ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 0ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:15,076 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=b064c7ac-b3ad-4297-9d7e-3a1f412ad26d workspace_id=ws-1 user_id=user-1 conversation_id=pdc_missing total_ms=481
+prompt=sort by position
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 204ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 78ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 3ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 0ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:15,722 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=a29d2fd1-6035-4ac8-bd1e-3ee276f5aba5 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_5397a5f5abff4e44b1bc total_ms=616
+prompt=show me students enrolled at Barksdale Elementary
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 421ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 2ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 2ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:16,190 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=644ce7fc-8a0e-43a9-a04d-d8bf17ee5c5d workspace_id=ws-1 user_id=user-1 conversation_id=pdc_d17795ccd4194a0eadff total_ms=462
+prompt=show me the days off at Barksdale Elementary in December
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 269ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 2ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:16,630 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=8b4c4a76-8b9d-4d28-a824-74c3f3379411 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_22eb593d07fd4313b0bd total_ms=436
+prompt=show me all the african american students currently enrolled
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 321ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 1ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:17,175 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=816c0e50-8ef3-405a-9035-6dd1151eb0eb workspace_id=ws-1 user_id=user-1 conversation_id=pdc_0695532c2806406da175 total_ms=540
+prompt=show me the oldest student
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 372ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 0ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:17,739 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=633288aa-bde2-4ed5-9c6d-c929506f3b26 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_0e7961692cbf430bb302 total_ms=560
+prompt=show me students born in January
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 361ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 3ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 1ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:18,252 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=02fe9147-2769-4ee9-8a62-96279c032bfb workspace_id=ws-1 user_id=user-1 conversation_id=pdc_f34f2208845947ec9cc5 total_ms=508
+prompt=show me enrollment data by semester for school year 2025
+1. Load and prepare conversation context: 6ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 329ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 2ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:18,746 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=8b508148-414f-475f-9ad1-f56dd6692e24 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_7cda6bbd581e4b729503 total_ms=490
+prompt=show me the top 10 schools by enrollment
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 304ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 2ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 0ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:19,236 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=ae8f1d0f-e346-4e41-a0d8-e3b04a9c72fa workspace_id=ws-1 user_id=user-1 conversation_id=pdc_66b8fd48a62c40268df5 total_ms=486
+prompt=show me the staff at barksdale elementary
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 325ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 2ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 2ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:19,700 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=793b1f5c-5370-4fdf-af51-01d5131ddbcf workspace_id=ws-1 user_id=user-1 conversation_id=pdc_fa4d172e94b247669768 total_ms=460
+prompt=show me the staff at barksdale elementary
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 290ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 2ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 2ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:19,982 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=bb3819a4-af57-4f5f-bb0c-b2c6a309df75 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_fa4d172e94b247669768 total_ms=280
+prompt=sort by position
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 152ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 2ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 2ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 0ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:20,640 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=38ec6102-a636-487b-86d4-38767118a7a2 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_a0dd1bc909794b708c14 total_ms=510
+prompt=students per teacher by county
+1. Load and prepare conversation context: 2ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 356ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 5ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 0ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:21,588 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=f4d75db7-c289-41d0-867b-6ea96c451c0e workspace_id=ws-1 user_id=user-1 conversation_id=pdc_f5791601304847f29579 total_ms=468
+prompt=students per teacher by county
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 322ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 3ms
+5. Extract intent/constraints slot hints via LLM: 0ms
+6. Compact capabilities payload for plan generation: 0ms
+7. Generate PlanV2 with LLM: 0ms
+8. Normalize plan and apply deterministic value/filter normalizers: 0ms
+9. Validate and repair plan against capabilities: 0ms
+10. Map validated plan to SQL JSON: 0ms
+11. Build deterministic explanation object: 0ms
+12. Optionally polish explanation summary with LLM: 0ms
+13. Defer next action generation (async): 0ms
+14. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:22,079 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=29915c65-7799-4b92-925b-38eeac4fa408 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_cb675fc75b76486f8e12 total_ms=487
+prompt=students per teacher by county
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 338ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 5ms
+5. Extract intent/constraints slot hints via LLM: 0ms
+6. Compact capabilities payload for plan generation: 0ms
+7. Generate PlanV2 with LLM: 0ms
+8. Normalize plan and apply deterministic value/filter normalizers: 0ms
+9. Validate and repair plan against capabilities: 0ms
+10. Retry PlanV2 generation after validation feedback: 0ms
+11. Normalize retry plan and re-apply deterministic normalizers: 0ms
+12. Validate and repair retry plan: 0ms
+13. Map validated plan to SQL JSON: 0ms
+14. Build deterministic explanation object: 0ms
+15. Optionally polish explanation summary with LLM: 0ms
+16. Defer next action generation (async): 0ms
+17. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:22,512 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=4b27bb26-5a02-4c3b-bf54-8aa68804021b workspace_id=ws-1 user_id=user-1 conversation_id=pdc_f438e37df22540b8a8cb total_ms=430
+prompt=show students by county
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 293ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Extract intent/constraints slot hints via LLM: 0ms
+8. Compact capabilities payload for plan generation: 0ms
+9. Generate PlanV2 with LLM: 0ms
+10. Normalize plan and apply deterministic value/filter normalizers: 0ms
+11. Validate and repair plan against capabilities: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:22,948 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=d0378035-1190-4068-8e18-7ac2669621d9 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_ee35ab0cbd984d69b932 total_ms=432
+prompt=Show me where Jennifer Gilstrap works
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 279ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 3ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:23,454 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=bb705efb-4d95-40f2-8c7d-5e0a766eae4e workspace_id=ws-1 user_id=user-1 conversation_id=pdc_2b108958ad71482bb3df total_ms=502
+prompt=Show me the principal for Barksdale Elementary
+1. Load and prepare conversation context: 4ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 335ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 2ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 0ms
+12. Generate in-domain next action suggestions: 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:23,941 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=7d25f7d8-01ad-409a-b8b2-5272b021f4a8 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_e81767c7877646de9516 total_ms=482
+prompt=Show me the principal for Barksdale Elementary
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 313ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 2ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 0ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:24,346 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=ed71bd8a-f9cf-471a-8c45-fa134f762b70 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_e60e36fbe2024fc7bdec total_ms=399
+prompt=list students by county
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 262ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 0ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 5ms
+2026-03-29 00:10:25,185 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=1989a959-b5d9-4447-830e-7a736edd3771 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_aff69464dbb34e56be46 total_ms=344
+prompt=students per teacher by county
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 214ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 1ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 115ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 0ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 2ms
+2026-03-29 00:10:25,662 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=bea2d4c3-a6a8-4233-979c-390f43d6a0cd workspace_id=ws-1 user_id=user-1 conversation_id=pdc_0c67488c075043599a04 total_ms=472
+prompt=Show me all the african american students currently enrolled
+1. Load and prepare conversation context: 46ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 272ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 0ms
+5. Extract intent/constraints slot hints via LLM: 0ms
+6. Compact capabilities payload for plan generation: 0ms
+7. Generate PlanV2 with LLM: 0ms
+8. Normalize plan and apply deterministic value/filter normalizers: 0ms
+9. Validate and repair plan against capabilities: 0ms
+10. Map validated plan to SQL JSON: 0ms
+11. Build deterministic explanation object: 0ms
+12. Optionally polish explanation summary with LLM: 0ms
+13. Defer next action generation (async): 0ms
+14. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:26,107 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=16c7b7b0-ba5b-49f2-9d42-dd4b7c9e9f95 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_b7e5b802781b4e32adea total_ms=438
+prompt=students not born in the us
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 290ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 2ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 2ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms
+2026-03-29 00:10:26,853 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=059168ca-5c17-4695-b569-8b5c8028dde4 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_bbae45735cdd4abb90a5 total_ms=742
+prompt=Find all students with a first name of Holden and last name of Black
+1. Load and prepare conversation context: 0ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 463ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 2ms
+5. Compact capabilities payload for plan generation: 0ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 0ms
+8. Validate and repair plan against capabilities: 0ms
+9. Retry PlanV2 generation after validation feedback: 0ms
+10. Normalize retry plan and re-apply deterministic normalizers: 2ms
+11. Validate and repair retry plan: 0ms
+12. Map validated plan to SQL JSON: 0ms
+13. Build deterministic explanation object: 0ms
+14. Optionally polish explanation summary with LLM: 0ms
+15. Defer next action generation (async): 0ms
+16. Persist conversation state for follow-up context: 0ms

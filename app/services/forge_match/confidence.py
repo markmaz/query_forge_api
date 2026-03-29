@@ -26,6 +26,7 @@ class ForgeMatchConfidenceScorer:
         lexical = float(selected_candidate.get("lexical_score") or 0.0)
         vector = float(selected_candidate.get("vector_score") or 0.0)
         retrieval = float(selected_candidate.get("combined_retrieval_score") or 0.0)
+        reranked = float(selected_candidate.get("final_score") or retrieval)
         dtype = type_compatibility(source_record.source_type, selected_candidate.get("data_type"))
 
         desc_sim = token_overlap_score(
@@ -43,7 +44,7 @@ class ForgeMatchConfidenceScorer:
         score_norm = (
             (lexical * 0.24)
             + (vector * 0.24)
-            + (retrieval * 0.18)
+            + (reranked * 0.18)
             + (dtype * 0.12)
             + (desc_sim * 0.08)
             + (table_align * 0.06)
@@ -68,9 +69,13 @@ class ForgeMatchConfidenceScorer:
     def _ambiguity_penalty(*, candidates: Sequence[Dict[str, Any]]) -> float:
         if len(candidates) < 2:
             return 0.0
-        ranked = sorted(candidates, key=lambda row: float(row.get("combined_retrieval_score") or 0.0), reverse=True)
-        top = float(ranked[0].get("combined_retrieval_score") or 0.0)
-        second = float(ranked[1].get("combined_retrieval_score") or 0.0)
+        ranked = sorted(
+            candidates,
+            key=lambda row: float(row.get("final_score") or row.get("combined_retrieval_score") or 0.0),
+            reverse=True,
+        )
+        top = float(ranked[0].get("final_score") or ranked[0].get("combined_retrieval_score") or 0.0)
+        second = float(ranked[1].get("final_score") or ranked[1].get("combined_retrieval_score") or 0.0)
         gap = max(0.0, top - second)
         if gap >= 0.25:
             return 0.0

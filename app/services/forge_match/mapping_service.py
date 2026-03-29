@@ -297,7 +297,6 @@ class ForgeMatchMappingService:
         force: bool = False,
         llm_id: Optional[int] = None,
     ) -> Dict[str, Any]:
-        del vertical_norm  # reserved for future filtering
         ws = _required_text(workspace_id, "workspace_id")
         sid = _required_text(session_id, "session_id")
         session = self._get_session_row(workspace_id=ws, session_id=sid)
@@ -340,6 +339,7 @@ class ForgeMatchMappingService:
             "message": "ForgeMatch analysis queued",
             "top_n": max(3, int(top_n or 8)),
             "domain_id": int(domain_id) if domain_id is not None else None,
+            "vertical_norm": _to_text_or_none(vertical_norm),
             "force": bool(force),
             "llm_id": int(llm_id) if llm_id is not None else None,
         }
@@ -356,8 +356,6 @@ class ForgeMatchMappingService:
         job_id: Optional[str] = None,
         llm_id: Optional[int] = None,
     ) -> Dict[str, Any]:
-        del vertical_norm  # reserved for future filtering
-
         ws = _required_text(workspace_id, "workspace_id")
         sid = _required_text(session_id, "session_id")
         session = self._get_session_row(workspace_id=ws, session_id=sid)
@@ -465,6 +463,7 @@ class ForgeMatchMappingService:
                         workspace_id=ws,
                         source_record=source_record,
                         top_n=max(3, int(top_n or 8)),
+                        vertical_norm=vertical_norm,
                         domain_id=int(domain_id) if domain_id is not None else None,
                     )
                     llm_rank = self._ranker.rank(

@@ -77,7 +77,12 @@ from app.services.planner_domain.prompt_intents import (
     _slot_mentions_students,
 )
 from app.services.planner_domain.rerank_policy_engine import PlannerDomainRerankPolicyEngine
+from app.services.planner_domain.pipeline_definition import build_planner_domain_selection_pipeline_definition
 from app.services.planner.semantic_grounding_service import SemanticGroundingService
+from app.services.shared_ai.adapters.candidates import candidate_from_domain_row
+from app.services.shared_ai.artifacts import CandidateSetArtifact, PromptSignalsArtifact, RerankedCandidatesArtifact
+from app.services.shared_ai.context import PipelineContext
+from app.services.shared_ai.executor import PipelineExecutor
 
 # ---------------------------------------------------------------------------
 # Module-level constants
@@ -632,9 +637,19 @@ class DomainSelectionService:
         semantic_grounding_factory: Callable[[], SemanticGroundingService],
         semantic_alias_constraints_fn: Callable[..., List[Dict[str, Any]]],
     ) -> None:
+        from app.services.shared_ai.adapters.capabilities import PlannerDomainCapabilityAdapter
+        from app.services.shared_ai.adapters.policies import PlannerPolicyRerankAdapter
+
         self._domain_vector = domain_vector
         self._capabilities = capabilities_service
         self._rerank_policy_engine = rerank_policy_engine
+        self._pipeline_executor = PipelineExecutor()
+        self._planner_capability_adapter = PlannerDomainCapabilityAdapter(
+            service=rerank_policy_engine.capability_service,
+        )
+        self._planner_policy_adapter = PlannerPolicyRerankAdapter(
+            policy_service=rerank_policy_engine.policy_service,
+        )
         self._embedding_model_factory = embedding_model_factory
         self._column_vector_factory = column_vector_factory
         self._semantic_grounding_factory = semantic_grounding_factory
@@ -1090,10 +1105,8 @@ class DomainSelectionService:
         prompt: str,
         domain_candidates: Sequence[Mapping[str, Any]],
     ) -> Tuple[int, Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
-        ranking: List[Dict[str, Any]] = []
-        best_row: Optional[Dict[str, Any]] = None
+        ranking_seed_rows: List[Dict[str, Any]] = []
         first_error: Optional[ForgeError] = None
-        prompt_signals = self._rerank_policy_engine.extract_prompt_signals(prompt=prompt)
 
         for candidate in list(domain_candidates or [])[:3]:
             domain_id = _to_int(candidate.get("domain_id"))
@@ -1109,7 +1122,7 @@ class DomainSelectionService:
             except ForgeError as exc:
                 if first_error is None:
                     first_error = exc
-                ranking.append({"domain_id": domain_id, "status": "error", "error": str(exc), "score": 0.0})
+                ranking_seed_rows.append({"domain_id": domain_id, "status": "error", "error": str(exc), "score": 0.0})
                 continue
 
             shortlist = self._shortlist_columns_for_domain(
@@ -1147,49 +1160,119 @@ class DomainSelectionService:
                 shortlisted_columns=shortlist,
             )
             base_score = round(score + semantic_score, 5)
-            policy_eval = self._rerank_policy_engine.evaluate_candidate(
-                prompt=prompt,
-                workspace_id=workspace_id,
-                vertical_norm=vertical_norm,
-                base_domain_id=int(domain_id),
-                base_score=base_score,
-                capabilities=capabilities,
-                shortlisted_columns=shortlist,
-                prompt_signals=prompt_signals,
+            ranking_seed_rows.append(
+                {
+                    "domain_id": domain_id,
+                    "name": str(candidate.get("name") or f"domain_{domain_id}"),
+                    "score": base_score,
+                    "base_score": base_score,
+                    "semantic_score": semantic_score,
+                    "vector_score": float(candidate.get("score") or 0.0),
+                    "source": str(candidate.get("source") or "vector"),
+                    "capabilities_payload": capabilities,
+                    "shortlisted_columns": shortlist,
+                    "column_shortlist_count": len(shortlist),
+                    "dimension_count": len(list(capabilities.get("dimensions") or [])),
+                }
             )
-            score = float(policy_eval["final_score"])
+
+        successful_seed_rows = [row for row in ranking_seed_rows if str(row.get("status") or "") != "error"]
+        if not successful_seed_rows:
+            if first_error is not None:
+                raise first_error
+            raise ForgeError("No accessible domain candidates found", status_code=404)
+
+        pipeline_context = PipelineContext(
+            pipeline_name="planner_domain_selection_pipeline",
+            trace_id=f"planner_domain_selection:{workspace_id}:{vertical_norm}",
+            workspace_id=workspace_id,
+            user_id=user_id,
+            vertical_norm=vertical_norm,
+            request={"prompt": prompt},
+        )
+        pipeline_context.set_artifact(
+            "candidate_set",
+            CandidateSetArtifact(
+                candidates=[candidate_from_domain_row(row) for row in successful_seed_rows],
+                retrieval_debug={"candidate_count": len(successful_seed_rows)},
+            ),
+        )
+        pipeline_definition = build_planner_domain_selection_pipeline_definition(
+            capability_adapter=self._planner_capability_adapter,
+            policy_adapter=self._planner_policy_adapter,
+        )
+        pipeline_context = self._pipeline_executor.execute(pipeline_definition, pipeline_context)
+
+        prompt_signals_artifact = pipeline_context.get_artifact(
+            "prompt_signals",
+            node_name="planner_domain_selection_pipeline",
+        )
+        reranked_artifact = pipeline_context.get_artifact(
+            "reranked_candidates",
+            node_name="planner_domain_selection_pipeline",
+        )
+        if not isinstance(prompt_signals_artifact, PromptSignalsArtifact):
+            raise TypeError("planner_domain_selection_pipeline expected PromptSignalsArtifact.")
+        if not isinstance(reranked_artifact, RerankedCandidatesArtifact):
+            raise TypeError("planner_domain_selection_pipeline expected RerankedCandidatesArtifact.")
+
+        effects_by_candidate: Dict[str, List[Dict[str, Any]]] = {}
+        for effect in list(reranked_artifact.policy_effects or []):
+            candidate_id = str(effect.get("candidate_id") or "").strip()
+            if candidate_id == "":
+                continue
+            effects_by_candidate.setdefault(candidate_id, []).append(dict(effect))
+
+        ranking: List[Dict[str, Any]] = []
+        best_row: Optional[Dict[str, Any]] = None
+        for candidate_artifact in reranked_artifact.candidates:
+            attrs = dict(candidate_artifact.attributes)
+            domain_id = int(attrs.get("domain_id") or 0)
+            candidate_effects = list(effects_by_candidate.get(candidate_artifact.candidate_id) or [])
+            present_capabilities = list(candidate_artifact.capabilities or [])
             row = {
                 "domain_id": domain_id,
-                "score": score,
-                "base_score": base_score,
-                "semantic_score": semantic_score,
-                "vector_score": float(candidate.get("score") or 0.0),
-                "policy_adjustment": float((policy_eval.get("rerank_summary") or {}).get("policy_adjustment") or 0.0),
-                "rerank_signals": list(policy_eval.get("prompt_signals") or []),
-                "domain_capabilities": dict(policy_eval.get("domain_capabilities") or {}),
-                "policy_effects": list(policy_eval.get("policy_effects") or []),
-                "rerank_summary": dict(policy_eval.get("rerank_summary") or {}),
-                "column_shortlist_count": len(shortlist),
-                "dimension_count": len(list(capabilities.get("dimensions") or [])),
-                "source": str(candidate.get("source") or "vector"),
-                "capabilities": capabilities,
-                "shortlisted_columns": shortlist,
+                "score": float(candidate_artifact.scores.get("final_score") or candidate_artifact.scores.get("base_score") or 0.0),
+                "base_score": float(candidate_artifact.scores.get("base_score") or 0.0),
+                "semantic_score": float(attrs.get("semantic_score") or 0.0),
+                "vector_score": float(attrs.get("vector_score") or 0.0),
+                "policy_adjustment": float(candidate_artifact.scores.get("policy_adjustment") or 0.0),
+                "rerank_signals": list(prompt_signals_artifact.signals),
+                "domain_capabilities": {
+                    "present": present_capabilities,
+                    "missing": sorted(
+                        {
+                            capability
+                            for effect in candidate_effects
+                            for capability in list(effect.get("capabilities_missing") or [])
+                        }
+                    ),
+                },
+                "policy_effects": candidate_effects,
+                "rerank_summary": {
+                    "base_score": round(float(candidate_artifact.scores.get("base_score") or 0.0), 5),
+                    "policy_adjustment": round(float(candidate_artifact.scores.get("policy_adjustment") or 0.0), 5),
+                    "final_score": round(
+                        float(candidate_artifact.scores.get("final_score") or candidate_artifact.scores.get("base_score") or 0.0),
+                        5,
+                    ),
+                },
+                "column_shortlist_count": int(attrs.get("column_shortlist_count") or 0),
+                "dimension_count": int(attrs.get("dimension_count") or 0),
+                "source": str(attrs.get("source") or "vector"),
+                "capabilities": dict(attrs.get("capabilities_payload") or {}),
+                "shortlisted_columns": list(attrs.get("shortlisted_columns") or []),
             }
             ranking.append({k: v for k, v in row.items() if k not in {"capabilities", "shortlisted_columns"}})
             if best_row is None or float(row["score"]) > float(best_row["score"]):
                 best_row = row
-
-        if best_row is None:
-            if first_error is not None:
-                raise first_error
-            raise ForgeError("No accessible domain candidates found", status_code=404)
 
         return (
             int(best_row["domain_id"]),
             dict(best_row["capabilities"]),
             list(best_row["shortlisted_columns"]),
             ranking,
-            prompt_signals,
+            list(prompt_signals_artifact.signals),
         )
 
     def _shortlist_columns_for_domain(

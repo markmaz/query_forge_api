@@ -36,8 +36,11 @@ class _Extractor:
 
 
 class _Retriever:
+    def __init__(self) -> None:
+        self.calls = []
+
     def retrieve(self, **kwargs):
-        del kwargs
+        self.calls.append(dict(kwargs))
         return [
             {
                 "column_id": 4812,
@@ -218,6 +221,98 @@ def test_analyze_session_persists_mappings_and_summary() -> None:
     assert out["summary"]["total"] == 1
     assert out["summary"]["confidence_bands"]["high"] == 1
     assert len(sql.insert_calls) == 1
+
+
+def test_analyze_session_passes_vertical_norm_to_retriever() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [
+            {
+                "id": "sess-1",
+                "workspace_id": "ws-1",
+                "uploaded_filename": "mapping.csv",
+                "file_type": "csv",
+                "created_by": "user-1",
+                "status": "uploaded",
+                "sheet_count": 1,
+                "source_record_count": 1,
+                "summary_json": None,
+                "created_at": "2026-03-12T00:00:00",
+                "updated_at": "2026-03-12T00:00:00",
+            }
+        ],
+        [
+            {
+                "id": 10,
+                "row_id": "Sheet1:2",
+                "sheet_name": "Sheet1",
+                "row_number": 2,
+                "source_field_name": "BirthDate",
+                "source_description": "Student date of birth",
+                "source_type": "date",
+                "source_object_name": "StudentDemographics",
+                "sample_value": "2010-02-14",
+                "category": None,
+                "normalized_search_text": "BirthDate. Student date of birth",
+                "raw_row_json": '{"field":"BirthDate"}',
+            }
+        ],
+        [],
+        [{"cancel_requested": 0}],
+        [
+            {
+                "mapping_id": "map-1",
+                "session_id": "sess-1",
+                "source_record_id": 10,
+                "source_row_id": "Sheet1:2",
+                "sheet_name": "Sheet1",
+                "row_number": 2,
+                "source_field_name": "BirthDate",
+                "source_description": "Student date of birth",
+                "source_type": "date",
+                "source_object_name": "StudentDemographics",
+                "sample_value": "2010-02-14",
+                "best_match_workspace_column_id": 4812,
+                "best_match_column_name": "student_birth_date",
+                "best_match_table_name": "dim_student",
+                "alternate_workspace_column_ids": "[]",
+                "retrieved_candidates_json": "[]",
+                "match_decision": "matched",
+                "reason_codes_json": '["name_similarity"]',
+                "explanation": "Strong name and type alignment.",
+                "ambiguity_note": None,
+                "llm_confidence": 0.91,
+                "confidence_score": 92,
+                "confidence_band": "high",
+                "status": "suggested",
+                "review_notes": None,
+                "manually_selected_workspace_column_id": None,
+                "manual_column_name": None,
+                "manual_table_name": None,
+                "reviewer_user_id": None,
+                "reviewed_at": None,
+                "created_at": "2026-03-12T00:00:00",
+                "updated_at": "2026-03-12T00:00:00",
+            }
+        ],
+    ]
+    retriever = _Retriever()
+    svc = ForgeMatchMappingService(
+        sql=sql,
+        retriever=retriever,
+        ranker=_Ranker(),
+        confidence=_Confidence(),
+    )
+
+    out = svc.analyze_session(
+        workspace_id="ws-1",
+        session_id="sess-1",
+        vertical_norm="education",
+        top_n=8,
+    )
+
+    assert out["status"] == "analyzed"
+    assert retriever.calls[0]["vertical_norm"] == "education"
 
 
 def test_patch_mappings_accepts_remap_action() -> None:
