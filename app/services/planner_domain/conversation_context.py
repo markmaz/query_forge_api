@@ -5,7 +5,7 @@ Functions for building, reading, and merging conversation state between turns.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 from app.services.planner_domain.types import PlanConversationContext
 

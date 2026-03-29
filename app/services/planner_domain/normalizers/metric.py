@@ -4,7 +4,6 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Mapping, Tuple
 
-from app.services.planner_domain.column_scoring import _is_staff_role_title_column_name
 from app.services.planner_domain.conversation_context import normalize_plan_prompt
 from app.services.planner_domain.prompt_intents import _prompt_has_adm_intent
 

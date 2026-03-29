@@ -1,5 +1,8 @@
-from .routes import workspace_ns, workspace_tables_ns, workspace_llm_ns, llm_roles_ns, llm_providers_ns, workspace_features_ns
 from app.api_config import build_url, NAME, VERSION
+from app.routes.workspace_feature_routes import workspace_features_ns
+from app.routes.workspace_llm_routes import llm_providers_ns, llm_roles_ns, workspace_llm_ns
+from app.routes.workspace_routes import workspace_ns
+from app.routes.workspace_table_routes import workspace_tables_ns
 
 
 def register(api):

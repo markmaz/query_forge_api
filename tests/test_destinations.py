@@ -9,7 +9,6 @@ Run with: pytest tests/test_destinations.py -v
 
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest

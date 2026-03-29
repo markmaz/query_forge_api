@@ -28,9 +28,8 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any
 
-from flask import g, request
+from flask import request
 from flask_restx import Namespace, Resource, fields
 
 from app.decorators.security import token_required

@@ -16,8 +16,6 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from qdrant_client.http import models as qdrant_models
 
 from app.config import (
-    EMBEDDING_MODEL_NAME,
-    QDRANT_COLUMN_COLLECTION_V2,
     QF_PLAN_DOMAIN_FAST_MODE_MAX_DIMENSIONS,
     QF_PLAN_DOMAIN_FAST_MODE_MAX_FILTER_COLUMNS,
     QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED,

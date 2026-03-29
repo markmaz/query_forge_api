@@ -14,7 +14,7 @@ import logging
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict
 from unittest.mock import patch
 
 # Allow running as __main__ from the query-forge-api/ directory.
@@ -22,8 +22,8 @@ _API_ROOT = Path(__file__).parent.parent.parent.parent
 if str(_API_ROOT) not in sys.path:
     sys.path.insert(0, str(_API_ROOT))
 
-from app.services.planner_domain import service as _svc_module
-from app.services.planner_domain.service import PlannerDomainService
+from app.services.planner_domain import service as _svc_module  # noqa: E402
+from app.services.planner_domain.service import PlannerDomainService  # noqa: E402
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
 

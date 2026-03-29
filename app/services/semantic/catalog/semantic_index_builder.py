@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Iterable, List, Mapping
 
 from app.services.semantic.catalog.catalog_models import SemanticIndexItem
 

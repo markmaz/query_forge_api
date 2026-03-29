@@ -207,8 +207,10 @@ def test_import_columns_returns_updated_and_unmatched(svc):
     ]
     # First execute call (full_replace=False, so no clear): UPDATE returns rowcount 1 for npi, 0 for MISSING
     conn = MagicMock()
-    result_npi = MagicMock(); result_npi.rowcount = 1
-    result_miss = MagicMock(); result_miss.rowcount = 0
+    result_npi = MagicMock()
+    result_npi.rowcount = 1
+    result_miss = MagicMock()
+    result_miss.rowcount = 0
     conn.execute.side_effect = [result_npi, result_miss]
     conn.commit = MagicMock()
     cm = MagicMock()
@@ -228,8 +230,10 @@ def test_import_columns_full_replace_clears_first(svc):
     """When full_replace=True the clear SQL must execute before any row updates."""
     rows = [{"table_name": "dim_prov", "column_name": "npi", "description": "NPI", "data_type": None}]
     conn = MagicMock()
-    result_clear = MagicMock(); result_clear.rowcount = 0
-    result_update = MagicMock(); result_update.rowcount = 1
+    result_clear = MagicMock()
+    result_clear.rowcount = 0
+    result_update = MagicMock()
+    result_update.rowcount = 1
     conn.execute.side_effect = [result_clear, result_update]
     conn.commit = MagicMock()
     cm = MagicMock()

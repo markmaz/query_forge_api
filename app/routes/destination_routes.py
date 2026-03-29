@@ -69,7 +69,8 @@ class DestinationTypeList(Resource):
     @require_access("skills")
     def get(self, workspace_id: str = ""):
         """Return all destination types with their config schemas. Available to all users."""
-        workspace_id = extract_workspace_id()
+        del workspace_id
+        extract_workspace_id()
         return {
             "destination_types": [
                 {

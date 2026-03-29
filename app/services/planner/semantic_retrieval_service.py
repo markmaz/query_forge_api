@@ -1056,7 +1056,6 @@ def _build_lexical_hints(
         "account": {"account"},
         "territory": {"territory", "region"},
     }
-    bucket = list(metric_candidates) + list(dimension_candidates) + list(filter_candidates) + list(time_candidates)
     for term, signals in term_map.items():
         if term not in prompt_text:
             continue
@@ -1297,7 +1296,6 @@ def _prefer_dimension_over_filter(
     filter_candidate: SemanticConceptCandidate,
 ) -> bool:
     dim_name = _norm_text(dimension.label or dimension.concept_key)
-    filter_name = _norm_text(filter_candidate.label or filter_candidate.concept_key)
     if dim_name and f"by {dim_name}" in prompt_norm:
         return True
     if _is_name_like(dimension) and not _looks_filter_like(filter_candidate):

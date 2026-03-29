@@ -1,5 +1,6 @@
-from .routes import ingestion_ns, datasource_ns
 from app.api_config import build_url, NAME, VERSION
+from app.routes.datasource_routes import datasource_ns
+from app.routes.ingestion_routes import ingestion_ns
 
 
 def register(api):

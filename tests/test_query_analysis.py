@@ -10,7 +10,7 @@ Run with: pytest tests/test_query_analysis.py -v
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -253,7 +253,7 @@ def test_analyze_includes_prompt_hint_in_call(client, auth_headers):
          patch("app.routes.query_analysis_routes._get_cache", return_value=None), \
          patch("app.routes.query_analysis_routes._set_cache"), \
          patch("app.routes.query_analysis_routes.call_analysis_llm",
-               return_value={"narrative": "N", "highlights": ["H"], "comparison": None}) as mock_llm, \
+               return_value={"narrative": "N", "highlights": ["H"], "comparison": None}), \
          patch("app.routes.query_analysis_routes.build_analysis_system_prompt",
                wraps=build_analysis_system_prompt) as mock_prompt:
         client.post(

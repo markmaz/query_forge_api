@@ -1,5 +1,7 @@
-from .routes import dictionary_ns, qf_domains_ns, wsinv_ns
 from app.api_config import build_url, NAME, VERSION
+from app.routes.dictionary_routes import dictionary_ns
+from app.routes.domain_routes import qf_domains_ns
+from app.routes.workspace_inventory_routes import wsinv_ns
 
 
 def register(api):

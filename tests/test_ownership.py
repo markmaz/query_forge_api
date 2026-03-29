@@ -134,7 +134,7 @@ def test_filter_non_admin_sees_own_and_shared(app):
             mock_model.created_by = MagicMock()
             mock_model.is_shared = MagicMock()
 
-            result = apply_ownership_filter(mock_query, mock_model, 42, "skills:admin", 1)
+            apply_ownership_filter(mock_query, mock_model, 42, "skills:admin", 1)
             mock_query.filter.assert_called_once()
 
 

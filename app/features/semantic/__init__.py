@@ -1,15 +1,15 @@
-from .routes import (
+from app.api_config import build_url, NAME, VERSION
+from app.routes.semantic_concepts import (
     semantic_concepts_ns,
     semantic_concept_aliases_ns,
     semantic_value_aliases_ns,
     semantic_concept_column_maps_ns,
-    semantic_registry_ns,
-    semantic_mappings_ns,
-    semantic_relationships_ns,
-    semantic_suggestions_ns,
-    semantic_ns,
 )
-from app.api_config import build_url, NAME, VERSION
+from app.routes.semantic_mappings import semantic_mappings_ns
+from app.routes.semantic_registry import semantic_registry_ns
+from app.routes.semantic_relationships import semantic_relationships_ns
+from app.routes.semantic_routes import semantic_ns
+from app.routes.semantic_suggestions import semantic_suggestions_ns
 
 
 def register(api):

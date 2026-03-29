@@ -50,10 +50,6 @@ from app.services.planner_domain.conversation_context import (
     _plan_conversation_context_from_state,
     normalize_plan_prompt,
 )
-from app.services.planner_domain.column_scoring import (
-    _column_heuristic_boost,
-    _required_column_keys,
-)
 from app.services.planner_domain.domain_selection_service import DomainSelectionService
 from app.services.planner_domain.explanation_service import ExplanationService
 from app.services.planner_domain.llm_planning_service import LLMPlanningService
@@ -89,6 +85,7 @@ from app.services.planner_domain.normalizers.time import (
     _normalize_semester_filters_in_plan,
 )
 from app.services.planner_domain.normalization_pipeline import NormalizationPipeline
+from app.services.planner_domain.column_scoring import _column_heuristic_boost, _required_column_keys
 from app.services.planner_domain.pipeline_trace import (
     _add_pipeline_step,
     _append_pipeline_trace_step,
@@ -105,6 +102,15 @@ from app.services.semantic.value_alias_resolution_service import ValueAliasResol
 from app.services.vector import DomainVectorIndexService
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "PlannerDomainService",
+    "_column_heuristic_boost",
+    "_normalize_relative_time_in_plan",
+    "_normalize_top_bottom_ranking_in_plan",
+    "_normalize_year_keyword_filters_in_plan",
+    "_required_column_keys",
+]
 
 
 class PlannerDomainService:

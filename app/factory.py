@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 import uuid
-from typing import Any
+from typing import Optional
 
 import valkey
 from flask import Flask, g, jsonify, request
@@ -38,14 +37,12 @@ from app.config.logging_config import configure_logging
 from app.config.mail_config import ForgeMailConfig
 from app.exceptions.forge_error import ForgeError
 from app.extensions import db, mail
-from app.api_config import NAME, VERSION, build_url
 from app.features import register_features
 from app.services.analytics.registry import AnalyticsDatasourceRegistry
 from app.services.auth_service import AuthService
 from app.services.semantic.concept_seed import ConceptSeedService
 
 auth_service = AuthService()
-
 
 def _register_analytics_registry(app: Flask) -> None:
     """Register an empty analytics registry.
@@ -55,6 +52,7 @@ def _register_analytics_registry(app: Flask) -> None:
     initialize the application database and framework services.
     """
     app.extensions["analytics_registry"] = AnalyticsDatasourceRegistry({})
+
 
 def try_get_json_body(req):
     try:
@@ -69,6 +67,7 @@ def try_get_json_body(req):
         pass
     return None
 
+
 def extract_user_id():
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
@@ -78,6 +77,7 @@ def extract_user_id():
             return payload.get("sub") or "unknown_user"
         return "unknown_user"
     return "unknown_user"
+
 
 def create_app():
     app = Flask(__name__)
@@ -146,9 +146,6 @@ def create_app():
             logger.info("Seeded semantic concepts on startup for vertical=%s", SEMANTIC_VERTICAL_DEFAULT)
         except Exception:
             logger.exception("Semantic concept startup seed failed")
-
-
-
     valkey_client = valkey.StrictValkey(host=VALKEY_ADDRESS, port=VALKEY_PORT, decode_responses=True)
 
     @app.before_request
@@ -203,6 +200,7 @@ def create_app():
     from app.commands.create_superuser import create_superuser_command
     from app.commands.encrypt_datasource_secrets import encrypt_datasource_secrets_command
     from app.commands.seed_rbac_roles import seed_rbac_roles_command
+
     app.cli.add_command(create_superuser_command)
     app.cli.add_command(encrypt_datasource_secrets_command)
     app.cli.add_command(seed_rbac_roles_command)

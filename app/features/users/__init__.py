@@ -1,5 +1,8 @@
-from .routes import qf_user_ns, user_workspace_ns, role_ns, rbac_ns
 from app.api_config import build_url, NAME, VERSION
+from app.routes.rbac_routes import rbac_ns
+from app.routes.role_routes import role_ns
+from app.routes.user_routes import qf_user_ns
+from app.routes.user_workspace_routes import user_workspace_ns
 
 
 def register(api):
