@@ -9,7 +9,6 @@ from app.exceptions.forge_error import ForgeError
 from app.services.planner.semantic_candidate_models import SemanticCandidatePayload, SemanticConceptCandidate
 from app.services.planner.semantic_grounding_service import SemanticGroundingBundle
 from app.services.planner_domain import service as planner_domain_service_module
-import app.services.planner_domain.next_actions_service as next_actions_service_module
 import app.services.planner_domain.pipeline_trace as pipeline_trace_module
 import app.services.planner_domain.semantic_integration_service as semantic_integration_module
 from app.services.planner_domain.conversation_context import _prompt_is_followup_edit
@@ -1146,7 +1145,7 @@ def test_plan_accepts_llm_payload_missing_time_block() -> None:
 
 
 def test_compact_capabilities_prepends_student_identity_for_show_students_prompt() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -1199,7 +1198,7 @@ def test_compact_capabilities_prepends_student_identity_for_show_students_prompt
 
 
 def test_compact_capabilities_prepends_student_identity_from_slot_hints() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -1253,7 +1252,7 @@ def test_compact_capabilities_prepends_student_identity_from_slot_hints() -> Non
 
 
 def test_compact_capabilities_includes_nativity_filter_columns() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -1312,7 +1311,7 @@ def test_compact_capabilities_includes_nativity_filter_columns() -> None:
 
 
 def test_compact_capabilities_prepends_school_listing_identity_columns() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -1371,7 +1370,7 @@ def test_compact_capabilities_prepends_school_listing_identity_columns() -> None
 
 
 def test_compact_capabilities_city_state_prefers_state_code_over_state_school_code() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -1440,7 +1439,7 @@ def test_compact_capabilities_city_state_prefers_state_code_over_state_school_co
 
 
 def test_compact_capabilities_staff_school_name_filter_avoids_k_school() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -1494,7 +1493,7 @@ def test_compact_capabilities_staff_school_name_filter_avoids_k_school() -> None
 
 
 def test_compact_capabilities_principal_school_name_filter_avoids_k_school() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -1542,7 +1541,7 @@ def test_compact_capabilities_principal_school_name_filter_avoids_k_school() -> 
 
 
 def test_compact_capabilities_staff_role_filter_prefers_position_title_over_classification() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -1602,7 +1601,7 @@ def test_compact_capabilities_staff_role_filter_prefers_position_title_over_clas
 
 
 def test_compact_capabilities_person_lookup_prefers_canonical_name_columns_over_preferred() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -1674,7 +1673,7 @@ def test_compact_capabilities_person_lookup_prefers_canonical_name_columns_over_
 
 
 def test_compact_capabilities_explicit_preferred_name_request_keeps_preferred_name_columns() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -1739,7 +1738,7 @@ def test_compact_capabilities_explicit_preferred_name_request_keeps_preferred_na
 
 
 def test_score_domain_candidate_prefers_staff_columns_for_work_prompt() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -1780,7 +1779,7 @@ def test_score_domain_candidate_prefers_staff_columns_for_work_prompt() -> None:
 
 
 def test_score_domain_candidate_work_prompt_penalizes_discipline_domain_name() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -1816,7 +1815,7 @@ def test_score_domain_candidate_work_prompt_penalizes_discipline_domain_name() -
 
 
 def test_score_domain_candidate_work_prompt_penalizes_student_domain_name() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -1852,7 +1851,7 @@ def test_score_domain_candidate_work_prompt_penalizes_student_domain_name() -> N
 
 
 def test_score_domain_candidate_prefers_adm_columns_for_adm_prompt() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -1894,7 +1893,7 @@ def test_score_domain_candidate_prefers_adm_columns_for_adm_prompt() -> None:
 
 
 def test_score_domain_candidate_adm_prompt_penalizes_calendar_domain_name() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -1930,7 +1929,7 @@ def test_score_domain_candidate_adm_prompt_penalizes_calendar_domain_name() -> N
 
 
 def test_score_domain_candidate_days_off_prompt_prefers_calendar_domain() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -1967,7 +1966,7 @@ def test_score_domain_candidate_days_off_prompt_prefers_calendar_domain() -> Non
 
 
 def test_score_domain_candidate_age_extreme_prompt_prefers_demographics_domain() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -2004,7 +2003,7 @@ def test_score_domain_candidate_age_extreme_prompt_prefers_demographics_domain()
 
 
 def test_score_domain_candidate_birth_month_prompt_prefers_demographics_domain() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),
@@ -2153,7 +2152,7 @@ def test_get_domain_candidates_uses_semantic_alias_queries_to_improve_recall(mon
 
 
 def test_score_semantic_grounding_bundle_prefers_richer_semantic_signal() -> None:
-    svc = PlannerDomainService(
+    _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
         domain_vector_service=_FakeDomainVectorService(),
         llm_client=_FakeLLM(),

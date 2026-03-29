@@ -6,7 +6,6 @@ import logging
 import os
 import re
 import uuid
-from datetime import datetime
 from logging.handlers import WatchedFileHandler
 from time import perf_counter
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple

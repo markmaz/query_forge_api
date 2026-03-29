@@ -20,7 +20,7 @@ from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import Boolean, DateTime, Enum, Index, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.extensions import db
 
@@ -183,7 +183,6 @@ class WorkspaceDestination(db.Model):
 
     def get_usage_summary(self) -> dict:
         """Return usage stats for the admin UI."""
-        from app.models.query.skills import QuerySkill
         try:
             # Count distinct skills referencing this destination
             skills_using = _count_skills_using_destination(self.id, self.workspace_id)
@@ -244,7 +243,6 @@ def _count_skills_using_destination(destination_id: int, workspace_id: int) -> i
     anywhere in their config JSON.
     Uses a JSON search — adjust to your MySQL version if needed.
     """
-    from app.models.query.skills import QuerySkill
     try:
         # MySQL 5.7+ JSON_SEARCH
         result = db.session.execute(

@@ -524,7 +524,6 @@ def _preview_relationships_for_dry_run(
     derived_specs: Sequence[_DerivedMetricSpec],
     domain_name: str,
 ) -> List[Dict[str, Any]]:
-    domain_key = _domain_concept_key(domain_name)
     keys = [c.concept_key for c in concepts]
     concept_id_by_key = {k: i + 1 for i, k in enumerate(keys)}
     rels = _build_relationships(

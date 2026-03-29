@@ -23,14 +23,6 @@ from app.services.planner_domain import service as planner_domain_service_module
 import app.services.planner_domain.pipeline_trace as pipeline_trace_module
 from tests.services.planner_domain.generate_golden_files import (
     _MemoryConversationStore,
-    _capture_enrolled_students,
-    _capture_calendar_days_off,
-    _capture_race_alias_normalization,
-    _capture_age_extreme,
-    _capture_birth_month,
-    _capture_school_year_semester,
-    _capture_top_bottom_ranking,
-    _capture_followup_sort,
     _make_caps,
     _make_vector,
     strip_nondeterministic,

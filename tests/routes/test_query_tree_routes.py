@@ -5,7 +5,6 @@ import app.routes.request_helpers as request_helpers
 import app.decorators.rbac as rbac_decorators
 import app.decorators.security as security
 import app.services.rbac_service as rbac_service
-from app.exceptions.forge_error import ForgeError
 
 
 def _headers(monkeypatch, *, actor_id: str = "user-1", roles: set[str] | None = None):

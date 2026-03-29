@@ -13,7 +13,7 @@ from flask_restx import Namespace, fields
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import QF_INGESTION_STALE_GUARD_ENABLED, QF_INGESTION_STALE_SECONDS
 from app.decorators.security import token_required
-from app.decorators.rbac import require_access, require_role
+from app.decorators.rbac import require_access
 from app.routes.forge_resource import ForgeResource
 from app.services.analytics.metadata_provider_factory import MetadataProviderFactory
 from app.services.analytics.runtime_registry import build_runtime_registry

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
 
 
 def test_base_skill_and_context_importable():
-    from app.skills.base import BaseSkill, SkillContext
+    from app.skills.base import SkillContext
 
     ctx = SkillContext(workspace_id="ws-1", skill_id="sk-1", execution_id="ex-1")
     assert ctx.workspace_id == "ws-1"

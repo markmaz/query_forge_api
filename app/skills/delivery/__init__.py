@@ -73,7 +73,6 @@ class EmailDeliveryChannel(BaseDeliveryChannel):
             return False, "No recipients configured."
 
         try:
-            from flask import current_app
             from app.email.mailer import get_logo, send_email
 
             logo_path = get_logo()
@@ -155,8 +154,6 @@ class TeamsDeliveryChannel(BaseDeliveryChannel):
         webhook_url = resolved.get("webhook_url", "").strip()
         if not webhook_url:
             return False, "No Teams webhook URL configured."
-
-        severity_color = {"info": "0078D4", "warning": "F7630C", "critical": "D13438"}.get(payload.severity, "F7630C")
 
         card = {
             "type": "message",

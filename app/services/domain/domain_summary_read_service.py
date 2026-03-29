@@ -20,7 +20,7 @@ class DomainSummaryReadService:
     def list_domain_summaries(self, *, workspace_id: str, sample_size: int = 2) -> List[Dict[str, Any]]:
         sample_size = max(0, int(sample_size))
 
-        sql = f"""
+        sql = """
           WITH mapped AS (
             SELECT
               dwt.domain_id,

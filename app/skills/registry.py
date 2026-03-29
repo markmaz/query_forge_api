@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 import logging
 import pkgutil
-from typing import Any, Dict, List, Optional, Type
+from typing import Dict, List, Optional, Type
 
 from app.skills.base import BaseSkill
 

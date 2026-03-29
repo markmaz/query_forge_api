@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import os
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import app.services.query_studio_summary_service as svc_module
 from app.services.query_studio_summary_service import generate_preview_summary

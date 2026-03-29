@@ -1,5 +1,5 @@
-from .routes import data_environment_ns
 from app.api_config import NAME, VERSION
+from app.routes.data_environment import data_environment_ns
 
 
 def register(api):

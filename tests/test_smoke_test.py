@@ -1,8 +1,6 @@
 # tests/test_smoke_test.py
 from __future__ import annotations
-import os
 import sys
-import types
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -10,7 +8,9 @@ from unittest.mock import MagicMock, patch
 # ---------------------------------------------------------------------------
 # Import helpers — smoke_test.py lives in scripts/, not a package
 # ---------------------------------------------------------------------------
-import importlib.util, pathlib
+import importlib.util
+import pathlib
+import requests as _requests
 
 _SCRIPT = pathlib.Path(__file__).parent.parent / "scripts" / "smoke_test.py"
 spec = importlib.util.spec_from_file_location("smoke_test", _SCRIPT)
@@ -88,9 +88,6 @@ class TestAuthenticate:
         payload = mock_post.call_args[1]["json"]
         assert payload["username"] == "tester"
         assert payload["password"] == "secret"
-
-
-import requests as _requests
 
 def _session(cfg=None):
     if cfg is None:

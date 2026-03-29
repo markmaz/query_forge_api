@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 from app.config.llm_resolver import build_llm_client_for_role
 from app.constants.llm_roles import LLMRole

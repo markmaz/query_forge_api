@@ -1,5 +1,6 @@
-from .routes import skills_ns, destinations_ns
 from app.api_config import build_url, NAME, VERSION
+from app.routes.destination_routes import destinations_ns
+from app.routes.skills_routes import skills_ns
 
 
 def register(api):

@@ -220,8 +220,6 @@ def test_non_super_admin_scoped_to_workspace(client, auth_headers, monkeypatch):
     from flask import g
 
     # Override effective_roles to be workspace_admin only (not super_admin).
-    original_ensure = rbac._ensure_roles_loaded
-
     def _set_workspace_admin_roles():
         g.effective_roles = {"workspace_admin"}
 

@@ -4,7 +4,7 @@ import datetime
 import json
 import logging
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import valkey
 

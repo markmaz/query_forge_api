@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional, Sequence
 
 from app.services.forge_match.field_extractor import SourceFieldRecord
-from app.services.forge_match.normalizer import normalize_text, token_overlap_score, token_set, type_compatibility
+from app.services.forge_match.normalizer import token_overlap_score, token_set, type_compatibility
 
 
 class ForgeMatchConfidenceScorer:

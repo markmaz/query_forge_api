@@ -1,5 +1,6 @@
-from .routes import executions_ns, exports_ns
 from app.api_config import build_url, NAME, VERSION
+from app.routes.execution_routes import executions_ns
+from app.routes.export_routes import exports_ns
 
 
 def register(api):

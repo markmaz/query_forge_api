@@ -1,5 +1,6 @@
-from .routes import admin_ns, version_ns
 from app.api_config import build_url, NAME, VERSION
+from app.routes.admin_routes import admin_ns
+from app.routes.version_routes import version_ns
 
 
 def register(api):

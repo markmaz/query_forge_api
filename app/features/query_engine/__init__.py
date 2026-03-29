@@ -1,6 +1,8 @@
-from .routes import query_forge_ns, query_studio_ns, qf_tree_ns
 from app.api_config import build_url, NAME, VERSION
+from app.routes.query_forge_routes import query_forge_ns
 from app.routes.query_studio_summary_routes import query_studio_summary_ns
+from app.routes.query_studio_routes import query_studio_ns
+from app.routes.query_tree_routes import qf_tree_ns
 
 
 def register(api):
