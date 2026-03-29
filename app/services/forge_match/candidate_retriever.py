@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import platform
 import uuid
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -14,10 +13,10 @@ from app.ports.sql_executor import ForgeQueryPort
 from app.services.embedding.embedding_search_service import EmbeddingSearchService
 from app.services.forge_match.field_extractor import SourceFieldRecord
 from app.services.forge_match.pipeline_definition import build_forge_match_candidate_pipeline_definition
-from app.services.forge_match.normalizer import normalize_identifier, normalize_text, token_overlap_score, token_set
+from app.services.forge_match.normalizer import normalize_identifier, normalize_text, split_identifier, token_overlap_score, token_set
 from app.services.shared_ai.adapters.candidates import candidate_from_column_row, candidate_to_dict
 from app.services.shared_ai.adapters.capabilities import CandidateCapabilityAdapter, HeuristicColumnCapabilityAdapter
-from app.services.shared_ai.adapters.policies import CandidatePolicyRerankAdapter, PolicyDrivenRerankAdapter
+from app.services.shared_ai.adapters.policies import CandidatePolicyRerankAdapter, SignalCapabilityRerankAdapter
 from app.services.shared_ai.artifacts import CandidateSetArtifact
 from app.services.shared_ai.context import PipelineContext
 from app.services.shared_ai.executor import PipelineExecutor
@@ -29,8 +28,7 @@ def _is_vector_enabled() -> bool:
     raw = os.getenv("FORGE_MATCH_VECTOR_ENABLED")
     if raw is not None and str(raw).strip() != "":
         return str(raw).strip().lower() in {"1", "true", "yes", "y", "on"}
-    # Safer default on macOS where prefork workers + native ML libs can segfault.
-    return platform.system().lower() != "darwin"
+    return True
 
 
 @dataclass(frozen=True)
@@ -46,6 +44,7 @@ class RetrievedCandidate:
     data_type: Optional[str]
     semantic_type: Optional[str]
     entity: Optional[str]
+    preferred_domain_match: bool
     vector_score: float
     lexical_score: float
     combined_retrieval_score: float
@@ -63,6 +62,7 @@ class RetrievedCandidate:
             "data_type": self.data_type,
             "semantic_type": self.semantic_type,
             "entity": self.entity,
+            "preferred_domain_match": self.preferred_domain_match,
             "vector_score": round(float(self.vector_score), 4),
             "lexical_score": round(float(self.lexical_score), 4),
             "combined_retrieval_score": round(float(self.combined_retrieval_score), 4),
@@ -90,7 +90,7 @@ class ForgeMatchCandidateRetriever:
             logger.info("ForgeMatch vector retrieval disabled (FORGE_MATCH_VECTOR_ENABLED=false or macOS default)")
         self._pipeline_executor = pipeline_executor or PipelineExecutor()
         self._capability_adapter = capability_adapter or HeuristicColumnCapabilityAdapter()
-        self._policy_adapter = policy_adapter or PolicyDrivenRerankAdapter()
+        self._policy_adapter = policy_adapter or SignalCapabilityRerankAdapter()
         self._last_pipeline_context: Optional[PipelineContext] = None
 
     def retrieve(
@@ -118,6 +118,7 @@ class ForgeMatchCandidateRetriever:
                 "source_record": source_record,
                 "top_n": limit,
                 "domain_id": int(domain_id) if domain_id is not None else None,
+                "preferred_domain_id": int(domain_id) if domain_id is not None else None,
             },
         )
         definition = build_forge_match_candidate_pipeline_definition(
@@ -142,14 +143,14 @@ class ForgeMatchCandidateRetriever:
         workspace_id: str,
         source_record: SourceFieldRecord,
         top_n: int,
-        domain_id: Optional[int],
+        preferred_domain_id: Optional[int],
     ) -> List[Dict[str, Any]]:
         limit = max(3, min(30, int(top_n or 8)))
         lexical_rows = self._load_lexical_candidates(
             workspace_id=workspace_id,
             source_record=source_record,
-            domain_id=domain_id,
-            max_rows=max(120, limit * 12),
+            domain_id=None,
+            max_rows=max(240, limit * 20),
         )
 
         by_col: dict[int, dict[str, Any]] = {}
@@ -162,16 +163,16 @@ class ForgeMatchCandidateRetriever:
         vector_scores = self._load_vector_scores(
             workspace_id=workspace_id,
             source_record=source_record,
-            domain_id=domain_id,
-            limit=max(limit * 3, 12),
+            domain_id=None,
+            limit=max(limit * 6, 24),
         )
 
-        if not by_col and vector_scores:
-            # Fallback: hydrate columns from IDs returned by vector index.
+        missing_vector_ids = [col_id for col_id in vector_scores if col_id not in by_col]
+        if missing_vector_ids:
             hydrated = self._load_candidates_by_ids(
                 workspace_id=workspace_id,
-                column_ids=list(vector_scores.keys()),
-                domain_id=domain_id,
+                column_ids=missing_vector_ids,
+                domain_id=None,
             )
             for row in hydrated:
                 col_id = int(row.get("workspace_column_id") or 0)
@@ -182,7 +183,9 @@ class ForgeMatchCandidateRetriever:
         for col_id, row in by_col.items():
             lexical_score = self._lexical_score(source_record=source_record, candidate=row)
             vector_score = float(vector_scores.get(col_id, 0.0))
-            combined = (lexical_score * 0.58) + (vector_score * 0.42)
+            stronger_signal = max(lexical_score, vector_score)
+            weaker_signal = min(lexical_score, vector_score)
+            combined = (stronger_signal * 0.7) + (weaker_signal * 0.3)
             scored.append(
                 RetrievedCandidate(
                     column_id=col_id,
@@ -196,6 +199,9 @@ class ForgeMatchCandidateRetriever:
                     data_type=_to_text_or_none(row.get("data_type")),
                     semantic_type=_to_text_or_none(row.get("semantic_type")),
                     entity=_to_text_or_none(row.get("entity")),
+                    preferred_domain_match=(
+                        preferred_domain_id is not None and _to_int_or_none(row.get("domain_id")) == preferred_domain_id
+                    ),
                     vector_score=vector_score,
                     lexical_score=lexical_score,
                     combined_retrieval_score=combined,
@@ -213,25 +219,43 @@ class ForgeMatchCandidateRetriever:
         domain_id: Optional[int],
         max_rows: int,
     ) -> List[Dict[str, Any]]:
-        tokens = list(token_set(source_record.source_field_name, source_record.source_description, source_record.source_object_name))[:6]
+        search_terms = _lexical_query_terms(source_record)[:10]
+        source_name_norm = normalize_identifier(source_record.source_field_name)
+        source_name_parts = split_identifier(source_record.source_field_name)
+        source_name_compact = "".join(source_name_parts)
+        source_name_phrase = " ".join(source_name_parts)
 
         params: Dict[str, Any] = {
             "workspace_id": workspace_id,
             "limit": int(max_rows),
             "domain_id": int(domain_id) if domain_id is not None else None,
+            "source_name_norm": source_name_norm,
+            "source_name_compact": source_name_compact,
+            "source_name_phrase": source_name_phrase,
         }
 
         token_clause = ""
-        if tokens:
+        lexical_score_parts = [
+            "CASE WHEN LOWER(wc.column_name) = :source_name_norm THEN 240 ELSE 0 END",
+            "CASE WHEN LOWER(REPLACE(REPLACE(wc.column_name, '_', ''), '-', '')) = :source_name_compact THEN 210 ELSE 0 END",
+            "CASE WHEN LOWER(REPLACE(REPLACE(wc.column_name, '_', ' '), '-', ' ')) = :source_name_phrase THEN 190 ELSE 0 END",
+        ]
+        if search_terms:
             parts: list[str] = []
-            for idx, token in enumerate(tokens):
-                key = f"tok{idx}"
-                params[key] = f"%{normalize_text(token)}%"
+            for idx, term in enumerate(search_terms):
+                key = f"term{idx}"
+                params[key] = f"%{normalize_text(term)}%"
                 parts.append(
                     f"(LOWER(wc.column_name) LIKE :{key} OR LOWER(COALESCE(wc.description, '')) LIKE :{key} "
                     f"OR LOWER(COALESCE(wt.table_name, '')) LIKE :{key} OR LOWER(COALESCE(wt.source_table_name, '')) LIKE :{key})"
                 )
+                lexical_score_parts.extend([
+                    f"CASE WHEN LOWER(wc.column_name) LIKE :{key} THEN 28 ELSE 0 END",
+                    f"CASE WHEN LOWER(COALESCE(wc.description, '')) LIKE :{key} THEN 16 ELSE 0 END",
+                    f"CASE WHEN LOWER(COALESCE(wt.table_name, '')) LIKE :{key} OR LOWER(COALESCE(wt.source_table_name, '')) LIKE :{key} THEN 10 ELSE 0 END",
+                ])
             token_clause = " AND (" + " OR ".join(parts) + ")"
+        lexical_hit_score_sql = " + ".join(lexical_score_parts)
 
         rows = self._sql.execute_query_mappings(
             f"""
@@ -265,7 +289,8 @@ class ForgeMatchCandidateRetriever:
                 WHERE dwt.workspace_table_id = wt.id
                 ORDER BY dwt.is_primary DESC, dwt.sort_order ASC, d.id ASC
                 LIMIT 1
-              ) AS domain_name
+              ) AS domain_name,
+              ({lexical_hit_score_sql}) AS lexical_hit_score
             FROM workspace_column wc
             JOIN workspace_table wt ON wt.id = wc.workspace_table_id
             WHERE wt.workspace_id = :workspace_id
@@ -276,7 +301,7 @@ class ForgeMatchCandidateRetriever:
                   AND dwt_filter.domain_id = :domain_id
               ))
               {token_clause}
-            ORDER BY wc.id DESC
+            ORDER BY lexical_hit_score DESC, wc.id DESC
             LIMIT :limit
             """,
             params,
@@ -361,9 +386,10 @@ class ForgeMatchCandidateRetriever:
     ) -> Dict[int, float]:
         if self._vector is None:
             return {}
+        query_text = _vector_query_text(source_record)
         try:
             payload = self._vector.search(
-                query=source_record.normalized_search_text,
+                query=query_text,
                 workspace_id=workspace_id,
                 kinds=["column"],
                 domain_id=int(domain_id) if domain_id is not None else None,
@@ -391,29 +417,142 @@ class ForgeMatchCandidateRetriever:
         source_name = normalize_identifier(source_record.source_field_name)
         source_desc = normalize_text(source_record.source_description)
         source_object = normalize_identifier(source_record.source_object_name)
+        source_tokens = _expanded_source_tokens(source_record)
 
         cand_name = normalize_identifier(candidate.get("column_name"))
         cand_desc = normalize_text(candidate.get("description"))
         cand_table = normalize_identifier(candidate.get("table_name"))
+        candidate_tokens = token_set(candidate.get("column_name"), candidate.get("description"), candidate.get("table_name"))
 
         exact = 1.0 if source_name and source_name == cand_name else 0.0
+        compact_exact = (
+            1.0
+            if source_name
+            and source_name.replace("_", "") == cand_name.replace("_", "")
+            else 0.0
+        )
         seq_name = SequenceMatcher(None, source_name, cand_name).ratio() if source_name and cand_name else 0.0
         seq_desc = SequenceMatcher(None, source_desc, cand_desc).ratio() if source_desc and cand_desc else 0.0
         object_score = SequenceMatcher(None, source_object, cand_table).ratio() if source_object and cand_table else 0.0
 
-        token_score = token_overlap_score(
-            token_set(source_record.source_field_name, source_record.source_description),
-            token_set(candidate.get("column_name"), candidate.get("description"), candidate.get("table_name")),
-        )
+        token_score = token_overlap_score(source_tokens, candidate_tokens)
 
         score = (
             (exact * 0.35)
-            + (seq_name * 0.30)
-            + (token_score * 0.20)
+            + (compact_exact * 0.20)
+            + (seq_name * 0.22)
+            + (token_score * 0.18)
             + (seq_desc * 0.10)
             + (object_score * 0.05)
         )
         return max(0.0, min(1.0, score))
+
+
+def _expanded_source_tokens(source_record: SourceFieldRecord) -> set[str]:
+    tokens = set(token_set(source_record.source_field_name, source_record.source_description, source_record.source_object_name))
+    for term in _lexical_query_terms(source_record):
+        norm = normalize_text(term)
+        if norm:
+            tokens.update(token_set(norm))
+            compact = norm.replace(" ", "")
+            if compact:
+                tokens.add(compact)
+    return {token for token in tokens if token}
+
+
+def _lexical_query_terms(source_record: SourceFieldRecord) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _push(value: object) -> None:
+        text = normalize_text(value)
+        if not text or text in seen:
+            return
+        seen.add(text)
+        out.append(text)
+
+    name_parts = split_identifier(source_record.source_field_name)
+    if name_parts:
+        _push(" ".join(name_parts))
+        _push("".join(name_parts))
+        for part in name_parts:
+            _push(part)
+
+    for token in token_set(source_record.source_description, source_record.source_object_name):
+        _push(token)
+
+    name_key = " ".join(name_parts)
+    token_key = set(name_parts)
+    if {"birth", "date"} <= token_key:
+        _push("date of birth")
+        _push("dob")
+    if {"first", "name"} <= token_key:
+        _push("given name")
+        _push("forename")
+    if {"last", "name"} <= token_key:
+        _push("family name")
+        _push("surname")
+    if name_key == "student id":
+        _push("student identifier")
+        _push("person id")
+
+    return out
+
+
+def _vector_query_text(source_record: SourceFieldRecord) -> str:
+    parts: list[str] = []
+    field_name = str(source_record.source_field_name or "").strip()
+    if field_name:
+        parts.append(field_name)
+
+    alias_terms = _semantic_alias_terms(source_record)
+    if alias_terms:
+        parts.append("Aliases: " + ", ".join(alias_terms))
+
+    if source_record.source_description:
+        parts.append(str(source_record.source_description).strip())
+    if source_record.source_object_name:
+        parts.append(f"Object: {str(source_record.source_object_name).strip()}")
+    if source_record.source_type:
+        parts.append(f"Type: {str(source_record.source_type).strip()}")
+    if source_record.sample_value:
+        parts.append(f"Sample: {str(source_record.sample_value).strip()}")
+    return ". ".join(part for part in parts if part)
+
+
+def _semantic_alias_terms(source_record: SourceFieldRecord) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _push(value: object) -> None:
+        text = normalize_text(value)
+        if not text or text in seen:
+            return
+        seen.add(text)
+        out.append(text)
+
+    name_parts = split_identifier(source_record.source_field_name)
+    token_key = set(name_parts).union(token_set(source_record.source_description))
+    name_key = " ".join(name_parts)
+
+    if {"birth", "date"} <= token_key or "birthday" in token_key:
+        _push("birth date")
+        _push("date of birth")
+        _push("birthdate")
+        _push("dob")
+    if {"first", "name"} <= token_key or name_key == "firstname":
+        _push("first name")
+        _push("given name")
+        _push("forename")
+    if {"last", "name"} <= token_key or name_key == "lastname":
+        _push("last name")
+        _push("family name")
+        _push("surname")
+    if name_key == "student id":
+        _push("student identifier")
+        _push("person id")
+
+    return out
 
 
 def _display_name(column_name: str) -> str:
@@ -453,13 +592,18 @@ class ForgeMatchColumnRetrievalAdapter:
             workspace_id=str(context.workspace_id or "").strip(),
             source_record=source_record,
             top_n=int(context.request.get("top_n") or 8),
-            domain_id=_to_int_or_none(context.request.get("domain_id")),
+            preferred_domain_id=_to_int_or_none(
+                context.request.get("preferred_domain_id") or context.request.get("domain_id")
+            ),
         )
         return CandidateSetArtifact(
             candidates=[candidate_from_column_row(row) for row in rows],
             retrieval_debug={
                 "candidate_count": len(rows),
-                "domain_id": _to_int_or_none(context.request.get("domain_id")),
+                "preferred_domain_id": _to_int_or_none(
+                    context.request.get("preferred_domain_id") or context.request.get("domain_id")
+                ),
+                "search_scope": "workspace_global",
                 "vertical_norm": str(context.vertical_norm or "generic"),
             },
         )

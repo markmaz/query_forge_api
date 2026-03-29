@@ -109,21 +109,11 @@ class _FirstCandidateRanker:
             "selected_column_id": int(selected.get("column_id") or 0) if selected else None,
             "alternate_column_ids": alternates,
             "match_decision": "matched" if selected else "no_confident_match",
-            "reason_codes": ["name_similarity", "domain_alignment"] if selected else ["insufficient_signal"],
+            "reason_codes": ["name_similarity", "definition_alignment"] if selected else ["insufficient_signal"],
             "explanation": "Selected the top reranked candidate.",
             "ambiguity_note": None,
             "llm_confidence": 0.88 if selected else 0.0,
         }
-
-
-class _PolicyService:
-    def __init__(self, *, policies_by_domain):
-        self._policies_by_domain = dict(policies_by_domain)
-
-    def get_applicable_policies(self, *, workspace_id: str, vertical_norm: str, base_domain_id: int):
-        assert workspace_id == "ws-1"
-        assert vertical_norm == "education"
-        return list(self._policies_by_domain.get(base_domain_id, []))
 
 
 def test_upload_file_creates_session_and_source_rows() -> None:
@@ -265,6 +255,7 @@ def test_analyze_session_persists_mappings_and_summary() -> None:
     assert out["status"] == "analyzed"
     assert out["summary"]["total"] == 1
     assert out["summary"]["confidence_bands"]["high"] == 1
+    assert out["session"]["summary_json"]["analysis_trace"]["pipeline_name"] == "forge_match_session_pipeline"
     assert len(sql.insert_calls) == 1
 
 
@@ -465,47 +456,6 @@ def test_analyze_session_workflow_prefers_birth_date_candidate_from_shared_pipel
         vector_search=object(),
         policy_adapter=None,
     )
-    retriever._policy_adapter._policies = _PolicyService(
-        policies_by_domain={
-            15: [
-                {
-                    "policy_key": "prefer_birth_date",
-                    "stop_on_match": False,
-                    "policy_json": {
-                        "version": 1,
-                        "when_signals_all": ["age_extreme_prompt"],
-                        "when_signals_any": [],
-                        "exclude_signals_any": [],
-                        "prefer_capabilities": ["BIRTH_DATE"],
-                        "penalize_missing": ["BIRTH_DATE"],
-                        "require_for_bonus": [],
-                        "boost": 0.0,
-                        "penalty": 0.3,
-                        "max_effect": 0.3,
-                    },
-                }
-            ],
-            21: [
-                {
-                    "policy_key": "prefer_birth_date",
-                    "stop_on_match": False,
-                    "policy_json": {
-                        "version": 1,
-                        "when_signals_all": ["age_extreme_prompt"],
-                        "when_signals_any": [],
-                        "exclude_signals_any": [],
-                        "prefer_capabilities": ["BIRTH_DATE"],
-                        "penalize_missing": ["BIRTH_DATE"],
-                        "require_for_bonus": [],
-                        "boost": 0.3,
-                        "penalty": 0.0,
-                        "max_effect": 0.3,
-                    },
-                }
-            ],
-        }
-    )
-
     svc = ForgeMatchMappingService(
         sql=sql,
         retriever=retriever,
@@ -517,6 +467,7 @@ def test_analyze_session_workflow_prefers_birth_date_candidate_from_shared_pipel
         workspace_id="ws-1",
         session_id="sess-1",
         vertical_norm="education",
+        domain_id=15,
         top_n=8,
     )
 
@@ -525,6 +476,7 @@ def test_analyze_session_workflow_prefers_birth_date_candidate_from_shared_pipel
     payload = json.loads(str(sql.insert_calls[0].params["retrieved_candidates_json"]))
     assert payload[0]["column_id"] == 202
     assert payload[0]["capabilities"] == ["BIRTH_DATE"]
+    assert payload[0]["preferred_domain_match"] is False
     assert payload[0]["policy_adjustment"] > 0
     assert payload[0]["final_score"] > payload[1]["final_score"]
     llm_payload = json.loads(str(sql.insert_calls[0].params["llm_response_json"]))
@@ -638,47 +590,6 @@ def test_analyze_session_workflow_prefers_school_day_flag_candidate_from_shared_
         vector_search=object(),
         policy_adapter=None,
     )
-    retriever._policy_adapter._policies = _PolicyService(
-        policies_by_domain={
-            6: [
-                {
-                    "policy_key": "prefer_school_day_flag",
-                    "stop_on_match": False,
-                    "policy_json": {
-                        "version": 1,
-                        "when_signals_all": ["calendar_days_off_prompt"],
-                        "when_signals_any": [],
-                        "exclude_signals_any": [],
-                        "prefer_capabilities": ["SCHOOL_DAY_FLAG"],
-                        "penalize_missing": [],
-                        "require_for_bonus": [],
-                        "boost": 0.3,
-                        "penalty": 0.0,
-                        "max_effect": 0.3,
-                    },
-                }
-            ],
-            15: [
-                {
-                    "policy_key": "prefer_school_day_flag",
-                    "stop_on_match": False,
-                    "policy_json": {
-                        "version": 1,
-                        "when_signals_all": ["calendar_days_off_prompt"],
-                        "when_signals_any": [],
-                        "exclude_signals_any": [],
-                        "prefer_capabilities": [],
-                        "penalize_missing": ["SCHOOL_DAY_FLAG"],
-                        "require_for_bonus": [],
-                        "boost": 0.0,
-                        "penalty": 0.3,
-                        "max_effect": 0.3,
-                    },
-                }
-            ],
-        }
-    )
-
     svc = ForgeMatchMappingService(
         sql=sql,
         retriever=retriever,

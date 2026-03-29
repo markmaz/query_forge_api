@@ -15,6 +15,11 @@ from app.services.shared_ai.nodes.rank_candidates import RankCandidatesNode
 from app.services.shared_ai.nodes.resolve_capabilities import ResolveCapabilitiesNode
 from app.services.shared_ai.nodes.retrieve_candidates import CandidateRetrievalAdapter, RetrieveCandidatesNode
 from app.services.shared_ai.nodes.score_confidence import ScoreConfidenceNode
+from app.services.forge_match.session_pipeline_nodes import (
+    ExecuteSessionRowsNode,
+    FinalizeSessionRunNode,
+    PrepareSessionRunNode,
+)
 
 
 def build_forge_match_candidate_pipeline_definition(
@@ -84,7 +89,33 @@ def build_forge_match_row_pipeline_definition(
     )
 
 
+def build_forge_match_session_pipeline_definition(
+    *,
+    preparation_adapter: Any,
+    execution_adapter: Any,
+    finalization_adapter: Any,
+) -> PipelineDefinition:
+    prepare = PrepareSessionRunNode(adapter=preparation_adapter)
+    execute = ExecuteSessionRowsNode(adapter=execution_adapter)
+    finalize = FinalizeSessionRunNode(adapter=finalization_adapter)
+
+    return PipelineDefinition(
+        name="forge_match_session_pipeline",
+        nodes={
+            prepare.name: prepare,
+            execute.name: execute,
+            finalize.name: finalize,
+        },
+        edges=[
+            PipelineEdge(from_node=prepare.name, to_node=execute.name),
+            PipelineEdge(from_node=execute.name, to_node=finalize.name),
+        ],
+        start_nodes=[prepare.name],
+    )
+
+
 __all__ = [
     "build_forge_match_candidate_pipeline_definition",
     "build_forge_match_row_pipeline_definition",
+    "build_forge_match_session_pipeline_definition",
 ]

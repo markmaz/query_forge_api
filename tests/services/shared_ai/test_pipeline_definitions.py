@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.services.forge_match.pipeline_definition import (
     build_forge_match_candidate_pipeline_definition,
     build_forge_match_row_pipeline_definition,
+    build_forge_match_session_pipeline_definition,
 )
 from app.services.planner_domain.pipeline_definition import build_planner_domain_selection_pipeline_definition
 from app.services.shared_ai.artifacts import CandidateSetArtifact, RerankedCandidatesArtifact
@@ -50,6 +51,30 @@ class _PersistenceAdapter:
         from app.services.shared_ai.artifacts import PersistenceArtifact
 
         return PersistenceArtifact(record_id="sess-1:10", status="persisted")
+
+
+class _SessionPreparationAdapter:
+    def prepare(self, *, context: PipelineContext):
+        del context
+        from app.services.forge_match.session_pipeline_artifacts import ForgeMatchSessionWorkArtifact
+
+        return ForgeMatchSessionWorkArtifact(session={"id": "sess-1"}, source_rows=[], source_total=0)
+
+
+class _SessionExecutionAdapter:
+    def execute(self, *, context: PipelineContext, work):
+        del context, work
+        from app.services.forge_match.session_pipeline_artifacts import ForgeMatchSessionExecutionArtifact
+
+        return ForgeMatchSessionExecutionArtifact(status="completed")
+
+
+class _SessionFinalizationAdapter:
+    def finalize(self, *, context: PipelineContext, work, execution):
+        del context, work, execution
+        from app.services.forge_match.session_pipeline_artifacts import ForgeMatchSessionResultArtifact
+
+        return ForgeMatchSessionResultArtifact(payload={"status": "analyzed"})
 
 
 def test_forge_match_pipeline_definition_declares_expected_nodes_and_edges() -> None:
@@ -129,4 +154,26 @@ def test_forge_match_row_pipeline_definition_declares_expected_nodes_and_edges()
         ("dispatch_candidate_pipeline", "rank_candidates"),
         ("rank_candidates", "score_confidence"),
         ("score_confidence", "assemble_match_outcome"),
+    }
+
+
+def test_forge_match_session_pipeline_definition_declares_expected_nodes_and_edges() -> None:
+    definition = build_forge_match_session_pipeline_definition(
+        preparation_adapter=_SessionPreparationAdapter(),
+        execution_adapter=_SessionExecutionAdapter(),
+        finalization_adapter=_SessionFinalizationAdapter(),
+    )
+
+    validate_pipeline_definition(definition)
+
+    assert definition.name == "forge_match_session_pipeline"
+    assert definition.start_nodes == ["prepare_session_run"]
+    assert sorted(definition.nodes.keys()) == [
+        "execute_session_rows",
+        "finalize_session_run",
+        "prepare_session_run",
+    ]
+    assert {(edge.from_node, edge.to_node) for edge in definition.edges} == {
+        ("execute_session_rows", "finalize_session_run"),
+        ("prepare_session_run", "execute_session_rows"),
     }

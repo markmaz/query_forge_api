@@ -35,11 +35,12 @@ class ForgeMatchConfidenceScorer:
         )
         table_align = token_overlap_score(
             token_set(source_record.source_object_name),
-            token_set(selected_candidate.get("table_name"), selected_candidate.get("domain_name")),
+            token_set(selected_candidate.get("table_name")),
         )
 
         llm_conf = float(llm_result.get("llm_confidence") or 0.0)
         llm_conf = max(0.0, min(1.0, llm_conf))
+        llm_reason_codes = {str(code) for code in list(llm_result.get("reason_codes") or []) if str(code).strip()}
 
         score_norm = (
             (lexical * 0.24)
@@ -50,6 +51,19 @@ class ForgeMatchConfidenceScorer:
             + (table_align * 0.06)
             + (llm_conf * 0.08)
         )
+
+        definition_adjustment = 0.0
+        if bool(token_set(source_record.source_description)):
+            if "definition_alignment" in llm_reason_codes:
+                definition_adjustment += 0.08
+            if "definition_conflict" in llm_reason_codes:
+                definition_adjustment -= 0.16
+            elif desc_sim < 0.12:
+                definition_adjustment -= 0.14
+            elif desc_sim < 0.25:
+                definition_adjustment -= 0.06
+
+        score_norm += definition_adjustment
 
         # Penalize close second-best candidates to reflect ambiguity.
         ambiguity_penalty = self._ambiguity_penalty(candidates=candidates)

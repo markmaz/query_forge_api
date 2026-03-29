@@ -340,6 +340,27 @@ def test_forge_match_patch_mappings_route(client, monkeypatch):
     assert resp.json["updated"] == 1
 
 
+def test_forge_match_delete_session_route(client, monkeypatch):
+    class _Svc:
+        def delete_session(self, **kwargs):
+            assert kwargs["session_id"] == "sess-1"
+            assert kwargs["workspace_id"] == "ws-1"
+            return {
+                "session_id": "sess-1",
+                "workspace_id": "ws-1",
+                "deleted": True,
+                "message": "ForgeMatch session deleted",
+            }
+
+    monkeypatch.setattr(forge_match_routes, "ForgeMatchMappingService", _Svc)
+    resp = client.delete(
+        "/api/v1/forge-match/sess-1",
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["deleted"] is True
+
+
 def test_forge_match_export_route(client, monkeypatch):
     class _Svc:
         def export_session(self, **kwargs):

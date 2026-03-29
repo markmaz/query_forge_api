@@ -7,10 +7,17 @@ from app.services.forge_match.llm_ranker import ForgeMatchLLMRanker
 class _LLM:
     def __init__(self, payload):
         self._payload = payload
+        self.calls = []
 
     def chat_json_with_trace(self, **kwargs):
-        del kwargs
+        self.calls.append(dict(kwargs))
         return {"parsed": self._payload, "content": ""}
+
+
+class _BrokenLLM:
+    def chat_json_with_trace(self, **kwargs):
+        del kwargs
+        return {"parsed": None, "content": "not-json"}
 
 
 def _source() -> SourceFieldRecord:
@@ -55,3 +62,57 @@ def test_ranker_rejects_out_of_set_ids() -> None:
     out = ranker.rank(workspace_id="ws-test", source_record=_source(), candidates=candidates)
     assert out["match_decision"] == "no_confident_match"
     assert out["selected_column_id"] is None
+
+
+def test_ranker_prompt_includes_definition_guidance() -> None:
+    llm = _LLM(
+        {
+            "selected_column_id": 4812,
+            "alternate_column_ids": [],
+            "match_decision": "matched",
+            "reason_codes": ["definition_alignment"],
+            "explanation": "Definitions aligned.",
+            "ambiguity_note": None,
+            "llm_confidence": 0.8,
+        }
+    )
+    ranker = ForgeMatchLLMRanker(llm=llm)
+    candidates = [
+        {
+            "column_id": 4812,
+            "column_name": "student_dob",
+            "display_name": "Student DOB",
+            "table_name": "dim_student",
+            "description": "Date of birth for the student",
+            "combined_retrieval_score": 0.72,
+        }
+    ]
+
+    ranker.rank(workspace_id="ws-test", source_record=_source(), candidates=candidates)
+
+    prompt = llm.calls[0]["user_prompt"]
+    assert "definition_guidance" in prompt
+    assert "definition_overlap_score" in prompt
+
+
+def test_ranker_fallback_refuses_confident_match_when_definitions_conflict() -> None:
+    ranker = ForgeMatchLLMRanker(llm=_BrokenLLM())
+    candidates = [
+        {
+            "column_id": 4812,
+            "column_name": "birth_date",
+            "display_name": "Birth Date",
+            "table_name": "dim_student",
+            "description": "Date the student enrolled in the district",
+            "final_score": 0.93,
+            "combined_retrieval_score": 0.9,
+            "lexical_score": 0.88,
+            "vector_score": 0.85,
+        }
+    ]
+
+    out = ranker.rank(workspace_id="ws-test", source_record=_source(), candidates=candidates)
+
+    assert out["match_decision"] == "ambiguous"
+    assert out["selected_column_id"] is None
+    assert "definition_conflict" in out["reason_codes"]

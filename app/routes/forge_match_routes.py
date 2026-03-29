@@ -368,6 +368,23 @@ class ForgeMatchSession(ForgeResource):
             logger.exception("forge_match session get failed")
             return {"error": "forge_match session get failed"}, 500
 
+    @token_required
+    @require_access("forge_match")
+    def delete(self, session_id: str):
+        try:
+            workspace_id = extract_workspace_id()
+            service = ForgeMatchMappingService()
+            result = service.delete_session(
+                workspace_id=workspace_id,
+                session_id=session_id,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("forge_match session delete failed")
+            return {"error": "forge_match session delete failed"}, 500
+
 
 @forge_match_ns.route("/<string:session_id>/mappings")
 class ForgeMatchMappings(ForgeResource):

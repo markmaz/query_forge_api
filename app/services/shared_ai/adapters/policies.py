@@ -11,6 +11,8 @@ from app.services.planner_domain.rerank_policy_engine import (
 from app.services.shared_ai.artifacts import Candidate, CapabilityMapArtifact, PromptSignalsArtifact, RerankedCandidatesArtifact
 from app.services.shared_ai.context import PipelineContext
 
+FORGE_MATCH_PREFERRED_DOMAIN_BONUS = 0.08
+
 
 class CandidatePolicyRerankAdapter(Protocol):
     def rerank(
@@ -49,6 +51,7 @@ class PolicyDrivenRerankAdapter:
             positive = 0.0
             negative = 0.0
             candidate_effects: list[dict[str, Any]] = []
+            domain_preference_adjustment = 0.0
 
             if workspace_id and base_domain_id > 0:
                 policies = self._policies.get_applicable_policies(
@@ -120,14 +123,36 @@ class PolicyDrivenRerankAdapter:
                     if bool(row.get("stop_on_match")):
                         break
 
+            preferred_domain_id = _preferred_domain_id(context)
+            if preferred_domain_id is not None and candidate.candidate_type == "column" and base_domain_id == preferred_domain_id:
+                domain_preference_adjustment = FORGE_MATCH_PREFERRED_DOMAIN_BONUS
+                adjustment += domain_preference_adjustment
+                candidate_effects.append(
+                    {
+                        "candidate_id": candidate.candidate_id,
+                        "candidate_label": candidate.label,
+                        "policy_key": "preferred_domain_bias",
+                        "score_delta": round(domain_preference_adjustment, 5),
+                        "signals_matched": [],
+                        "capabilities_present": [],
+                        "capabilities_missing": [],
+                        "reason": "Boosted because candidate belongs to the preferred Forge Match domain.",
+                    }
+                )
+
             final_score = round(base_score + adjustment, 5)
             reranked.append(
                 replace(
                     candidate,
+                    attributes={
+                        **candidate.attributes,
+                        "preferred_domain_match": preferred_domain_id is not None and base_domain_id == preferred_domain_id,
+                    },
                     scores={
                         **candidate.scores,
                         "base_score": round(base_score, 5),
                         "policy_adjustment": round(adjustment, 5),
+                        "domain_preference_adjustment": round(domain_preference_adjustment, 5),
                         "final_score": final_score,
                     },
                 )
@@ -152,6 +177,7 @@ class PolicyDrivenRerankAdapter:
                 "signals": list(prompt_signals.signals),
                 "candidate_count": len(reranked),
                 "policy_match_count": len(effects),
+                "preferred_domain_id": _preferred_domain_id(context),
             },
         )
 
@@ -192,3 +218,139 @@ def _build_reason(*, policy_key: str, delta: float, present: Sequence[str], miss
     if missing:
         return f"{policy_key} matched but produced no score change because required capabilities were missing."
     return f"{policy_key} matched but produced no score change."
+
+
+def _preferred_domain_id(context: PipelineContext) -> int | None:
+    raw = context.request.get("preferred_domain_id")
+    if raw is None:
+        return None
+    try:
+        parsed = int(raw)
+    except Exception:
+        return None
+    return parsed if parsed > 0 else None
+
+
+class SignalCapabilityRerankAdapter:
+    def rerank(
+        self,
+        *,
+        context: PipelineContext,
+        candidates: Sequence[Candidate],
+        prompt_signals: PromptSignalsArtifact,
+        capability_map: CapabilityMapArtifact,
+    ) -> RerankedCandidatesArtifact:
+        del context
+        signals = set(prompt_signals.signals)
+        reranked: list[Candidate] = []
+        effects: list[dict[str, Any]] = []
+
+        for candidate in candidates:
+            base_score = _candidate_base_score(candidate)
+            present = set(capability_map.candidate_capabilities.get(candidate.candidate_id) or list(candidate.capabilities))
+            adjustment, candidate_effects = _heuristic_capability_adjustment(
+                candidate=candidate,
+                signals=signals,
+                capabilities=present,
+            )
+            final_score = round(base_score + adjustment, 5)
+            reranked.append(
+                replace(
+                    candidate,
+                    attributes={
+                        **candidate.attributes,
+                        "preferred_domain_match": False,
+                    },
+                    scores={
+                        **candidate.scores,
+                        "base_score": round(base_score, 5),
+                        "policy_adjustment": round(adjustment, 5),
+                        "domain_preference_adjustment": 0.0,
+                        "final_score": final_score,
+                    },
+                )
+            )
+            if candidate_effects:
+                effects.extend(candidate_effects)
+
+        reranked.sort(
+            key=lambda item: (
+                float(item.scores.get("final_score") or _candidate_base_score(item)),
+                float(item.scores.get("combined_retrieval_score") or 0.0),
+                float(item.scores.get("lexical_score") or 0.0),
+                float(item.scores.get("vector_score") or 0.0),
+            ),
+            reverse=True,
+        )
+
+        return RerankedCandidatesArtifact(
+            candidates=reranked,
+            policy_effects=effects,
+            summary={
+                "signals": list(prompt_signals.signals),
+                "candidate_count": len(reranked),
+                "policy_match_count": len(effects),
+                "mode": "signal_capability_rerank",
+            },
+        )
+
+
+def _heuristic_capability_adjustment(
+    *,
+    candidate: Candidate,
+    signals: set[str],
+    capabilities: set[str],
+) -> tuple[float, list[dict[str, Any]]]:
+    adjustment = 0.0
+    effects: list[dict[str, Any]] = []
+
+    def apply(delta: float, reason: str, matched_caps: Sequence[str]) -> None:
+        nonlocal adjustment
+        if abs(delta) <= 0:
+            return
+        adjustment += delta
+        effects.append(
+            {
+                "candidate_id": candidate.candidate_id,
+                "candidate_label": candidate.label,
+                "policy_key": "forge_match_signal_capability",
+                "score_delta": round(delta, 5),
+                "signals_matched": sorted(signals),
+                "capabilities_present": sorted(matched_caps),
+                "capabilities_missing": [],
+                "reason": reason,
+            }
+        )
+
+    if "age_extreme_prompt" in signals:
+        if "BIRTH_DATE" in capabilities:
+            apply(0.28, "Boosted because age-extreme prompts align strongly with birth-date columns.", ["BIRTH_DATE"])
+        elif "AGE" in capabilities:
+            apply(0.22, "Boosted because age-extreme prompts align with age columns.", ["AGE"])
+        elif "PROGRAM_MEMBERSHIP" in capabilities:
+            apply(-0.18, "Penalized because program-membership columns are weak fits for age-extreme prompts.", ["PROGRAM_MEMBERSHIP"])
+
+    if "birth_month_prompt" in signals:
+        if "BIRTH_DATE" in capabilities:
+            apply(0.32, "Boosted because birth-month prompts align strongly with birth-date columns.", ["BIRTH_DATE"])
+        elif "PROGRAM_MEMBERSHIP" in capabilities:
+            apply(-0.16, "Penalized because program-membership columns are weak fits for birth-month prompts.", ["PROGRAM_MEMBERSHIP"])
+
+    if "calendar_days_off_prompt" in signals:
+        matched = [cap for cap in ("SCHOOL_DAY_FLAG", "NON_INSTRUCTIONAL_DAY", "CALENDAR_DATE") if cap in capabilities]
+        if matched:
+            delta = 0.0
+            if "SCHOOL_DAY_FLAG" in capabilities:
+                delta += 0.24
+            if "NON_INSTRUCTIONAL_DAY" in capabilities:
+                delta += 0.24
+            if "CALENDAR_DATE" in capabilities:
+                delta += 0.14
+            apply(min(delta, 0.34), "Boosted because days-off prompts align with calendar/day-off columns.", matched)
+        elif "PROGRAM_MEMBERSHIP" in capabilities:
+            apply(-0.18, "Penalized because program-membership columns are weak fits for calendar day-off prompts.", ["PROGRAM_MEMBERSHIP"])
+
+    if "student_listing" in signals and "STUDENT_IDENTITY" in capabilities:
+        apply(0.06, "Boosted because student-listing prompts align with student identity columns.", ["STUDENT_IDENTITY"])
+
+    return adjustment, effects

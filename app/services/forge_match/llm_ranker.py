@@ -7,14 +7,37 @@ from typing import Any, Dict, Optional, Sequence
 from app.config.llm_resolver import build_llm_client_for_role
 from app.constants.llm_roles import LLMRole
 from app.services.forge_match.field_extractor import SourceFieldRecord
+from app.services.forge_match.normalizer import normalize_text, token_overlap_score, token_set
 from app.services.llm.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
+
+_GENERIC_DEFINITION_TOKENS = {
+    "student",
+    "students",
+    "staff",
+    "teacher",
+    "teachers",
+    "user",
+    "users",
+    "record",
+    "records",
+    "field",
+    "fields",
+    "column",
+    "columns",
+    "value",
+    "values",
+    "code",
+    "codes",
+}
 
 _ALLOWED_DECISIONS = {"matched", "ambiguous", "no_confident_match"}
 _ALLOWED_REASON_CODES = {
     "name_similarity",
     "description_similarity",
+    "definition_alignment",
+    "definition_conflict",
     "type_compatible",
     "domain_alignment",
     "table_alignment",
@@ -87,7 +110,7 @@ class ForgeMatchLLMRanker:
 
         if payload is None:
             logger.warning("ForgeMatch LLM rank response invalid JSON; falling back", extra={"trace": trace})
-            return self._fallback_from_retrieval(candidates)
+            return self._fallback_from_retrieval(source_record=source_record, candidates=candidates)
 
         normalized = _normalize_rank_payload(payload)
         if not _ids_are_valid(normalized, candidate_ids):
@@ -124,13 +147,20 @@ class ForgeMatchLLMRanker:
             "You rank retrieved column candidates for a mapping workflow.\n"
             "Return strict JSON only, no markdown.\n"
             "Never invent candidate IDs. You may only use candidate column_id values provided in input.\n"
+            "A strong definition match may outweigh a weaker name match.\n"
+            "A strong name match is not enough if the source definition conflicts with the candidate definition.\n"
             "If uncertain, return match_decision='ambiguous' or 'no_confident_match'."
         )
 
     @staticmethod
     def _build_user_prompt(*, source_record: SourceFieldRecord, candidates: Sequence[Dict[str, Any]]) -> str:
+        source_definition_present = bool(normalize_text(source_record.source_description))
         compact_candidates = []
         for row in candidates:
+            definition_metrics = _definition_metrics(
+                source_description=source_record.source_description,
+                candidate_description=row.get("description"),
+            )
             compact_candidates.append(
                 {
                     "column_id": row.get("column_id"),
@@ -146,6 +176,13 @@ class ForgeMatchLLMRanker:
                     "vector_score": row.get("vector_score"),
                     "lexical_score": row.get("lexical_score"),
                     "combined_retrieval_score": row.get("combined_retrieval_score"),
+                    "definition_context": {
+                        "source_definition_present": source_definition_present,
+                        "candidate_definition_present": bool(normalize_text(row.get("description"))),
+                        "definition_overlap_score": round(definition_metrics["overlap"], 4),
+                        "source_definition_coverage": round(definition_metrics["source_coverage"], 4),
+                        "salient_definition_coverage": round(definition_metrics["salient_coverage"], 4),
+                    },
                 }
             )
 
@@ -157,12 +194,18 @@ class ForgeMatchLLMRanker:
                 "source_type": source_record.source_type,
                 "source_object_name": source_record.source_object_name,
                 "sample_value": source_record.sample_value,
+                "definition_present": source_definition_present,
             },
             "candidates": compact_candidates,
             "instructions": {
                 "allowed_match_decisions": ["matched", "ambiguous", "no_confident_match"],
                 "max_alternates": 2,
                 "reason_code_allow_list": sorted(_ALLOWED_REASON_CODES),
+                "definition_guidance": (
+                    "When a source description exists, compare it to each candidate description. "
+                    "Prefer candidates whose definitions align semantically, even if the names are not identical. "
+                    "Do not choose a candidate solely on name similarity when the definitions conflict."
+                ),
             },
             "response_schema": {
                 "selected_column_id": "integer|null",
@@ -177,8 +220,21 @@ class ForgeMatchLLMRanker:
         return json.dumps(payload, ensure_ascii=True)
 
     @staticmethod
-    def _fallback_from_retrieval(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-        ranked = sorted(candidates, key=lambda row: float(row.get("combined_retrieval_score") or 0.0), reverse=True)
+    def _fallback_from_retrieval(
+        *,
+        source_record: SourceFieldRecord,
+        candidates: Sequence[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        ranked = sorted(
+            candidates,
+            key=lambda row: (
+                float(row.get("final_score") or row.get("base_score") or row.get("combined_retrieval_score") or 0.0),
+                float(row.get("combined_retrieval_score") or 0.0),
+                float(row.get("lexical_score") or 0.0),
+                float(row.get("vector_score") or 0.0),
+            ),
+            reverse=True,
+        )
         if not ranked:
             return {
                 "selected_column_id": None,
@@ -192,14 +248,46 @@ class ForgeMatchLLMRanker:
 
         top = ranked[0]
         top_id = int(top.get("column_id") or 0)
-        score = float(top.get("combined_retrieval_score") or 0.0)
+        score = float(top.get("final_score") or top.get("base_score") or top.get("combined_retrieval_score") or 0.0)
+        source_definition_present = bool(normalize_text(source_record.source_description))
+        candidate_definition_present = bool(normalize_text(top.get("description")))
+        definition_metrics = _definition_metrics(
+            source_description=source_record.source_description,
+            candidate_description=top.get("description"),
+        )
+        definition_aligned = (
+            source_definition_present
+            and candidate_definition_present
+            and definition_metrics["source_coverage"] >= 0.6
+            and definition_metrics["salient_coverage"] >= 0.6
+        )
+        definition_conflicted = source_definition_present and (
+            not candidate_definition_present
+            or definition_metrics["source_coverage"] < 0.5
+            or definition_metrics["salient_coverage"] < 0.5
+            or definition_metrics["overlap"] < 0.12
+        )
         if top_id > 0 and score >= 0.86:
+            if definition_conflicted:
+                alternates = [int(row.get("column_id") or 0) for row in ranked[1:3] if int(row.get("column_id") or 0) > 0]
+                return {
+                    "selected_column_id": None,
+                    "alternate_column_ids": [top_id, *alternates][:2],
+                    "match_decision": "ambiguous",
+                    "reason_codes": ["definition_conflict", "ambiguous_candidates"],
+                    "explanation": "Top retrieved candidate was not auto-selected because the field definitions did not align strongly enough.",
+                    "ambiguity_note": "Definitions need review before accepting this mapping.",
+                    "llm_confidence": min(0.35, max(0.1, score)),
+                }
             alternates = [int(row.get("column_id") or 0) for row in ranked[1:3] if int(row.get("column_id") or 0) > 0]
+            reason_codes = ["name_similarity", "description_similarity"]
+            if definition_aligned:
+                reason_codes.append("definition_alignment")
             return {
                 "selected_column_id": top_id,
                 "alternate_column_ids": alternates,
                 "match_decision": "matched",
-                "reason_codes": ["name_similarity", "description_similarity"],
+                "reason_codes": reason_codes,
                 "explanation": "Top retrieved candidate selected by deterministic fallback.",
                 "ambiguity_note": None,
                 "llm_confidence": min(0.75, max(0.4, score)),
@@ -249,6 +337,29 @@ def _extract_json_payload(trace: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if isinstance(obj, dict):
             return obj
     return None
+
+
+def _definition_metrics(*, source_description: object, candidate_description: object) -> Dict[str, float]:
+    source_tokens = token_set(source_description)
+    candidate_tokens = token_set(candidate_description)
+    if not source_tokens or not candidate_tokens:
+        return {"overlap": 0.0, "source_coverage": 0.0, "salient_coverage": 0.0}
+
+    overlap = token_overlap_score(source_tokens, candidate_tokens)
+    shared = source_tokens.intersection(candidate_tokens)
+    source_coverage = float(len(shared)) / float(len(source_tokens) or 1)
+    salient_source = {
+        token for token in source_tokens if len(token) >= 5 and token not in _GENERIC_DEFINITION_TOKENS
+    }
+    if not salient_source:
+        salient_coverage = source_coverage
+    else:
+        salient_coverage = float(len(shared.intersection(salient_source))) / float(len(salient_source) or 1)
+    return {
+        "overlap": overlap,
+        "source_coverage": source_coverage,
+        "salient_coverage": salient_coverage,
+    }
 
 
 def _normalize_rank_payload(payload: Dict[str, Any]) -> Dict[str, Any]:

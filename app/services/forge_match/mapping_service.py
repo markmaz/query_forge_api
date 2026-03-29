@@ -20,11 +20,16 @@ from app.services.forge_match.pipeline_adapters import (
     ForgeMatchConfidenceAdapter,
     ForgeMatchLLMDecisionAdapter,
     ForgeMatchPersistenceAdapter,
+    ForgeMatchSessionExecutionAdapter,
+    ForgeMatchSessionFinalizationAdapter,
+    ForgeMatchSessionPreparationAdapter,
 )
 from app.services.forge_match.pipeline_definition import (
     build_forge_match_candidate_pipeline_definition,
     build_forge_match_row_pipeline_definition,
+    build_forge_match_session_pipeline_definition,
 )
+from app.services.forge_match.session_pipeline_artifacts import ForgeMatchSessionResultArtifact
 from app.services.shared_ai.artifacts import MatchOutcomeArtifact, PersistenceArtifact
 from app.services.shared_ai.context import PipelineContext
 from app.services.shared_ai.executor import PipelineExecutor
@@ -373,190 +378,34 @@ class ForgeMatchMappingService:
     ) -> Dict[str, Any]:
         ws = _required_text(workspace_id, "workspace_id")
         sid = _required_text(session_id, "session_id")
-        session = self._get_session_row(workspace_id=ws, session_id=sid)
-        source_rows = self._load_source_rows(session_id=sid)
-        if not source_rows:
-            raise ForgeError("No source records found for session", status_code=400)
-
-        if force:
-            self._sql.execute_write(
-                """
-                DELETE FROM forge_match_result
-                WHERE session_id = :session_id
-                """,
-                {"session_id": sid},
-            )
-
-        existing_by_source = self._existing_results_by_source(session_id=sid)
-        source_total = len(source_rows)
-        analyzed = 0
-        skipped = 0
-        failed = 0
-
-        self._update_session_progress(
-            session_id=sid,
-            status="analyzing",
-            job_id=job_id,
-            source_total=source_total,
-            source_done=0,
-            source_skipped=0,
-            source_failed=0,
-            current_phase="analyzing",
-            current_source_row_id=None,
-            analysis_error=None,
-            cancel_requested=False,
-            started_at=datetime.now(timezone.utc),
-            completed_at=None,
+        context = PipelineContext(
+            pipeline_name="forge_match_session_pipeline",
+            trace_id=f"forge_match_session:{uuid.uuid4().hex}",
+            workspace_id=ws,
+            user_id=None,
+            vertical_norm=str(vertical_norm or "generic"),
+            request={
+                "session_id": sid,
+                "job_id": _to_text_or_none(job_id),
+                "top_n": max(3, int(top_n or 8)),
+                "vertical_norm": _to_text_or_none(vertical_norm),
+                "domain_id": int(domain_id) if domain_id is not None else None,
+                "preferred_domain_id": int(domain_id) if domain_id is not None else None,
+                "force": bool(force),
+                "llm_id": int(llm_id) if llm_id is not None else None,
+            },
         )
 
         try:
-            for source in source_rows:
-                src_id = int(source["id"])
-                current_source_row_id = str(source.get("row_id") or "")
-
-                if self._is_cancel_requested(session_id=sid):
-                    self._update_session_progress(
-                        session_id=sid,
-                        status="canceled",
-                        job_id=job_id,
-                        source_total=source_total,
-                        source_done=analyzed,
-                        source_skipped=skipped,
-                        source_failed=failed,
-                        current_phase="canceled",
-                        current_source_row_id=current_source_row_id or None,
-                        analysis_error="Canceled by operator",
-                        cancel_requested=True,
-                        started_at=None,
-                        completed_at=datetime.now(timezone.utc),
-                    )
-                    return {
-                        "job_id": job_id,
-                        "session_id": sid,
-                        "workspace_id": ws,
-                        "status": "canceled",
-                        "result_count": len(self._load_mapping_rows(workspace_id=ws, session_id=sid)),
-                        "analyzed_count": analyzed,
-                        "skipped_count": skipped,
-                        "failed_count": failed,
-                        "summary": self._build_summary(self._load_mapping_rows(workspace_id=ws, session_id=sid)),
-                        "mappings": self._load_mapping_rows(workspace_id=ws, session_id=sid),
-                        "session": session,
-                    }
-
-                if (not force) and src_id in existing_by_source:
-                    skipped += 1
-                    self._update_session_progress(
-                        session_id=sid,
-                        status="analyzing",
-                        job_id=job_id,
-                        source_total=source_total,
-                        source_done=analyzed,
-                        source_skipped=skipped,
-                        source_failed=failed,
-                        current_phase="skipping_existing",
-                        current_source_row_id=current_source_row_id or None,
-                    )
-                    continue
-
-                source_record = SourceFieldRecord(
-                    row_id=str(source.get("row_id") or ""),
-                    sheet_name=str(source.get("sheet_name") or ""),
-                    row_number=int(source.get("row_number") or 0),
-                    source_field_name=str(source.get("source_field_name") or ""),
-                    source_description=_to_text_or_none(source.get("source_description")),
-                    source_type=_to_text_or_none(source.get("source_type")),
-                    source_object_name=_to_text_or_none(source.get("source_object_name")),
-                    sample_value=_to_text_or_none(source.get("sample_value")),
-                    category=_to_text_or_none(source.get("category")),
-                    normalized_search_text=str(source.get("normalized_search_text") or ""),
-                    raw_row=_parse_json_dict(source.get("raw_row_json")) or {},
-                )
-
-                try:
-                    outcome, pipeline_snapshot, _persistence = self._run_row_pipeline(
-                        workspace_id=ws,
-                        session_id=sid,
-                        source_record_id=src_id,
-                        source_record=source_record,
-                        top_n=max(3, int(top_n or 8)),
-                        vertical_norm=vertical_norm,
-                        domain_id=int(domain_id) if domain_id is not None else None,
-                        llm_id=llm_id,
-                    )
-                    analyzed += 1
-                    current_phase = "ranking"
-                except Exception as row_exc:
-                    failed += 1
-                    logger.exception(
-                        "ForgeMatch row analyze failed session_id=%s source_record_id=%s",
-                        sid,
-                        src_id,
-                    )
-                    self._upsert_mapping_result(
-                        session_id=sid,
-                        source_record_id=src_id,
-                        selected=None,
-                        alternates=[],
-                        candidates=[],
-                        llm_rank={
-                            "match_decision": "no_confident_match",
-                            "reason_codes": ["processing_error"],
-                            "explanation": f"Processing error: {str(row_exc)[:300]}",
-                            "ambiguity_note": None,
-                            "llm_confidence": 0.0,
-                        },
-                        confidence={"confidence_score": 0, "confidence_band": "low"},
-                    )
-                    current_phase = "row_error"
-
-                self._update_session_progress(
-                    session_id=sid,
-                    status="analyzing",
-                    job_id=job_id,
-                    source_total=source_total,
-                    source_done=analyzed,
-                    source_skipped=skipped,
-                    source_failed=failed,
-                    current_phase=current_phase,
-                    current_source_row_id=current_source_row_id or None,
-                )
-
-            mappings = self._load_mapping_rows(workspace_id=ws, session_id=sid)
-            summary = self._build_summary(mappings)
-            warning_error = None
-            if failed > 0:
-                warning_error = f"Completed with row errors: failed_count={failed}"
-
-            self._update_session_progress(
-                session_id=sid,
-                status="analyzed",
-                job_id=job_id,
-                source_total=source_total,
-                source_done=analyzed,
-                source_skipped=skipped,
-                source_failed=failed,
-                current_phase="analyzed",
-                current_source_row_id=None,
-                analysis_error=warning_error,
-                completed_at=datetime.now(timezone.utc),
-            )
-
-            return {
-                "job_id": job_id,
-                "session_id": sid,
-                "workspace_id": ws,
-                "status": "analyzed",
-                "result_count": len(mappings),
-                "analyzed_count": analyzed,
-                "skipped_count": skipped,
-                "failed_count": failed,
-                "summary": summary,
-                "mappings": mappings,
-                "session": session,
-            }
+            result = self._run_session_pipeline(context)
+            return dict(result.payload)
         except Exception as exc:
             logger.exception("ForgeMatch analyze session failed session_id=%s", sid)
+            progress = context.metadata.get("session_progress") or {}
+            analyzed = int(progress.get("analyzed_count") or 0)
+            skipped = int(progress.get("skipped_count") or 0)
+            failed = int(progress.get("failed_count") or 0)
+            source_total = int(progress.get("source_total") or 0)
             self._update_session_progress(
                 session_id=sid,
                 status="failed",
@@ -571,6 +420,44 @@ class ForgeMatchMappingService:
                 completed_at=datetime.now(timezone.utc),
             )
             raise
+
+    def _run_session_pipeline(self, context: PipelineContext) -> ForgeMatchSessionResultArtifact:
+        definition = build_forge_match_session_pipeline_definition(
+            preparation_adapter=ForgeMatchSessionPreparationAdapter(
+                load_session=self._get_session_row,
+                load_source_rows=self._load_source_rows,
+                existing_results_by_source=self._existing_results_by_source,
+                clear_results=self._clear_session_results,
+                update_progress=self._update_session_progress,
+            ),
+            execution_adapter=ForgeMatchSessionExecutionAdapter(
+                is_cancel_requested=self._is_cancel_requested,
+                update_progress=self._update_session_progress,
+                run_row_pipeline=self._run_row_pipeline,
+                persist_failure_result=self._upsert_mapping_result,
+            ),
+            finalization_adapter=ForgeMatchSessionFinalizationAdapter(
+                load_mapping_rows=self._load_mapping_rows,
+                build_summary=self._build_summary,
+                update_progress=self._update_session_progress,
+            ),
+        )
+        context = self._pipeline_executor.execute(definition, context)
+        trace_snapshot = serialize_pipeline_context(context)
+        work = context.get_artifact("session_work", node_name="forge_match_session_pipeline")
+        result = context.get_artifact("session_result", node_name="forge_match_session_pipeline")
+        if not isinstance(result, ForgeMatchSessionResultArtifact):
+            raise TypeError("forge_match_session_pipeline expected ForgeMatchSessionResultArtifact.")
+        if hasattr(work, "session") and isinstance(getattr(work, "session"), dict):
+            summary_json = self._persist_session_analysis_trace(
+                session_id=str(context.request.get("session_id") or ""),
+                current_summary=getattr(work, "session").get("summary_json"),
+                trace_snapshot=trace_snapshot,
+            )
+            payload_session = result.payload.get("session")
+            if isinstance(payload_session, dict):
+                payload_session["summary_json"] = summary_json
+        return result
 
     def _run_row_pipeline(
         self,
@@ -602,6 +489,7 @@ class ForgeMatchMappingService:
                 "source_record": source_record,
                 "top_n": int(top_n),
                 "domain_id": int(domain_id) if domain_id is not None else None,
+                "preferred_domain_id": int(domain_id) if domain_id is not None else None,
                 "llm_id": int(llm_id) if llm_id is not None else None,
             },
         )
@@ -762,6 +650,31 @@ class ForgeMatchMappingService:
             "source_records": [self._source_row_to_response(row) for row in source_records],
             "mappings": mappings,
             "summary": summary,
+        }
+
+    def delete_session(self, *, workspace_id: str, session_id: str) -> Dict[str, Any]:
+        ws = _required_text(workspace_id, "workspace_id")
+        sid = _required_text(session_id, "session_id")
+        session = self._get_session_row(workspace_id=ws, session_id=sid)
+
+        status = str(session.get("status") or "").strip().lower()
+        if status in {"queued", "analyzing"}:
+            raise ForgeError("Cannot delete a ForgeMatch session while analysis is in progress", status_code=409)
+
+        self._sql.execute_write(
+            """
+            DELETE FROM forge_match_session
+            WHERE id = :session_id
+              AND workspace_id = :workspace_id
+            """,
+            {"session_id": sid, "workspace_id": ws},
+        )
+
+        return {
+            "session_id": sid,
+            "workspace_id": ws,
+            "deleted": True,
+            "message": "ForgeMatch session deleted",
         }
 
     def patch_mappings(
@@ -1177,6 +1090,39 @@ class ForgeMatchMappingService:
             if source_id > 0 and mapping_id:
                 out[source_id] = mapping_id
         return out
+
+    def _clear_session_results(self, *, session_id: str) -> None:
+        self._sql.execute_write(
+            """
+            DELETE FROM forge_match_result
+            WHERE session_id = :session_id
+            """,
+            {"session_id": session_id},
+        )
+
+    def _persist_session_analysis_trace(
+        self,
+        *,
+        session_id: str,
+        current_summary: Any,
+        trace_snapshot: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        summary = current_summary if isinstance(current_summary, dict) else {}
+        next_summary = dict(summary)
+        next_summary["analysis_trace"] = dict(trace_snapshot)
+        self._sql.execute_write(
+            """
+            UPDATE forge_match_session
+            SET summary_json = :summary_json,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :session_id
+            """,
+            {
+                "session_id": session_id,
+                "summary_json": _json_dumps(next_summary),
+            },
+        )
+        return next_summary
 
     def _load_source_rows(self, *, session_id: str, limit: int = 2000, offset: int = 0) -> List[Dict[str, Any]]:
         rows = self._sql.execute_query_mappings(
