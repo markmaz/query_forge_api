@@ -19,13 +19,13 @@ from app.services.forge_match.pipeline_adapters import (
     ExistingRetrieverCandidateAdapter,
     ForgeMatchConfidenceAdapter,
     ForgeMatchLLMDecisionAdapter,
+    ForgeMatchPersistenceAdapter,
 )
 from app.services.forge_match.pipeline_definition import (
     build_forge_match_candidate_pipeline_definition,
     build_forge_match_row_pipeline_definition,
 )
-from app.services.shared_ai.adapters.candidates import candidate_to_dict
-from app.services.shared_ai.artifacts import ConfidenceArtifact, LLMDecisionArtifact, RerankedCandidatesArtifact
+from app.services.shared_ai.artifacts import MatchOutcomeArtifact, PersistenceArtifact
 from app.services.shared_ai.context import PipelineContext
 from app.services.shared_ai.executor import PipelineExecutor
 from app.services.shared_ai.tracing import serialize_pipeline_context
@@ -474,25 +474,15 @@ class ForgeMatchMappingService:
                 )
 
                 try:
-                    candidates, llm_rank, confidence, pipeline_snapshot = self._run_row_pipeline(
+                    outcome, pipeline_snapshot, _persistence = self._run_row_pipeline(
                         workspace_id=ws,
+                        session_id=sid,
+                        source_record_id=src_id,
                         source_record=source_record,
                         top_n=max(3, int(top_n or 8)),
                         vertical_norm=vertical_norm,
                         domain_id=int(domain_id) if domain_id is not None else None,
                         llm_id=llm_id,
-                    )
-                    selected = self._find_candidate(candidates, llm_rank.get("selected_column_id"))
-                    alternates = self._find_alternates(candidates, llm_rank.get("alternate_column_ids") or [])
-                    llm_rank["shared_pipeline"] = pipeline_snapshot
-                    self._upsert_mapping_result(
-                        session_id=sid,
-                        source_record_id=src_id,
-                        selected=selected,
-                        alternates=alternates,
-                        candidates=candidates,
-                        llm_rank=llm_rank,
-                        confidence=confidence,
                     )
                     analyzed += 1
                     current_phase = "ranking"
@@ -586,12 +576,14 @@ class ForgeMatchMappingService:
         self,
         *,
         workspace_id: str,
+        session_id: str,
+        source_record_id: int,
         source_record: SourceFieldRecord,
         top_n: int,
         vertical_norm: Optional[str],
         domain_id: Optional[int],
         llm_id: Optional[int],
-    ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    ) -> tuple[MatchOutcomeArtifact, dict[str, Any], PersistenceArtifact]:
         context = PipelineContext(
             pipeline_name="forge_match_row_pipeline",
             trace_id=f"forge_match_row:{uuid.uuid4().hex}",
@@ -605,6 +597,8 @@ class ForgeMatchMappingService:
                     or source_record.source_field_name
                     or ""
                 ).strip(),
+                "session_id": session_id,
+                "source_record_id": int(source_record_id),
                 "source_record": source_record,
                 "top_n": int(top_n),
                 "domain_id": int(domain_id) if domain_id is not None else None,
@@ -615,25 +609,18 @@ class ForgeMatchMappingService:
             candidate_pipeline_factory=lambda _ctx: self._build_candidate_pipeline_definition(),
             ranking_adapter=ForgeMatchLLMDecisionAdapter(ranker=self._ranker),
             confidence_adapter=ForgeMatchConfidenceAdapter(scorer=self._confidence),
+            persistence_adapter=ForgeMatchPersistenceAdapter(persist_result=self._upsert_mapping_result),
         )
         context = self._pipeline_executor.execute(definition, context)
 
-        reranked = context.get_artifact("reranked_candidates", node_name="forge_match_row_pipeline")
-        decision = context.get_artifact("llm_decision", node_name="forge_match_row_pipeline")
-        confidence = context.get_artifact("confidence", node_name="forge_match_row_pipeline")
-        if not isinstance(reranked, RerankedCandidatesArtifact):
-            raise TypeError("forge_match_row_pipeline expected RerankedCandidatesArtifact.")
-        if not isinstance(decision, LLMDecisionArtifact):
-            raise TypeError("forge_match_row_pipeline expected LLMDecisionArtifact.")
-        if not isinstance(confidence, ConfidenceArtifact):
-            raise TypeError("forge_match_row_pipeline expected ConfidenceArtifact.")
+        outcome = context.get_artifact("match_outcome", node_name="forge_match_row_pipeline")
+        persistence = context.get_artifact("persistence_result", node_name="forge_match_row_pipeline")
+        if not isinstance(outcome, MatchOutcomeArtifact):
+            raise TypeError("forge_match_row_pipeline expected MatchOutcomeArtifact.")
+        if not isinstance(persistence, PersistenceArtifact):
+            raise TypeError("forge_match_row_pipeline expected PersistenceArtifact.")
 
-        candidates = [candidate_to_dict(candidate) for candidate in list(reranked.candidates or [])]
-        llm_rank = dict(decision.raw_payload or {})
-        confidence_payload = dict(confidence.details or {})
-        confidence_payload.setdefault("confidence_score", confidence.confidence_score)
-        confidence_payload.setdefault("confidence_band", confidence.confidence_band)
-        return candidates, llm_rank, confidence_payload, serialize_pipeline_context(context)
+        return outcome, serialize_pipeline_context(context), persistence
 
     def _build_candidate_pipeline_definition(self):
         retrieval_adapter = self._candidate_retrieval_adapter()
@@ -1425,29 +1412,6 @@ class ForgeMatchMappingService:
         )
         if not rows:
             raise ForgeError("manually_selected_workspace_column_id not found in workspace", status_code=404)
-
-    @staticmethod
-    def _find_candidate(candidates: Sequence[Dict[str, Any]], candidate_id: Any) -> Optional[Dict[str, Any]]:
-        cid = _safe_int(candidate_id)
-        if cid is None:
-            return None
-        for row in candidates:
-            if _safe_int(row.get("column_id")) == cid:
-                return row
-        return None
-
-    @staticmethod
-    def _find_alternates(candidates: Sequence[Dict[str, Any]], candidate_ids: Sequence[Any]) -> List[Dict[str, Any]]:
-        allowed = {_safe_int(value) for value in candidate_ids}
-        allowed = {value for value in allowed if value is not None}
-        out: list[Dict[str, Any]] = []
-        for row in candidates:
-            cid = _safe_int(row.get("column_id"))
-            if cid is not None and cid in allowed:
-                out.append(row)
-            if len(out) >= 2:
-                break
-        return out
 
     @staticmethod
     def _json_safe_row(row: Dict[str, Any]) -> Dict[str, Any]:

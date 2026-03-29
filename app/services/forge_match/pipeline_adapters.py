@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 from app.services.forge_match.confidence import ForgeMatchConfidenceScorer
 from app.services.forge_match.field_extractor import SourceFieldRecord
 from app.services.forge_match.llm_ranker import ForgeMatchLLMRanker
 from app.services.shared_ai.adapters.candidates import candidate_from_column_row, candidate_to_dict
-from app.services.shared_ai.artifacts import CandidateSetArtifact, ConfidenceArtifact, LLMDecisionArtifact
+from app.services.shared_ai.artifacts import (
+    CandidateSetArtifact,
+    ConfidenceArtifact,
+    LLMDecisionArtifact,
+    MatchOutcomeArtifact,
+    PersistenceArtifact,
+)
 from app.services.shared_ai.context import PipelineContext
 
 
@@ -78,6 +84,54 @@ class ForgeMatchConfidenceAdapter:
             confidence_score=int(score_payload.get("confidence_score") or 0),
             confidence_band=str(score_payload.get("confidence_band") or "low"),
             details=dict(score_payload),
+        )
+
+
+class ForgeMatchPersistenceAdapter:
+    def __init__(
+        self,
+        *,
+        persist_result: Callable[..., None],
+    ) -> None:
+        self._persist_result = persist_result
+
+    def persist(
+        self,
+        *,
+        context: PipelineContext,
+        outcome: MatchOutcomeArtifact,
+    ) -> PersistenceArtifact:
+        session_id = str(context.request.get("session_id") or "").strip()
+        if not session_id:
+            raise TypeError("ForgeMatchPersistenceAdapter requires session_id in request['session_id'].")
+        try:
+            source_record_id = int(context.request.get("source_record_id") or 0)
+        except Exception as exc:
+            raise TypeError(
+                "ForgeMatchPersistenceAdapter requires integer source_record_id in request['source_record_id']."
+            ) from exc
+        if source_record_id <= 0:
+            raise TypeError("ForgeMatchPersistenceAdapter requires positive source_record_id in request.")
+
+        self._persist_result(
+            session_id=session_id,
+            source_record_id=source_record_id,
+            selected=outcome.selected_candidate,
+            alternates=outcome.alternates,
+            candidates=outcome.candidates,
+            llm_rank=outcome.decision_payload,
+            confidence=outcome.confidence_payload,
+        )
+        return PersistenceArtifact(
+            record_id=f"{session_id}:{source_record_id}",
+            status="persisted",
+            details={
+                "session_id": session_id,
+                "source_record_id": source_record_id,
+                "selected_column_id": (
+                    outcome.selected_candidate.get("column_id") if outcome.selected_candidate else None
+                ),
+            },
         )
 
 

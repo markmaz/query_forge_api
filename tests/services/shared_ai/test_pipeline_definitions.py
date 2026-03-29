@@ -44,6 +44,14 @@ class _ConfidenceAdapter:
         return ConfidenceArtifact(confidence_score=90, confidence_band="high")
 
 
+class _PersistenceAdapter:
+    def persist(self, *, context: PipelineContext, outcome):
+        del context, outcome
+        from app.services.shared_ai.artifacts import PersistenceArtifact
+
+        return PersistenceArtifact(record_id="sess-1:10", status="persisted")
+
+
 def test_forge_match_pipeline_definition_declares_expected_nodes_and_edges() -> None:
     definition = build_forge_match_candidate_pipeline_definition(
         retrieval_adapter=_RetrievalAdapter(),
@@ -102,6 +110,7 @@ def test_forge_match_row_pipeline_definition_declares_expected_nodes_and_edges()
         ),
         ranking_adapter=_RankingAdapter(),
         confidence_adapter=_ConfidenceAdapter(),
+        persistence_adapter=_PersistenceAdapter(),
     )
 
     validate_pipeline_definition(definition)
@@ -109,11 +118,15 @@ def test_forge_match_row_pipeline_definition_declares_expected_nodes_and_edges()
     assert definition.name == "forge_match_row_pipeline"
     assert definition.start_nodes == ["dispatch_candidate_pipeline"]
     assert sorted(definition.nodes.keys()) == [
+        "assemble_match_outcome",
         "dispatch_candidate_pipeline",
+        "persist_match_outcome",
         "rank_candidates",
         "score_confidence",
     ]
     assert {(edge.from_node, edge.to_node) for edge in definition.edges} == {
+        ("assemble_match_outcome", "persist_match_outcome"),
         ("dispatch_candidate_pipeline", "rank_candidates"),
         ("rank_candidates", "score_confidence"),
+        ("score_confidence", "assemble_match_outcome"),
     }

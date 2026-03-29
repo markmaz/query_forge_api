@@ -66,6 +66,22 @@ class ConfidenceArtifact:
 
 
 @dataclass(frozen=True)
+class MatchOutcomeArtifact:
+    selected_candidate: Optional[dict[str, Any]]
+    alternates: list[dict[str, Any]] = field(default_factory=list)
+    candidates: list[dict[str, Any]] = field(default_factory=list)
+    decision_payload: dict[str, Any] = field(default_factory=dict)
+    confidence_payload: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class PersistenceArtifact:
+    record_id: Optional[str] = None
+    status: str = "persisted"
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class ValidationArtifact:
     is_valid: bool
     errors: list[str] = field(default_factory=list)
