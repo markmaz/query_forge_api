@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import datetime
-import json
 import logging
-import uuid
 from typing import Any, Dict, List, Optional
 
 import valkey
 
 from app.config import VALKEY_ADDRESS, VALKEY_PORT
 from app.exceptions.forge_error import ForgeError
+from app.services.execution import (
+    ExecutionJobService,
+    ExecutionModeQueryBuilder,
+    ExecutionModeQueryBuilderSql,
+    ExecutionRequestValidator,
+)
 from app.services.domain_resolver import DomainResolver
 from app.services.analytics.executor_adapter import AnalyticsExecutorForgeAdapter
 from app.services.query_forge_service import QueryForgeService
@@ -36,26 +40,12 @@ def _get_valkey_client() -> valkey.StrictValkey:
         )
     return _valkey_client
 
-
-def _qf_job_key(job_id: str) -> str:
-    return f"qf:exec:{job_id}"
-
-
-def _put_job(job_id: str, payload: Dict[str, Any]) -> None:
-    payload = dict(payload)
-    payload.setdefault("created_at", _utc_now_iso())
-    data = json.dumps(payload, default=str)
-    _get_valkey_client().setex(_qf_job_key(job_id), _JOB_TTL_S, data)
-
-
 def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
-    data = _get_valkey_client().get(_qf_job_key(job_id))
-    if not data:
-        return None
-    try:
-        return json.loads(data)
-    except json.JSONDecodeError:
-        return None
+    return ExecutionJobService(
+        client_factory=_get_valkey_client,
+        utc_now_iso=_utc_now_iso,
+        ttl_s=_JOB_TTL_S,
+    ).get_job(job_id)
 
 
 def _columns_from_manifest(manifest: Optional[Dict[str, Any]]) -> list[Dict[str, Any]]:
@@ -223,63 +213,47 @@ def _build_assistant_result_message(
 class ExecutionService:
     def __init__(self, context_builder: Optional[WorkspaceSqlContextBuilder] = None):
         self._builder = context_builder or WorkspaceSqlContextBuilder()
+        self._job_service = ExecutionJobService(
+            client_factory=_get_valkey_client,
+            utc_now_iso=_utc_now_iso,
+            ttl_s=_JOB_TTL_S,
+        )
+        self._validator = ExecutionRequestValidator(
+            assert_no_disallowed_client_sql_fields=assert_no_disallowed_client_sql_fields,
+            int_from_payload=_qf_int_from_payload,
+            int_from_args=_qf_int_from_args,
+        )
+        self._query_builder_mode = ExecutionModeQueryBuilder(
+            query_forge_service_cls=QueryForgeService,
+            domain_resolver_factory=DomainResolver,
+        )
+        self._query_builder_sql_mode = ExecutionModeQueryBuilderSql()
 
     def start(self, workspace_id: str, payload: Dict[str, Any], query_args: Dict[str, Any]) -> tuple[Dict[str, Any], int]:
-        assert_no_disallowed_client_sql_fields(payload)
-
-        qf_sql_json = payload.get("sqlJson") or payload.get("sql_json")
-        raw_sql = payload.get("rawSql") or payload.get("raw_sql")
-        if qf_sql_json is not None and not isinstance(qf_sql_json, dict):
-            raise ForgeError("sqlJson must be an object", status_code=400)
-
-        sql = ""
-        params: Dict[str, Any] = {}
-
-        kind = (payload.get("kind") or "").strip()
-        if not kind and isinstance(qf_sql_json, dict):
-            kind = "query_builder"
-        if not kind and isinstance(raw_sql, str) and raw_sql.strip():
-            kind = "query_builder_sql"
-        if kind not in {"query_builder", "query_builder_sql"}:
-            raise ForgeError("kind must be query_builder or query_builder_sql", status_code=400)
-
+        request = self._validator.validate_start(payload, query_args)
         ctx = self._builder.build(workspace_id)
-        qf_limit_raw = _qf_int_from_payload(payload.get("limit"), "limit")
-        offset_raw = _qf_int_from_payload(payload.get("offset"), "offset")
-        limit = qf_limit_raw if qf_limit_raw is not None else _qf_int_from_args(query_args, "limit", 200)
-        offset = offset_raw if offset_raw is not None else _qf_int_from_args(query_args, "offset", 0)
-
-        qf_rendered_sql = None
-        qf_count_sql = None
-        if kind == "query_builder_sql":
-            if qf_sql_json is not None:
-                raise ForgeError("sqlJson is not allowed when kind=query_builder_sql", status_code=400)
-            sql = str(raw_sql or "").strip()
-            if not sql:
-                raise ForgeError("rawSql is required", status_code=400)
-            qf_rendered_sql = sql
+        if request.kind == "query_builder_sql":
+            prepared = self._query_builder_sql_mode.prepare(raw_sql=str(request.raw_sql or ""))
         else:
-            if qf_sql_json is None:
-                raise ForgeError("sqlJson is required", status_code=400)
-            domain_resolver = DomainResolver(workspace_id=workspace_id)
-            svc = QueryForgeService(executor=ctx.sql_exec, domain_resolver=domain_resolver)
-            mode = (query_args.get("mode") or "preview").strip().lower()
-            prepared = svc.prepare(raw_query=qf_sql_json, mode=mode, limit=limit, offset=offset)
-            sql = prepared.sql
-            params = prepared.params
-            qf_rendered_sql = prepared.qf_rendered_sql
-            qf_count_sql = prepared.qf_count_sql
+            prepared = self._query_builder_mode.prepare(
+                workspace_id=workspace_id,
+                sql_exec=ctx.sql_exec,
+                sql_json=request.sql_json or {},
+                mode=(query_args.get("mode") or "preview").strip().lower(),
+                limit=request.limit,
+                offset=request.offset,
+            )
 
         assert_read_only_sql_statement(
-            sql,
-            context="Provided SQL statement" if kind == "query_builder_sql" else "Compiled SQL statement",
+            prepared.sql,
+            context="Provided SQL statement" if request.kind == "query_builder_sql" else "Compiled SQL statement",
         )
-        if qf_count_sql:
-            assert_read_only_sql_statement(qf_count_sql, context="Compiled count SQL statement")
+        if prepared.count_sql:
+            assert_read_only_sql_statement(prepared.count_sql, context="Compiled count SQL statement")
 
         resp = ctx.sql_exec.submit_statement_async(
-            sql,
-            params,
+            prepared.sql,
+            prepared.params,
         )
 
         statement_id = resp.get("statement_id") or resp.get("qf_statement_id")
@@ -298,20 +272,18 @@ class ExecutionService:
                     except Exception:
                         inline_rows = None
 
-        job_id = uuid.uuid4().hex
-        _put_job(
-            job_id,
+        job_id = self._job_service.create_job(
             {
                 "workspace_id": workspace_id,
                 "statement_id": statement_id,
-                "kind": kind,
-                "sql": sql,
-                "params": params,
-                "sqlRendered": qf_rendered_sql,
-                "limit": limit,
-                "offset": offset,
-                "countSql": qf_count_sql,
-                "sqlJson": qf_sql_json,
+                "kind": request.kind,
+                "sql": prepared.sql,
+                "params": prepared.params,
+                "sqlRendered": prepared.sql_rendered,
+                "limit": request.limit,
+                "offset": request.offset,
+                "countSql": prepared.count_sql,
+                "sqlJson": request.sql_json,
                 "inline_status": inline_status,
                 "inline_rows": inline_rows,
             },
@@ -320,9 +292,7 @@ class ExecutionService:
         return {"jobId": job_id, "statementId": statement_id}, 200
 
     def status(self, workspace_id: str, job_id: str) -> tuple[Dict[str, Any], int]:
-        job = _get_job(job_id)
-        if not job or job.get("workspace_id") != workspace_id:
-            raise ForgeError("Execution job not found", status_code=404)
+        job = self._job_service.get_job_for_workspace(workspace_id, job_id)
 
         inline_status = _normalize_status_dict(job.get("inline_status"))
         if isinstance(inline_status, dict):
@@ -359,9 +329,7 @@ class ExecutionService:
         }, 200
 
     def cancel(self, workspace_id: str, job_id: str) -> tuple[Dict[str, Any], int]:
-        job = _get_job(job_id)
-        if not job or job.get("workspace_id") != workspace_id:
-            raise ForgeError("Execution job not found", status_code=404)
+        job = self._job_service.get_job_for_workspace(workspace_id, job_id)
 
         ctx = self._builder.build(workspace_id)
         ctx.sql_exec.cancel_statement(job["statement_id"])
@@ -369,9 +337,7 @@ class ExecutionService:
         return {"ok": True}, 200
 
     def results(self, workspace_id: str, job_id: str) -> tuple[Dict[str, Any], int]:
-        job = _get_job(job_id)
-        if not job or job.get("workspace_id") != workspace_id:
-            raise ForgeError("Execution job not found", status_code=404)
+        job = self._job_service.get_job_for_workspace(workspace_id, job_id)
 
         ctx = self._builder.build(workspace_id)
         inline_status = _normalize_status_dict(job.get("inline_status"))
