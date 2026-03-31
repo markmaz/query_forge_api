@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import app.routes.prompt_feedback as prompt_feedback_route
+import app.features.ai.prompt_feedback_api as prompt_feedback_route
 from app.services.prompt_feedback_service import PromptFeedbackWriteResult
 
 

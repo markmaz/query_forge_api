@@ -8,8 +8,8 @@ from flask_restx import Api
 
 from app.decorators import security
 from app.exceptions.forge_error import ForgeError
-import app.routes.ai as ai_routes
-from app.routes.ai import ai_ns
+import app.features.ai.ai_api as ai_routes
+from app.features.ai.ai_api import ai_ns
 from app.routes import request_helpers as _route_utils
 from app.services import ai_suggest_service
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import app.routes.forge_insights as forge_insights_route
+import app.features.forge_match.forge_insights_api as forge_insights_route
 
 
 def _headers(monkeypatch):

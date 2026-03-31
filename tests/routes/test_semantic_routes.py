@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import app.routes.semantic_mappings as semantic_mappings
-import app.routes.semantic_registry as semantic_registry
-import app.routes.semantic_relationships as semantic_relationships
+import app.features.semantic.semantic_mappings_api as semantic_mappings
+import app.features.semantic.semantic_registry_api as semantic_registry
+import app.features.semantic.semantic_relationships_api as semantic_relationships
 from app.services.semantic.semantic_registry_service import SemanticRegistryService
 from tests._support.fakes import FakeForgeQueryPort
 

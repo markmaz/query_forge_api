@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import app.routes.planner_domain as planner_domain_route
+import app.features.planner.planner_domain_api as planner_domain_route
 from app.exceptions.forge_error import ForgeError
 
 

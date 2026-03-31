@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.query_studio_routes as query_studio_routes
+import app.features.query_engine.query_studio_api as query_studio_routes
 from app.exceptions.forge_error import ForgeError
 
 

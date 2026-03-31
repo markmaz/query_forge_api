@@ -3,9 +3,8 @@ from __future__ import annotations
 import logging
 
 from flask import g, request
-from flask_restx import Namespace, fields
+from flask_restx import Namespace, fields, Resource
 from pydantic import ValidationError
-from app.routes.forge_resource import ForgeResource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import public, require_admin, require_role
@@ -244,14 +243,14 @@ tenancy_bootstrap_model = admin_ns.model(
 # ---------------------------------------------------------------------------
 
 @admin_ns.route("/healthz")
-class ShowHealth(ForgeResource):
+class ShowHealth(Resource):
     @public
     def get(self):
         return "OK", 200
 
 
 @admin_ns.route("/health/detailed")
-class DetailedHealth(ForgeResource):
+class DetailedHealth(Resource):
     @token_required
     @require_admin()
     def get(self):
@@ -267,7 +266,7 @@ class DetailedHealth(ForgeResource):
 
 
 @admin_ns.route("/health/broker")
-class BrokerHealth(ForgeResource):
+class BrokerHealth(Resource):
     @token_required
     @require_role("system:admin")
     def get(self):
@@ -287,7 +286,7 @@ class BrokerHealth(ForgeResource):
 # ---------------------------------------------------------------------------
 
 @admin_ns.route("/pipeline-profiles")
-class PipelineProfileList(ForgeResource):
+class PipelineProfileList(Resource):
     @token_required
     @require_admin()
     def get(self):
@@ -305,7 +304,7 @@ class PipelineProfileList(ForgeResource):
 
 
 @admin_ns.route("/pipeline-profiles/<string:trace_id>")
-class PipelineProfileDetail(ForgeResource):
+class PipelineProfileDetail(Resource):
     @token_required
     @require_admin()
     def get(self, trace_id: str):
@@ -332,7 +331,7 @@ class PipelineProfileDetail(ForgeResource):
 # ---------------------------------------------------------------------------
 
 @admin_ns.route("/prompt-feedback")
-class AdminPromptFeedbackList(ForgeResource):
+class AdminPromptFeedbackList(Resource):
     @token_required
     @require_admin()
     def get(self):
@@ -369,7 +368,7 @@ class AdminPromptFeedbackList(ForgeResource):
 
 
 @admin_ns.route("/prompt-feedback/<int:feedback_id>")
-class AdminPromptFeedbackDelete(ForgeResource):
+class AdminPromptFeedbackDelete(Resource):
     @token_required
     @require_admin()
     def delete(self, feedback_id: int):
@@ -392,7 +391,7 @@ class AdminPromptFeedbackDelete(ForgeResource):
 # ---------------------------------------------------------------------------
 
 @admin_ns.route("/vector/semantic-concepts/rebuild")
-class RebuildSemanticConceptVectors(ForgeResource):
+class RebuildSemanticConceptVectors(Resource):
     @token_required
     @require_admin()
     def post(self):
@@ -409,7 +408,7 @@ class RebuildSemanticConceptVectors(ForgeResource):
 
 
 @admin_ns.route("/vector/domains/reindex")
-class ReindexDomainVectors(ForgeResource):
+class ReindexDomainVectors(Resource):
     @token_required
     @require_admin()
     def post(self):
@@ -440,7 +439,7 @@ class ReindexDomainVectors(ForgeResource):
 
 
 @admin_ns.route("/vector/embeddings/rebuild")
-class RebuildEmbeddingVectors(ForgeResource):
+class RebuildEmbeddingVectors(Resource):
     @token_required
     @require_admin()
     def post(self):
@@ -470,7 +469,7 @@ class RebuildEmbeddingVectors(ForgeResource):
 
 
 @admin_ns.route("/vector/rebuild-all")
-class RebuildAllVectors(ForgeResource):
+class RebuildAllVectors(Resource):
     @token_required
     @require_role("system:admin")
     def post(self):
@@ -537,7 +536,7 @@ class RebuildAllVectors(ForgeResource):
 # ---------------------------------------------------------------------------
 
 @admin_ns.route("/domain-profiles")
-class DomainProfileList(ForgeResource):
+class DomainProfileList(Resource):
     @token_required
     @require_admin()
     def get(self):
@@ -570,7 +569,7 @@ class DomainProfileList(ForgeResource):
 
 
 @admin_ns.route("/domain-profiles/<int:domain_id>")
-class DomainProfileDetail(ForgeResource):
+class DomainProfileDetail(Resource):
     @token_required
     @require_admin()
     def get(self, domain_id: int):
@@ -615,7 +614,7 @@ class DomainProfileDetail(ForgeResource):
 
 
 @admin_ns.route("/domain-profiles/<int:domain_id>/generate")
-class DomainProfileGenerateOne(ForgeResource):
+class DomainProfileGenerateOne(Resource):
     @token_required
     @require_admin()
     @admin_ns.expect(domain_profile_generate_one_model, validate=False)
@@ -641,7 +640,7 @@ class DomainProfileGenerateOne(ForgeResource):
 
 
 @admin_ns.route("/domain-profiles/generate")
-class DomainProfileGenerateBatch(ForgeResource):
+class DomainProfileGenerateBatch(Resource):
     @token_required
     @require_admin()
     @admin_ns.expect(domain_profile_generate_batch_model, validate=False)
@@ -667,7 +666,7 @@ class DomainProfileGenerateBatch(ForgeResource):
 
 
 @admin_ns.route("/domain-profiles/generate-all")
-class DomainProfileGenerateAll(ForgeResource):
+class DomainProfileGenerateAll(Resource):
     @token_required
     @require_admin()
     @admin_ns.expect(domain_profile_generate_all_model, validate=False)
@@ -697,7 +696,7 @@ class DomainProfileGenerateAll(ForgeResource):
 # ---------------------------------------------------------------------------
 
 @admin_ns.route("/semantic-catalog/build")
-class SemanticCatalogBuild(ForgeResource):
+class SemanticCatalogBuild(Resource):
     @token_required
     @require_admin()
     @admin_ns.expect(semantic_catalog_build_model, validate=False)
@@ -740,7 +739,7 @@ class SemanticCatalogBuild(ForgeResource):
 # ---------------------------------------------------------------------------
 
 @admin_ns.route("/tenancy/bootstrap")
-class TenancyBootstrap(ForgeResource):
+class TenancyBootstrap(Resource):
     @token_required
     @require_role("system:admin")
     @admin_ns.expect(tenancy_bootstrap_model, validate=False)
@@ -775,7 +774,7 @@ class TenancyBootstrap(ForgeResource):
 
 
 @admin_ns.route("/organizations")
-class OrganizationListCreate(ForgeResource):
+class OrganizationListCreate(Resource):
     @token_required
     @require_admin()
     def get(self):
@@ -825,7 +824,7 @@ class OrganizationListCreate(ForgeResource):
 
 
 @admin_ns.route("/organizations/<string:organization_id>")
-class OrganizationDetail(ForgeResource):
+class OrganizationDetail(Resource):
     @token_required
     @require_role("system:admin")
     def get(self, organization_id: str):
@@ -869,7 +868,7 @@ class OrganizationDetail(ForgeResource):
 
 
 @admin_ns.route("/organizations/<string:organization_id>/memberships")
-class OrganizationMembershipListCreate(ForgeResource):
+class OrganizationMembershipListCreate(Resource):
     @token_required
     @require_role("system:admin")
     def get(self, organization_id: str):
@@ -911,7 +910,7 @@ class OrganizationMembershipListCreate(ForgeResource):
 
 
 @admin_ns.route("/organizations/<string:organization_id>/memberships/<int:membership_id>")
-class OrganizationMembershipDetail(ForgeResource):
+class OrganizationMembershipDetail(Resource):
     @token_required
     @require_role("system:admin")
     @admin_ns.expect(organization_membership_update_model, validate=False)
@@ -949,7 +948,7 @@ class OrganizationMembershipDetail(ForgeResource):
 
 
 @admin_ns.route("/organizations/<string:organization_id>/datasources")
-class OrganizationDatasourceListCreate(ForgeResource):
+class OrganizationDatasourceListCreate(Resource):
     @token_required
     @require_admin()
     def get(self, organization_id: str):
@@ -992,7 +991,7 @@ class OrganizationDatasourceListCreate(ForgeResource):
 
 
 @admin_ns.route("/datasources/<int:datasource_id>")
-class DatasourceDetail(ForgeResource):
+class DatasourceDetail(Resource):
     @token_required
     @require_admin()
     def get(self, datasource_id: int):
@@ -1042,7 +1041,7 @@ class DatasourceDetail(ForgeResource):
 
 
 @admin_ns.route("/datasources/<int:datasource_id>/test")
-class DatasourceConnectionTest(ForgeResource):
+class DatasourceConnectionTest(Resource):
     @token_required
     @require_admin()
     def post(self, datasource_id: int):
@@ -1060,7 +1059,7 @@ class DatasourceConnectionTest(ForgeResource):
 
 
 @admin_ns.route("/datasources/<int:datasource_id>/namespaces")
-class DatasourceNamespaces(ForgeResource):
+class DatasourceNamespaces(Resource):
     @token_required
     @require_admin()
     def get(self, datasource_id: int):
@@ -1081,7 +1080,7 @@ class DatasourceNamespaces(ForgeResource):
 
 
 @admin_ns.route("/workspaces")
-class WorkspaceBindingList(ForgeResource):
+class WorkspaceBindingList(Resource):
     @token_required
     @require_admin()
     def get(self):
@@ -1134,7 +1133,7 @@ class WorkspaceBindingList(ForgeResource):
 
 
 @admin_ns.route("/workspaces/<string:workspace_id>/binding")
-class WorkspaceBindingDetail(ForgeResource):
+class WorkspaceBindingDetail(Resource):
     @token_required
     @require_role("system:admin")
     def get(self, workspace_id: str):
@@ -1164,7 +1163,7 @@ class WorkspaceBindingDetail(ForgeResource):
 
 
 @admin_ns.route("/workspaces/<string:workspace_id>")
-class WorkspaceDetail(ForgeResource):
+class WorkspaceDetail(Resource):
     @token_required
     @require_role("system:admin")
     def delete(self, workspace_id: str):
@@ -1181,7 +1180,7 @@ class WorkspaceDetail(ForgeResource):
 
 
 @admin_ns.route("/workspaces/<string:workspace_id>/memberships")
-class WorkspaceMembershipListCreate(ForgeResource):
+class WorkspaceMembershipListCreate(Resource):
     @token_required
     @require_role("system:admin")
     def get(self, workspace_id: str):
@@ -1220,7 +1219,7 @@ class WorkspaceMembershipListCreate(ForgeResource):
 
 
 @admin_ns.route("/workspaces/<string:workspace_id>/memberships/<int:membership_id>")
-class WorkspaceMembershipDetail(ForgeResource):
+class WorkspaceMembershipDetail(Resource):
     @token_required
     @require_role("system:admin")
     @admin_ns.expect(workspace_membership_update_model, validate=False)

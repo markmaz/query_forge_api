@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import app.routes.otp_routes as otp_routes
+import app.features.auth.otp_api as otp_routes
 
 
 def test_otp_verify_requires_challenge_id_and_otp(client):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.routes import nlp_routes
+from app.features.ai import nlp_api as nlp_routes
 from app.services.embedding import embedding_search_service
 
 

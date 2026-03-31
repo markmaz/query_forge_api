@@ -59,7 +59,7 @@ def test_get_llm_providers(client, auth_headers):
 def test_list_workspace_llms(client, auth_headers):
     mock_svc = MagicMock()
     mock_svc.get_all_for_workspace.return_value = [_make_llm_row()]
-    with patch("app.routes.workspace_llm_routes.WorkspaceLLMService", return_value=mock_svc):
+    with patch("app.features.workspaces.workspace_llm_api.WorkspaceLLMService", return_value=mock_svc):
         resp = client.get("/api/v1/workspaces/ws1/llms", headers=auth_headers)
     assert resp.status_code == 200
     data = json.loads(resp.data)
@@ -71,7 +71,7 @@ def test_list_workspace_llms(client, auth_headers):
 def test_create_workspace_llm_validates_role(client, auth_headers):
     mock_svc = MagicMock()
     mock_svc.create_llm.side_effect = ValueError("Invalid role 'bad_role'")
-    with patch("app.routes.workspace_llm_routes.WorkspaceLLMService", return_value=mock_svc):
+    with patch("app.features.workspaces.workspace_llm_api.WorkspaceLLMService", return_value=mock_svc):
         resp = client.post(
             "/api/v1/workspaces/ws1/llms",
             headers={**auth_headers, "Content-Type": "application/json"},
@@ -91,7 +91,7 @@ def test_test_connection_endpoint(client, auth_headers):
     mock_svc = MagicMock()
     mock_svc.get_by_id.return_value = _make_llm_row()
     mock_svc.test_connection.return_value = {"success": True, "message": "Connected"}
-    with patch("app.routes.workspace_llm_routes.WorkspaceLLMService", return_value=mock_svc):
+    with patch("app.features.workspaces.workspace_llm_api.WorkspaceLLMService", return_value=mock_svc):
         resp = client.post(
             "/api/v1/workspaces/ws1/llms/1/test",
             headers=auth_headers,
@@ -105,7 +105,7 @@ def test_test_connection_endpoint(client, auth_headers):
 def test_test_connection_cross_workspace_returns_404(client, auth_headers):
     mock_svc = MagicMock()
     mock_svc.get_by_id.return_value = _make_llm_row(workspace_id="other-ws")
-    with patch("app.routes.workspace_llm_routes.WorkspaceLLMService", return_value=mock_svc):
+    with patch("app.features.workspaces.workspace_llm_api.WorkspaceLLMService", return_value=mock_svc):
         resp = client.post(
             "/api/v1/workspaces/ws1/llms/1/test",
             headers=auth_headers,
@@ -117,7 +117,7 @@ def test_delete_workspace_llm(client, auth_headers):
     mock_svc = MagicMock()
     mock_svc.get_by_id.return_value = _make_llm_row()
     mock_svc.delete_llm.return_value = None
-    with patch("app.routes.workspace_llm_routes.WorkspaceLLMService", return_value=mock_svc):
+    with patch("app.features.workspaces.workspace_llm_api.WorkspaceLLMService", return_value=mock_svc):
         resp = client.delete(
             "/api/v1/workspaces/ws1/llms/1",
             headers=auth_headers,
@@ -128,7 +128,7 @@ def test_delete_workspace_llm(client, auth_headers):
 def test_delete_cross_workspace_returns_404(client, auth_headers):
     mock_svc = MagicMock()
     mock_svc.get_by_id.return_value = _make_llm_row(workspace_id="other-ws")
-    with patch("app.routes.workspace_llm_routes.WorkspaceLLMService", return_value=mock_svc):
+    with patch("app.features.workspaces.workspace_llm_api.WorkspaceLLMService", return_value=mock_svc):
         resp = client.delete(
             "/api/v1/workspaces/ws1/llms/1",
             headers=auth_headers,
@@ -140,7 +140,7 @@ def test_put_workspace_llm(client, auth_headers):
     mock_svc = MagicMock()
     mock_svc.get_by_id.return_value = _make_llm_row()
     mock_svc.update_llm.return_value = {**_make_llm_row(), "name": "Updated"}
-    with patch("app.routes.workspace_llm_routes.WorkspaceLLMService", return_value=mock_svc):
+    with patch("app.features.workspaces.workspace_llm_api.WorkspaceLLMService", return_value=mock_svc):
         resp = client.put(
             "/api/v1/workspaces/ws1/llms/1",
             headers={**auth_headers, "Content-Type": "application/json"},
@@ -154,7 +154,7 @@ def test_put_workspace_llm(client, auth_headers):
 def test_put_cross_workspace_returns_404(client, auth_headers):
     mock_svc = MagicMock()
     mock_svc.get_by_id.return_value = _make_llm_row(workspace_id="other-ws")
-    with patch("app.routes.workspace_llm_routes.WorkspaceLLMService", return_value=mock_svc):
+    with patch("app.features.workspaces.workspace_llm_api.WorkspaceLLMService", return_value=mock_svc):
         resp = client.put(
             "/api/v1/workspaces/ws1/llms/1",
             headers={**auth_headers, "Content-Type": "application/json"},
@@ -166,7 +166,7 @@ def test_put_cross_workspace_returns_404(client, auth_headers):
 def test_put_not_found_returns_404(client, auth_headers):
     mock_svc = MagicMock()
     mock_svc.get_by_id.return_value = None
-    with patch("app.routes.workspace_llm_routes.WorkspaceLLMService", return_value=mock_svc):
+    with patch("app.features.workspaces.workspace_llm_api.WorkspaceLLMService", return_value=mock_svc):
         resp = client.put(
             "/api/v1/workspaces/ws1/llms/999",
             headers={**auth_headers, "Content-Type": "application/json"},

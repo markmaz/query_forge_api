@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.planner_llm as planner_llm_route
+import app.features.planner.planner_llm_api as planner_llm_route
 
 
 def _headers(monkeypatch):
