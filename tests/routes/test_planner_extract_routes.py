@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.planner_extract as planner_extract
+import app.features.planner.planner_extract_api as planner_extract
 
 
 def _headers(monkeypatch):

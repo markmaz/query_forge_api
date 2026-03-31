@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pyarrow as pa
 
-import app.routes.export_routes as export_routes
+import app.features.exports.export_api as export_routes
 from app.services.exports.export_policy import QF_EXCEL_MAX_ROWS, clear_qf_rowcount_cache
 
 

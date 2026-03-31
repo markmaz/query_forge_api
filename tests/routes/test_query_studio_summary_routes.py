@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Dict
 
 import app.decorators.security as security
-import app.routes.query_studio_summary_routes as summary_routes
+import app.features.query_engine.query_studio_summary_api as summary_routes
 from app.exceptions.llm_unavailable_error import LLMUnavailableError
 
 
