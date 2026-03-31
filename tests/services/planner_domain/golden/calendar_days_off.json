@@ -34,7 +34,8 @@
         "filterable": true,
         "workspace_table_id": 20,
         "model_column_id": 201,
-        "column_name": "school_name"
+        "column_name": "school_name",
+        "semantic_concept_key": "SCHOOL_NAME"
       }
     ],
     "domain_metrics": [],
@@ -53,7 +54,8 @@
         "filterable": true,
         "workspace_table_id": 20,
         "model_column_id": 201,
-        "column_name": "school_name"
+        "column_name": "school_name",
+        "semantic_concept_key": "SCHOOL_NAME"
       },
       {
         "column_key": "wt30.day_date",
@@ -83,7 +85,8 @@
         "filterable": true,
         "workspace_table_id": 20,
         "model_column_id": 201,
-        "column_name": "school_name"
+        "column_name": "school_name",
+        "semantic_concept_key": "SCHOOL_NAME"
       },
       {
         "column_key": "wt30.day_date",
@@ -458,6 +461,28 @@
       "model": "",
       "endpoint": ""
     }
+  },
+  "projection_policy": {
+    "prompt_signals": [
+      "calendar_days_off_prompt",
+      "needs_school_filter",
+      "school_literal_present",
+      "time_constraint_present"
+    ],
+    "matched_policies": [
+      "human_school_filter_projection"
+    ],
+    "projection_mode": "prepend",
+    "required_concept_keys": [
+      "SCHOOL_NAME"
+    ],
+    "excluded_concept_keys": [
+      "SCHOOL_ID"
+    ],
+    "required_column_names": [],
+    "excluded_column_names": [],
+    "required_filter_concept_keys": [],
+    "required_join_tables": []
   },
   "shared_pipeline": {
     "domain_selection": {

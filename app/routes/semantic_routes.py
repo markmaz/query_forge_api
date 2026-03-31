@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from flask import request
 from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -33,7 +33,7 @@ plan_request_model = semantic_ns.model(
 
 
 @semantic_ns.route("/plan")
-class SemanticPlan(ForgeResource):
+class SemanticPlan(Resource):
     @token_required
     @require_access("semantic")
     @semantic_ns.expect(plan_request_model, validate=False)
@@ -51,7 +51,7 @@ class SemanticPlan(ForgeResource):
 
 
 @semantic_ns.route("/suggest-columns")
-class SemanticSuggestColumns(ForgeResource):
+class SemanticSuggestColumns(Resource):
     @token_required
     @require_access("semantic")
     @semantic_ns.expect(plan_request_model, validate=False)

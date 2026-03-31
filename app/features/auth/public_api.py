@@ -4,8 +4,7 @@ import time
 from typing import Any, Dict, Optional
 
 from flask import redirect, request
-from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Namespace, Resource, fields
 
 from app.config import ERROR_SERVER_URL, ERROR_VALIDATION_URL, THANK_YOU_REDIRECT
 from app.decorators.rbac import public
@@ -81,7 +80,7 @@ def _get_client_ip() -> Optional[str]:
 
 
 @public_ns.route("/sales-inquiry")
-class SalesInquiry(ForgeResource):
+class SalesInquiry(Resource):
     @public_ns.expect(sales_inquiry_model, validate=False)
     @public_ns.doc(security=[])
     @public

@@ -8,7 +8,7 @@ from typing import Any
 
 from flask import g, request, send_file
 from flask_restx import Namespace
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.decorators.security import token_required
@@ -171,7 +171,7 @@ def _validate_value_override_type(value_override_type: str) -> str:
 # ----------------------------
 
 @value_override_ns.route("")
-class ValueOverrideIndex(ForgeResource):
+class ValueOverrideIndex(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
@@ -195,7 +195,7 @@ class ValueOverrideIndex(ForgeResource):
 
 
 @value_override_ns.route("/<string:value_override_type>/<string:list_id>/preview")
-class ValueOverridePreview(ForgeResource):
+class ValueOverridePreview(Resource):
     @token_required
     @require_access("catalog")
     def get(self, value_override_type: str, list_id: str):
@@ -228,7 +228,7 @@ class ValueOverridePreview(ForgeResource):
 
 
 @value_override_ns.route("/visibility")
-class ValueOverrideVisibility(ForgeResource):
+class ValueOverrideVisibility(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
@@ -261,7 +261,7 @@ class ValueOverrideVisibility(ForgeResource):
 
 
 @value_override_ns.route("/<string:value_override_type>/uploads")
-class ValueOverrideUpload(ForgeResource):
+class ValueOverrideUpload(Resource):
     @token_required
     @require_access("catalog")
     def post(self, value_override_type: str):
@@ -309,7 +309,7 @@ class ValueOverrideUpload(ForgeResource):
             return {"error": "Upload failed"}, 500
     
 @value_override_ns.route("/templates/<string:value_override_type>")
-class ValueOverrideTemplateDownload(ForgeResource):
+class ValueOverrideTemplateDownload(Resource):
     @token_required
     @require_access("catalog")
     def get(self, value_override_type: str):
@@ -346,7 +346,7 @@ class ValueOverrideTemplateDownload(ForgeResource):
 
 
 @value_override_ns.route("/<string:value_override_type>/<string:list_id>")
-class ValueOverrideDetail(ForgeResource):
+class ValueOverrideDetail(Resource):
     @token_required
     @require_access("catalog")
     def patch(self, value_override_type: str, list_id: str):

@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from flask import request
 from flask_restx import Namespace
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access, require_admin
@@ -85,7 +85,7 @@ def _run(handler: Callable[[], Tuple[Any, int]], *, log_message: str, client_err
 
 
 @qf_domains_ns.route("/")
-class DomainsRoot(ForgeResource):
+class DomainsRoot(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
@@ -118,7 +118,7 @@ class DomainsRoot(ForgeResource):
 
 
 @qf_domains_ns.route("/recommendations/generate")
-class DomainRecommendationsGenerate(ForgeResource):
+class DomainRecommendationsGenerate(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def post(self):
@@ -152,7 +152,7 @@ class DomainRecommendationsGenerate(ForgeResource):
 
 
 @qf_domains_ns.route("/recommendations/apply")
-class DomainRecommendationsApply(ForgeResource):
+class DomainRecommendationsApply(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def post(self):
@@ -179,7 +179,7 @@ class DomainRecommendationsApply(ForgeResource):
 
 
 @qf_domains_ns.route("/<int:domain_id>")
-class DomainById(ForgeResource):
+class DomainById(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def patch(self, domain_id: int):
@@ -222,7 +222,7 @@ class DomainById(ForgeResource):
 
 
 @qf_domains_ns.route("/column-sample")
-class ColumnSample(ForgeResource):
+class ColumnSample(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
@@ -248,7 +248,7 @@ class ColumnSample(ForgeResource):
 
 
 @qf_domains_ns.route("/workspace-tables")
-class WorkspaceTables(ForgeResource):
+class WorkspaceTables(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
@@ -269,7 +269,7 @@ class WorkspaceTables(ForgeResource):
 
 
 @qf_domains_ns.route("/<int:domain_id>/tables")
-class DomainTables(ForgeResource):
+class DomainTables(Resource):
     @token_required
     @require_access("catalog")
     def get(self, domain_id: int):
@@ -337,7 +337,7 @@ class DomainTables(ForgeResource):
 
 
 @qf_domains_ns.route("/<int:domain_id>/tables/<int:workspace_table_id>/primary")
-class DomainPrimaryTable(ForgeResource):
+class DomainPrimaryTable(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def patch(self, domain_id: int, workspace_table_id: int):
@@ -361,7 +361,7 @@ class DomainPrimaryTable(ForgeResource):
 
 
 @qf_domains_ns.route("/<int:domain_id>/joins")
-class DomainJoins(ForgeResource):
+class DomainJoins(Resource):
     @token_required
     @require_access("catalog")
     def get(self, domain_id: int):
@@ -407,7 +407,7 @@ class DomainJoins(ForgeResource):
 
 
 @qf_domains_ns.route("/<int:domain_id>/joins/<string:join_id>")
-class DomainJoin(ForgeResource):
+class DomainJoin(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def patch(self, domain_id: int, join_id: str):
@@ -455,7 +455,7 @@ class DomainJoin(ForgeResource):
 
 
 @qf_domains_ns.route("/<int:domain_id>/users")
-class DomainUsers(ForgeResource):
+class DomainUsers(Resource):
     @token_required
     @require_admin()
     def get(self, domain_id: int):
@@ -513,7 +513,7 @@ class DomainUsers(ForgeResource):
 
 
 @qf_domains_ns.route("/<int:domain_id>/users/<string:tarrequire_user_id>")
-class DomainUserById(ForgeResource):
+class DomainUserById(Resource):
     @token_required
     @require_admin()
     def delete(self, domain_id: int, tarrequire_user_id: str):
@@ -534,7 +534,7 @@ class DomainUserById(ForgeResource):
 
 
 @qf_domains_ns.route("/summary")
-class DomainSummary(ForgeResource):
+class DomainSummary(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
@@ -555,7 +555,7 @@ class DomainSummary(ForgeResource):
 
 
 @qf_domains_ns.route("/<int:domain_id>/capabilities")
-class DomainCapabilities(ForgeResource):
+class DomainCapabilities(Resource):
     @token_required
     @require_access("catalog")
     def get(self, domain_id: int):
@@ -577,7 +577,7 @@ class DomainCapabilities(ForgeResource):
 
 
 @qf_domains_ns.route("/<int:domain_id>/overlay-metrics")
-class DomainOverlayMetrics(ForgeResource):
+class DomainOverlayMetrics(Resource):
     @token_required
     @require_access("catalog")
     def get(self, domain_id: int):
@@ -599,7 +599,7 @@ class DomainOverlayMetrics(ForgeResource):
 
 
 @qf_domains_ns.route("/<int:domain_id>/profile-metrics")
-class DomainProfileMetrics(ForgeResource):
+class DomainProfileMetrics(Resource):
     @token_required
     @require_access("catalog")
     def get(self, domain_id: int):
@@ -638,7 +638,7 @@ class DomainProfileMetrics(ForgeResource):
 
 
 @qf_domains_ns.route("/<int:domain_id>/time-policy")
-class DomainTimePolicy(ForgeResource):
+class DomainTimePolicy(Resource):
     @token_required
     @require_access("catalog")
     def get(self, domain_id: int):
@@ -678,7 +678,7 @@ class DomainTimePolicy(ForgeResource):
 
 
 @qf_domains_ns.route("/planner-rerank-policies")
-class DomainPlannerRerankPolicies(ForgeResource):
+class DomainPlannerRerankPolicies(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
@@ -722,7 +722,7 @@ class DomainPlannerRerankPolicies(ForgeResource):
 
 
 @qf_domains_ns.route("/planner-rerank-policies/<int:policy_id>")
-class DomainPlannerRerankPolicyDetail(ForgeResource):
+class DomainPlannerRerankPolicyDetail(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def delete(self, policy_id: int):
@@ -742,7 +742,7 @@ class DomainPlannerRerankPolicyDetail(ForgeResource):
 
 
 @qf_domains_ns.route("/planner-domain-capabilities")
-class DomainPlannerCapabilities(ForgeResource):
+class DomainPlannerCapabilities(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
@@ -787,7 +787,7 @@ class DomainPlannerCapabilities(ForgeResource):
 
 
 @qf_domains_ns.route("/planner-domain-capabilities/<int:capability_id>")
-class DomainPlannerCapabilityDetail(ForgeResource):
+class DomainPlannerCapabilityDetail(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def delete(self, capability_id: int):
@@ -807,7 +807,7 @@ class DomainPlannerCapabilityDetail(ForgeResource):
 
 
 @qf_domains_ns.route("/planner-rerank-policy-candidates")
-class DomainPlannerRerankPolicyCandidates(ForgeResource):
+class DomainPlannerRerankPolicyCandidates(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
@@ -863,7 +863,7 @@ class DomainPlannerRerankPolicyCandidates(ForgeResource):
 
 
 @qf_domains_ns.route("/planner-rerank-policy-candidates/<int:candidate_id>")
-class DomainPlannerRerankPolicyCandidateDetail(ForgeResource):
+class DomainPlannerRerankPolicyCandidateDetail(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def delete(self, candidate_id: int):
@@ -882,7 +882,7 @@ class DomainPlannerRerankPolicyCandidateDetail(ForgeResource):
 
 
 @qf_domains_ns.route("/planner-rerank-policy-candidates/<int:candidate_id>/approve")
-class DomainPlannerRerankPolicyCandidateApprove(ForgeResource):
+class DomainPlannerRerankPolicyCandidateApprove(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def post(self, candidate_id: int):
@@ -905,7 +905,7 @@ class DomainPlannerRerankPolicyCandidateApprove(ForgeResource):
 
 
 @qf_domains_ns.route("/planner-rerank-policy-candidates/suggest")
-class DomainPlannerRerankPolicyCandidateSuggest(ForgeResource):
+class DomainPlannerRerankPolicyCandidateSuggest(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def post(self):
@@ -927,7 +927,7 @@ class DomainPlannerRerankPolicyCandidateSuggest(ForgeResource):
 
 
 @qf_domains_ns.route("/tables")
-class BuilderTables(ForgeResource):
+class BuilderTables(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
@@ -945,7 +945,7 @@ class BuilderTables(ForgeResource):
 
 
 @qf_domains_ns.route("/columns")
-class BuilderColumns(ForgeResource):
+class BuilderColumns(Resource):
     @token_required
     @require_access("catalog")
     def get(self):

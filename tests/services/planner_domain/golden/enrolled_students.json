@@ -16,7 +16,8 @@
         "filterable": false,
         "workspace_table_id": 24,
         "model_column_id": 1001,
-        "column_name": "student_unique_id"
+        "column_name": "student_unique_id",
+        "semantic_concept_key": "STUDENT_ID"
       },
       {
         "column_key": "wt20.school_name",
@@ -25,7 +26,8 @@
         "filterable": true,
         "workspace_table_id": 20,
         "model_column_id": 201,
-        "column_name": "school_name"
+        "column_name": "school_name",
+        "semantic_concept_key": "SCHOOL_NAME"
       },
       {
         "column_key": "wt24.is_enrolled",
@@ -34,7 +36,8 @@
         "filterable": true,
         "workspace_table_id": 24,
         "model_column_id": 1002,
-        "column_name": "is_enrolled"
+        "column_name": "is_enrolled",
+        "semantic_concept_key": "ENROLLMENT_STATUS"
       }
     ],
     "domain_metrics": [],
@@ -47,22 +50,24 @@
     "domain_version": 1,
     "dimensions": [
       {
-        "column_key": "wt20.school_name",
-        "label": "School Name",
-        "data_type": "string",
-        "filterable": true,
-        "workspace_table_id": 20,
-        "model_column_id": 201,
-        "column_name": "school_name"
-      },
-      {
         "column_key": "wt24.student_unique_id",
         "label": "Student ID",
         "data_type": "string",
         "filterable": false,
         "workspace_table_id": 24,
         "model_column_id": 1001,
-        "column_name": "student_unique_id"
+        "column_name": "student_unique_id",
+        "semantic_concept_key": "STUDENT_ID"
+      },
+      {
+        "column_key": "wt20.school_name",
+        "label": "School Name",
+        "data_type": "string",
+        "filterable": true,
+        "workspace_table_id": 20,
+        "model_column_id": 201,
+        "column_name": "school_name",
+        "semantic_concept_key": "SCHOOL_NAME"
       },
       {
         "column_key": "wt24.is_enrolled",
@@ -71,7 +76,8 @@
         "filterable": true,
         "workspace_table_id": 24,
         "model_column_id": 1002,
-        "column_name": "is_enrolled"
+        "column_name": "is_enrolled",
+        "semantic_concept_key": "ENROLLMENT_STATUS"
       }
     ],
     "time_columns": [],
@@ -83,7 +89,8 @@
         "filterable": true,
         "workspace_table_id": 20,
         "model_column_id": 201,
-        "column_name": "school_name"
+        "column_name": "school_name",
+        "semantic_concept_key": "SCHOOL_NAME"
       },
       {
         "column_key": "wt24.is_enrolled",
@@ -92,7 +99,8 @@
         "filterable": true,
         "workspace_table_id": 24,
         "model_column_id": 1002,
-        "column_name": "is_enrolled"
+        "column_name": "is_enrolled",
+        "semantic_concept_key": "ENROLLMENT_STATUS"
       }
     ],
     "domain_metrics": [],
@@ -406,6 +414,40 @@
       "model": "",
       "endpoint": ""
     }
+  },
+  "projection_policy": {
+    "prompt_signals": [
+      "listing_intent",
+      "needs_enrollment_status",
+      "needs_school_filter",
+      "needs_student_identity",
+      "school_literal_present",
+      "status_enrolled",
+      "student_listing"
+    ],
+    "matched_policies": [
+      "student_listing_identity_projection",
+      "student_listing_school_context",
+      "human_school_filter_projection"
+    ],
+    "projection_mode": "prepend",
+    "required_concept_keys": [
+      "STUDENT_ID",
+      "STUDENT_FIRST_NAME",
+      "STUDENT_LAST_NAME",
+      "SCHOOL_NAME"
+    ],
+    "excluded_concept_keys": [
+      "SCHOOL_ID"
+    ],
+    "required_column_names": [],
+    "excluded_column_names": [],
+    "required_filter_concept_keys": [
+      "SCHOOL_NAME"
+    ],
+    "required_join_tables": [
+      "dim_school"
+    ]
   },
   "shared_pipeline": {
     "domain_selection": {

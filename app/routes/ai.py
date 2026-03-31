@@ -5,7 +5,7 @@ import logging
 import requests
 from flask import current_app, request
 from flask_restx import Namespace
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 from pydantic import ValidationError
 
 from app.decorators.security import token_required
@@ -314,7 +314,7 @@ def _legacy_suggest_response(suggest_request: SuggestRequest) -> SuggestAPIRespo
 
 
 @ai_ns.route("/suggest")
-class AISuggest(ForgeResource):
+class AISuggest(Resource):
     @token_required
     @require_access("ai")
     def post(self) -> tuple[dict, int]:
@@ -506,7 +506,7 @@ def _sqljson_to_suggest_edits(sqljson: object) -> list[dict]:
 
 
 @ai_ns.route("/suggest-semantic-adapter")
-class AISuggestSemanticAdapter(ForgeResource):
+class AISuggestSemanticAdapter(Resource):
     @token_required
     @require_access("ai")
     def post(self) -> tuple[dict, int]:
@@ -539,7 +539,7 @@ class AISuggestSemanticAdapter(ForgeResource):
 
 
 @ai_ns.route("/health")
-class AIHealth(ForgeResource):
+class AIHealth(Resource):
     @public
     def get(self) -> tuple[dict, int]:
         service = _build_service()

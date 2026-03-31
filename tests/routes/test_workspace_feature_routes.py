@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Dict
 
 import app.decorators.security as security
-import app.routes.workspace_feature_routes as workspace_feature_routes
+import app.features.workspaces.workspace_feature_api as workspace_feature_routes
 import app.services.rbac_service as rbac_service
 
 

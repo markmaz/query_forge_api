@@ -4,7 +4,7 @@ import logging
 
 from flask import request
 from flask_restx import Namespace
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -67,7 +67,7 @@ def _parse_model_table_id(value):
 
 
 @embeddings_ns.route("/rebuild")
-class EmbeddingsRebuild(ForgeResource):
+class EmbeddingsRebuild(Resource):
     @token_required
     @require_access("vector", role="admin")
     def post(self):
@@ -92,7 +92,7 @@ class EmbeddingsRebuild(ForgeResource):
 
 
 @embeddings_ns.route("/search")
-class EmbeddingsSearch(ForgeResource):
+class EmbeddingsSearch(Resource):
     @token_required
     @require_access("vector")
     def post(self):
@@ -133,7 +133,7 @@ class EmbeddingsSearch(ForgeResource):
 
 
 @embeddings_ns.route("/domains/upsert")
-class EmbeddingsDomainUpsert(ForgeResource):
+class EmbeddingsDomainUpsert(Resource):
     @token_required
     @require_access("vector", role="admin")
     def post(self):
@@ -155,7 +155,7 @@ class EmbeddingsDomainUpsert(ForgeResource):
 
 
 @embeddings_ns.route("/columns/upsert")
-class EmbeddingsColumnUpsert(ForgeResource):
+class EmbeddingsColumnUpsert(Resource):
     @token_required
     @require_access("vector", role="admin")
     def post(self):

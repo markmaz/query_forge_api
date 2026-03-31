@@ -17,23 +17,22 @@
 - product-groups (`app/routes/product_groups_routes.py`)
 - value_overrides (`app/routes/value_override_routes.py`)
 - models (`app/routes/model_routes.py`)
-- workspace-inventory (`app/routes/workspace_inventory_routes.py`)
+- workspace-inventory (`app/features/data_catalog/workspace_inventory_api.py`)
 - domains (`app/routes/domain_routes.py`)
 - query (`app/routes/query_forge_routes.py`)
 - query-tree (`app/routes/query_tree_routes.py`)
 - saved-queries (`app/routes/query_tree_routes.py`)
-- catalog (`app/routes/catalog_routes.py`)
 
 ## Services (Public classes)
 
 - Domain services: `DomainAdminWriteService`, `DomainJoinService`, `DomainTableReadService`, `DomainTableWriteService`, `DomainSummaryReadService`, `DomainUserReadService`, `DomainUserWriteService`, `BuilderColumnFeedService`, `DomainColumnSampleReadService`
 - Query tree: `SavedQueryTreeService`, `SavedQueryReadService`, `SavedQueryWriteService`, `SavedQueryShareService`, `SavedQueryFolderWriteService`, `QueryFolderService`
 - Models: `ModelReadService`, `ModelWriteService`, `ModelUpdateService`, `ModelUploadService`, `ModelSnapshotImportService`, `ModelSampleService`, `ModelColumnSampleReadService`
-- Workspace inventory: `WorkspaceSnapshotService`, `WorkspaceSnapshotEnsureService`, `WorkspaceSampleWriteService`, `UnmappedWorkspaceTablesReadService`, `WorkspacePipelineService`
+- Workspace inventory: `WorkspaceSnapshotService`, `WorkspaceSnapshotEnsureService`, `UnmappedWorkspaceTablesReadService`, `WorkspacePipelineService`
 - Users: `UserService`, `WorkspaceUserReadService`
 - Auth: `AuthService`, `OtpService`, `PasswordService`
 - Products: `ProductService`, `ProductGroupService`, `RoleService`
-- ValueOverrides: `ListReadService`, `ListUploadService`, `ListTemplateService`, `ListWriter`/`DualListWriter`
+- ValueOverrides: `ListReadService`, `ListUploadService`, `ListTemplateService`, `ListWriter`
 - Query Forge: `QueryForgeService`
 - Misc: `ConnectionService`, `DashboardService`, `WorkspaceService`, `WarehouseService`, `UdfService`
 - Recon: `WorkspaceReconService`

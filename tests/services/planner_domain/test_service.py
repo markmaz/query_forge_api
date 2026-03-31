@@ -1171,18 +1171,21 @@ def test_compact_capabilities_prepends_student_identity_for_show_students_prompt
             {
                 "column_key": "wt24.student_unique_id",
                 "column_name": "student_unique_id",
+                "semantic_concept_key": "STUDENT_ID",
                 "filterable": True,
                 "workspace_table_id": 24,
             },
             {
                 "column_key": "wt24.first_name",
                 "column_name": "first_name",
+                "semantic_concept_key": "STUDENT_FIRST_NAME",
                 "filterable": True,
                 "workspace_table_id": 24,
             },
             {
                 "column_key": "wt24.last_name",
                 "column_name": "last_name",
+                "semantic_concept_key": "STUDENT_LAST_NAME",
                 "filterable": True,
                 "workspace_table_id": 24,
             },
@@ -1224,18 +1227,21 @@ def test_compact_capabilities_prepends_student_identity_from_slot_hints() -> Non
             {
                 "column_key": "wt24.student_unique_id",
                 "column_name": "student_unique_id",
+                "semantic_concept_key": "STUDENT_ID",
                 "filterable": True,
                 "workspace_table_id": 24,
             },
             {
                 "column_key": "wt24.first_name",
                 "column_name": "first_name",
+                "semantic_concept_key": "STUDENT_FIRST_NAME",
                 "filterable": True,
                 "workspace_table_id": 24,
             },
             {
                 "column_key": "wt24.last_name",
                 "column_name": "last_name",
+                "semantic_concept_key": "STUDENT_LAST_NAME",
                 "filterable": True,
                 "workspace_table_id": 24,
             },
@@ -1256,6 +1262,56 @@ def test_compact_capabilities_prepends_student_identity_from_slot_hints() -> Non
 
     first_three = [row["column_key"] for row in compact["dimensions"][:3]]
     assert first_three == ["wt24.student_unique_id", "wt24.first_name", "wt24.last_name"]
+
+
+def test_compact_capabilities_projection_policy_resolves_concept_keys() -> None:
+    capabilities = {
+        "domain_id": 6,
+        "domain_version": 1,
+        "dimensions": [
+            {
+                "column_key": "wt24.birth_country",
+                "column_name": "birth_country",
+                "filterable": True,
+                "workspace_table_id": 24,
+            },
+            {
+                "column_key": "wt24.student_lookup_key",
+                "column_name": "learner_lookup_key",
+                "semantic_concept_key": "STUDENT_ID",
+                "filterable": True,
+                "workspace_table_id": 24,
+            },
+            {
+                "column_key": "wt24.given_name_text",
+                "column_name": "given_name_text",
+                "semantic_concept_key": "STUDENT_FIRST_NAME",
+                "filterable": True,
+                "workspace_table_id": 24,
+            },
+            {
+                "column_key": "wt24.family_name_text",
+                "column_name": "family_name_text",
+                "semantic_concept_key": "STUDENT_LAST_NAME",
+                "filterable": True,
+                "workspace_table_id": 24,
+            },
+        ],
+        "time_columns": [],
+        "domain_metrics": [],
+        "user_metrics": [],
+        "overlay_metrics": [],
+    }
+    shortlisted = [{"column_key": "wt24.birth_country", "column_name": "birth_country", "workspace_table_id": 24}]
+
+    compact = DomainSelectionService.compact_capabilities_for_llm(
+        capabilities=capabilities,
+        shortlisted_columns=shortlisted,
+        prompt="Show students not born in the US",
+    )
+
+    first_three = [row["column_key"] for row in compact["dimensions"][:3]]
+    assert first_three == ["wt24.student_lookup_key", "wt24.given_name_text", "wt24.family_name_text"]
 
 
 def test_compact_capabilities_includes_nativity_filter_columns() -> None:
@@ -1465,18 +1521,21 @@ def test_compact_capabilities_staff_school_name_filter_avoids_k_school() -> None
             {
                 "column_key": "wt30.k_school",
                 "column_name": "k_school",
+                "semantic_concept_key": "SCHOOL_ID",
                 "filterable": True,
                 "workspace_table_id": 30,
             },
             {
                 "column_key": "wt20.school_name",
                 "column_name": "school_name",
+                "semantic_concept_key": "SCHOOL_NAME",
                 "filterable": True,
                 "workspace_table_id": 20,
             },
             {
                 "column_key": "wt20.lea_name",
                 "column_name": "lea_name",
+                "semantic_concept_key": "DISTRICT_NAME",
                 "filterable": True,
                 "workspace_table_id": 20,
             },
@@ -1519,12 +1578,14 @@ def test_compact_capabilities_principal_school_name_filter_avoids_k_school() -> 
             {
                 "column_key": "wt30.k_school",
                 "column_name": "k_school",
+                "semantic_concept_key": "SCHOOL_ID",
                 "filterable": True,
                 "workspace_table_id": 30,
             },
             {
                 "column_key": "wt20.school_name",
                 "column_name": "school_name",
+                "semantic_concept_key": "SCHOOL_NAME",
                 "filterable": True,
                 "workspace_table_id": 20,
             },
@@ -1547,6 +1608,43 @@ def test_compact_capabilities_principal_school_name_filter_avoids_k_school() -> 
     assert "wt30.k_school" not in filter_keys
 
 
+def test_compact_capabilities_explicit_school_key_request_keeps_school_id_filter() -> None:
+    capabilities = {
+        "domain_id": 5,
+        "domain_version": 1,
+        "dimensions": [
+            {
+                "column_key": "wt30.k_school",
+                "column_name": "k_school",
+                "semantic_concept_key": "SCHOOL_ID",
+                "filterable": True,
+                "workspace_table_id": 30,
+            },
+            {
+                "column_key": "wt20.school_name",
+                "column_name": "school_name",
+                "semantic_concept_key": "SCHOOL_NAME",
+                "filterable": True,
+                "workspace_table_id": 20,
+            },
+        ],
+        "time_columns": [],
+        "domain_metrics": [],
+        "user_metrics": [],
+        "overlay_metrics": [],
+    }
+    shortlisted = [{"column_key": "wt30.k_school", "column_name": "k_school", "workspace_table_id": 30}]
+
+    compact = DomainSelectionService.compact_capabilities_for_llm(
+        capabilities=capabilities,
+        shortlisted_columns=shortlisted,
+        prompt="Show me the school id for Barksdale Elementary",
+    )
+
+    filter_keys = [row["column_key"] for row in compact["filter_columns"]]
+    assert "wt30.k_school" in filter_keys
+
+
 def test_compact_capabilities_staff_role_filter_prefers_position_title_over_classification() -> None:
     _ = PlannerDomainService(
         capabilities_service=_FakeCapabilitiesService(),
@@ -1561,18 +1659,21 @@ def test_compact_capabilities_staff_role_filter_prefers_position_title_over_clas
             {
                 "column_key": "wt30.staff_classification",
                 "column_name": "staff_classification",
+                "semantic_concept_key": "STAFF_CLASSIFICATION",
                 "filterable": True,
                 "workspace_table_id": 30,
             },
             {
                 "column_key": "wt30.position_title",
                 "column_name": "position_title",
+                "semantic_concept_key": "STAFF_ROLE",
                 "filterable": True,
                 "workspace_table_id": 30,
             },
             {
                 "column_key": "wt31.classroom_position",
                 "column_name": "classroom_position",
+                "semantic_concept_key": "STAFF_ROLE",
                 "filterable": True,
                 "workspace_table_id": 31,
             },
@@ -1605,6 +1706,87 @@ def test_compact_capabilities_staff_role_filter_prefers_position_title_over_clas
     filter_keys = [row["column_key"] for row in compact["filter_columns"]]
     assert "wt30.position_title" in filter_keys
     assert "wt30.staff_classification" not in filter_keys
+
+
+def test_compact_capabilities_projection_policy_debug_exposes_staff_role_rule() -> None:
+    capabilities = {
+        "domain_id": 5,
+        "domain_version": 1,
+        "dimensions": [
+            {
+                "column_key": "wt30.staff_classification",
+                "column_name": "staff_classification",
+                "semantic_concept_key": "STAFF_CLASSIFICATION",
+                "filterable": True,
+                "workspace_table_id": 30,
+            },
+            {
+                "column_key": "wt30.position_title",
+                "column_name": "position_title",
+                "semantic_concept_key": "STAFF_ROLE",
+                "filterable": True,
+                "workspace_table_id": 30,
+            },
+        ],
+        "time_columns": [],
+        "domain_metrics": [],
+        "user_metrics": [],
+        "overlay_metrics": [],
+    }
+
+    compact = DomainSelectionService.compact_capabilities_for_llm(
+        capabilities=capabilities,
+        shortlisted_columns=[],
+        prompt="Who is the principal at Rossview Elementary",
+        include_projection_policy_debug=True,
+    )
+
+    assert "human_staff_role_filter_projection" in compact["projection_policy_debug"]["matched_policies"]
+    assert "STAFF_ROLE" in compact["projection_policy_debug"]["required_concept_keys"]
+    assert "STAFF_CLASSIFICATION" in compact["projection_policy_debug"]["excluded_concept_keys"]
+
+
+def test_compact_capabilities_explicit_staff_classification_request_keeps_classification() -> None:
+    capabilities = {
+        "domain_id": 5,
+        "domain_version": 1,
+        "dimensions": [
+            {
+                "column_key": "wt30.staff_classification",
+                "column_name": "staff_classification",
+                "semantic_concept_key": "STAFF_CLASSIFICATION",
+                "filterable": True,
+                "workspace_table_id": 30,
+            },
+            {
+                "column_key": "wt30.position_title",
+                "column_name": "position_title",
+                "semantic_concept_key": "STAFF_ROLE",
+                "filterable": True,
+                "workspace_table_id": 30,
+            },
+        ],
+        "time_columns": [],
+        "domain_metrics": [],
+        "user_metrics": [],
+        "overlay_metrics": [],
+    }
+    shortlisted = [
+        {
+            "column_key": "wt30.staff_classification",
+            "column_name": "staff_classification",
+            "workspace_table_id": 30,
+        }
+    ]
+
+    compact = DomainSelectionService.compact_capabilities_for_llm(
+        capabilities=capabilities,
+        shortlisted_columns=shortlisted,
+        prompt="Show me the staff classification at Rossview Elementary",
+    )
+
+    filter_keys = [row["column_key"] for row in compact["filter_columns"]]
+    assert "wt30.staff_classification" in filter_keys
 
 
 def test_compact_capabilities_person_lookup_prefers_canonical_name_columns_over_preferred() -> None:
@@ -2473,6 +2655,9 @@ def test_plan_debug_includes_semantic_grounding_bundle_when_enabled(monkeypatch)
 
     debug = out["debug"]
     assert debug["semantic_grounding"]["alias_constraints"][0]["value_hint"] == "United States"
+    assert "projection_policy" in debug
+    assert isinstance(debug["projection_policy"]["matched_policies"], list)
+    assert isinstance(debug["projection_policy"]["prompt_signals"], list)
     assert grounding.calls
     assert grounding.calls[0]["base_domain_id"] == 6
     assert grounding.calls[0]["workspace_id"] == "ws-1"

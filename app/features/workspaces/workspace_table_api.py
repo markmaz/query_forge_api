@@ -3,13 +3,12 @@ from __future__ import annotations
 import logging
 
 from flask import request
-from flask_restx import Namespace
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Namespace, Resource
 from sqlalchemy import text
 
 from app.adapters.mysql_sql_executor import engine
-from app.decorators.security import token_required
 from app.decorators.rbac import require_access
+from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
 
 logger = logging.getLogger(__name__)
@@ -29,7 +28,7 @@ def _handle_error(exc: ForgeError):
 
 
 @workspace_tables_ns.route("/<int:workspace_table_id>/columns")
-class WorkspaceTableColumns(ForgeResource):
+class WorkspaceTableColumns(Resource):
     @token_required
     @require_access("workspaces")
     def get(self, workspace_table_id: int):

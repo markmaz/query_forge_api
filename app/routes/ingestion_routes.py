@@ -14,7 +14,7 @@ from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import QF_INGESTION_STALE_GUARD_ENABLED, QF_INGESTION_STALE_SECONDS
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 from app.services.analytics.metadata_provider_factory import MetadataProviderFactory
 from app.services.analytics.runtime_registry import build_runtime_registry
 from app.services.tenancy.datasource_resolver_service import WorkspaceDatasourceResolverService
@@ -296,7 +296,7 @@ def _serialize_run(row: dict) -> dict:
 
 
 @ingestion_ns.route("/sync")
-class IngestionSync(ForgeResource):
+class IngestionSync(Resource):
 
     @ingestion_ns.doc("start_sync")
     @ingestion_ns.expect(_sync_request)
@@ -425,7 +425,7 @@ WHERE id = :run_id
 
 
 @ingestion_ns.route("/status/<string:job_id>")
-class IngestionStatus(ForgeResource):
+class IngestionStatus(Resource):
 
     @ingestion_ns.doc("get_status")
     @ingestion_ns.response(200, "Run status", _run_model)
@@ -447,7 +447,7 @@ class IngestionStatus(ForgeResource):
 
 
 @ingestion_ns.route("/diagnostics/<string:job_id>")
-class IngestionDiagnostics(ForgeResource):
+class IngestionDiagnostics(Resource):
 
     @ingestion_ns.doc("get_diagnostics")
     @ingestion_ns.response(200, "Ingestion run diagnostics")
@@ -470,7 +470,7 @@ class IngestionDiagnostics(ForgeResource):
 
 
 @ingestion_ns.route("/cancel/<string:job_id>")
-class IngestionCancel(ForgeResource):
+class IngestionCancel(Resource):
 
     @ingestion_ns.doc("cancel_run")
     @ingestion_ns.response(200, "Run canceled", _cancel_response)
@@ -539,7 +539,7 @@ WHERE id = :run_id
 
 
 @ingestion_ns.route("/history")
-class IngestionHistory(ForgeResource):
+class IngestionHistory(Resource):
 
     @ingestion_ns.doc("get_history")
     @ingestion_ns.response(200, "Recent runs", [_run_model])
@@ -556,7 +556,7 @@ class IngestionHistory(ForgeResource):
 
 
 @ingestion_ns.route("/schemas")
-class IngestionSchemas(ForgeResource):
+class IngestionSchemas(Resource):
 
     @token_required
     @require_access("ingestion", role="admin")

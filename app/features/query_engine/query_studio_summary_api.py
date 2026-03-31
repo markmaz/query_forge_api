@@ -1,9 +1,3 @@
-"""
-app/routes/query_studio_summary_routes.py
-
-POST /api/v1/query-studio/summarize
-Generates an AI summary of a Run Preview result set.
-"""
 from __future__ import annotations
 
 import logging
@@ -11,8 +5,8 @@ import logging
 from flask import request
 from flask_restx import Namespace, Resource, fields
 
-from app.decorators.security import token_required
 from app.decorators.rbac import require_access
+from app.decorators.security import token_required
 from app.exceptions.llm_unavailable_error import LLMUnavailableError
 from app.routes.request_helpers import extract_workspace_id
 from app.services.query_studio_summary_service import generate_preview_summary
@@ -24,32 +18,35 @@ query_studio_summary_ns = Namespace(
     description="Query Studio AI Result Summary",
 )
 
-_summarize_request = query_studio_summary_ns.model("SummarizeRequest", {
-    "workspace_id": fields.String(required=True),
-    "query_name": fields.String(required=True),
-    "column_names": fields.List(fields.String(), required=True),
-    "rows": fields.List(fields.Raw(), required=True),
-    "prompt_hint": fields.String(required=False),
-})
+_summarize_request = query_studio_summary_ns.model(
+    "SummarizeRequest",
+    {
+        "workspace_id": fields.String(required=True),
+        "query_name": fields.String(required=True),
+        "column_names": fields.List(fields.String(), required=True),
+        "rows": fields.List(fields.Raw(), required=True),
+        "prompt_hint": fields.String(required=False),
+    },
+)
 
-_summarize_response = query_studio_summary_ns.model("SummarizeResponse", {
-    "narrative": fields.String(),
-    "highlights": fields.List(fields.String()),
-    "comparison": fields.String(allow_null=True),
-    "capped": fields.Boolean(),
-})
+_summarize_response = query_studio_summary_ns.model(
+    "SummarizeResponse",
+    {
+        "narrative": fields.String(),
+        "highlights": fields.List(fields.String()),
+        "comparison": fields.String(allow_null=True),
+        "capped": fields.Boolean(),
+    },
+)
 
 
 @query_studio_summary_ns.route("/summarize")
 class QueryStudioSummarize(Resource):
-
     @token_required
     @require_access("query_studio")
     @query_studio_summary_ns.expect(_summarize_request)
     def post(self):
         body = request.get_json(silent=True) or {}
-
-        # --- Validation ---
         workspace_id = body.get("workspace_id")
         query_name = body.get("query_name")
         column_names = body.get("column_names")
@@ -65,19 +62,14 @@ class QueryStudioSummarize(Resource):
         if rows is None or not isinstance(rows, list):
             return {"error": "rows is required and must be an array", "code": "validation_error"}, 422
 
-        # --- Workspace header / body consistency check ---
         header_workspace_id = extract_workspace_id()
         if workspace_id.strip() != header_workspace_id:
-            return {
-                "error": "workspace_id must match workspace header",
-                "code": "validation_error",
-            }, 422
+            return {"error": "workspace_id must match workspace header", "code": "validation_error"}, 422
 
         effective_hint = ""
         if isinstance(prompt_hint, str):
             effective_hint = prompt_hint
 
-        # --- Dispatch ---
         try:
             result = generate_preview_summary(
                 workspace_id=workspace_id,

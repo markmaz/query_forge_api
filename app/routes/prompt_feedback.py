@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from flask import request
 from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 from pydantic import ValidationError
 
 from app.config import QF_PROMPT_FEEDBACK_MAX_PAYLOAD_BYTES
@@ -46,7 +46,7 @@ _prompt_feedback_request_model = prompt_feedback_ns.model(
 
 
 @prompt_feedback_ns.route("")
-class PromptFeedback(ForgeResource):
+class PromptFeedback(Resource):
     @token_required
     @require_access("ai")
     @prompt_feedback_ns.expect(_prompt_feedback_request_model, validate=False)

@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from flask import request
 from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -62,7 +62,7 @@ def _parse_float(value: Any, *, default: float) -> float:
 
 
 @vector_ns.route("/domains/search")
-class DomainVectorSearch(ForgeResource):
+class DomainVectorSearch(Resource):
     @token_required
     @require_access("vector")
     @vector_ns.expect(_domain_search_request_model, validate=False)

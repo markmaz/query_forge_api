@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 
 from flask import request
 from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -47,7 +47,7 @@ semantic_relationship_patch_model = semantic_relationships_ns.model(
 
 
 @semantic_relationships_ns.route("")
-class SemanticRelationshipsCollection(ForgeResource):
+class SemanticRelationshipsCollection(Resource):
     @token_required
     @require_access("semantic")
     @semantic_relationships_ns.doc(
@@ -93,7 +93,7 @@ class SemanticRelationshipsCollection(ForgeResource):
 
 
 @semantic_relationships_ns.route("/concepts")
-class SemanticRelationshipConceptLookup(ForgeResource):
+class SemanticRelationshipConceptLookup(Resource):
     @token_required
     @require_access("semantic")
     @semantic_relationships_ns.doc(
@@ -121,7 +121,7 @@ class SemanticRelationshipConceptLookup(ForgeResource):
 
 
 @semantic_relationships_ns.route("/<int:relationship_id>")
-class SemanticRelationshipsById(ForgeResource):
+class SemanticRelationshipsById(Resource):
     @token_required
     @require_access("semantic")
     def get(self, relationship_id: int):

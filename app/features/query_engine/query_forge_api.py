@@ -1,15 +1,13 @@
-# app/routes/query_forge_routes.py
 from __future__ import annotations
 
 import logging
 import re
 
 from flask import current_app, request
-from flask_restx import Namespace
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Namespace, Resource
 
-from app.decorators.security import token_required
 from app.decorators.rbac import require_access
+from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import extract_workspace_id, int_arg
 from app.services.domain_resolver import DomainResolver
@@ -25,48 +23,30 @@ from app.services.workspace_inventory.workspace_context import WorkspaceSqlConte
 logger = logging.getLogger(__name__)
 query_forge_ns = Namespace("query", description="Query Forge query")
 
-def _handle_service_error(e: ForgeError):
-    return {"error": str(e)}, getattr(e, "status_code", 400) or 400
+
+def _handle_service_error(error: ForgeError):
+    return {"error": str(error)}, getattr(error, "status_code", 400) or 400
+
 
 _DATASOURCE_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 
 
 def _resolve_analytics_executor(datasource_name: str | None):
-    """Return the analytics ``SQLExecutor`` for *datasource_name* from the registry.
-
-    Falls back to ``"primary"`` when *datasource_name* is ``None`` or empty.
-    Returns ``None`` if the registry is unavailable (startup failure).
-
-    Datasource selection is restricted to admin users only (FIND-018).  The
-    datasource name is validated against ``^[A-Za-z0-9_\\-]{1,64}$`` before the
-    registry lookup to prevent injection and information leakage (FIND-023).
-
-    :param datasource_name: Name of the desired analytics datasource, or ``None``.
-    :returns: ``SQLExecutor`` instance or ``None``.
-    :raises ForgeError: 403 if the caller is not an admin and a non-default datasource
-        is requested; 400 if the name fails validation; 404 if the datasource is not
-        registered.
-    """
     from flask import g as _g
 
     registry = current_app.extensions.get("analytics_registry")
     if registry is None:
         return None
 
-    # When no datasource is specified the default ("primary") is used and no
-    # admin check is required — the workspace-default path is unchanged.
     if not datasource_name:
         try:
             return registry.get("primary")
         except KeyError:
             return None
 
-    # FIND-023: validate name format before any registry lookup so the user-supplied
-    # value cannot appear verbatim in error messages or logs.
     if not _DATASOURCE_NAME_RE.match(datasource_name):
         raise ForgeError("Invalid datasource name", status_code=400)
 
-    # FIND-018: datasource selection requires the admin role.
     if not getattr(_g, "is_admin", False):
         raise ForgeError("Datasource selection requires admin role", status_code=403)
 
@@ -77,19 +57,15 @@ def _resolve_analytics_executor(datasource_name: str | None):
 
 
 @query_forge_ns.route("/")
-class QueryForgeRun(ForgeResource):
+class QueryForgeRun(Resource):
     @token_required
     @require_access("query_studio")
     def post(self):
         try:
             workspace_id = extract_workspace_id()
-
             mode = (request.args.get("mode") or "preview").strip().lower()
             limit = int_arg("limit", 200)
             offset = int_arg("offset", 0)
-
-            # Optional analytics datasource override.
-            # Application metadata queries (ORM, Peewee) are never routed here.
             datasource_name = (request.args.get("datasource") or "").strip() or None
 
             raw = request.get_json(silent=True) or {}
@@ -98,10 +74,6 @@ class QueryForgeRun(ForgeResource):
 
             ctx = WorkspaceSqlContextBuilder().build(workspace_id)
             domain_resolver = DomainResolver(workspace_id=workspace_id)
-
-            # Determine which SQL executor to use for analytics query execution.
-            # When a named datasource is requested via the query param, use the
-            # analytics registry.  Otherwise fall through to the workspace executor.
             analytics_executor = _resolve_analytics_executor(datasource_name)
             sql_exec = analytics_executor if analytics_executor is not None else ctx.sql_exec
 
@@ -123,16 +95,15 @@ class QueryForgeRun(ForgeResource):
                 "limit": out.limit,
                 "offset": out.offset,
             }, 200
-
-        except ForgeError as e:
-            return _handle_service_error(e)
+        except ForgeError as error:
+            return _handle_service_error(error)
         except Exception:
             logger.exception("Query Forge query run failed")
             return {"error": "Query Forge query run failed"}, 500
 
 
 @query_forge_ns.route("/plan")
-class QueryForgePlan(ForgeResource):
+class QueryForgePlan(Resource):
     @token_required
     @require_access("query_studio")
     def post(self):
@@ -172,9 +143,8 @@ class QueryForgePlan(ForgeResource):
                     "sql": None,
                 },
             }, 200
-
-        except ForgeError as e:
-            return _handle_service_error(e)
+        except ForgeError as error:
+            return _handle_service_error(error)
         except Exception:
             logger.exception("Query Forge query plan failed")
             return {"error": "Query Forge query plan failed"}, 500
@@ -258,22 +228,20 @@ def _run_vector_search(vector_request: dict) -> dict:
 
 def _table_hits_from_vector(vector_response: dict) -> list[dict]:
     hits: list[dict] = []
-    for item in vector_response.get("results", []) or []:
-        kind = item.get("kind")
-        if kind not in {"column", "table"}:
-            continue
-        table_id = item.get("workspaceTableId") or item.get("workspace_table_id")
+    for item in vector_response.get("results", []):
+        table_id = item.get("tableId")
         if table_id is None:
             continue
         try:
-            table_id_int = int(table_id)
-        except Exception:
+            table_id_value = int(table_id)
+        except (TypeError, ValueError):
             continue
+        score = item.get("score")
         hits.append(
             {
-                "workspace_table_id": table_id_int,
-                "score": float(item.get("score") or 0.0),
-                "table_name": item.get("tableName") or item.get("sourceTableName"),
+                "tableId": table_id_value,
+                "score": float(score) if score is not None else 0.0,
+                "label": item.get("label"),
             }
         )
     return hits

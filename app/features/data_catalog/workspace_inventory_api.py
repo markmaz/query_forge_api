@@ -4,15 +4,17 @@ import logging
 
 from flask import request
 from flask_restx import Namespace
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
-from app.decorators.security import token_required
 from app.decorators.rbac import require_access
+from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import extract_workspace_id, int_arg
 from app.services.recon.workspace_recon_read_service import WorkspaceReconReadService
 from app.services.recon.workspace_recon_service import ReconQuery, WorkspaceReconService
-from app.services.workspace_inventory.unmapped_workspace_tables_read_service import UnmappedWorkspaceTablesReadService
+from app.services.workspace_inventory.unmapped_workspace_tables_read_service import (
+    UnmappedWorkspaceTablesReadService,
+)
 from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 from app.services.workspace_inventory.workspace_inventory_pipeline_service import WorkspacePipelineService
 
@@ -30,7 +32,7 @@ def _recon_service() -> WorkspaceReconReadService:
 
 
 @wsinv_ns.route("/sync")
-class WorkspaceInventorySync(ForgeResource):
+class WorkspaceInventorySync(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def post(self):
@@ -55,7 +57,7 @@ class WorkspaceInventorySync(ForgeResource):
 
 
 @wsinv_ns.route("/unmapped-tables")
-class WorkspaceInventoryUnmapped(ForgeResource):
+class WorkspaceInventoryUnmapped(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
@@ -77,7 +79,7 @@ class WorkspaceInventoryUnmapped(ForgeResource):
 
 
 @wsinv_ns.route("/recon")
-class WorkspaceInventoryRecon(ForgeResource):
+class WorkspaceInventoryRecon(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
@@ -105,7 +107,7 @@ class WorkspaceInventoryRecon(ForgeResource):
 
 
 @wsinv_ns.route("/recon/counts")
-class WorkspaceInventoryReconCounts(ForgeResource):
+class WorkspaceInventoryReconCounts(Resource):
     @token_required
     @require_access("catalog")
     def get(self):

@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from flask import request
 from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -37,7 +37,7 @@ patch_model = nlp_review_ns.model(
 
 
 @nlp_review_ns.route("/review-queue")
-class NlpReviewQueue(ForgeResource):
+class NlpReviewQueue(Resource):
     @token_required
     @require_access("ai")
     @nlp_review_ns.expect(create_model, validate=False)
@@ -93,7 +93,7 @@ class NlpReviewQueue(ForgeResource):
 
 
 @nlp_review_ns.route("/review-queue/<int:item_id>")
-class NlpReviewQueueItem(ForgeResource):
+class NlpReviewQueueItem(Resource):
     @token_required
     @require_access("ai", role="admin")
     @nlp_review_ns.expect(patch_model, validate=False)
@@ -119,7 +119,7 @@ class NlpReviewQueueItem(ForgeResource):
 
 
 @nlp_review_ns.route("/review-queue/<int:item_id>/approve")
-class NlpReviewQueueApprove(ForgeResource):
+class NlpReviewQueueApprove(Resource):
     @token_required
     @require_access("ai", role="admin")
     def post(self, item_id: int):
@@ -135,7 +135,7 @@ class NlpReviewQueueApprove(ForgeResource):
 
 
 @nlp_review_ns.route("/review-queue/<int:item_id>/export")
-class NlpReviewQueueExport(ForgeResource):
+class NlpReviewQueueExport(Resource):
     @token_required
     @require_access("ai", role="admin")
     def post(self, item_id: int):

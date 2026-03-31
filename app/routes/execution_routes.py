@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict
 
 from flask import request
 from flask_restx import Namespace
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -43,7 +43,7 @@ def _json_payload() -> Dict[str, Any]:
 
 
 @executions_ns.route("/start")
-class ExecutionStart(ForgeResource):
+class ExecutionStart(Resource):
     @token_required
     @require_access("exports")
     def post(self):
@@ -57,7 +57,7 @@ class ExecutionStart(ForgeResource):
 
 
 @executions_ns.route("/<string:job_id>/status")
-class ExecutionStatus(ForgeResource):
+class ExecutionStatus(Resource):
     @token_required
     @require_access("exports")
     def get(self, job_id: str):
@@ -68,7 +68,7 @@ class ExecutionStatus(ForgeResource):
 
 
 @executions_ns.route("/<string:job_id>/cancel")
-class ExecutionCancel(ForgeResource):
+class ExecutionCancel(Resource):
     @token_required
     @require_access("exports")
     def post(self, job_id: str):
@@ -79,7 +79,7 @@ class ExecutionCancel(ForgeResource):
 
 
 @executions_ns.route("/<string:job_id>/results")
-class ExecutionResults(ForgeResource):
+class ExecutionResults(Resource):
     @token_required
     @require_access("exports")
     def get(self, job_id: str):

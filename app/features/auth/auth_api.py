@@ -4,12 +4,11 @@ from typing import Any, Dict
 from urllib.parse import unquote
 
 from flask import g, jsonify, make_response, request
-from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Namespace, Resource, fields
 
 from app.config import COOKIE_SAMESITE, COOKIE_SECURE, REFRESH_COOKIE_PATH
-from app.decorators.security import token_required
 from app.decorators.rbac import public
+from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
 from app.models.tenancy.status_enum import UserStatus
 from app.models.tenancy.user import User
@@ -24,7 +23,7 @@ from app.services.otp_service import OTP_CHALLENGE_TTL_S, issue_otp_challenge
 from app.services.user_service import UserService
 from app.utils.token_utils import validate_token
 
-qf_auth_ns = Namespace('auth', description='Authentication operations')
+qf_auth_ns = Namespace("auth", description="Authentication operations")
 logger = logging.getLogger(__name__)
 
 MFA_VERIFY_MAX_ATTEMPTS = int(os.getenv("MFA_VERIFY_MAX_ATTEMPTS", "8"))
@@ -34,10 +33,13 @@ MFA_CONFIRM_WINDOW_SECONDS = int(os.getenv("MFA_CONFIRM_WINDOW_SECONDS", "600"))
 MFA_DISABLE_MAX_ATTEMPTS = int(os.getenv("MFA_DISABLE_MAX_ATTEMPTS", "6"))
 MFA_DISABLE_WINDOW_SECONDS = int(os.getenv("MFA_DISABLE_WINDOW_SECONDS", "600"))
 
-login_model = qf_auth_ns.model('Login', {
-    'username': fields.String(required=True, description="Username"),
-    'password': fields.String(required=True, description="Password")
-})
+login_model = qf_auth_ns.model(
+    "Login",
+    {
+        "username": fields.String(required=True, description="Username"),
+        "password": fields.String(required=True, description="Password"),
+    },
+)
 
 invite_accept_model = qf_auth_ns.model(
     "InviteAcceptRequest",
@@ -149,9 +151,10 @@ def _get_refresh_candidates_from_request() -> list[str]:
 
     return values
 
-@qf_auth_ns.route('/auth')
+
+@qf_auth_ns.route("/auth")
 @qf_auth_ns.expect(login_model)
-class Authenticate(ForgeResource):
+class Authenticate(Resource):
     @public
     def post(self):
         data = request.json
@@ -181,9 +184,10 @@ class Authenticate(ForgeResource):
         _set_refresh_cookie(response, tokens["refresh_token"], auth.qf_refresh_ttl)
         return response
 
-@qf_auth_ns.route('/login')
+
+@qf_auth_ns.route("/login")
 @qf_auth_ns.expect(login_model)
-class Login(ForgeResource):
+class Login(Resource):
     @qf_auth_ns.expect(login_model)
     @qf_auth_ns.response(code=200, description="Credentials accepted and OTP challenge issued")
     @qf_auth_ns.doc(security=[])
@@ -246,7 +250,7 @@ class Login(ForgeResource):
 
 
 @qf_auth_ns.route("/mfa/totp/start")
-class StartTotpEnrollment(ForgeResource):
+class StartTotpEnrollment(Resource):
     @token_required
     def post(self):
         user_id = str(getattr(g, "user_id", "") or "").strip()
@@ -255,7 +259,7 @@ class StartTotpEnrollment(ForgeResource):
 
 
 @qf_auth_ns.route("/mfa/totp/confirm")
-class ConfirmTotpEnrollment(ForgeResource):
+class ConfirmTotpEnrollment(Resource):
     @qf_auth_ns.expect(totp_confirm_model, validate=False)
     @token_required
     def post(self):
@@ -276,7 +280,7 @@ class ConfirmTotpEnrollment(ForgeResource):
 
 
 @qf_auth_ns.route("/mfa/totp/verify")
-class VerifyTotpChallenge(ForgeResource):
+class VerifyTotpChallenge(Resource):
     @qf_auth_ns.expect(totp_verify_model, validate=False)
     @qf_auth_ns.doc(security=[])
     @public
@@ -340,7 +344,7 @@ class VerifyTotpChallenge(ForgeResource):
 
 
 @qf_auth_ns.route("/mfa/totp/disable")
-class DisableTotp(ForgeResource):
+class DisableTotp(Resource):
     @qf_auth_ns.expect(totp_disable_model, validate=False)
     @token_required
     def post(self):
@@ -359,8 +363,10 @@ class DisableTotp(ForgeResource):
         )
         result = TotpService().disable_totp(user_id, password, code)
         return result, 200
+
+
 @qf_auth_ns.route("/refresh")
-class Refresh(ForgeResource):
+class Refresh(Resource):
     @public
     def post(self):
         tokens = _get_refresh_candidates_from_request()
@@ -387,8 +393,8 @@ class Refresh(ForgeResource):
             except ForgeError:
                 logger.warning("refresh user_lookup_failed user_id=%s", user_id)
             access_token = auth.generate_access_token(user_id)
-        except ForgeError as e:
-            return {"error": str(e)}, getattr(e, "status_code", 401) or 401
+        except ForgeError as exc:
+            return {"error": str(exc)}, getattr(exc, "status_code", 401) or 401
 
         response = make_response(
             jsonify(
@@ -406,7 +412,7 @@ class Refresh(ForgeResource):
 
 
 @qf_auth_ns.route("/logout")
-class Logout(ForgeResource):
+class Logout(Resource):
     @token_required
     def post(self):
         auth = AuthService()
@@ -446,8 +452,9 @@ class Logout(ForgeResource):
         _clear_legacy_refresh_cookies(response)
         return response
 
+
 @qf_auth_ns.route("/invite/validate/<string:token>")
-class InviteValidationResource(ForgeResource):
+class InviteValidationResource(Resource):
     @public
     def get(self, token):
         if not token:
@@ -463,7 +470,7 @@ class InviteValidationResource(ForgeResource):
 
 
 @qf_auth_ns.route("/invite/accept")
-class InviteAcceptResource(ForgeResource):
+class InviteAcceptResource(Resource):
     @qf_auth_ns.expect(invite_accept_model, validate=False)
     @qf_auth_ns.doc(security=[])
     @public
@@ -533,46 +540,45 @@ class InviteAcceptResource(ForgeResource):
             "status": str(updated.status or UserStatus.ACTIVE),
         }, 200
 
+
 @qf_auth_ns.route("/reset/request")
-class ResetPasswordRequest(ForgeResource):
+class ResetPasswordRequest(Resource):
     @public
     def post(self):
         email = request.json["email"]
         auth = AuthService()
-
         return auth.send_reset_request(email)
-    
+
+
 @qf_auth_ns.route("/reset/validate")
-class ResetPasswordValidate(ForgeResource):
+class ResetPasswordValidate(Resource):
     @public
     def post(self):
         token = request.json["token"]
-        
+
         if not token:
             return {"error": "Missing token"}, 400
-        
+
         auth = AuthService()
         if auth.validate_token(token):
             response = make_response(("", 204))
             response.set_cookie("reset_session", hash_token(token), max_age=900, httponly=True, secure=True, samesite="Strict")
             return response
-        else:
-            return  {"error": "Missing token"}, 400
+        return {"error": "Missing token"}, 400
+
 
 @qf_auth_ns.route("/reset/password")
-class ResetPassword(ForgeResource):
+class ResetPassword(Resource):
     @public
     def post(self):
         token_hash = request.cookies.get("reset_session")
 
         if not token_hash:
             return ("", 400)
-        
-        password = request.json["password"]
 
+        password = request.json["password"]
         if not password:
             return ("", 400)
-        
 
         auth = AuthService()
         return auth.reset_password(password, token_hash)

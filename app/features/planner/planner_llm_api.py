@@ -5,14 +5,14 @@ from typing import Any, Dict
 
 from flask import request
 from flask_restx import fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.config import QF_PLANNER_LLM_ENABLED
-from app.decorators.security import token_required
 from app.decorators.rbac import require_access
+from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
+from app.features.planner.planner_extract_api import planner_ns
 from app.routes.request_helpers import extract_workspace_id
-from app.routes.planner_extract import planner_ns
 from app.services.planner_llm import PlannerLLMService
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ plan_llm_request_model = planner_ns.model(
 
 
 @planner_ns.route("/plan_llm")
-class PlannerPlanLLM(ForgeResource):
+class PlannerPlanLLM(Resource):
     @token_required
     @require_access("planner")
     @planner_ns.expect(plan_llm_request_model, validate=False)

@@ -12,7 +12,7 @@ from app.config import VALKEY_ADDRESS, VALKEY_PORT
 from app.decorators.rbac import require_access
 from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 from app.routes.request_helpers import extract_workspace_id
 from app.services.domain_resolver import DomainResolver
 from app.services.exports.export_materialization_service import ExportMaterializationService
@@ -54,7 +54,7 @@ def _build_token_store() -> ExportTokenStore:
 
 
 @exports_ns.route("/excel")
-class ExcelExport(ForgeResource):
+class ExcelExport(Resource):
     @token_required
     @require_access("exports")
     def post(self):
@@ -86,7 +86,7 @@ class ExcelExport(ForgeResource):
 
 
 @exports_ns.route("/excel/<string:token>")
-class ExcelDownload(ForgeResource):
+class ExcelDownload(Resource):
     @token_required
     @require_access("exports")
     def get(self, token: str):

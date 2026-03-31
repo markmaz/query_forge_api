@@ -6,7 +6,7 @@ import logging
 import pandas as pd
 from flask import request
 from flask_restx import Namespace
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -82,7 +82,7 @@ def _parse_file(file_storage) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 @dictionary_ns.route("/tables")
-class DictionaryTables(ForgeResource):
+class DictionaryTables(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
@@ -107,7 +107,7 @@ class DictionaryTables(ForgeResource):
 # ---------------------------------------------------------------------------
 
 @dictionary_ns.route("/tables/<int:table_id>")
-class DictionaryTableDetail(ForgeResource):
+class DictionaryTableDetail(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def patch(self, table_id: int):
@@ -135,7 +135,7 @@ class DictionaryTableDetail(ForgeResource):
 # ---------------------------------------------------------------------------
 
 @dictionary_ns.route("/columns")
-class DictionaryColumns(ForgeResource):
+class DictionaryColumns(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
@@ -163,7 +163,7 @@ class DictionaryColumns(ForgeResource):
 
 
 @dictionary_ns.route("/columns/search")
-class DictionaryColumnsSearch(ForgeResource):
+class DictionaryColumnsSearch(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
@@ -191,7 +191,7 @@ class DictionaryColumnsSearch(ForgeResource):
 # ---------------------------------------------------------------------------
 
 @dictionary_ns.route("/columns/<int:column_id>")
-class DictionaryColumn(ForgeResource):
+class DictionaryColumn(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def patch(self, column_id: int):
@@ -232,7 +232,7 @@ class DictionaryColumn(ForgeResource):
 # ---------------------------------------------------------------------------
 
 @dictionary_ns.route("/columns/import")
-class DictionaryColumnsImport(ForgeResource):
+class DictionaryColumnsImport(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def post(self):

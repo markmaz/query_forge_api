@@ -3,13 +3,12 @@ from __future__ import annotations
 import logging
 
 from flask import request
-from flask_restx import Namespace, fields
+from flask_restx import Namespace, Resource, fields
 
 from app.constants.llm_roles import LLMProvider, LLMRole
-from app.decorators.security import token_required
 from app.decorators.rbac import require_admin
+from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
-from app.routes.forge_resource import ForgeResource
 from app.services.tenancy.workspace_llm_service import WorkspaceLLMService
 
 logger = logging.getLogger(__name__)
@@ -34,29 +33,23 @@ _llm_create_model = workspace_llm_ns.model(
 
 
 @llm_roles_ns.route("")
-class LLMRolesList(ForgeResource):
+class LLMRolesList(Resource):
     @token_required
     @require_admin()
     def get(self):
-        return [
-            {"value": role, "label": LLMRole.DISPLAY_NAMES.get(role, role)}
-            for role in LLMRole.ALL
-        ], 200
+        return [{"value": role, "label": LLMRole.DISPLAY_NAMES.get(role, role)} for role in LLMRole.ALL], 200
 
 
 @llm_providers_ns.route("")
-class LLMProvidersList(ForgeResource):
+class LLMProvidersList(Resource):
     @token_required
     @require_admin()
     def get(self):
-        return [
-            {"value": provider, "label": LLMProvider.DISPLAY_NAMES.get(provider, provider)}
-            for provider in LLMProvider.ALL
-        ], 200
+        return [{"value": provider, "label": LLMProvider.DISPLAY_NAMES.get(provider, provider)} for provider in LLMProvider.ALL], 200
 
 
 @workspace_llm_ns.route("/workspaces/<string:workspace_id>/llms")
-class WorkspaceLLMList(ForgeResource):
+class WorkspaceLLMList(Resource):
     @token_required
     @require_admin()
     def get(self, workspace_id: str):
@@ -88,7 +81,7 @@ class WorkspaceLLMList(ForgeResource):
 
 
 @workspace_llm_ns.route("/workspaces/<string:workspace_id>/llms/<int:llm_id>")
-class WorkspaceLLMDetail(ForgeResource):
+class WorkspaceLLMDetail(Resource):
     @token_required
     @require_admin()
     def get(self, workspace_id: str, llm_id: int):
@@ -137,7 +130,7 @@ class WorkspaceLLMDetail(ForgeResource):
 
 
 @workspace_llm_ns.route("/workspaces/<string:workspace_id>/llms/<int:llm_id>/test")
-class WorkspaceLLMTest(ForgeResource):
+class WorkspaceLLMTest(Resource):
     @token_required
     @require_admin()
     def post(self, workspace_id: str, llm_id: int):

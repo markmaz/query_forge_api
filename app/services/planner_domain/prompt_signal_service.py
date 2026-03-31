@@ -15,6 +15,7 @@ _AGG_STAFF_RE = re.compile(
     r"\b(how many|count|number of|total|sum|average|avg|ratio|rate|percentage|percent)\b.*\b(staff|teachers?|employees?)\b",
     re.IGNORECASE,
 )
+_LIST_SCHOOLS_RE = re.compile(r"\b(show|list|give|display|return|find)\b.*\bschools?\b(?!\s+year)", re.IGNORECASE)
 _SCHOOL_AGG_RE = re.compile(
     r"\b(how many|count|number of|total|sum|average|avg|ratio|rate|percentage|percent)\b.*\b(school|schools)\b",
     re.IGNORECASE,
@@ -44,6 +45,14 @@ _STAFF_ROLE_RE = re.compile(
 )
 _SCHOOL_LITERAL_SUFFIXES = {"elementary", "middle", "high", "academy", "campus", "school"}
 _SCHOOL_LITERAL_STOPWORDS = {"the", "a", "an", "all", "show", "list", "give", "display", "return", "find", "me", "has", "have"}
+_EXPLICIT_SCHOOL_KEY_RE = re.compile(
+    r"\b(k_school|school\s+key|school\s+keys|school\s+id|school\s+ids|school\s+code|school\s+codes|nces)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_STAFF_CLASSIFICATION_RE = re.compile(
+    r"\b(staff\s+classification|classification\s+code|class\s+code)\b",
+    re.IGNORECASE,
+)
 
 
 class PromptSignalService:
@@ -63,6 +72,8 @@ class PromptSignalService:
             signals.update({"staff_listing", "listing_intent"})
         if _AGG_STAFF_RE.search(text):
             signals.update({"staff_aggregate", "aggregate_intent"})
+        if _LIST_SCHOOLS_RE.search(text):
+            signals.update({"school_listing", "listing_intent"})
         if _SCHOOL_AGG_RE.search(text):
             signals.update({"school_aggregate", "aggregate_intent"})
         if " by " in lower and "aggregate_intent" in signals:
@@ -90,6 +101,10 @@ class PromptSignalService:
             signals.add("staff_role_prompt")
         if _has_school_literal(text):
             signals.update({"school_literal_present", "needs_school_filter"})
+        if _EXPLICIT_SCHOOL_KEY_RE.search(text):
+            signals.add("explicit_school_key_request")
+        if _EXPLICIT_STAFF_CLASSIFICATION_RE.search(text):
+            signals.add("explicit_staff_classification_request")
 
         if "student_listing" in signals:
             signals.add("needs_student_identity")

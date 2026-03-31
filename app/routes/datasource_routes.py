@@ -7,7 +7,7 @@ from flask_restx import Namespace, fields
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_admin
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 from app.services.tenancy.datasource_catalog_service import DatasourceCatalogService
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ _datasource_model = datasource_ns.model(
 
 
 @datasource_ns.route("/")
-class DatasourceList(ForgeResource):
+class DatasourceList(Resource):
     """List all registered analytics datasources."""
 
     @datasource_ns.doc("list_datasources")

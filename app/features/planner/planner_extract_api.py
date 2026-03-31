@@ -5,10 +5,10 @@ from typing import Any, Dict
 
 from flask import request
 from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
-from app.decorators.security import token_required
 from app.decorators.rbac import require_access
+from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
 from app.services.planner.semantic_extract_service import SemanticExtractService
 
@@ -25,7 +25,7 @@ extract_model = planner_ns.model(
 
 
 @planner_ns.route("/extract")
-class PlannerExtract(ForgeResource):
+class PlannerExtract(Resource):
     @token_required
     @require_access("planner")
     @planner_ns.expect(extract_model, validate=False)

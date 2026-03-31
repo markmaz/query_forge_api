@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.user_routes as user_routes
+import app.features.users.user_api as user_routes
 from app.models.tenancy.user import User
 
 

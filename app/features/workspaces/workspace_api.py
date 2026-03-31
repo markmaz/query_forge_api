@@ -4,20 +4,19 @@ import logging
 import re
 
 from flask import g, request
-from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Namespace, Resource, fields
 from sqlalchemy import text
 
 from app.adapters.mysql_sql_executor import engine
-from app.decorators.security import token_required
 from app.decorators.rbac import require_access, require_admin
+from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
-from app.routes.user_routes import user_model
-from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
+from app.features.users.user_api import user_model
+from app.services.tenancy.workspace_external_link_service import WorkspaceExternalLinkService
 from app.services.workspace_access_service import WorkspaceAccessService
+from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 from app.services.workspace_service import WorkspaceService
 from app.services.workspace_user_read_service import WorkspaceUserReadService
-from app.services.tenancy.workspace_external_link_service import WorkspaceExternalLinkService
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +53,8 @@ def _int_arg(name: str, default: int) -> int:
         raise ForgeError(f"Invalid integer for '{name}'", status_code=400) from exc
 
 
-
 @workspace_ns.route("/", methods=["GET"])
-class Workspaces(ForgeResource):
+class Workspaces(Resource):
     @workspace_ns.marshal_list_with(workspace_model)
     @token_required
     @require_access("workspaces")
@@ -66,7 +64,7 @@ class Workspaces(ForgeResource):
 
 
 @workspace_ns.route("/<string:workspace_id>/")
-class WorkSpaceDetails(ForgeResource):
+class WorkSpaceDetails(Resource):
     @workspace_ns.marshal_list_with(workspace_model)
     @workspace_ns.doc(params={"workspace_id": "The ID of the workspace to fetch"})
     @token_required
@@ -76,7 +74,7 @@ class WorkSpaceDetails(ForgeResource):
 
 
 @workspace_ns.route("/<string:workspace_id>/users")
-class WorkspaceUsers(ForgeResource):
+class WorkspaceUsers(Resource):
     @workspace_ns.marshal_list_with(user_model)
     @workspace_ns.doc(params={"workspace_id": "The ID of the workspace"})
     @token_required
@@ -85,9 +83,8 @@ class WorkspaceUsers(ForgeResource):
         return _workspace_service().get_workspace_users_from_dbx(workspace_id)
 
 
-
 @workspace_ns.route("/<string:workspace_id>/namespaces")
-class WorkspaceNamespaces(ForgeResource):
+class WorkspaceNamespaces(Resource):
     @token_required
     @require_access("workspaces")
     def get(self, workspace_id: str):
@@ -146,7 +143,7 @@ class WorkspaceNamespaces(ForgeResource):
 
 
 @workspace_ns.route("/users")
-class GetWorkspaceUsersFromSystem(ForgeResource):
+class GetWorkspaceUsersFromSystem(Resource):
     @token_required
     @require_admin()
     def get(self):
@@ -167,7 +164,7 @@ class GetWorkspaceUsersFromSystem(ForgeResource):
 
 
 @workspace_ns.route("/<string:workspace_id>/external-links")
-class WorkspaceExternalLinks(ForgeResource):
+class WorkspaceExternalLinks(Resource):
     @token_required
     @require_access("workspaces")
     def get(self, workspace_id: str):

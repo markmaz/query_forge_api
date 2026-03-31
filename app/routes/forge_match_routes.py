@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 from app.routes.request_helpers import extract_workspace_id, int_arg, require_user_id
 from app.schemas.forge_match_schema import (
     ForgeMatchAnalyzeRequest,
@@ -123,7 +123,7 @@ _cancel_response_model = forge_match_ns.model(
 
 
 @forge_match_ns.route("")
-class ForgeMatchSessionList(ForgeResource):
+class ForgeMatchSessionList(Resource):
     @token_required
     @require_access("forge_match")
     @forge_match_ns.doc(
@@ -158,7 +158,7 @@ class ForgeMatchSessionList(ForgeResource):
 
 
 @forge_match_ns.route("/upload")
-class ForgeMatchUpload(ForgeResource):
+class ForgeMatchUpload(Resource):
     @token_required
     @require_access("forge_match")
     def post(self):
@@ -185,7 +185,7 @@ class ForgeMatchUpload(ForgeResource):
 
 
 @forge_match_ns.route("/<string:session_id>/analyze")
-class ForgeMatchAnalyze(ForgeResource):
+class ForgeMatchAnalyze(Resource):
     @token_required
     @require_access("forge_match")
     @forge_match_ns.expect(_analyze_model, validate=False)
@@ -216,7 +216,7 @@ class ForgeMatchAnalyze(ForgeResource):
 
 
 @forge_match_ns.route("/<string:session_id>/analyze/start")
-class ForgeMatchAnalyzeStart(ForgeResource):
+class ForgeMatchAnalyzeStart(Resource):
     @token_required
     @require_access("forge_match")
     @forge_match_ns.expect(_analyze_model, validate=False)
@@ -291,7 +291,7 @@ class ForgeMatchAnalyzeStart(ForgeResource):
 
 
 @forge_match_ns.route("/status/<string:job_id>")
-class ForgeMatchAnalyzeStatus(ForgeResource):
+class ForgeMatchAnalyzeStatus(Resource):
     @token_required
     @require_access("forge_match")
     @forge_match_ns.response(200, "Analyze run status", _run_status_model)
@@ -309,7 +309,7 @@ class ForgeMatchAnalyzeStatus(ForgeResource):
 
 
 @forge_match_ns.route("/cancel/<string:job_id>")
-class ForgeMatchAnalyzeCancel(ForgeResource):
+class ForgeMatchAnalyzeCancel(Resource):
     @token_required
     @require_access("forge_match")
     @forge_match_ns.response(200, "Analyze run cancel status", _cancel_response_model)
@@ -332,7 +332,7 @@ class ForgeMatchAnalyzeCancel(ForgeResource):
 
 
 @forge_match_ns.route("/history")
-class ForgeMatchAnalyzeHistory(ForgeResource):
+class ForgeMatchAnalyzeHistory(Resource):
     @token_required
     @require_access("forge_match")
     @forge_match_ns.doc(params={"limit": "Max rows (default 20, max 200)"})
@@ -352,7 +352,7 @@ class ForgeMatchAnalyzeHistory(ForgeResource):
 
 
 @forge_match_ns.route("/<string:session_id>")
-class ForgeMatchSession(ForgeResource):
+class ForgeMatchSession(Resource):
     @token_required
     @require_access("forge_match")
     def get(self, session_id: str):
@@ -397,7 +397,7 @@ class ForgeMatchSession(ForgeResource):
 
 
 @forge_match_ns.route("/<string:session_id>/mappings")
-class ForgeMatchMappings(ForgeResource):
+class ForgeMatchMappings(Resource):
     @token_required
     @require_access("forge_match")
     @forge_match_ns.expect(_patch_model, validate=False)
@@ -426,7 +426,7 @@ class ForgeMatchMappings(ForgeResource):
 
 
 @forge_match_ns.route("/<string:session_id>/export")
-class ForgeMatchExport(ForgeResource):
+class ForgeMatchExport(Resource):
     @token_required
     @require_access("forge_match")
     def get(self, session_id: str):
@@ -454,7 +454,7 @@ class ForgeMatchExport(ForgeResource):
 
 
 @forge_match_ns.route("/<string:session_id>/create-view-draft")
-class ForgeMatchCreateViewDraft(ForgeResource):
+class ForgeMatchCreateViewDraft(Resource):
     @token_required
     @require_access("forge_match")
     @forge_match_ns.expect(_draft_model, validate=False)
@@ -480,7 +480,7 @@ class ForgeMatchCreateViewDraft(ForgeResource):
 
 
 @forge_match_ns.route("/<string:session_id>/execute-view-draft-sql")
-class ForgeMatchExecuteViewDraftSql(ForgeResource):
+class ForgeMatchExecuteViewDraftSql(Resource):
     @token_required
     @require_access("forge_match")
     @forge_match_ns.expect(_execute_draft_sql_model, validate=False)
@@ -508,7 +508,7 @@ class ForgeMatchExecuteViewDraftSql(ForgeResource):
 
 
 @forge_match_ns.route("/<string:session_id>/create-domain-draft")
-class ForgeMatchCreateDomainDraft(ForgeResource):
+class ForgeMatchCreateDomainDraft(Resource):
     @token_required
     @require_access("forge_match")
     @forge_match_ns.expect(_draft_model, validate=False)

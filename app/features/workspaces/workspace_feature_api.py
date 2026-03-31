@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 from flask import g, request
-from flask_restx import Namespace
+from flask_restx import Namespace, Resource
 from sqlalchemy import text
 
 from app.decorators.rbac import require_admin
 from app.decorators.security import token_required
+from app.extensions import db
 from app.models.rbac import FEATURE_KEYS, Role, UserRole, WorkspaceFeature
-from app.routes.forge_resource import ForgeResource
 from app.services.rbac_service import set_workspace_feature
 from app.services.workspace_service import WorkspaceService
-from app.extensions import db
 
 workspace_features_ns = Namespace("workspace-features", description="Workspace feature entitlements")
 
@@ -28,10 +27,7 @@ def _feature_row(workspace_id: str, feature_key: str) -> WorkspaceFeature | None
 
 
 def _workspace_readiness_payload(workspace_id: str) -> dict[str, object]:
-    enabled = {
-        row.feature_key
-        for row in _active_workspace_feature_rows(workspace_id)
-    }
+    enabled = {row.feature_key for row in _active_workspace_feature_rows(workspace_id)}
     has_workspace_admin = (
         db.session.execute(
             text(
@@ -98,20 +94,14 @@ def _workspace_readiness_payload(workspace_id: str) -> dict[str, object]:
 
 
 @workspace_features_ns.route("/<string:workspace_id>/features")
-class WorkspaceFeatureList(ForgeResource):
+class WorkspaceFeatureList(Resource):
     @token_required
     @require_admin()
     def get(self, workspace_id: str):
-        enabled = {
-            row.feature_key
-            for row in _active_workspace_feature_rows(workspace_id)
-        }
+        enabled = {row.feature_key for row in _active_workspace_feature_rows(workspace_id)}
         return {
             "workspace_id": workspace_id,
-            "features": [
-                {"feature_key": feature_key, "enabled": feature_key in enabled}
-                for feature_key in FEATURE_KEYS
-            ],
+            "features": [{"feature_key": feature_key, "enabled": feature_key in enabled} for feature_key in FEATURE_KEYS],
         }, 200
 
     @token_required
@@ -136,7 +126,7 @@ class WorkspaceFeatureList(ForgeResource):
 
 
 @workspace_features_ns.route("/<string:workspace_id>/features/<string:feature_key>")
-class WorkspaceFeatureDetails(ForgeResource):
+class WorkspaceFeatureDetails(Resource):
     @token_required
     @require_admin()
     def delete(self, workspace_id: str, feature_key: str):
@@ -157,7 +147,7 @@ class WorkspaceFeatureDetails(ForgeResource):
 
 
 @workspace_features_ns.route("/<string:workspace_id>/readiness")
-class WorkspaceReadiness(ForgeResource):
+class WorkspaceReadiness(Resource):
     @token_required
     @require_admin()
     def get(self, workspace_id: str):

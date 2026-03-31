@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from flask import request
-from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Namespace, Resource, fields
 
-from app.decorators.security import token_required
 from app.decorators.rbac import require_admin
+from app.decorators.security import token_required
 from app.services.role_service import RoleService
 
 role_ns = Namespace("roles", description="Role management")
@@ -30,7 +29,7 @@ def _service() -> RoleService:
 
 @role_ns.route("")
 @role_ns.response(200, "The list of roles", roles)
-class RoleList(ForgeResource):
+class RoleList(Resource):
     @role_ns.expect()
     @token_required
     @require_admin()
@@ -45,7 +44,7 @@ class RoleList(ForgeResource):
 
 
 @role_ns.route("/<string:role_name>")
-class RoleDetails(ForgeResource):
+class RoleDetails(Resource):
     @token_required
     @require_admin()
     def delete(self, role_name: str):

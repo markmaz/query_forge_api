@@ -5,7 +5,7 @@ import logging
 from flask import g, request
 from flask_restx import Namespace, fields
 from pydantic import ValidationError
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import public, require_admin, require_role
@@ -37,6 +37,7 @@ from app.routes.request_helpers import extract_workspace_id
 from app.services.admin.domain_profile_embedding_service import DomainProfileEmbeddingService
 from app.services.admin.domain_profile_service import DomainProfileService
 from app.services.admin.health_service import AdminHealthService
+from app.services.domain.planner_projection_policy_service import PlannerProjectionPolicyService
 from app.services.embedding.embedding_index_service import EmbeddingIndexService
 from app.services.embedding.semantic_concept_embedding_service import SemanticConceptEmbeddingService
 from app.services.prompt_feedback_service import PromptFeedbackService
@@ -238,20 +239,38 @@ tenancy_bootstrap_model = admin_ns.model(
     },
 )
 
+planner_projection_policy_model = admin_ns.model(
+    "PlannerProjectionPolicyRequest",
+    {
+        "id": fields.Integer(required=False),
+        "policy_key": fields.String(required=True),
+        "name": fields.String(required=True),
+        "description": fields.String(required=False),
+        "scope_type": fields.String(required=True),
+        "scope_workspace_id": fields.String(required=False),
+        "scope_vertical_norm": fields.String(required=False),
+        "scope_base_domain_id": fields.Integer(required=False),
+        "priority": fields.Integer(required=False, default=100),
+        "is_active": fields.Boolean(required=False, default=True),
+        "stop_on_match": fields.Boolean(required=False, default=False),
+        "policy_json": fields.Raw(required=True),
+    },
+)
+
 
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
 
 @admin_ns.route("/healthz")
-class ShowHealth(ForgeResource):
+class ShowHealth(Resource):
     @public
     def get(self):
         return "OK", 200
 
 
 @admin_ns.route("/health/detailed")
-class DetailedHealth(ForgeResource):
+class DetailedHealth(Resource):
     @token_required
     @require_admin()
     def get(self):
@@ -267,7 +286,7 @@ class DetailedHealth(ForgeResource):
 
 
 @admin_ns.route("/health/broker")
-class BrokerHealth(ForgeResource):
+class BrokerHealth(Resource):
     @token_required
     @require_role("system:admin")
     def get(self):
@@ -287,7 +306,7 @@ class BrokerHealth(ForgeResource):
 # ---------------------------------------------------------------------------
 
 @admin_ns.route("/pipeline-profiles")
-class PipelineProfileList(ForgeResource):
+class PipelineProfileList(Resource):
     @token_required
     @require_admin()
     def get(self):
@@ -305,7 +324,7 @@ class PipelineProfileList(ForgeResource):
 
 
 @admin_ns.route("/pipeline-profiles/<string:trace_id>")
-class PipelineProfileDetail(ForgeResource):
+class PipelineProfileDetail(Resource):
     @token_required
     @require_admin()
     def get(self, trace_id: str):
@@ -332,7 +351,7 @@ class PipelineProfileDetail(ForgeResource):
 # ---------------------------------------------------------------------------
 
 @admin_ns.route("/prompt-feedback")
-class AdminPromptFeedbackList(ForgeResource):
+class AdminPromptFeedbackList(Resource):
     @token_required
     @require_admin()
     def get(self):
@@ -369,7 +388,7 @@ class AdminPromptFeedbackList(ForgeResource):
 
 
 @admin_ns.route("/prompt-feedback/<int:feedback_id>")
-class AdminPromptFeedbackDelete(ForgeResource):
+class AdminPromptFeedbackDelete(Resource):
     @token_required
     @require_admin()
     def delete(self, feedback_id: int):
@@ -388,11 +407,94 @@ class AdminPromptFeedbackDelete(ForgeResource):
 
 
 # ---------------------------------------------------------------------------
+# Planner projection policies
+# ---------------------------------------------------------------------------
+
+@admin_ns.route("/planner-projection-policies")
+class AdminPlannerProjectionPolicies(Resource):
+    @token_required
+    @require_admin()
+    def get(self):
+        try:
+            workspace_id = extract_workspace_id()
+            base_domain_id_raw = request.args.get("base_domain_id")
+            base_domain_id = int(base_domain_id_raw) if (base_domain_id_raw or "").strip() else None
+            vertical_norm = (request.args.get("vertical_norm") or "generic").strip().lower() or "generic"
+            include_inactive = str(request.args.get("include_inactive") or "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "y",
+                "on",
+            }
+            include_seeded = str(request.args.get("include_seeded") or "true").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "y",
+                "on",
+            }
+            result = PlannerProjectionPolicyService().list_policies(
+                workspace_id=workspace_id,
+                base_domain_id=base_domain_id,
+                vertical_norm=vertical_norm,
+                include_inactive=include_inactive,
+                include_seeded=include_seeded,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("planner projection policy list failed")
+            return {"error": "planner projection policy list failed"}, 500
+
+    @token_required
+    @require_admin()
+    @admin_ns.expect(planner_projection_policy_model, validate=False)
+    def put(self):
+        try:
+            workspace_id = extract_workspace_id()
+            result = PlannerProjectionPolicyService().upsert_policy(
+                workspace_id=workspace_id,
+                actor_user_id=str(getattr(g, "user_id", "") or ""),
+                payload=request.get_json(silent=True) or {},
+            )
+            return result, 200
+        except ValidationError as exc:
+            return {"error": "Invalid planner projection policy request", "details": {"errors": exc.errors()}}, 400
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("planner projection policy upsert failed")
+            return {"error": "planner projection policy upsert failed"}, 500
+
+
+@admin_ns.route("/planner-projection-policies/<int:policy_id>")
+class AdminPlannerProjectionPolicyDetail(Resource):
+    @token_required
+    @require_admin()
+    def delete(self, policy_id: int):
+        try:
+            workspace_id = extract_workspace_id()
+            result = PlannerProjectionPolicyService().delete_policy(
+                workspace_id=workspace_id,
+                actor_user_id=str(getattr(g, "user_id", "") or ""),
+                policy_id=policy_id,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("planner projection policy delete failed")
+            return {"error": "planner projection policy delete failed"}, 500
+
+
+# ---------------------------------------------------------------------------
 # Vector index rebuild
 # ---------------------------------------------------------------------------
 
 @admin_ns.route("/vector/semantic-concepts/rebuild")
-class RebuildSemanticConceptVectors(ForgeResource):
+class RebuildSemanticConceptVectors(Resource):
     @token_required
     @require_admin()
     def post(self):
@@ -409,7 +511,7 @@ class RebuildSemanticConceptVectors(ForgeResource):
 
 
 @admin_ns.route("/vector/domains/reindex")
-class ReindexDomainVectors(ForgeResource):
+class ReindexDomainVectors(Resource):
     @token_required
     @require_admin()
     def post(self):
@@ -440,7 +542,7 @@ class ReindexDomainVectors(ForgeResource):
 
 
 @admin_ns.route("/vector/embeddings/rebuild")
-class RebuildEmbeddingVectors(ForgeResource):
+class RebuildEmbeddingVectors(Resource):
     @token_required
     @require_admin()
     def post(self):
@@ -470,7 +572,7 @@ class RebuildEmbeddingVectors(ForgeResource):
 
 
 @admin_ns.route("/vector/rebuild-all")
-class RebuildAllVectors(ForgeResource):
+class RebuildAllVectors(Resource):
     @token_required
     @require_role("system:admin")
     def post(self):
@@ -537,7 +639,7 @@ class RebuildAllVectors(ForgeResource):
 # ---------------------------------------------------------------------------
 
 @admin_ns.route("/domain-profiles")
-class DomainProfileList(ForgeResource):
+class DomainProfileList(Resource):
     @token_required
     @require_admin()
     def get(self):
@@ -570,7 +672,7 @@ class DomainProfileList(ForgeResource):
 
 
 @admin_ns.route("/domain-profiles/<int:domain_id>")
-class DomainProfileDetail(ForgeResource):
+class DomainProfileDetail(Resource):
     @token_required
     @require_admin()
     def get(self, domain_id: int):
@@ -615,7 +717,7 @@ class DomainProfileDetail(ForgeResource):
 
 
 @admin_ns.route("/domain-profiles/<int:domain_id>/generate")
-class DomainProfileGenerateOne(ForgeResource):
+class DomainProfileGenerateOne(Resource):
     @token_required
     @require_admin()
     @admin_ns.expect(domain_profile_generate_one_model, validate=False)
@@ -641,7 +743,7 @@ class DomainProfileGenerateOne(ForgeResource):
 
 
 @admin_ns.route("/domain-profiles/generate")
-class DomainProfileGenerateBatch(ForgeResource):
+class DomainProfileGenerateBatch(Resource):
     @token_required
     @require_admin()
     @admin_ns.expect(domain_profile_generate_batch_model, validate=False)
@@ -667,7 +769,7 @@ class DomainProfileGenerateBatch(ForgeResource):
 
 
 @admin_ns.route("/domain-profiles/generate-all")
-class DomainProfileGenerateAll(ForgeResource):
+class DomainProfileGenerateAll(Resource):
     @token_required
     @require_admin()
     @admin_ns.expect(domain_profile_generate_all_model, validate=False)
@@ -697,7 +799,7 @@ class DomainProfileGenerateAll(ForgeResource):
 # ---------------------------------------------------------------------------
 
 @admin_ns.route("/semantic-catalog/build")
-class SemanticCatalogBuild(ForgeResource):
+class SemanticCatalogBuild(Resource):
     @token_required
     @require_admin()
     @admin_ns.expect(semantic_catalog_build_model, validate=False)
@@ -740,7 +842,7 @@ class SemanticCatalogBuild(ForgeResource):
 # ---------------------------------------------------------------------------
 
 @admin_ns.route("/tenancy/bootstrap")
-class TenancyBootstrap(ForgeResource):
+class TenancyBootstrap(Resource):
     @token_required
     @require_role("system:admin")
     @admin_ns.expect(tenancy_bootstrap_model, validate=False)
@@ -775,7 +877,7 @@ class TenancyBootstrap(ForgeResource):
 
 
 @admin_ns.route("/organizations")
-class OrganizationListCreate(ForgeResource):
+class OrganizationListCreate(Resource):
     @token_required
     @require_admin()
     def get(self):
@@ -825,7 +927,7 @@ class OrganizationListCreate(ForgeResource):
 
 
 @admin_ns.route("/organizations/<string:organization_id>")
-class OrganizationDetail(ForgeResource):
+class OrganizationDetail(Resource):
     @token_required
     @require_role("system:admin")
     def get(self, organization_id: str):
@@ -869,7 +971,7 @@ class OrganizationDetail(ForgeResource):
 
 
 @admin_ns.route("/organizations/<string:organization_id>/memberships")
-class OrganizationMembershipListCreate(ForgeResource):
+class OrganizationMembershipListCreate(Resource):
     @token_required
     @require_role("system:admin")
     def get(self, organization_id: str):
@@ -911,7 +1013,7 @@ class OrganizationMembershipListCreate(ForgeResource):
 
 
 @admin_ns.route("/organizations/<string:organization_id>/memberships/<int:membership_id>")
-class OrganizationMembershipDetail(ForgeResource):
+class OrganizationMembershipDetail(Resource):
     @token_required
     @require_role("system:admin")
     @admin_ns.expect(organization_membership_update_model, validate=False)
@@ -949,7 +1051,7 @@ class OrganizationMembershipDetail(ForgeResource):
 
 
 @admin_ns.route("/organizations/<string:organization_id>/datasources")
-class OrganizationDatasourceListCreate(ForgeResource):
+class OrganizationDatasourceListCreate(Resource):
     @token_required
     @require_admin()
     def get(self, organization_id: str):
@@ -992,7 +1094,7 @@ class OrganizationDatasourceListCreate(ForgeResource):
 
 
 @admin_ns.route("/datasources/<int:datasource_id>")
-class DatasourceDetail(ForgeResource):
+class DatasourceDetail(Resource):
     @token_required
     @require_admin()
     def get(self, datasource_id: int):
@@ -1042,7 +1144,7 @@ class DatasourceDetail(ForgeResource):
 
 
 @admin_ns.route("/datasources/<int:datasource_id>/test")
-class DatasourceConnectionTest(ForgeResource):
+class DatasourceConnectionTest(Resource):
     @token_required
     @require_admin()
     def post(self, datasource_id: int):
@@ -1060,7 +1162,7 @@ class DatasourceConnectionTest(ForgeResource):
 
 
 @admin_ns.route("/datasources/<int:datasource_id>/namespaces")
-class DatasourceNamespaces(ForgeResource):
+class DatasourceNamespaces(Resource):
     @token_required
     @require_admin()
     def get(self, datasource_id: int):
@@ -1081,7 +1183,7 @@ class DatasourceNamespaces(ForgeResource):
 
 
 @admin_ns.route("/workspaces")
-class WorkspaceBindingList(ForgeResource):
+class WorkspaceBindingList(Resource):
     @token_required
     @require_admin()
     def get(self):
@@ -1134,7 +1236,7 @@ class WorkspaceBindingList(ForgeResource):
 
 
 @admin_ns.route("/workspaces/<string:workspace_id>/binding")
-class WorkspaceBindingDetail(ForgeResource):
+class WorkspaceBindingDetail(Resource):
     @token_required
     @require_role("system:admin")
     def get(self, workspace_id: str):
@@ -1164,7 +1266,7 @@ class WorkspaceBindingDetail(ForgeResource):
 
 
 @admin_ns.route("/workspaces/<string:workspace_id>")
-class WorkspaceDetail(ForgeResource):
+class WorkspaceDetail(Resource):
     @token_required
     @require_role("system:admin")
     def delete(self, workspace_id: str):
@@ -1181,7 +1283,7 @@ class WorkspaceDetail(ForgeResource):
 
 
 @admin_ns.route("/workspaces/<string:workspace_id>/memberships")
-class WorkspaceMembershipListCreate(ForgeResource):
+class WorkspaceMembershipListCreate(Resource):
     @token_required
     @require_role("system:admin")
     def get(self, workspace_id: str):
@@ -1220,7 +1322,7 @@ class WorkspaceMembershipListCreate(ForgeResource):
 
 
 @admin_ns.route("/workspaces/<string:workspace_id>/memberships/<int:membership_id>")
-class WorkspaceMembershipDetail(ForgeResource):
+class WorkspaceMembershipDetail(Resource):
     @token_required
     @require_role("system:admin")
     @admin_ns.expect(workspace_membership_update_model, validate=False)

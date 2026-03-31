@@ -4,7 +4,7 @@ import logging
 
 from flask import request
 from flask_restx import Namespace
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -19,7 +19,7 @@ nlp_ns = Namespace("nlp", description="NLP extraction")
 
 
 @nlp_ns.route("/extract")
-class NlpExtract(ForgeResource):
+class NlpExtract(Resource):
     @token_required
     @require_access("ai")
     def post(self):
@@ -31,7 +31,7 @@ class NlpExtract(ForgeResource):
 
 
 @nlp_ns.route("/extract-and-search")
-class NlpExtractAndSearch(ForgeResource):
+class NlpExtractAndSearch(Resource):
     @token_required
     @require_access("ai")
     def post(self):

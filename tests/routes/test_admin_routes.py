@@ -200,6 +200,89 @@ def test_pipeline_profile_detail_allows_workspace_admin(client, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Planner projection policy admin
+# ---------------------------------------------------------------------------
+
+def test_admin_planner_projection_policy_list(client, monkeypatch):
+    class _FakeSvc:
+        def list_policies(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["vertical_norm"] == "education"
+            assert kwargs["base_domain_id"] == 9
+            assert kwargs["include_inactive"] is True
+            assert kwargs["include_seeded"] is True
+            return {
+                "workspace_id": "ws-1",
+                "vertical_norm": "education",
+                "base_domain_id": 9,
+                "can_edit": True,
+                "policies": [
+                    {"id": 0, "policy_key": "student_listing_identity_projection", "is_seeded": True},
+                    {"id": 22, "policy_key": "custom_student_listing", "is_seeded": False},
+                ],
+            }
+
+    monkeypatch.setattr(admin_routes, "PlannerProjectionPolicyService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/planner-projection-policies?base_domain_id=9&vertical_norm=education&include_inactive=true&include_seeded=true",
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert len(resp.json["policies"]) == 2
+
+
+def test_admin_planner_projection_policy_upsert(client, monkeypatch):
+    class _FakeSvc:
+        def upsert_policy(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["actor_user_id"] == "user-1"
+            assert kwargs["payload"]["policy_key"] == "custom_school_listing"
+            return {
+                "id": 44,
+                "policy_key": "custom_school_listing",
+                "scope_type": "workspace",
+                "policy_json": {"required_column_names": ["school_name"]},
+                "is_seeded": False,
+            }
+
+    monkeypatch.setattr(admin_routes, "PlannerProjectionPolicyService", _FakeSvc)
+    resp = client.put(
+        "/api/v1/admin/planner-projection-policies",
+        headers=_headers(monkeypatch),
+        json={
+            "policy_key": "custom_school_listing",
+            "name": "Custom school listing",
+            "scope_type": "workspace",
+            "policy_json": {
+                "version": 1,
+                "when_signals_all": ["school_listing"],
+                "projection_mode": "prepend",
+                "required_column_names": ["school_name"],
+            },
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json["id"] == 44
+
+
+def test_admin_planner_projection_policy_delete(client, monkeypatch):
+    class _FakeSvc:
+        def delete_policy(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["actor_user_id"] == "user-1"
+            assert kwargs["policy_id"] == 22
+            return {"deleted": True, "policy_id": 22}
+
+    monkeypatch.setattr(admin_routes, "PlannerProjectionPolicyService", _FakeSvc)
+    resp = client.delete(
+        "/api/v1/admin/planner-projection-policies/22",
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["deleted"] is True
+
+
+# ---------------------------------------------------------------------------
 # Prompt feedback admin
 # ---------------------------------------------------------------------------
 

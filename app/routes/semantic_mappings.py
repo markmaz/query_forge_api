@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 
 from flask import request
 from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -41,7 +41,7 @@ semantic_mapping_model = semantic_mappings_ns.model(
 
 
 @semantic_mappings_ns.route("")
-class SemanticMappingsCollection(ForgeResource):
+class SemanticMappingsCollection(Resource):
     @token_required
     @require_access("semantic")
     @semantic_mappings_ns.doc(
@@ -93,7 +93,7 @@ class SemanticMappingsCollection(ForgeResource):
 
 
 @semantic_mappings_ns.route("/<int:mapping_id>")
-class SemanticMappingsById(ForgeResource):
+class SemanticMappingsById(Resource):
     @token_required
     @require_access("semantic", role="admin")
     def delete(self, mapping_id: int):

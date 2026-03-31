@@ -21,6 +21,7 @@ from app.models.query.ai_suggest import AddSelectEdit, SetDomainEdit, SqlColumnK
 from app.nlp.normalization import normalize_prompt
 from app.nlp.time_normalizer import CanonicalTime, normalize_time_terms
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.domain.planner_projection_policy_service import PlannerProjectionPolicyService
 from app.services.llm.llm_client import LLMClient
 from app.services.planner.semantic_extract_service import SemanticExtractService
 from app.services.sqljson_apply_service import apply_edits
@@ -129,6 +130,7 @@ class PlanService:
         column_vector: Optional[ConstrainedColumnVectorService] = None,
         domain_selector: Optional[DomainSelectionService] = None,
         value_alias_resolver: Optional[ValueAliasResolutionService] = None,
+        projection_policy_service: Optional[PlannerProjectionPolicyService] = None,
         llm_client: Optional[LLMClient] = None,
         tier2_runner: Optional[Any] = None,
         semantic_extractor: Optional[SemanticExtractService] = None,
@@ -140,6 +142,7 @@ class PlanService:
         self._column_vector = column_vector or ConstrainedColumnVectorService(sql=self._sql)
         self._domain_selector = domain_selector or DomainSelectionService(sql=self._sql)
         self._value_alias_resolver = value_alias_resolver or ValueAliasResolutionService(sql=self._sql)
+        self._projection_policy_service = projection_policy_service or PlannerProjectionPolicyService(sql=self._sql)
         self._explicit_llm = llm_client is not None
         self._llm = llm_client or LLMClient(timeout_seconds=SEMANTIC_PLAN_LLM_TIMEOUT_SECONDS)
         self._llm_runtime_meta: Dict[str, Any] = {
@@ -459,6 +462,7 @@ class PlanService:
             self._resolve_runtime_llm(workspace_id=workspace_id, llm_id_override=req.llm_id)
             t4 = time.perf_counter()
             llm_plan = self._plan_with_llm(
+                workspace_id=workspace_id,
                 prompt=prompt,
                 vertical_norm=vertical_norm,
                 domain_id=selected_domain_id,
@@ -530,6 +534,7 @@ class PlanService:
     def _plan_with_llm(
         self,
         *,
+        workspace_id: str,
         prompt: str,
         vertical_norm: str,
         domain_id: Optional[int],
@@ -608,9 +613,21 @@ class PlanService:
             extracted_values=extracted_values,
             mapped_columns=columns_for_llm,
         )
-        school_forced_filters = self._build_school_forced_filters(
+        school_literal = _resolve_school_literal(extracted_values)
+        policy_signals = self._semantic_projection_prompt_signals(
+            prompt=prompt,
+            school_literal_present=bool(school_literal),
+        )
+        policy_result = self._projection_policy_service.get_projection_requirements(
+            workspace_id=workspace_id,
+            vertical_norm=vertical_norm,
+            base_domain_id=domain_id,
+            prompt_signals=policy_signals,
+        )
+        school_forced_filters = self._build_required_literal_filters(
             extracted_values=extracted_values,
             mapped_columns=columns_for_llm,
+            required_filter_concept_keys=policy_result.get("required_filter_concept_keys") or [],
         )
         forced_filters = self._merge_forced_filters(
             existing_filters=forced_filters,
@@ -728,6 +745,8 @@ class PlanService:
         grounded, gate_warnings = self._apply_plan_validity_gate(
             llm_plan=grounded,
             prompt=prompt,
+            workspace_id=workspace_id,
+            vertical_norm=vertical_norm,
             intent_entity=intent_entity,
             extracted_values=extracted_values,
             mapped_columns=columns_for_llm,
@@ -2634,22 +2653,24 @@ class PlanService:
         return [{"concept_key": selected_concept, "op": "=", "value": value}]
 
     @staticmethod
-    def _build_school_forced_filters(
+    def _build_required_literal_filters(
         *,
         extracted_values: Sequence[Dict[str, Any]],
         mapped_columns: Sequence[Dict[str, Any]],
+        required_filter_concept_keys: Sequence[str],
     ) -> List[Dict[str, Any]]:
         school_value = _resolve_school_literal(extracted_values)
-        if school_value is None:
+        if school_value is None or not required_filter_concept_keys:
             return []
         available_concepts = {
             str(row.get("concept_key") or "").strip().upper()
             for row in mapped_columns
             if isinstance(row, dict) and str(row.get("concept_key") or "").strip()
         }
-        for concept_key in ("SCHOOL_NAME", "STUDENT_SCHOOL_NAME"):
-            if concept_key in available_concepts:
-                return [{"concept_key": concept_key, "op": "contains", "value": school_value}]
+        for required_concept in required_filter_concept_keys:
+            for concept_key in _projection_concept_family(required_concept):
+                if concept_key in available_concepts:
+                    return [{"concept_key": concept_key, "op": "contains", "value": school_value}]
         return []
 
     @staticmethod
@@ -2854,6 +2875,8 @@ class PlanService:
         *,
         llm_plan: Dict[str, Any],
         prompt: str,
+        workspace_id: str,
+        vertical_norm: str,
         intent_entity: Optional[str],
         extracted_values: Sequence[Dict[str, Any]],
         mapped_columns: Sequence[Dict[str, Any]],
@@ -2878,15 +2901,27 @@ class PlanService:
         )
 
         if projection_with_school:
-            selected_columns = self._ensure_student_first_last_projection(
+            policy_signals = self._semantic_projection_prompt_signals(
+                prompt=prompt,
+                school_literal_present=bool(school_literal),
+            )
+            policy_result = self._projection_policy_service.get_projection_requirements(
+                workspace_id=workspace_id,
+                vertical_norm=vertical_norm,
+                base_domain_id=domain_id,
+                prompt_signals=policy_signals,
+            )
+            selected_columns = self._ensure_projection_policy_concepts(
                 selected_columns=selected_columns,
                 mapped_columns=mapped_columns,
+                required_concept_keys=policy_result.get("required_concept_keys") or [],
             )
-            filters = self._ensure_school_name_filter(
+            filters = self._ensure_required_literal_filters(
                 filters=filters,
                 extracted_values=extracted_values,
                 mapped_columns=mapped_columns,
                 prompt=prompt,
+                required_filter_concept_keys=policy_result.get("required_filter_concept_keys") or [],
             )
             out["selected_columns"] = selected_columns
             out["filters"] = filters
@@ -2902,11 +2937,13 @@ class PlanService:
                 warnings.append("plan_invalid_missing_columns_or_filters")
                 return out, warnings
 
-            out["join_plan"] = self._ensure_student_school_join_plan(
+            out["join_plan"] = self._ensure_required_join_plan(
                 join_plan=out.get("join_plan"),
                 selected_columns=selected_columns,
                 filters=filters,
                 mapped_columns=mapped_columns,
+                required_filter_concept_keys=policy_result.get("required_filter_concept_keys") or [],
+                required_join_tables=policy_result.get("required_join_tables") or [],
             )
 
             sql_json, _ = self._build_grounded_sql_json(
@@ -3032,24 +3069,25 @@ class PlanService:
                     break
         return selected
 
-    def _ensure_student_first_last_projection(
+    def _ensure_projection_policy_concepts(
         self,
         *,
         selected_columns: Sequence[Dict[str, Any]],
         mapped_columns: Sequence[Dict[str, Any]],
+        required_concept_keys: Sequence[str],
     ) -> List[Dict[str, Any]]:
         out = [dict(item) for item in selected_columns if isinstance(item, dict)]
-        if _has_student_first_last_projection(out):
+        if not required_concept_keys:
             return out
 
-        first_last = self._build_student_first_last_projection(mapped_columns=mapped_columns)
-        if not first_last:
-            return out
         seen = {
             (_to_int(item.get("model_column_id")), str(item.get("concept_key") or "").strip().upper())
             for item in out
         }
-        for item in first_last:
+        for item in self._build_projection_policy_columns(
+            mapped_columns=mapped_columns,
+            required_concept_keys=required_concept_keys,
+        ):
             key = (_to_int(item.get("model_column_id")), str(item.get("concept_key") or "").strip().upper())
             if key in seen:
                 continue
@@ -3058,7 +3096,11 @@ class PlanService:
         return out
 
     @staticmethod
-    def _build_student_first_last_projection(*, mapped_columns: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _build_projection_policy_columns(
+        *,
+        mapped_columns: Sequence[Dict[str, Any]],
+        required_concept_keys: Sequence[str],
+    ) -> List[Dict[str, Any]]:
         by_concept: Dict[str, List[Dict[str, Any]]] = {}
         for row in mapped_columns:
             if not isinstance(row, dict):
@@ -3068,9 +3110,10 @@ class PlanService:
                 by_concept.setdefault(concept_key, []).append(dict(row))
 
         selected: List[Dict[str, Any]] = []
-        for concept_candidates in (("STUDENT_FIRST_NAME", "FIRST_NAME"), ("STUDENT_LAST_NAME", "LAST_NAME")):
+        seen_mid: set[int] = set()
+        for required_concept in required_concept_keys:
             chosen: Optional[Dict[str, Any]] = None
-            for concept_key in concept_candidates:
+            for concept_key in _projection_concept_family(required_concept):
                 rows = list(by_concept.get(concept_key) or [])
                 if not rows:
                     continue
@@ -3087,23 +3130,34 @@ class PlanService:
                 continue
             mid = _to_int(chosen.get("model_column_id"))
             concept_key = str(chosen.get("concept_key") or "").strip().upper()
-            if mid is None or concept_key == "":
+            if mid is None or concept_key == "" or mid in seen_mid:
                 continue
+            seen_mid.add(mid)
             selected.append({"concept_key": concept_key, "model_column_id": mid})
         return selected
 
-    def _ensure_school_name_filter(
+    def _semantic_projection_prompt_signals(self, *, prompt: str, school_literal_present: bool = False) -> List[str]:
+        signals: set[str] = set()
+        if _prompt_has_student_intent(prompt):
+            signals.update({"student_listing", "listing_intent", "needs_student_identity"})
+        if school_literal_present:
+            signals.update({"school_literal_present", "needs_school_filter"})
+        return sorted(signals)
+
+    def _ensure_required_literal_filters(
         self,
         *,
         filters: Sequence[Dict[str, Any]],
         extracted_values: Sequence[Dict[str, Any]],
         mapped_columns: Sequence[Dict[str, Any]],
         prompt: str,
+        required_filter_concept_keys: Sequence[str],
     ) -> List[Dict[str, Any]]:
         base = [dict(item) for item in filters if isinstance(item, dict)]
-        forced = self._build_school_forced_filters(
+        forced = self._build_required_literal_filters(
             extracted_values=extracted_values,
             mapped_columns=mapped_columns,
+            required_filter_concept_keys=required_filter_concept_keys,
         )
         return self._merge_forced_filters(
             existing_filters=base,
@@ -3112,22 +3166,27 @@ class PlanService:
         )
 
     @staticmethod
-    def _ensure_student_school_join_plan(
+    def _ensure_required_join_plan(
         *,
         join_plan: Any,
         selected_columns: Sequence[Dict[str, Any]],
         filters: Sequence[Dict[str, Any]],
         mapped_columns: Sequence[Dict[str, Any]],
+        required_filter_concept_keys: Sequence[str],
+        required_join_tables: Sequence[str],
     ) -> Dict[str, Any]:
         current = dict(join_plan) if isinstance(join_plan, dict) else {}
+        if not required_join_tables:
+            return current
         mid_to_row = _candidate_by_mid(mapped_columns)
         selected_tables = {
             str((mid_to_row.get(_to_int(col.get("model_column_id")) or -1) or {}).get("table_name") or "").strip().lower()
             for col in selected_columns
             if isinstance(col, dict)
         }
+        required_filter_keys = {str(item or "").strip().upper() for item in required_filter_concept_keys if str(item or "").strip()}
         has_school_filter = any(
-            str(item.get("concept_key") or "").strip().upper() in {"SCHOOL_NAME", "STUDENT_SCHOOL_NAME"}
+            str(item.get("concept_key") or "").strip().upper() in required_filter_keys
             for item in filters
             if isinstance(item, dict)
         )
@@ -3135,13 +3194,16 @@ class PlanService:
             return current
 
         joins = list(current.get("joins") or [])
-        if not any(str(item.get("table") or "").strip().lower() == "dim_school" for item in joins if isinstance(item, dict)):
-            joins.append(
-                {
-                    "table": "dim_school",
-                    "on": [{"concept_key": "SCHOOL_ID", "op": "=", "value": "SCHOOL_ID"}],
-                }
-            )
+        for required_table in [str(item or "").strip().lower() for item in required_join_tables if str(item or "").strip()]:
+            if any(str(item.get("table") or "").strip().lower() == required_table for item in joins if isinstance(item, dict)):
+                continue
+            if required_table == "dim_school":
+                joins.append(
+                    {
+                        "table": "dim_school",
+                        "on": [{"concept_key": "SCHOOL_ID", "op": "=", "value": "SCHOOL_ID"}],
+                    }
+                )
         current["primary_table"] = str(current.get("primary_table") or "dim_student")
         current["joins"] = joins
         return current
@@ -3522,6 +3584,16 @@ def _has_student_first_last_projection(selected_columns: Sequence[Dict[str, Any]
     has_first = bool(keys & {"STUDENT_FIRST_NAME", "FIRST_NAME"})
     has_last = bool(keys & {"STUDENT_LAST_NAME", "LAST_NAME"})
     return has_first and has_last
+
+
+def _projection_concept_family(concept_key: str) -> tuple[str, ...]:
+    token = str(concept_key or "").strip().upper()
+    families = {
+        "STUDENT_ID": ("STUDENT_ID", "ID"),
+        "STUDENT_FIRST_NAME": ("STUDENT_FIRST_NAME", "FIRST_NAME"),
+        "STUDENT_LAST_NAME": ("STUDENT_LAST_NAME", "LAST_NAME"),
+    }
+    return families.get(token, (token,))
 
 
 def _has_school_name_filter(*, filters: Sequence[Dict[str, Any]], school_literal: Optional[str]) -> bool:

@@ -439,6 +439,7 @@ class PlannerDomainService:
         semantic_grounding_bundle = None
         semantic_value_alias_constraints: List[Dict[str, Any]] = []
         semantic_grounding_debug: Optional[Dict[str, Any]] = None
+        projection_policy_debug: Optional[Dict[str, Any]] = None
         if QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED:
             semantic_capabilities = self._domain_selection.compact_capabilities_for_llm(
                 capabilities=capabilities,
@@ -446,7 +447,14 @@ class PlannerDomainService:
                 prompt=normalized_prompt,
                 slot_hints=None,
                 fast_mode=fast_mode,
+                workspace_id=req.workspace_id,
+                vertical_norm=vertical,
+                include_projection_policy_debug=bool(req.debug),
             )
+            if req.debug:
+                raw_projection_debug = semantic_capabilities.pop("projection_policy_debug", None)
+                if isinstance(raw_projection_debug, Mapping):
+                    projection_policy_debug = dict(raw_projection_debug)
             semantic_grounding_bundle = self._semantic_integration.build_grounding_bundle(
                 prompt=normalized_prompt,
                 workspace_id=req.workspace_id,
@@ -626,6 +634,7 @@ class PlannerDomainService:
                 explanation_summary_trace=explanation_summary_trace,
                 next_actions_trace=next_actions_trace,
                 technical_details=technical_details,
+                projection_policy_debug=projection_policy_debug,
                 shared_pipeline=shared_pipeline,
                 profile_enabled=profile_enabled,
                 pipeline_profile=pipeline_profile_steps,

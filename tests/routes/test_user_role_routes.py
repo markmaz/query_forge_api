@@ -5,7 +5,7 @@ from typing import Dict
 import app.decorators.security as security
 import app.routes.request_helpers as request_helpers
 import app.services.rbac_service as rbac_service
-import app.routes.user_routes as user_routes
+import app.features.users.user_api as user_routes
 
 
 def _headers(monkeypatch) -> Dict[str, str]:

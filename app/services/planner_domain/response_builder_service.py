@@ -107,6 +107,7 @@ class PlannerResponseBuilderService:
         explanation_summary_trace: Any,
         next_actions_trace: Any,
         technical_details: Mapping[str, Any],
+        projection_policy_debug: Optional[Mapping[str, Any]] = None,
         shared_pipeline: Optional[Mapping[str, Any]] = None,
         profile_enabled: bool,
         pipeline_profile: Sequence[Mapping[str, Any]],
@@ -151,6 +152,8 @@ class PlannerResponseBuilderService:
             "next_actions_trace": next_actions_trace,
             "technical_details": dict(technical_details or {}),
         }
+        if projection_policy_debug:
+            debug_payload["projection_policy"] = dict(projection_policy_debug)
         if shared_pipeline:
             debug_payload["shared_pipeline"] = dict(shared_pipeline)
         if profile_enabled:

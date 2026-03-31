@@ -45,6 +45,25 @@ def test_prompt_signal_service_extracts_days_off_and_lowercase_school_literal() 
     assert "time_constraint_present" in signals
 
 
+def test_prompt_signal_service_extracts_explicit_school_key_request() -> None:
+    svc = PromptSignalService()
+    signals = svc.extract_signals(prompt="Show me the school ids for Barksdale Elementary")
+    assert "explicit_school_key_request" in signals
+
+
+def test_prompt_signal_service_extracts_explicit_staff_classification_request() -> None:
+    svc = PromptSignalService()
+    signals = svc.extract_signals(prompt="Show me the staff classification at Lincoln High")
+    assert "explicit_staff_classification_request" in signals
+
+
+def test_prompt_signal_service_extracts_school_listing() -> None:
+    svc = PromptSignalService()
+    signals = svc.extract_signals(prompt="Show me all the schools in Clarksville, TN")
+    assert "school_listing" in signals
+    assert "listing_intent" in signals
+
+
 def test_prompt_signal_service_extracts_age_extreme_signal() -> None:
     svc = PromptSignalService()
     signals = svc.extract_signals(prompt="Show me the eldest student")

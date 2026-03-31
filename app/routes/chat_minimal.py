@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from flask import current_app, request
 from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.config import QF_FORGE_INSIGHTS_ENABLED, QF_MINIMAL_CHAT_ENABLED
 from app.decorators.security import token_required
@@ -40,7 +40,7 @@ _chat_request_model = chat_ns.model(
 
 
 @chat_ns.route("/minimal")
-class MinimalChatRoute(ForgeResource):
+class MinimalChatRoute(Resource):
     @token_required
     @require_access("ai")
     @chat_ns.expect(_chat_request_model, validate=False)
@@ -129,7 +129,7 @@ def _validate_forge_insights_enabled() -> None:
 
 
 @chat_ns.route("/forge-insights")
-class ForgeInsightsChatRoute(ForgeResource):
+class ForgeInsightsChatRoute(Resource):
     @token_required
     @require_access("forge_insights")
     @chat_ns.expect(_chat_request_model, validate=False)
@@ -159,7 +159,7 @@ class ForgeInsightsChatRoute(ForgeResource):
 
 
 @chat_ns.route("/forge-insights/conversations")
-class ForgeInsightsConversationListRoute(ForgeResource):
+class ForgeInsightsConversationListRoute(Resource):
     @token_required
     @require_access("forge_insights")
     def get(self):
@@ -182,7 +182,7 @@ class ForgeInsightsConversationListRoute(ForgeResource):
 
 
 @chat_ns.route("/forge-insights/conversations/<string:conversation_id>")
-class ForgeInsightsConversationDetailRoute(ForgeResource):
+class ForgeInsightsConversationDetailRoute(Resource):
     @token_required
     @require_access("forge_insights")
     def get(self, conversation_id: str):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-import app.routes.auth_routes as auth_routes
+import app.features.auth.auth_api as auth_routes
 from app.decorators import security
 from app.exceptions.forge_error import ForgeError
 from app.models.tenancy.user import User

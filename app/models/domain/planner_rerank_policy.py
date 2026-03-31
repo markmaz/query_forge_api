@@ -25,6 +25,7 @@ PLANNER_RERANK_SCOPE_TYPES = frozenset(
 PLANNER_RERANK_SIGNAL_KEYS = frozenset(
     {
         "student_listing",
+        "school_listing",
         "student_aggregate",
         "staff_listing",
         "staff_aggregate",
@@ -33,6 +34,8 @@ PLANNER_RERANK_SIGNAL_KEYS = frozenset(
         "birth_month_prompt",
         "calendar_days_off_prompt",
         "school_literal_present",
+        "explicit_school_key_request",
+        "explicit_staff_classification_request",
         "district_literal_present",
         "time_constraint_present",
         "status_enrolled",

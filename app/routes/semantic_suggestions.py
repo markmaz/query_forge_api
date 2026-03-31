@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 
 from flask import g, request
 from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -50,7 +50,7 @@ item_patch_model = semantic_suggestions_ns.model(
 
 
 @semantic_suggestions_ns.route("/runs")
-class SuggestionRuns(ForgeResource):
+class SuggestionRuns(Resource):
     @token_required
     @require_access("semantic", role="admin")
     @semantic_suggestions_ns.expect(run_model, validate=False)
@@ -68,7 +68,7 @@ class SuggestionRuns(ForgeResource):
 
 
 @semantic_suggestions_ns.route("/runs/<int:run_id>/execute")
-class SuggestionRunExecute(ForgeResource):
+class SuggestionRunExecute(Resource):
     @token_required
     @require_access("semantic", role="admin")
     @semantic_suggestions_ns.doc(params={"llm_id": "Optional workspace LLM id override"})
@@ -85,7 +85,7 @@ class SuggestionRunExecute(ForgeResource):
 
 
 @semantic_suggestions_ns.route("/runs/<int:run_id>")
-class SuggestionRunById(ForgeResource):
+class SuggestionRunById(Resource):
     @token_required
     @require_access("semantic")
     def get(self, run_id: int):
@@ -100,7 +100,7 @@ class SuggestionRunById(ForgeResource):
 
 
 @semantic_suggestions_ns.route("/items")
-class SuggestionItems(ForgeResource):
+class SuggestionItems(Resource):
     @token_required
     @require_access("semantic")
     @semantic_suggestions_ns.doc(
@@ -136,7 +136,7 @@ class SuggestionItems(ForgeResource):
 
 
 @semantic_suggestions_ns.route("/items/<int:item_id>")
-class SuggestionItemById(ForgeResource):
+class SuggestionItemById(Resource):
     @token_required
     @require_access("semantic", role="admin")
     @semantic_suggestions_ns.expect(item_patch_model, validate=False)
@@ -153,7 +153,7 @@ class SuggestionItemById(ForgeResource):
 
 
 @semantic_suggestions_ns.route("/runs/<int:run_id>/apply")
-class SuggestionRunApply(ForgeResource):
+class SuggestionRunApply(Resource):
     @token_required
     @require_access("semantic", role="admin")
     def post(self, run_id: int):

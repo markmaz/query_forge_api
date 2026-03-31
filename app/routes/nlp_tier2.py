@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from flask import request
 from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -28,7 +28,7 @@ parse_model = nlp_tier2_ns.model(
 
 
 @nlp_tier2_ns.route("/tier2/parse")
-class Tier2Parse(ForgeResource):
+class Tier2Parse(Resource):
     @token_required
     @require_access("ai")
     @nlp_tier2_ns.expect(parse_model, validate=False)

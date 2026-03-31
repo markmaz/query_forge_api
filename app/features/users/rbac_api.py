@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from flask import g, request
-from flask_restx import Namespace, abort
+from flask_restx import Namespace, Resource, abort
 
 from app.decorators.rbac import require_admin
 from app.decorators.security import token_required
 from app.models.rbac import GLOBAL_ROLES, Role, UserRole
-from app.routes.forge_resource import ForgeResource
 from app.routes.request_helpers import extract_workspace_id
 from app.services.rbac_service import assign_role, ensure_system_roles, get_effective_roles, revoke_role_by_id
 
@@ -22,10 +21,7 @@ def _list_user_role_rows(user_id: str, workspace_id: str) -> list[UserRole]:
         UserRole.query.join(Role)
         .filter(UserRole.user_id == user_id)
         .filter(
-            (
-                (UserRole.workspace_id == workspace_id)
-                | ((UserRole.workspace_id.is_(None)) & (Role.name.in_(GLOBAL_ROLES)))
-            )
+            ((UserRole.workspace_id == workspace_id) | ((UserRole.workspace_id.is_(None)) & (Role.name.in_(GLOBAL_ROLES))))
         )
         .order_by(UserRole.id.asc())
         .all()
@@ -56,11 +52,7 @@ def _find_existing_user_role(user_id: str, role_id: int, workspace_id: str | Non
 
 
 def _find_user_role_row(user_id: str, user_role_id: int) -> UserRole | None:
-    return (
-        UserRole.query.filter_by(id=user_role_id, user_id=user_id)
-        .join(Role)
-        .first()
-    )
+    return UserRole.query.filter_by(id=user_role_id, user_id=user_id).join(Role).first()
 
 
 def _role_to_assignment_payload(row: UserRole) -> dict[str, object | None]:
@@ -82,7 +74,7 @@ def _read_role_name(body: object) -> str:
 
 
 @rbac_ns.route("/roles")
-class RbacRoleList(ForgeResource):
+class RbacRoleList(Resource):
     @token_required
     @require_admin()
     def get(self):
@@ -92,15 +84,11 @@ class RbacRoleList(ForgeResource):
 
 
 @rbac_ns.route("/users/<string:user_id>/roles")
-class UserRoleList(ForgeResource):
+class UserRoleList(Resource):
     @token_required
     @require_admin()
     def get(self, user_id: str):
         workspace_id = extract_workspace_id()
-
-        # Current schema stores direct roles globally. Keep workspace_id in the
-        # contract so the route stays compatible if workspace-scoped user_roles
-        # are added later.
         rows = _list_user_role_rows(user_id, workspace_id)
         return {
             "user_id": user_id,
@@ -143,7 +131,7 @@ class UserRoleList(ForgeResource):
 
 
 @rbac_ns.route("/users/<string:user_id>/roles/<int:user_role_id>")
-class UserRoleDetails(ForgeResource):
+class UserRoleDetails(Resource):
     @token_required
     @require_admin()
     def delete(self, user_id: str, user_role_id: int):

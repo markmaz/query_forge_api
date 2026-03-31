@@ -13,7 +13,7 @@ from app.decorators.security import token_required
 from app.decorators.rbac import require_access
 from app.decorators.ownership import require_ownership
 from app.exceptions.forge_error import ForgeError
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 from app.routes.request_helpers import extract_workspace_id, int_arg, require_user_id
 
 logger = logging.getLogger(__name__)
@@ -717,7 +717,7 @@ _execute_response_model = skills_ns.model(
 
 
 @skills_ns.route("")
-class SkillList(ForgeResource):
+class SkillList(Resource):
     @token_required
     @require_access("skills")
     @skills_ns.doc(params={"page": "Page number (default 1)", "page_size": "Page size (default 20, max 100)"})
@@ -848,7 +848,7 @@ class SkillList(ForgeResource):
 
 
 @skills_ns.route("/<string:skill_id>")
-class SkillDetail(ForgeResource):
+class SkillDetail(Resource):
     @token_required
     @require_access("skills")
     @require_ownership("QuerySkill", "skill_id", "skills:admin", check_read=True)
@@ -1016,7 +1016,7 @@ class SkillDetail(ForgeResource):
 
 
 @skills_ns.route("/<string:skill_id>/execute")
-class SkillExecute(ForgeResource):
+class SkillExecute(Resource):
     @token_required
     @require_access("skills")
     @require_ownership("QuerySkill", "skill_id", "skills:admin", check_read=True)
@@ -1078,7 +1078,7 @@ class SkillExecute(ForgeResource):
 
 
 @skills_ns.route("/<string:skill_id>/executions")
-class SkillExecutionList(ForgeResource):
+class SkillExecutionList(Resource):
     @token_required
     @require_access("skills")
     @require_ownership("QuerySkill", "skill_id", "skills:admin", check_read=True)
@@ -1130,7 +1130,7 @@ class SkillExecutionList(ForgeResource):
 
 
 @skills_ns.route("/<string:skill_id>/runs")
-class SkillRunListAlias(ForgeResource):
+class SkillRunListAlias(Resource):
     @token_required
     @require_access("skills")
     @require_ownership("QuerySkill", "skill_id", "skills:admin", check_read=True)
@@ -1139,7 +1139,7 @@ class SkillRunListAlias(ForgeResource):
 
 
 @skills_ns.route("/schedules")
-class SkillScheduleList(ForgeResource):
+class SkillScheduleList(Resource):
     @token_required
     @require_access("skills")
     @skills_ns.doc(params={"page": "Page number (default 1)", "page_size": "Page size (default 20, max 100)"})
@@ -1183,7 +1183,7 @@ class SkillScheduleList(ForgeResource):
 
 
 @skills_ns.route("/<string:skill_id>/schedules")
-class SkillScheduleCreate(ForgeResource):
+class SkillScheduleCreate(Resource):
     @token_required
     @require_access("skills", role="admin")
     @require_ownership("QuerySkill", "skill_id", "skills:admin", check_read=True)
@@ -1247,7 +1247,7 @@ class SkillScheduleCreate(ForgeResource):
 
 
 @skills_ns.route("/schedules/<string:schedule_id>")
-class SkillScheduleDetail(ForgeResource):
+class SkillScheduleDetail(Resource):
     @token_required
     @require_access("skills", role="admin")
     @skills_ns.expect(_schedule_update_model, validate=False)
@@ -1315,7 +1315,7 @@ class SkillScheduleDetail(ForgeResource):
 
 
 @skills_ns.route("/scheduler/status")
-class SchedulerStatus(ForgeResource):
+class SchedulerStatus(Resource):
     @token_required
     @require_access("skills")
     def get(self):
@@ -1333,7 +1333,7 @@ class SchedulerStatus(ForgeResource):
 
 
 @skills_ns.route("/<string:skill_id>/schedule/upcoming")
-class SkillScheduleUpcoming(ForgeResource):
+class SkillScheduleUpcoming(Resource):
     @token_required
     @require_access("skills")
     def get(self, skill_id: str):
@@ -1382,7 +1382,7 @@ class SkillScheduleUpcoming(ForgeResource):
 
 
 @skills_ns.route("/<string:skill_id>/acknowledge")
-class SkillAlertAcknowledge(ForgeResource):
+class SkillAlertAcknowledge(Resource):
     @token_required
     @require_access("skills")
     @require_ownership("QuerySkill", "skill_id", "skills:admin", check_read=True)
@@ -1420,7 +1420,7 @@ class SkillAlertAcknowledge(ForgeResource):
 
 
 @skills_ns.route("/schedule/validate")
-class ScheduleValidate(ForgeResource):
+class ScheduleValidate(Resource):
     @token_required
     @require_access("skills")
     def post(self):

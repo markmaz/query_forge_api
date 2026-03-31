@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from flask import g, request
 from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -111,7 +111,7 @@ concept_column_map_patch_model = semantic_concept_column_maps_ns.clone(
 
 
 @semantic_concepts_ns.route("")
-class SemanticConceptCollection(ForgeResource):
+class SemanticConceptCollection(Resource):
     @token_required
     @require_access("semantic")
     @semantic_concepts_ns.doc(
@@ -158,7 +158,7 @@ class SemanticConceptCollection(ForgeResource):
 
 
 @semantic_concepts_ns.route("/keys")
-class SemanticConceptKeyCollection(ForgeResource):
+class SemanticConceptKeyCollection(Resource):
     @token_required
     @require_access("semantic")
     @semantic_concepts_ns.doc(
@@ -182,7 +182,7 @@ class SemanticConceptKeyCollection(ForgeResource):
 
 
 @semantic_concepts_ns.route("/<int:concept_id>")
-class SemanticConceptById(ForgeResource):
+class SemanticConceptById(Resource):
     @token_required
     @require_access("semantic")
     def get(self, concept_id: int):
@@ -225,7 +225,7 @@ class SemanticConceptById(ForgeResource):
 
 
 @semantic_concepts_ns.route("/seed")
-class SemanticConceptSeed(ForgeResource):
+class SemanticConceptSeed(Resource):
     @token_required
     @require_access("semantic", role="admin")
     @semantic_concepts_ns.expect(seed_model, validate=False)
@@ -246,7 +246,7 @@ class SemanticConceptSeed(ForgeResource):
 
 
 @semantic_concepts_ns.route("/rebuild-index")
-class SemanticConceptRebuildIndex(ForgeResource):
+class SemanticConceptRebuildIndex(Resource):
     @token_required
     @require_access("semantic", role="admin")
     @semantic_concepts_ns.expect(rebuild_index_model, validate=False)
@@ -265,7 +265,7 @@ class SemanticConceptRebuildIndex(ForgeResource):
 
 
 @semantic_concepts_ns.route("/backfill-primary-keys")
-class SemanticConceptBackfillPrimaryKeys(ForgeResource):
+class SemanticConceptBackfillPrimaryKeys(Resource):
     @token_required
     @require_access("semantic", role="admin")
     @semantic_concepts_ns.expect(backfill_primary_keys_model, validate=False)
@@ -287,7 +287,7 @@ class SemanticConceptBackfillPrimaryKeys(ForgeResource):
 
 
 @semantic_concept_aliases_ns.route("")
-class SemanticConceptAliasCollection(ForgeResource):
+class SemanticConceptAliasCollection(Resource):
     @token_required
     @require_access("semantic")
     @semantic_concept_aliases_ns.doc(
@@ -328,7 +328,7 @@ class SemanticConceptAliasCollection(ForgeResource):
 
 
 @semantic_concept_aliases_ns.route("/<int:alias_id>")
-class SemanticConceptAliasById(ForgeResource):
+class SemanticConceptAliasById(Resource):
     @token_required
     @require_access("semantic")
     def get(self, alias_id: int):
@@ -371,7 +371,7 @@ class SemanticConceptAliasById(ForgeResource):
 
 
 @semantic_value_aliases_ns.route("")
-class SemanticValueAliasCollection(ForgeResource):
+class SemanticValueAliasCollection(Resource):
     @token_required
     @require_access("semantic")
     @semantic_value_aliases_ns.doc(
@@ -416,7 +416,7 @@ class SemanticValueAliasCollection(ForgeResource):
 
 
 @semantic_value_aliases_ns.route("/<int:value_alias_id>")
-class SemanticValueAliasById(ForgeResource):
+class SemanticValueAliasById(Resource):
     @token_required
     @require_access("semantic")
     def get(self, value_alias_id: int):
@@ -459,7 +459,7 @@ class SemanticValueAliasById(ForgeResource):
 
 
 @semantic_concept_column_maps_ns.route("")
-class SemanticConceptColumnMapCollection(ForgeResource):
+class SemanticConceptColumnMapCollection(Resource):
     @token_required
     @require_access("semantic")
     @semantic_concept_column_maps_ns.doc(
@@ -512,7 +512,7 @@ class SemanticConceptColumnMapCollection(ForgeResource):
 
 
 @semantic_concept_column_maps_ns.route("/<int:map_id>")
-class SemanticConceptColumnMapById(ForgeResource):
+class SemanticConceptColumnMapById(Resource):
     @token_required
     @require_access("semantic")
     def get(self, map_id: int):

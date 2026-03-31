@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from flask import request
 from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 from pydantic import ValidationError
 
 from app.decorators.security import token_required
@@ -73,7 +73,7 @@ def _service() -> ForgeInsightsThreadsService:
 
 
 @forge_insights_ns.route("/projects")
-class ForgeInsightsProjectsRoute(ForgeResource):
+class ForgeInsightsProjectsRoute(Resource):
     @token_required
     @require_access("forge_insights")
     def get(self):
@@ -122,7 +122,7 @@ class ForgeInsightsProjectsRoute(ForgeResource):
 
 
 @forge_insights_ns.route("/projects/<int:project_id>")
-class ForgeInsightsProjectRoute(ForgeResource):
+class ForgeInsightsProjectRoute(Resource):
     @token_required
     @require_access("forge_insights")
     def get(self, project_id: int):
@@ -182,7 +182,7 @@ class ForgeInsightsProjectRoute(ForgeResource):
 
 
 @forge_insights_ns.route("/threads")
-class ForgeInsightsThreadsRoute(ForgeResource):
+class ForgeInsightsThreadsRoute(Resource):
     @token_required
     @require_access("forge_insights")
     def get(self):
@@ -246,7 +246,7 @@ class ForgeInsightsThreadsRoute(ForgeResource):
 
 
 @forge_insights_ns.route("/threads/<int:thread_id>")
-class ForgeInsightsThreadRoute(ForgeResource):
+class ForgeInsightsThreadRoute(Resource):
     @token_required
     @require_access("forge_insights")
     def get(self, thread_id: int):

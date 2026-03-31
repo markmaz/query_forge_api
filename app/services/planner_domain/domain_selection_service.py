@@ -23,7 +23,9 @@ from app.config import (
 from app.exceptions.forge_error import ForgeError
 from app.infra.embedding_model import EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
+from app.services.domain.planner_projection_policy_service import PlannerProjectionPolicyService
 from app.services.domains.capabilities_service import DomainCapabilitiesService
+from app.services.planner_domain.prompt_signal_service import PromptSignalService
 from app.services.planner_domain.column_scoring import (
     _cap_columns_per_table,
     _column_heuristic_boost,
@@ -37,21 +39,14 @@ from app.services.planner_domain.column_scoring import (
     _has_group_entity,
     _has_preferred_state_column,
     _has_school_day_flag_columns,
-    _has_school_name_column,
     _has_staff_identity_column,
-    _has_staff_role_title_column,
     _has_student_identity_column,
     _has_subgroup_column,
     _is_canonical_name_column_name,
     _is_name_column_needed_for_prompt,
     _is_preferred_name_column_name,
-    _is_staff_classification_column_name,
-    _is_staff_role_title_column_name,
     _is_state_school_code_name,
-    _is_student_identity_column_name,
-    _is_technical_school_key_name,
     _prompt_explicitly_requests_school_key,
-    _prompt_prefers_human_school_name_filter,
     _prompt_prefers_staff_role_title_filter,
     _required_column_keys,
     _select_keys_with_table_cap,
@@ -72,9 +67,7 @@ from app.services.planner_domain.prompt_intents import (
     _prompt_implies_staff_work_context,
     _prompt_implies_student_school_context,
     _prompt_mentions_school_or_district,
-    _prompt_mentions_students,
     _prompt_prefers_canonical_name_columns,
-    _slot_mentions_students,
 )
 from app.services.planner_domain.rerank_policy_engine import PlannerDomainRerankPolicyEngine
 from app.services.planner_domain.pipeline_definition import build_planner_domain_selection_pipeline_definition
@@ -504,88 +497,144 @@ def _find_dimension_by_column_name_candidates(
     return None
 
 
-def _prepend_student_identity_dimensions(
+def _concept_keys_for_row(row: Mapping[str, Any]) -> List[str]:
+    out: List[str] = []
+    for field_name in ("concept_key", "semantic_concept_key"):
+        token = str(row.get(field_name) or "").strip().upper()
+        if token and token not in out:
+            out.append(token)
+    return out
+
+
+def _prepend_required_concept_dimensions(
     *,
     selected_dims: Sequence[Mapping[str, Any]],
     full_dims: Sequence[Mapping[str, Any]],
+    required_concept_keys: Sequence[str],
 ) -> List[Dict[str, Any]]:
-    by_key: Dict[str, Dict[str, Any]] = {}
+    by_concept: Dict[str, Dict[str, Any]] = {}
     for row in full_dims:
-        key = _norm_key(row.get("column_key"))
-        if key == "":
+        if not isinstance(row, Mapping):
             continue
-        by_key[key] = dict(row)
+        for concept_key in _concept_keys_for_row(row):
+            by_concept.setdefault(concept_key, dict(row))
 
-    identity_prefix: List[Dict[str, Any]] = []
+    prefix: List[Dict[str, Any]] = []
     prefix_seen: set[str] = set()
-    for target in ("student_unique_id", "first_name", "last_name"):
-        matched = _find_dimension_by_column_name(full_dims=full_dims, target=target)
+    for concept_key in required_concept_keys:
+        matched = by_concept.get(str(concept_key or "").strip().upper())
         if matched is None:
             continue
         key = _norm_key(matched.get("column_key"))
         if key == "" or key in prefix_seen:
             continue
-        identity_prefix.append(dict(matched))
+        prefix.append(dict(matched))
         prefix_seen.add(key)
 
-    if not identity_prefix:
-        return [dict(row) for row in selected_dims if isinstance(row, Mapping)]
-
-    out: List[Dict[str, Any]] = list(identity_prefix)
+    out: List[Dict[str, Any]] = list(prefix)
     for row in selected_dims:
         if not isinstance(row, Mapping):
             continue
         key = _norm_key(row.get("column_key"))
         if key == "" or key in prefix_seen:
             continue
-        base = by_key.get(key) or dict(row)
-        out.append(dict(base))
+        out.append(dict(row))
         prefix_seen.add(key)
     return out
 
 
-def _prepend_school_listing_dimensions(
+def _row_has_excluded_concepts(
+    row: Mapping[str, Any],
+    *,
+    excluded_concept_keys: Sequence[str],
+) -> bool:
+    excluded = {str(item or "").strip().upper() for item in excluded_concept_keys if str(item or "").strip()}
+    if not excluded:
+        return False
+    row_concepts = set(_concept_keys_for_row(row))
+    return bool(row_concepts & excluded)
+
+
+def _drop_excluded_concept_dimensions(
+    *,
+    selected_dims: Sequence[Mapping[str, Any]],
+    excluded_concept_keys: Sequence[str],
+) -> List[Dict[str, Any]]:
+    if not excluded_concept_keys:
+        return [dict(row) for row in selected_dims if isinstance(row, Mapping)]
+    return [
+        dict(row)
+        for row in selected_dims
+        if isinstance(row, Mapping) and not _row_has_excluded_concepts(row, excluded_concept_keys=excluded_concept_keys)
+    ]
+
+
+def _prepend_required_named_dimensions(
     *,
     selected_dims: Sequence[Mapping[str, Any]],
     full_dims: Sequence[Mapping[str, Any]],
+    required_column_names: Sequence[str],
 ) -> List[Dict[str, Any]]:
-    by_key: Dict[str, Dict[str, Any]] = {}
-    for row in full_dims:
-        key = _norm_key(row.get("column_key"))
-        if key == "":
-            continue
-        by_key[key] = dict(row)
+    normalized_names = [str(item or "").strip().lower() for item in required_column_names if str(item or "").strip()]
+    if not normalized_names:
+        return [dict(row) for row in selected_dims if isinstance(row, Mapping)]
 
-    school_prefix: List[Dict[str, Any]] = []
+    by_name: Dict[str, Dict[str, Any]] = {}
+    for row in full_dims:
+        if not isinstance(row, Mapping):
+            continue
+        col_name = str(row.get("column_name") or "").strip().lower()
+        if col_name and col_name not in by_name:
+            by_name[col_name] = dict(row)
+
+    prefix: List[Dict[str, Any]] = []
     prefix_seen: set[str] = set()
-    for candidates in (
-        ("school_name",),
-        ("lea_name", "district_name", "district"),
-        ("school_number", "school_num", "school_no"),
-    ):
-        matched = _find_dimension_by_column_name_candidates(full_dims=full_dims, targets=candidates)
+    for column_name in normalized_names:
+        matched = by_name.get(column_name)
         if matched is None:
             continue
         key = _norm_key(matched.get("column_key"))
         if key == "" or key in prefix_seen:
             continue
-        school_prefix.append(dict(matched))
+        prefix.append(dict(matched))
         prefix_seen.add(key)
 
-    if not school_prefix:
-        return [dict(row) for row in selected_dims if isinstance(row, Mapping)]
-
-    out: List[Dict[str, Any]] = list(school_prefix)
+    out: List[Dict[str, Any]] = list(prefix)
     for row in selected_dims:
         if not isinstance(row, Mapping):
             continue
         key = _norm_key(row.get("column_key"))
         if key == "" or key in prefix_seen:
             continue
-        base = by_key.get(key) or dict(row)
-        out.append(dict(base))
+        out.append(dict(row))
         prefix_seen.add(key)
     return out
+
+
+def _row_has_excluded_column_names(
+    row: Mapping[str, Any],
+    *,
+    excluded_column_names: Sequence[str],
+) -> bool:
+    excluded = {str(item or "").strip().lower() for item in excluded_column_names if str(item or "").strip()}
+    if not excluded:
+        return False
+    col_name = str(row.get("column_name") or "").strip().lower()
+    return bool(col_name) and col_name in excluded
+
+
+def _drop_excluded_named_dimensions(
+    *,
+    selected_dims: Sequence[Mapping[str, Any]],
+    excluded_column_names: Sequence[str],
+) -> List[Dict[str, Any]]:
+    if not excluded_column_names:
+        return [dict(row) for row in selected_dims if isinstance(row, Mapping)]
+    return [
+        dict(row)
+        for row in selected_dims
+        if isinstance(row, Mapping) and not _row_has_excluded_column_names(row, excluded_column_names=excluded_column_names)
+    ]
 
 
 def _prepend_school_name_for_filter_context(
@@ -636,6 +685,7 @@ class DomainSelectionService:
         column_vector_factory: Callable[[], QdrantClientWrapper],
         semantic_grounding_factory: Callable[[], SemanticGroundingService],
         semantic_alias_constraints_fn: Callable[..., List[Dict[str, Any]]],
+        projection_policy_service: Optional[PlannerProjectionPolicyService] = None,
     ) -> None:
         from app.services.shared_ai.adapters.capabilities import DomainCapabilityResolverAdapter
         from app.services.shared_ai.adapters.policies import PolicyDrivenRerankAdapter
@@ -654,6 +704,7 @@ class DomainSelectionService:
         self._column_vector_factory = column_vector_factory
         self._semantic_grounding_factory = semantic_grounding_factory
         self._semantic_alias_constraints_fn = semantic_alias_constraints_fn
+        self._projection_policy_service = projection_policy_service or PlannerProjectionPolicyService()
         self._last_pipeline_context: Optional[PipelineContext] = None
 
     def select_domain_and_shortlist(
@@ -703,29 +754,39 @@ class DomainSelectionService:
         prompt: str,
         slot_hints: Optional[Mapping[str, Any]] = None,
         fast_mode: bool = False,
+        workspace_id: Optional[str] = None,
+        vertical_norm: Optional[str] = None,
+        projection_policy_service: Optional[PlannerProjectionPolicyService] = None,
+        include_projection_policy_debug: bool = False,
     ) -> Dict[str, Any]:
         full_dims = [dict(row) for row in list(capabilities.get("dimensions") or []) if isinstance(row, dict)]
         full_time = [dict(row) for row in list(capabilities.get("time_columns") or []) if isinstance(row, dict)]
         full_filter_candidates = _merge_dimension_rows(dimensions=full_dims, time_columns=full_time)
         dim_by_key = {_norm_key(row.get("column_key")): row for row in full_dims if _norm_key(row.get("column_key"))}
         is_school_listing = _looks_like_list_schools_prompt(prompt) or _slot_implies_school_listing(slot_hints)
-        prompt_mentions_students = _prompt_mentions_students(prompt) or _slot_mentions_students(slot_hints)
         prompt_mentions_school_district = _prompt_mentions_school_or_district(prompt)
         city_state_pattern = _prompt_has_city_state_pattern(prompt)
         has_preferred_state = _has_preferred_state_column(rows=full_dims)
-        prefer_human_school_filter = (
-            _prompt_prefers_human_school_name_filter(prompt)
-            and _has_school_name_column(rows=full_filter_candidates)
-            and not _prompt_explicitly_requests_school_key(prompt)
-        )
-        prefer_staff_role_title_filter = (
-            _prompt_prefers_staff_role_title_filter(prompt)
-            and _has_staff_role_title_column(rows=full_filter_candidates)
-        )
         prefer_canonical_name_columns = (
             _prompt_prefers_canonical_name_columns(prompt)
             and _has_canonical_name_columns(rows=full_filter_candidates)
         )
+        prompt_signals = set(PromptSignalService().extract_signals(prompt=prompt))
+        if is_school_listing:
+            prompt_signals.update({"school_listing", "listing_intent"})
+        if _slot_implies_student_listing(slot_hints):
+            prompt_signals.update({"student_listing", "listing_intent", "needs_student_identity"})
+        if _prompt_explicitly_requests_school_key(prompt):
+            prompt_signals.add("explicit_school_key_request")
+        policy_result = (projection_policy_service or PlannerProjectionPolicyService()).get_projection_requirements(
+            workspace_id=workspace_id,
+            vertical_norm=vertical_norm,
+            base_domain_id=_to_int(capabilities.get("domain_id")),
+            prompt_signals=sorted(prompt_signals),
+        )
+        excluded_concept_keys = policy_result.get("excluded_concept_keys") or []
+        required_column_names = policy_result.get("required_column_names") or []
+        excluded_column_names = policy_result.get("excluded_column_names") or []
 
         selected_dims: List[Dict[str, Any]] = []
         seen: set[str] = set()
@@ -751,19 +812,20 @@ class DomainSelectionService:
                     selected_dims.append(row)
                     seen.add(key)
 
-        if prompt_mentions_students:
-            selected_dims = _prepend_student_identity_dimensions(selected_dims=selected_dims, full_dims=full_dims)
+        if policy_result.get("required_concept_keys"):
+            selected_dims = _prepend_required_concept_dimensions(
+                selected_dims=selected_dims,
+                full_dims=full_dims,
+                required_concept_keys=policy_result.get("required_concept_keys") or [],
+            )
             seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
-            for row in full_dims:
-                key = _norm_key(row.get("column_key"))
-                if key in seen:
-                    continue
-                col_name = str(row.get("column_name") or key).lower()
-                if _is_student_identity_column_name(col_name):
-                    selected_dims.append(row)
-                    seen.add(key)
-                    if len(selected_dims) >= 55:
-                        break
+        if required_column_names:
+            selected_dims = _prepend_required_named_dimensions(
+                selected_dims=selected_dims,
+                full_dims=full_dims,
+                required_column_names=required_column_names,
+            )
+            seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
         if prompt_mentions_school_district:
             lea_dim = _find_dimension_by_column_name_candidates(
                 full_dims=full_dims,
@@ -775,20 +837,11 @@ class DomainSelectionService:
                     selected_dims.append(dict(lea_dim))
                     seen.add(lea_key)
         if is_school_listing:
-            selected_dims = _prepend_school_listing_dimensions(selected_dims=selected_dims, full_dims=full_dims)
-            seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
             if city_state_pattern and has_preferred_state:
                 selected_dims = [
                     dict(row)
                     for row in selected_dims
                     if not _is_state_school_code_name(str(row.get("column_name") or "").strip().lower())
-                ]
-                seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
-            if prefer_human_school_filter:
-                selected_dims = [
-                    dict(row)
-                    for row in selected_dims
-                    if not _is_technical_school_key_name(str(row.get("column_name") or "").strip().lower())
                 ]
                 seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
             for row in full_dims:
@@ -798,43 +851,11 @@ class DomainSelectionService:
                 col_name = str(row.get("column_name") or key).lower()
                 if city_state_pattern and has_preferred_state and _is_state_school_code_name(col_name):
                     continue
-                if prefer_human_school_filter and _is_technical_school_key_name(col_name):
-                    continue
                 if any(token in col_name for token in ("school_name", "lea_name", "school_number", "city", "state")):
                     selected_dims.append(row)
                     seen.add(key)
                     if len(selected_dims) >= 55:
                         break
-        if prefer_human_school_filter:
-            seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
-            for row in full_dims:
-                key = _norm_key(row.get("column_key"))
-                if key in seen:
-                    continue
-                col_name = str(row.get("column_name") or key).lower()
-                if _is_technical_school_key_name(col_name):
-                    continue
-                if col_name in {"school_name", "lea_name"}:
-                    selected_dims.append(row)
-                    seen.add(key)
-            if selected_dims:
-                selected_dims = _prepend_school_name_for_filter_context(selected_dims=selected_dims, full_dims=full_dims)
-
-        if prefer_staff_role_title_filter:
-            selected_dims = [
-                dict(row)
-                for row in selected_dims
-                if not _is_staff_classification_column_name(str(row.get("column_name") or "").strip().lower())
-            ]
-            seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
-            for row in full_dims:
-                key = _norm_key(row.get("column_key"))
-                if key in seen:
-                    continue
-                col_name = str(row.get("column_name") or key).lower()
-                if _is_staff_role_title_column_name(col_name):
-                    selected_dims.append(row)
-                    seen.add(key)
 
         if prefer_canonical_name_columns:
             selected_dims = [
@@ -862,6 +883,14 @@ class DomainSelectionService:
                     selected_dims.append(row)
                     seen.add(key)
 
+        selected_dims = _drop_excluded_concept_dimensions(
+            selected_dims=selected_dims,
+            excluded_concept_keys=excluded_concept_keys,
+        )
+        selected_dims = _drop_excluded_named_dimensions(
+            selected_dims=selected_dims,
+            excluded_column_names=excluded_column_names,
+        )
         max_columns = max(12, int(QF_PLAN_DOMAIN_FAST_MODE_MAX_DIMENSIONS)) if fast_mode else 70
         per_table_cap = 8 if fast_mode else 14
         selected_dims = _cap_columns_per_table(selected_dims, max_columns=max_columns, per_table_cap=per_table_cap)
@@ -876,11 +905,11 @@ class DomainSelectionService:
                 return
             if row.get("filterable") is False:
                 return
+            if _row_has_excluded_concepts(row, excluded_concept_keys=excluded_concept_keys):
+                return
+            if _row_has_excluded_column_names(row, excluded_column_names=excluded_column_names):
+                return
             col_name = str(row.get("column_name") or "").strip().lower()
-            if prefer_human_school_filter and _is_technical_school_key_name(col_name):
-                return
-            if prefer_staff_role_title_filter and _is_staff_classification_column_name(col_name):
-                return
             if prefer_canonical_name_columns and _is_preferred_name_column_name(col_name):
                 return
             filter_columns.append(dict(row))
@@ -908,7 +937,7 @@ class DomainSelectionService:
         if len(filter_columns) > max_filter_columns:
             filter_columns = filter_columns[:max_filter_columns]
 
-        return {
+        result = {
             "domain_id": _to_int(capabilities.get("domain_id")) or 0,
             "domain_version": _to_int(capabilities.get("domain_version")) or 0,
             "dimensions": selected_dims,
@@ -918,6 +947,21 @@ class DomainSelectionService:
             "user_metrics": [dict(row) for row in list(capabilities.get("user_metrics") or []) if isinstance(row, dict)],
             "overlay_metrics": [dict(row) for row in list(capabilities.get("overlay_metrics") or []) if isinstance(row, dict)],
         }
+        if include_projection_policy_debug:
+            result["projection_policy_debug"] = {
+                "prompt_signals": sorted(prompt_signals),
+                "matched_policies": [str(item) for item in list(policy_result.get("matched_policies") or []) if str(item or "").strip()],
+                "projection_mode": str(policy_result.get("projection_mode") or "prepend"),
+                "required_concept_keys": [str(item) for item in list(policy_result.get("required_concept_keys") or []) if str(item or "").strip()],
+                "excluded_concept_keys": [str(item) for item in list(policy_result.get("excluded_concept_keys") or []) if str(item or "").strip()],
+                "required_column_names": [str(item) for item in list(policy_result.get("required_column_names") or []) if str(item or "").strip()],
+                "excluded_column_names": [str(item) for item in list(policy_result.get("excluded_column_names") or []) if str(item or "").strip()],
+                "required_filter_concept_keys": [
+                    str(item) for item in list(policy_result.get("required_filter_concept_keys") or []) if str(item or "").strip()
+                ],
+                "required_join_tables": [str(item) for item in list(policy_result.get("required_join_tables") or []) if str(item or "").strip()],
+            }
+        return result
 
     @staticmethod
     def full_capabilities_for_execution(capabilities: Mapping[str, Any]) -> Dict[str, Any]:
@@ -1140,6 +1184,9 @@ class DomainSelectionService:
                     prompt,
                     slot_hints=None,
                     fast_mode=False,
+                    workspace_id=workspace_id,
+                    vertical_norm=vertical_norm,
+                    projection_policy_service=self._projection_policy_service,
                 )
                 grounding_bundle = self._semantic_grounding_factory().build_grounding_bundle(
                     prompt=prompt,

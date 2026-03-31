@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from flask import request
 from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -43,7 +43,7 @@ semantic_registry_entry_model = semantic_registry_ns.model(
 
 
 @semantic_registry_ns.route("")
-class SemanticRegistryCollection(ForgeResource):
+class SemanticRegistryCollection(Resource):
     @token_required
     @require_access("semantic")
     @semantic_registry_ns.doc(
@@ -89,7 +89,7 @@ class SemanticRegistryCollection(ForgeResource):
 
 
 @semantic_registry_ns.route("/<int:entry_id>")
-class SemanticRegistryById(ForgeResource):
+class SemanticRegistryById(Resource):
     @token_required
     @require_access("semantic")
     def get(self, entry_id: int):

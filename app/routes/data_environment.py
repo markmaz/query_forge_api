@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 
 from flask import current_app
 from flask_restx import Namespace
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_role
@@ -56,7 +56,7 @@ def _handle_service_error(e: ForgeError):
 
 
 @data_environment_ns.route("/llm/start")
-class LLMStart(ForgeResource):
+class LLMStart(Resource):
     @token_required
     @require_role("system:admin")
     def post(self):
@@ -68,7 +68,7 @@ class LLMStart(ForgeResource):
 
 
 @data_environment_ns.route("/llm/stop")
-class LLMStop(ForgeResource):
+class LLMStop(Resource):
     @token_required
     @require_role("system:admin")
     def post(self):
@@ -80,7 +80,7 @@ class LLMStop(ForgeResource):
 
 
 @data_environment_ns.route("/llm/status")
-class LLMStatus(ForgeResource):
+class LLMStatus(Resource):
     @token_required
     @require_role("system:admin")
     def get(self):

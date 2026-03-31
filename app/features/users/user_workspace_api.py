@@ -4,11 +4,10 @@ from typing import Any
 from urllib.parse import quote
 
 from flask import request
-from flask_restx import Namespace, fields, reqparse
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Namespace, Resource, fields, reqparse
 
-from app.decorators.security import token_required
 from app.decorators.rbac import require_admin
+from app.decorators.security import token_required
 from app.services.user_service import UserService
 
 _parser = reqparse.RequestParser()
@@ -45,7 +44,7 @@ def _json_payload() -> dict[str, Any]:
 
 @user_workspace_ns.route("")
 @user_workspace_ns.doc()
-class UserWorkspaceMap(ForgeResource):
+class UserWorkspaceMap(Resource):
     @token_required
     @require_admin()
     @user_workspace_ns.expect(mapping_model)

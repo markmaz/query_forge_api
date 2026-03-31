@@ -123,7 +123,8 @@ class DomainCapabilitiesService:
               wc.nullable,
               wc.id AS workspace_column_id,
               wc.semantic_type,
-              wc.description
+              wc.description,
+              UPPER(TRIM(wc.semantic_concept_key)) AS semantic_concept_key
             FROM domain_workspace_table dwt
             JOIN workspace_table wt
               ON wt.id = dwt.workspace_table_id
@@ -166,6 +167,7 @@ class DomainCapabilitiesService:
                     "column_name": column_name,
                     "table_name": str(row.get("table_name") or ""),
                     "semantic_type": semantic_type or "unknown",
+                    "semantic_concept_key": str(row.get("semantic_concept_key") or "").strip().upper() or None,
                     "is_time": is_time,
                 }
             )
