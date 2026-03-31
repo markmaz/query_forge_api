@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.version_routes as version_routes
+import app.features.admin.version_api as version_routes
 from app.exceptions.forge_error import ForgeError
 
 
@@ -24,4 +24,3 @@ def test_version_route_service_error(client, monkeypatch):
     resp = client.get("/api/v1/version/")
     assert resp.status_code == 500
     assert "version.json not found" in resp.json["error"]
-

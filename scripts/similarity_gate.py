@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -61,12 +62,32 @@ class FileSignature:
     normalized_lines: tuple[str, ...]
     raw_hash: str | None
     normalized_hash: str | None
+    normalized_line_numbers: tuple[int, ...] = ()
 
 
-def normalize_lines(text: str, extension: str) -> list[str]:
-    normalized: list[str] = []
+def line_ngrams(lines: Sequence[str], n: int) -> set[tuple[str, ...]]:
+    """Return the set of all n-length consecutive line tuples from *lines*."""
+    result: set[tuple[str, ...]] = set()
+    lines_seq = tuple(lines)
+    for i in range(len(lines_seq) - n + 1):
+        result.add(lines_seq[i : i + n])
+    return result
+
+
+def _specific_lines(signatures: dict[str, FileSignature], max_file_freq: int) -> set[str]:
+    """Return lines that appear in at most *max_file_freq* distinct files."""
+    freq: Counter[str] = Counter()
+    for sig in signatures.values():
+        for line in set(sig.normalized_lines):
+            freq[line] += 1
+    return {line for line, count in freq.items() if count <= max_file_freq}
+
+
+def normalize_lines_numbered(text: str, extension: str) -> list[tuple[str, int]]:
+    """Return (normalized_line, original_1indexed_lineno) pairs, skipping blanks/comments."""
+    result: list[tuple[str, int]] = []
     content = text.replace("\r\n", "\n").replace("\r", "\n")
-    for line in content.split("\n"):
+    for lineno, line in enumerate(content.split("\n"), start=1):
         token = line.strip()
         if not token:
             continue
@@ -78,8 +99,12 @@ def normalize_lines(text: str, extension: str) -> list[str]:
             continue
         token = re.sub(r"\s+", " ", token).strip().lower()
         if token:
-            normalized.append(token)
-    return normalized
+            result.append((token, lineno))
+    return result
+
+
+def normalize_lines(text: str, extension: str) -> list[str]:
+    return [line for line, _ in normalize_lines_numbered(text, extension)]
 
 
 def _is_excluded(
@@ -152,7 +177,9 @@ def collect_signatures(
         raw_text = _read_text(path)
         if not raw_text:
             continue
-        lines = normalize_lines(raw_text, path.suffix.lower())
+        numbered = normalize_lines_numbered(raw_text, path.suffix.lower())
+        lines = [line for line, _ in numbered]
+        line_numbers = [lineno for _, lineno in numbered]
         normalized_text = "\n".join(lines)
         raw_hash = hashlib.sha256(raw_text.encode("utf-8", errors="ignore")).hexdigest()
         normalized_hash = hashlib.sha256(normalized_text.encode("utf-8", errors="ignore")).hexdigest()
@@ -162,8 +189,55 @@ def collect_signatures(
             normalized_lines=tuple(lines),
             raw_hash=raw_hash,
             normalized_hash=normalized_hash,
+            normalized_line_numbers=tuple(line_numbers),
         )
     return out
+
+
+def find_clone_locations(
+    intersection_ngrams: set[tuple[str, ...]],
+    source_sigs: dict[str, FileSignature],
+    target_sigs: dict[str, FileSignature],
+    max_clones: int = 20,
+) -> list[dict]:
+    """Map each intersecting n-gram back to exact file paths and line numbers.
+
+    Returns a list of dicts, each with:
+      - ``lines``: the shared n-gram as a list of normalized strings
+      - ``source_locations``: list of {"file", "start_line", "end_line"}
+      - ``target_locations``: list of {"file", "start_line", "end_line"}
+    """
+
+    def _locate(ngram: tuple[str, ...], sigs: dict[str, FileSignature]) -> list[dict]:
+        locations: list[dict] = []
+        n = len(ngram)
+        for sig in sigs.values():
+            nl = sig.normalized_lines
+            nums = sig.normalized_line_numbers
+            if len(nl) < n or not nums:
+                continue
+            for i in range(len(nl) - n + 1):
+                if nl[i : i + n] == ngram:
+                    locations.append({
+                        "file": sig.relative_path,
+                        "start_line": nums[i],
+                        "end_line": nums[i + n - 1],
+                    })
+        return locations
+
+    results: list[dict] = []
+    for ngram in intersection_ngrams:
+        src_locs = _locate(ngram, source_sigs)
+        tgt_locs = _locate(ngram, target_sigs)
+        if src_locs and tgt_locs:
+            results.append({
+                "lines": list(ngram),
+                "source_locations": src_locs,
+                "target_locations": tgt_locs,
+            })
+        if len(results) >= max_clones:
+            break
+    return results
 
 
 def _pct(num: int, den: int) -> float:
@@ -177,6 +251,9 @@ def compare_repositories(
     target_repo: Path,
     *,
     max_file_size_bytes: int = 1_500_000,
+    max_file_freq: int = 3,
+    ngram_size: int = 3,
+    max_clones: int = 20,
 ) -> dict:
     source = collect_signatures(source_repo, max_file_size_bytes=max_file_size_bytes)
     target = collect_signatures(target_repo, max_file_size_bytes=max_file_size_bytes)
@@ -217,6 +294,30 @@ def compare_repositories(
     target_lines = {line for v in target.values() for line in v.normalized_lines}
     line_intersection = source_lines.intersection(target_lines)
 
+    # Frequency-filtered lines: exclude boilerplate that appears in too many files
+    specific_src = _specific_lines(source, max_file_freq)
+    specific_tgt = _specific_lines(target, max_file_freq)
+    specific_intersection = specific_src.intersection(specific_tgt)
+
+    # N-grams built from frequency-filtered lines only
+    def _repo_specific_ngrams(sigs: dict, specific: set[str]) -> set[tuple[str, ...]]:
+        result: set[tuple[str, ...]] = set()
+        for sig in sigs.values():
+            filtered = tuple(line for line in sig.normalized_lines if line in specific)
+            result.update(line_ngrams(filtered, ngram_size))
+        return result
+
+    specific_ngrams_src = _repo_specific_ngrams(source, specific_src)
+    specific_ngrams_tgt = _repo_specific_ngrams(target, specific_tgt)
+    specific_ngrams_intersection = specific_ngrams_src.intersection(specific_ngrams_tgt)
+
+    clone_instances = find_clone_locations(
+        specific_ngrams_intersection,
+        source,
+        target,
+        max_clones=max_clones,
+    )
+
     report = {
         "counts": {
             "files_source": len(source),
@@ -237,6 +338,10 @@ def compare_repositories(
             ),
             "normalized_line_overlap_pct_of_source": _pct(len(line_intersection), len(source_lines)),
             "normalized_line_overlap_pct_of_target": _pct(len(line_intersection), len(target_lines)),
+            "specific_line_overlap_pct_of_source": _pct(len(specific_intersection), len(specific_src)),
+            "specific_line_overlap_pct_of_target": _pct(len(specific_intersection), len(specific_tgt)),
+            "specific_ngram_overlap_pct_of_source": _pct(len(specific_ngrams_intersection), len(specific_ngrams_src)),
+            "specific_ngram_overlap_pct_of_target": _pct(len(specific_ngrams_intersection), len(specific_ngrams_tgt)),
         },
         "raw_counts": {
             "exact_source": exact_source,
@@ -249,8 +354,15 @@ def compare_repositories(
             "normalized_unique_lines_source": len(source_lines),
             "normalized_unique_lines_target": len(target_lines),
             "normalized_unique_lines_intersection": len(line_intersection),
+            "specific_unique_lines_source": len(specific_src),
+            "specific_unique_lines_target": len(specific_tgt),
+            "specific_unique_lines_intersection": len(specific_intersection),
+            "specific_unique_ngrams_source": len(specific_ngrams_src),
+            "specific_unique_ngrams_target": len(specific_ngrams_tgt),
+            "specific_unique_ngrams_intersection": len(specific_ngrams_intersection),
         },
         "top_near_examples": sorted(top_near_examples, key=lambda item: (-item[1], item[0]))[:25],
+        "clone_instances": clone_instances,
     }
     return report
 
@@ -261,6 +373,7 @@ def evaluate_thresholds(
     exact_max_pct: float | None = None,
     normalized_exact_max_pct: float | None = None,
     line_overlap_max_pct: float | None = None,
+    specific_ngram_overlap_max_pct: float | None = None,
 ) -> list[str]:
     pct = dict(report.get("percentages") or {})
     failures: list[str] = []
@@ -268,6 +381,7 @@ def evaluate_thresholds(
     exact_source = float(pct.get("exact_match_anywhere_pct_of_source") or 0.0)
     normalized_exact_source = float(pct.get("normalized_exact_anywhere_pct_of_source") or 0.0)
     line_overlap_source = float(pct.get("normalized_line_overlap_pct_of_source") or 0.0)
+    specific_ngram_source = float(pct.get("specific_ngram_overlap_pct_of_source") or 0.0)
 
     if exact_max_pct is not None and exact_source > float(exact_max_pct):
         failures.append(
@@ -283,6 +397,11 @@ def evaluate_thresholds(
             f"normalized_line_overlap_pct_of_source {line_overlap_source:.2f}% exceeds max "
             f"{float(line_overlap_max_pct):.2f}%"
         )
+    if specific_ngram_overlap_max_pct is not None and specific_ngram_source > float(specific_ngram_overlap_max_pct):
+        failures.append(
+            f"specific_ngram_overlap_pct_of_source {specific_ngram_source:.2f}% exceeds max "
+            f"{float(specific_ngram_overlap_max_pct):.2f}%"
+        )
     return failures
 
 
@@ -291,9 +410,17 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--source-repo", default=".", help="Source repository root. Defaults to current working dir.")
     parser.add_argument("--target-repo", required=True, help="Target repository root to compare against.")
     parser.add_argument("--max-file-size-bytes", type=int, default=1_500_000)
+    parser.add_argument("--max-file-freq", type=int, default=3,
+                        help="Max files a line may appear in before being treated as boilerplate (default: 3).")
+    parser.add_argument("--ngram-size", type=int, default=3,
+                        help="Consecutive-line window size for logic-block comparison (default: 3).")
     parser.add_argument("--exact-max-pct", type=float, default=None)
     parser.add_argument("--normalized-exact-max-pct", type=float, default=None)
     parser.add_argument("--line-overlap-max-pct", type=float, default=12.0)
+    parser.add_argument("--specific-ngram-overlap-max-pct", type=float, default=None,
+                        help="Gate on frequency-filtered n-gram overlap (% of source). Recommended for logic similarity.")
+    parser.add_argument("--max-clones", type=int, default=20,
+                        help="Maximum number of clone instances to report (default: 20).")
     parser.add_argument("--output-json", default=None, help="Optional path to write JSON report.")
     return parser.parse_args(list(argv))
 
@@ -309,12 +436,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Target repo path not found: {target}", file=sys.stderr)
         return 2
 
-    report = compare_repositories(source, target, max_file_size_bytes=int(args.max_file_size_bytes))
+    report = compare_repositories(
+        source,
+        target,
+        max_file_size_bytes=int(args.max_file_size_bytes),
+        max_file_freq=int(args.max_file_freq),
+        ngram_size=int(args.ngram_size),
+        max_clones=int(args.max_clones),
+    )
     failures = evaluate_thresholds(
         report,
         exact_max_pct=args.exact_max_pct,
         normalized_exact_max_pct=args.normalized_exact_max_pct,
         line_overlap_max_pct=args.line_overlap_max_pct,
+        specific_ngram_overlap_max_pct=args.specific_ngram_overlap_max_pct,
     )
     payload = {
         "source_repo": str(source),

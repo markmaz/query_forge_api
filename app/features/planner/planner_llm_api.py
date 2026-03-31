@@ -4,7 +4,7 @@ import logging
 from typing import Any, Dict
 
 from flask import request
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.config import QF_PLANNER_LLM_ENABLED
 from app.decorators.security import token_required
@@ -30,7 +30,7 @@ def _planner_llm_service_factory():
 
 
 @planner_ns.route("/plan_llm")
-class PlannerPlanLLM(ForgeResource):
+class PlannerPlanLLM(Resource):
     @token_required
     @require_access("planner")
     @planner_ns.expect(plan_llm_request_model, validate=False)

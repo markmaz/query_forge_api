@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import app.routes.value_override_routes as value_override_routes
+import app.features.catalog.value_override_api as value_override_routes
 import app.decorators.security as security
 from app.exceptions.forge_error import ForgeError
 from app.models.query.value_override import ValueOverrideListIndex, ValueOverrideMeta

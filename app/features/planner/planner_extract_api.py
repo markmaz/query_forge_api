@@ -4,8 +4,7 @@ import logging
 from typing import Any, Dict
 
 from flask import request
-from flask_restx import Namespace
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Namespace, Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -22,7 +21,7 @@ extract_model = register_planner_models(planner_ns)["extract_model"]
 
 
 @planner_ns.route("/extract")
-class PlannerExtract(ForgeResource):
+class PlannerExtract(Resource):
     @token_required
     @require_access("planner")
     @planner_ns.expect(extract_model, validate=False)

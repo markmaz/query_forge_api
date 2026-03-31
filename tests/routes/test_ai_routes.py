@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.ai as ai_routes
+import app.features.ai.ai_api as ai_routes
 
 
 def _headers(monkeypatch):

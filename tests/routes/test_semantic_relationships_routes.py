@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.semantic_relationships as semantic_relationships
+import app.features.semantic.semantic_relationships_api as semantic_relationships
 
 
 def _headers(monkeypatch):

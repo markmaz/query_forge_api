@@ -1,6 +1,6 @@
 import uuid
 
-import app.routes.public_sales_inquiry as public_sales_inquiry
+import app.features.auth.public_api as public_sales_inquiry
 from app.config import ERROR_VALIDATION_URL, THANK_YOU_REDIRECT
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.semantic_routes as semantic_routes
+import app.features.semantic.semantic_plan_api as semantic_routes
 
 
 def _headers(monkeypatch):

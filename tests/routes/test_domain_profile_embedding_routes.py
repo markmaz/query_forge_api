@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.domain_profile_embeddings as routes
+import app.features.vector.domain_profile_embeddings_api as routes
 
 
 def _headers(monkeypatch):

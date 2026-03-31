@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.query_tree_routes as query_tree_routes
+import app.features.saved_queries.query_tree_api as query_tree_routes
 from app.exceptions.forge_error import ForgeError
 
 

@@ -1,7 +1,7 @@
-from app.routes.workspace_feature_routes import workspace_features_ns
-from app.routes.workspace_llm_routes import llm_providers_ns, llm_roles_ns, workspace_llm_ns
-from app.routes.workspace_routes import workspace_ns
-from app.routes.workspace_table_routes import workspace_tables_ns
+from .workspace_api import workspace_ns
+from .workspace_feature_api import workspace_features_ns
+from .workspace_llm_api import llm_providers_ns, llm_roles_ns, workspace_llm_ns
+from .workspace_table_api import workspace_tables_ns
 
 NAMESPACES = [
     (workspace_ns, ("workspaces",)),

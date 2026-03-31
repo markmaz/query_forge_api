@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.semantic_concepts as semantic_concepts
+import app.features.semantic.semantic_concepts_api as semantic_concepts
 
 
 def _headers(monkeypatch, *, is_admin: bool = True):

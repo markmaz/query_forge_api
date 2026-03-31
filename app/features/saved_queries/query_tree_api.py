@@ -4,8 +4,7 @@ import logging
 from typing import Any, Callable, Dict, Tuple
 
 from flask import g, request
-from flask_restx import Namespace, fields
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Namespace, fields, Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -150,7 +149,7 @@ def _run_route(error_message: str, fn: Callable[[], Tuple[Dict[str, Any], int]])
 
 
 @qf_tree_ns.route("/")
-class QueryTree(ForgeResource):
+class QueryTree(Resource):
     @token_required
     @require_access("query_studio")
     def get(self):
@@ -167,7 +166,7 @@ class QueryTree(ForgeResource):
 
 
 @qf_tree_ns.route("/folders")
-class Folders(ForgeResource):
+class Folders(Resource):
     @token_required
     @require_access("query_studio")
     def post(self):
@@ -202,7 +201,7 @@ class Folders(ForgeResource):
 
 
 @qf_tree_ns.route("/folders/<string:folder_id>/rename")
-class FolderRename(ForgeResource):
+class FolderRename(Resource):
     @token_required
     @require_access("query_studio")
     def patch(self, folder_id: str):
@@ -218,7 +217,7 @@ class FolderRename(ForgeResource):
 
 
 @qf_tree_ns.route("/folders/<string:folder_id>/move")
-class FolderMove(ForgeResource):
+class FolderMove(Resource):
     @token_required
     @require_access("query_studio")
     def patch(self, folder_id: str):
@@ -248,7 +247,7 @@ class FolderMove(ForgeResource):
 
 
 @qf_tree_ns.route("/folders/<string:folder_id>")
-class FolderDelete(ForgeResource):
+class FolderDelete(Resource):
     @token_required
     @require_access("query_studio")
     def delete(self, folder_id: str):
@@ -263,7 +262,7 @@ class FolderDelete(ForgeResource):
 
 
 @qf_tree_ns.route("/folders/<string:folder_id>/trash")
-class FolderTrash(ForgeResource):
+class FolderTrash(Resource):
     @token_required
     @require_access("query_studio")
     def post(self, folder_id: str):
@@ -275,7 +274,7 @@ class FolderTrash(ForgeResource):
 
 
 @qf_tree_ns.route("/folders/<string:folder_id>/restore")
-class FolderRestore(ForgeResource):
+class FolderRestore(Resource):
     @token_required
     @require_access("query_studio")
     def post(self, folder_id: str):
@@ -287,7 +286,7 @@ class FolderRestore(ForgeResource):
 
 
 @qf_tree_ns.route("/folders/<string:folder_id>/purge")
-class FolderPurge(ForgeResource):
+class FolderPurge(Resource):
     @token_required
     @require_access("query_studio")
     def delete(self, folder_id: str):
@@ -299,7 +298,7 @@ class FolderPurge(ForgeResource):
 
 
 @qf_tree_ns.route("/recent")
-class RecentQueries(ForgeResource):
+class RecentQueries(Resource):
     @token_required
     @require_access("query_studio")
     def get(self):
@@ -315,7 +314,7 @@ class RecentQueries(ForgeResource):
 
 
 @qf_saved_query_ns.route("/")
-class SavedQueryCreate(ForgeResource):
+class SavedQueryCreate(Resource):
     @token_required
     @require_access("query_studio")
     def post(self):
@@ -337,7 +336,7 @@ class SavedQueryCreate(ForgeResource):
 
 
 @qf_saved_query_ns.route("/<string:query_id>")
-class SavedQuery(ForgeResource):
+class SavedQuery(Resource):
     @token_required
     @require_access("query_studio")
     def get(self, query_id: str):
@@ -384,7 +383,7 @@ class SavedQuery(ForgeResource):
 
 
 @qf_saved_query_ns.route("/<string:query_id>/move")
-class SavedQueryMove(ForgeResource):
+class SavedQueryMove(Resource):
     @token_required
     @require_access("query_studio")
     def patch(self, query_id: str):
@@ -400,7 +399,7 @@ class SavedQueryMove(ForgeResource):
 
 
 @qf_saved_query_ns.route("/<string:query_id>/delete")
-class SavedQueryDelete(ForgeResource):
+class SavedQueryDelete(Resource):
     @token_required
     @require_access("query_studio")
     def post(self, query_id: str):
@@ -415,7 +414,7 @@ class SavedQueryDelete(ForgeResource):
 
 
 @qf_saved_query_ns.route("/<string:query_id>/save-to-library")
-class SavedQuerySaveToLibrary(ForgeResource):
+class SavedQuerySaveToLibrary(Resource):
     @token_required
     @require_access("query_studio")
     def post(self, query_id: str):
@@ -427,7 +426,7 @@ class SavedQuerySaveToLibrary(ForgeResource):
 
 
 @qf_saved_query_ns.route("/<string:query_id>/restore")
-class SavedQueryRestore(ForgeResource):
+class SavedQueryRestore(Resource):
     @token_required
     @require_access("query_studio")
     def post(self, query_id: str):
@@ -439,7 +438,7 @@ class SavedQueryRestore(ForgeResource):
 
 
 @qf_saved_query_ns.route("/<string:query_id>/purge")
-class SavedQueryPurge(ForgeResource):
+class SavedQueryPurge(Resource):
     @token_required
     @require_access("query_studio")
     def delete(self, query_id: str):
@@ -451,7 +450,7 @@ class SavedQueryPurge(ForgeResource):
 
 
 @qf_saved_query_ns.route("/<string:query_id>/shares")
-class SavedQueryShares(ForgeResource):
+class SavedQueryShares(Resource):
     @token_required
     @require_access("query_studio")
     @qf_saved_query_ns.marshal_with(share_list_response_model, code=200)

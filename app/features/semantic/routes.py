@@ -1,14 +1,14 @@
-from app.routes.semantic_concepts import (
+from .semantic_concepts_api import (
     semantic_concept_aliases_ns,
     semantic_concept_column_maps_ns,
     semantic_concepts_ns,
     semantic_value_aliases_ns,
 )
-from app.routes.semantic_mappings import semantic_mappings_ns
-from app.routes.semantic_registry import semantic_registry_ns
-from app.routes.semantic_relationships import semantic_relationships_ns
-from app.routes.semantic_routes import semantic_ns
-from app.routes.semantic_suggestions import semantic_suggestions_ns
+from .semantic_mappings_api import semantic_mappings_ns
+from .semantic_plan_api import semantic_ns
+from .semantic_registry_api import semantic_registry_ns
+from .semantic_relationships_api import semantic_relationships_ns
+from .semantic_suggestions_api import semantic_suggestions_ns
 
 NAMESPACES = [
     (semantic_concepts_ns, ("semantic", "concepts")),

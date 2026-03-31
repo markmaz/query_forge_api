@@ -4,7 +4,7 @@ import logging
 from typing import Any, Dict
 
 from flask import g, request
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -31,7 +31,7 @@ def _planner_domain_service_factory():
 
 
 @planner_ns.route("/plan_domain")
-class PlannerPlanDomain(ForgeResource):
+class PlannerPlanDomain(Resource):
     @token_required
     @require_access("planner")
     @planner_ns.expect(plan_domain_request_model, validate=False)
@@ -77,7 +77,7 @@ class PlannerPlanDomain(ForgeResource):
 
 
 @planner_ns.route("/plan_domain/profile/<string:trace_id>")
-class PlannerPlanDomainProfile(ForgeResource):
+class PlannerPlanDomainProfile(Resource):
     @token_required
     @require_access("planner")
     def get(self, trace_id: str):
@@ -100,7 +100,7 @@ class PlannerPlanDomainProfile(ForgeResource):
 
 
 @planner_ns.route("/plan_domain/next_actions")
-class PlannerPlanDomainNextActions(ForgeResource):
+class PlannerPlanDomainNextActions(Resource):
     @token_required
     @require_access("planner")
     @planner_ns.expect(next_actions_request_model, validate=False)

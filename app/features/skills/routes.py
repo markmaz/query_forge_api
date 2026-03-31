@@ -1,5 +1,5 @@
-from app.routes.destination_routes import destinations_ns
-from app.routes.skills_routes import skills_ns
+from .destination_api import destinations_ns
+from .skills_api import skills_ns
 
 NAMESPACES = [
     (skills_ns, ("skills",)),

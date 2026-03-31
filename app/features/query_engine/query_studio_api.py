@@ -3,12 +3,11 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Tuple
 
-from flask_restx import Namespace
+from flask_restx import Namespace, Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
-from app.routes.forge_resource import ForgeResource
 from app.routes.request_helpers import extract_workspace_id, require_user_id
 from app.services.query_studio import QueryStudioDomainExplorerService
 
@@ -28,7 +27,7 @@ def _run(handler: Callable[[], Tuple[Any, int]], *, log_message: str, client_err
 
 
 @query_studio_ns.route("/domains")
-class QueryStudioDomains(ForgeResource):
+class QueryStudioDomains(Resource):
     @token_required
     @require_access("query_studio")
     def get(self):
@@ -43,7 +42,7 @@ class QueryStudioDomains(ForgeResource):
 
 
 @query_studio_ns.route("/domains/<int:domain_id>/explorer")
-class QueryStudioDomainExplorer(ForgeResource):
+class QueryStudioDomainExplorer(Resource):
     @token_required
     @require_access("query_studio")
     def get(self, domain_id: int):

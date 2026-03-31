@@ -5,8 +5,7 @@ import logging
 import re
 
 from flask import current_app, request
-from flask_restx import Namespace
-from app.routes.forge_resource import ForgeResource
+from flask_restx import Namespace, Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -77,7 +76,7 @@ def _resolve_analytics_executor(datasource_name: str | None):
 
 
 @query_forge_ns.route("/")
-class QueryForgeRun(ForgeResource):
+class QueryForgeRun(Resource):
     @token_required
     @require_access("query_studio")
     def post(self):
@@ -132,7 +131,7 @@ class QueryForgeRun(ForgeResource):
 
 
 @query_forge_ns.route("/plan")
-class QueryForgePlan(ForgeResource):
+class QueryForgePlan(Resource):
     @token_required
     @require_access("query_studio")
     def post(self):

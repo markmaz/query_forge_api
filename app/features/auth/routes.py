@@ -1,6 +1,6 @@
-from app.routes.auth_routes import qf_auth_ns
-from app.routes.otp_routes import otp_ns
-from app.routes.public_sales_inquiry import public_ns
+from .auth_api import qf_auth_ns
+from .otp_api import otp_ns
+from .public_api import public_ns
 
 NAMESPACES = [
     (qf_auth_ns, ("auth",)),
