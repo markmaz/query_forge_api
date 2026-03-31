@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
+import app.services.forge_match.mapping_service as mapping_service
+from app.services.domain_resolver import DomainPlan, DomainPlanJoin, DomainPlanTable
 from app.services.forge_match.candidate_retriever import ForgeMatchCandidateRetriever
 from app.services.forge_match.confidence import ForgeMatchConfidenceScorer
 from app.services.forge_match.field_extractor import SourceFieldRecord
@@ -114,6 +117,71 @@ class _FirstCandidateRanker:
             "ambiguity_note": None,
             "llm_confidence": 0.88 if selected else 0.0,
         }
+
+
+class _DraftSqlResolver:
+    def __init__(self, *, workspace_id: str, sql=None) -> None:
+        del workspace_id, sql
+
+    def resolve_plan(self, domain_id: int) -> DomainPlan:
+        assert domain_id == 21
+        return DomainPlan(
+            primary=DomainPlanTable(
+                workspace_table_id=556,
+                full_name="catalog.analytics.dim_student",
+                alias="ds",
+                table_alias="ds",
+                is_primary=True,
+                sort_order=0,
+                filter_mode="WHERE",
+                cardinality="ONE",
+            ),
+            tables=[
+                DomainPlanTable(
+                    workspace_table_id=556,
+                    full_name="catalog.analytics.dim_student",
+                    alias="ds",
+                    table_alias="ds",
+                    is_primary=True,
+                    sort_order=0,
+                    filter_mode="WHERE",
+                    cardinality="ONE",
+                ),
+                DomainPlanTable(
+                    workspace_table_id=593,
+                    full_name="catalog.analytics.fct_student_school_association",
+                    alias="fssa",
+                    table_alias="fssa",
+                    is_primary=False,
+                    sort_order=1,
+                    filter_mode="WHERE",
+                    cardinality="MANY",
+                ),
+            ],
+            joins=[
+                DomainPlanJoin(
+                    join_id="join-1",
+                    from_workspace_table_id=556,
+                    to_workspace_table_id=593,
+                    join_type="LEFT",
+                    join_spec={
+                        "on": [
+                            {
+                                "left": {"columnName": "k_student", "workspaceTableId": 556},
+                                "right": {"columnName": "k_student", "workspaceTableId": 593},
+                            }
+                        ]
+                    },
+                    sort_order=1,
+                )
+            ],
+            alias_by_workspace_table_id={556: "ds", 593: "fssa"},
+            column_name_policy="SHOW_ALL_QUALIFIED",
+        )
+
+    def get_join_path(self, plan: DomainPlan, to_workspace_table_id: int):
+        assert int(to_workspace_table_id) == 593
+        return list(plan.joins)
 
 
 def test_upload_file_creates_session_and_source_rows() -> None:
@@ -834,3 +902,305 @@ def test_get_session_surfaces_shared_pipeline_debug_for_mapping_rows() -> None:
     assert out["mappings"][0]["llm_result"]["selected_column_id"] == 4812
     assert out["mappings"][0]["shared_pipeline"]["pipeline_name"] == "forge_match_row_pipeline"
     assert out["mappings"][0]["shared_pipeline"]["trace_nodes"][1]["node"] == "rank_candidates"
+
+
+def test_create_view_draft_returns_executable_sql_for_single_table() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [
+            {
+                "id": "sess-1",
+                "workspace_id": "ws-1",
+                "uploaded_filename": "mapping.csv",
+                "status": "analyzed",
+                "summary_json": None,
+            }
+        ],
+        [
+            {
+                "mapping_id": "map-1",
+                "sheet_name": "Sheet1",
+                "row_number": 2,
+                "source_field_name": "FirstName",
+                "selected_workspace_column_id": 14739,
+                "workspace_table_id": 556,
+                "column_name": "first_name",
+                "table_name": "dim_student",
+                "full_name": "catalog.analytics.dim_student",
+            },
+            {
+                "mapping_id": "map-2",
+                "sheet_name": "Sheet1",
+                "row_number": 3,
+                "source_field_name": "BirthDate",
+                "selected_workspace_column_id": 14743,
+                "workspace_table_id": 556,
+                "column_name": "birth_date",
+                "table_name": "dim_student",
+                "full_name": "catalog.analytics.dim_student",
+            },
+        ]
+        ,
+        [
+            {
+                "workspace_table_id": 556,
+                "column_name": "k_student",
+                "description": "Surrogate key identifying the student record and used to join related student tables.",
+            },
+            {
+                "workspace_table_id": 556,
+                "column_name": "student_id",
+                "description": "Natural key identifier for the student.",
+            },
+        ]
+    ]
+
+    svc = ForgeMatchMappingService(sql=sql)
+    out = svc.create_view_draft(workspace_id="ws-1", session_id="sess-1", name="Student View Draft")
+
+    assert out["accepted_column_count"] == 2
+    assert out["is_executable"] is True
+    assert out["view_name"] == "student_view_draft"
+    assert out["base_table_name"] == "catalog.analytics.dim_student"
+    assert out["blocking_reason"] is None
+    assert str(out["create_view_sql"]).startswith("-- Involved tables:\n-- - catalog.analytics.dim_student (suspected keys: k_student, student_id)")
+    assert "CREATE VIEW `student_view_draft` AS" in str(out["create_view_sql"])
+    assert "`dim_student`.`first_name` AS `firstname`" in str(out["create_view_sql"])
+    assert "`dim_student`.`birth_date` AS `birthdate`" in str(out["create_view_sql"])
+    assert "FROM `catalog`.`analytics`.`dim_student` `dim_student`" in str(out["create_view_sql"])
+
+
+def test_create_view_draft_returns_join_sql_when_tables_share_domain(monkeypatch) -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [
+            {
+                "id": "sess-1",
+                "workspace_id": "ws-1",
+                "uploaded_filename": "mapping.csv",
+                "status": "analyzed",
+                "summary_json": None,
+            }
+        ],
+        [
+            {
+                "mapping_id": "map-1",
+                "sheet_name": "Sheet1",
+                "row_number": 2,
+                "source_field_name": "FirstName",
+                "selected_workspace_column_id": 14739,
+                "workspace_table_id": 556,
+                "column_name": "first_name",
+                "table_name": "dim_student",
+                "full_name": "catalog.analytics.dim_student",
+            },
+            {
+                "mapping_id": "map-2",
+                "sheet_name": "Sheet1",
+                "row_number": 3,
+                "source_field_name": "SchoolYear",
+                "selected_workspace_column_id": 15424,
+                "workspace_table_id": 593,
+                "column_name": "school_year",
+                "table_name": "fct_student_school_association",
+                "full_name": "catalog.analytics.fct_student_school_association",
+            },
+        ],
+        [
+            {
+                "workspace_table_id": 556,
+                "column_name": "k_student",
+                "description": "Surrogate key identifying the student record and used to join related student tables.",
+            },
+            {
+                "workspace_table_id": 593,
+                "column_name": "k_student",
+                "description": "Foreign key identifying the student associated with the fact row.",
+            },
+            {
+                "workspace_table_id": 593,
+                "column_name": "k_student_school",
+                "description": "Surrogate key identifying the student-school association row.",
+            },
+        ],
+        [
+            {
+                "domain_id": 21,
+                "domain_name": "Student Demographics And Enrollment",
+                "matched_table_count": 2,
+                "total_table_count": 2,
+            }
+        ],
+    ]
+    monkeypatch.setattr(mapping_service, "DomainResolver", _DraftSqlResolver)
+
+    svc = ForgeMatchMappingService(sql=sql)
+    out = svc.create_view_draft(workspace_id="ws-1", session_id="sess-1", name="Student Enrollment View")
+
+    assert out["is_executable"] is True
+    assert out["join_domain_id"] == 21
+    assert out["join_domain_name"] == "Student Demographics And Enrollment"
+    assert "-- - catalog.analytics.dim_student (suspected keys: k_student)" in str(out["create_view_sql"])
+    assert "-- - catalog.analytics.fct_student_school_association (suspected keys: k_student, k_student_school)" in str(out["create_view_sql"])
+    assert "LEFT JOIN `catalog`.`analytics`.`fct_student_school_association` `fct_student_school_association`" in str(out["create_view_sql"])
+    assert "`dim_student`.`first_name` AS `firstname`" in str(out["create_view_sql"])
+    assert "`fct_student_school_association`.`school_year` AS `schoolyear`" in str(out["create_view_sql"])
+
+
+def test_create_view_draft_reports_blocking_reason_when_join_path_missing() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [
+            {
+                "id": "sess-1",
+                "workspace_id": "ws-1",
+                "uploaded_filename": "mapping.csv",
+                "status": "analyzed",
+                "summary_json": None,
+            }
+        ],
+        [
+            {
+                "mapping_id": "map-1",
+                "sheet_name": "Sheet1",
+                "row_number": 2,
+                "source_field_name": "FirstName",
+                "selected_workspace_column_id": 14739,
+                "workspace_table_id": 556,
+                "column_name": "first_name",
+                "table_name": "dim_student",
+                "full_name": "catalog.analytics.dim_student",
+            },
+            {
+                "mapping_id": "map-2",
+                "sheet_name": "Sheet1",
+                "row_number": 3,
+                "source_field_name": "SchoolName",
+                "selected_workspace_column_id": 14649,
+                "workspace_table_id": 552,
+                "column_name": "school_name",
+                "table_name": "dim_school",
+                "full_name": "catalog.analytics.dim_school",
+            },
+        ],
+        [
+            {
+                "workspace_table_id": 556,
+                "column_name": "k_student",
+                "description": "Surrogate key identifying the student record and used to join related student tables.",
+            },
+            {
+                "workspace_table_id": 552,
+                "column_name": "school_id",
+                "description": "Natural key identifier for the school.",
+            },
+        ],
+        [],
+    ]
+
+    svc = ForgeMatchMappingService(sql=sql)
+    out = svc.create_view_draft(workspace_id="ws-1", session_id="sess-1", name="Student View Draft")
+
+    assert out["is_executable"] is False
+    assert out["create_view_sql"] is None
+    assert out["select_sql"] is None
+    assert "CREATE VIEW `student_view_draft` AS" in str(out["editable_sql"])
+    assert "-- - catalog.analytics.dim_student (suspected keys: k_student)" in str(out["editable_sql"])
+    assert "-- - catalog.analytics.dim_school (suspected keys: school_id)" in str(out["editable_sql"])
+    assert "`dim_student`.`first_name` AS `firstname`" in str(out["editable_sql"])
+    assert "`dim_school`.`school_name` AS `schoolname`" in str(out["editable_sql"])
+    assert out["blocking_reason"] == "Accepted mappings span multiple tables with no resolvable shared domain join path."
+    assert out["involved_tables"] == [
+        {
+            "workspace_table_id": 556,
+            "table_name": "dim_student",
+            "full_name": "catalog.analytics.dim_student",
+        },
+        {
+            "workspace_table_id": 552,
+            "table_name": "dim_school",
+            "full_name": "catalog.analytics.dim_school",
+        },
+    ]
+
+
+def test_execute_view_draft_sql_rewrites_selected_schema_and_catalog(monkeypatch) -> None:
+    class _Exec:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def submit_statement(self, sql, **kwargs):
+            self.calls.append({"sql": sql, **kwargs})
+            return {"status": {"state": "SUCCEEDED"}, "rows": []}
+
+    exec_port = _Exec()
+
+    class _Builder:
+        def build(self, workspace_id: str):
+            assert workspace_id == "ws-1"
+            return SimpleNamespace(sql_exec=exec_port)
+
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [
+            {
+                "id": "sess-1",
+                "workspace_id": "ws-1",
+                "uploaded_filename": "mapping.csv",
+                "status": "analyzed",
+                "summary_json": None,
+            }
+        ]
+    ]
+    monkeypatch.setattr(mapping_service, "WorkspaceSqlContextBuilder", lambda: _Builder())
+
+    svc = ForgeMatchMappingService(sql=sql)
+    out = svc.execute_view_draft_sql(
+        workspace_id="ws-1",
+        session_id="sess-1",
+        sql="CREATE VIEW `student_view_draft` AS SELECT 1 AS c",
+        catalog_name="analytics",
+        schema_name="staging",
+    )
+
+    assert out["status"] == "SUCCEEDED"
+    assert exec_port.calls[0]["sql"] == "CREATE VIEW `analytics`.`staging`.`student_view_draft` AS SELECT 1 AS c"
+    assert out["effective_sql"] == exec_port.calls[0]["sql"]
+
+
+def test_execute_view_draft_sql_returns_select_rows(monkeypatch) -> None:
+    class _Exec:
+        def submit_statement(self, sql, **kwargs):
+            assert sql == "SELECT 1 AS value"
+            assert kwargs["qf_result_fmt"] == "ARROW_STREAM"
+            return {"status": {"state": "SUCCEEDED"}, "rows": [{"value": 1}]}
+
+    class _Builder:
+        def build(self, workspace_id: str):
+            assert workspace_id == "ws-1"
+            return SimpleNamespace(sql_exec=_Exec())
+
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [
+            {
+                "id": "sess-1",
+                "workspace_id": "ws-1",
+                "uploaded_filename": "mapping.csv",
+                "status": "analyzed",
+                "summary_json": None,
+            }
+        ]
+    ]
+    monkeypatch.setattr(mapping_service, "WorkspaceSqlContextBuilder", lambda: _Builder())
+
+    svc = ForgeMatchMappingService(sql=sql)
+    out = svc.execute_view_draft_sql(
+        workspace_id="ws-1",
+        session_id="sess-1",
+        sql="SELECT 1 AS value",
+    )
+
+    assert out["statement_type"] == "select"
+    assert out["row_count"] == 1
+    assert out["rows"] == [{"value": 1}]
