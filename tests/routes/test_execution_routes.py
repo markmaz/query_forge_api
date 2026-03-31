@@ -327,6 +327,65 @@ def test_execution_start_rejects_raw_sql_fields(client, auth_headers, monkeypatc
     assert "Raw SQL fields are not allowed" in resp.json["error"]
 
 
+def test_execution_start_accepts_read_only_raw_sql_preview(client, auth_headers, monkeypatch):
+    _install_valkey(monkeypatch)
+
+    class _SqlExec:
+        def submit_statement_async(self, sql, parameters, **_kwargs):
+            assert sql == "SELECT patient_id FROM dim_patient"
+            assert parameters == {}
+            return {"qf_statement_id": "stmt-raw-1"}
+
+    class _Ctx:
+        sql_exec = _SqlExec()
+
+    class _Builder:
+        def build(self, workspace_id: str):
+            return _Ctx()
+
+    monkeypatch.setattr(execution_service, "WorkspaceSqlContextBuilder", _Builder)
+
+    resp = client.post(
+        "/api/v1/executions/start",
+        headers=auth_headers,
+        json={
+            "kind": "query_builder_sql",
+            "rawSql": "SELECT patient_id FROM dim_patient",
+            "limit": 25,
+            "offset": 0,
+        },
+    )
+    assert resp.status_code == 200
+    job_id = resp.json["jobId"]
+    job = execution_service._get_job(job_id)
+    assert job["kind"] == "query_builder_sql"
+    assert job["sql"] == "SELECT patient_id FROM dim_patient"
+    assert job["sqlRendered"] == "SELECT patient_id FROM dim_patient"
+    assert job["params"] == {}
+    assert job["countSql"] is None
+
+
+def test_execution_start_rejects_mutating_raw_sql_preview(client, auth_headers, monkeypatch):
+    _install_valkey(monkeypatch)
+
+    class _Builder:
+        def build(self, workspace_id: str):
+            raise AssertionError("Builder should not be called for rejected SQL")
+
+    monkeypatch.setattr(execution_service, "WorkspaceSqlContextBuilder", _Builder)
+
+    resp = client.post(
+        "/api/v1/executions/start",
+        headers=auth_headers,
+        json={
+            "kind": "query_builder_sql",
+            "rawSql": "DELETE FROM dim_patient",
+        },
+    )
+    assert resp.status_code == 400
+    assert "must be read-only" in resp.json["error"]
+
+
 def test_execution_status_and_results_use_inline_snapshot_for_sync_adapter(client, auth_headers, monkeypatch):
     _install_valkey(monkeypatch)
     _install_nocode_prepare(monkeypatch, sql="SELECT 7 AS a", params={})

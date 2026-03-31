@@ -228,8 +228,7 @@ class ExecutionService:
         assert_no_disallowed_client_sql_fields(payload)
 
         qf_sql_json = payload.get("sqlJson") or payload.get("sql_json")
-        if qf_sql_json is None:
-            raise ForgeError("sqlJson is required", status_code=400)
+        raw_sql = payload.get("rawSql") or payload.get("raw_sql")
         if qf_sql_json is not None and not isinstance(qf_sql_json, dict):
             raise ForgeError("sqlJson must be an object", status_code=400)
 
@@ -239,8 +238,10 @@ class ExecutionService:
         kind = (payload.get("kind") or "").strip()
         if not kind and isinstance(qf_sql_json, dict):
             kind = "query_builder"
-        if kind != "query_builder":
-            raise ForgeError("kind must be query_builder", status_code=400)
+        if not kind and isinstance(raw_sql, str) and raw_sql.strip():
+            kind = "query_builder_sql"
+        if kind not in {"query_builder", "query_builder_sql"}:
+            raise ForgeError("kind must be query_builder or query_builder_sql", status_code=400)
 
         ctx = self._builder.build(workspace_id)
         qf_limit_raw = _qf_int_from_payload(payload.get("limit"), "limit")
@@ -250,16 +251,29 @@ class ExecutionService:
 
         qf_rendered_sql = None
         qf_count_sql = None
-        domain_resolver = DomainResolver(workspace_id=workspace_id)
-        svc = QueryForgeService(executor=ctx.sql_exec, domain_resolver=domain_resolver)
-        mode = (query_args.get("mode") or "preview").strip().lower()
-        prepared = svc.prepare(raw_query=qf_sql_json, mode=mode, limit=limit, offset=offset)
-        sql = prepared.sql
-        params = prepared.params
-        qf_rendered_sql = prepared.qf_rendered_sql
-        qf_count_sql = prepared.qf_count_sql
+        if kind == "query_builder_sql":
+            if qf_sql_json is not None:
+                raise ForgeError("sqlJson is not allowed when kind=query_builder_sql", status_code=400)
+            sql = str(raw_sql or "").strip()
+            if not sql:
+                raise ForgeError("rawSql is required", status_code=400)
+            qf_rendered_sql = sql
+        else:
+            if qf_sql_json is None:
+                raise ForgeError("sqlJson is required", status_code=400)
+            domain_resolver = DomainResolver(workspace_id=workspace_id)
+            svc = QueryForgeService(executor=ctx.sql_exec, domain_resolver=domain_resolver)
+            mode = (query_args.get("mode") or "preview").strip().lower()
+            prepared = svc.prepare(raw_query=qf_sql_json, mode=mode, limit=limit, offset=offset)
+            sql = prepared.sql
+            params = prepared.params
+            qf_rendered_sql = prepared.qf_rendered_sql
+            qf_count_sql = prepared.qf_count_sql
 
-        assert_read_only_sql_statement(sql, context="Compiled SQL statement")
+        assert_read_only_sql_statement(
+            sql,
+            context="Provided SQL statement" if kind == "query_builder_sql" else "Compiled SQL statement",
+        )
         if qf_count_sql:
             assert_read_only_sql_statement(qf_count_sql, context="Compiled count SQL statement")
 

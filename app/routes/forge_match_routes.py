@@ -16,6 +16,7 @@ from app.routes.request_helpers import extract_workspace_id, int_arg, require_us
 from app.schemas.forge_match_schema import (
     ForgeMatchAnalyzeRequest,
     ForgeMatchCreateDraftRequest,
+    ForgeMatchExecuteDraftSqlRequest,
     ForgeMatchPatchRequest,
 )
 from app.services.forge_match.mapping_service import ForgeMatchMappingService
@@ -61,6 +62,15 @@ _draft_model = forge_match_ns.model(
     {
         "name": fields.String(required=False),
         "include_notes": fields.Boolean(required=False, default=False),
+    },
+)
+
+_execute_draft_sql_model = forge_match_ns.model(
+    "ForgeMatchExecuteDraftSqlRequest",
+    {
+        "sql": fields.String(required=True),
+        "catalog_name": fields.String(required=False),
+        "schema_name": fields.String(required=False),
     },
 )
 
@@ -467,6 +477,34 @@ class ForgeMatchCreateViewDraft(ForgeResource):
         except Exception:
             logger.exception("forge_match create view draft failed")
             return {"error": "forge_match create view draft failed"}, 500
+
+
+@forge_match_ns.route("/<string:session_id>/execute-view-draft-sql")
+class ForgeMatchExecuteViewDraftSql(ForgeResource):
+    @token_required
+    @require_access("forge_match")
+    @forge_match_ns.expect(_execute_draft_sql_model, validate=False)
+    def post(self, session_id: str):
+        try:
+            workspace_id = extract_workspace_id()
+            body: Dict[str, Any] = request.get_json(silent=True) or {}
+            req = ForgeMatchExecuteDraftSqlRequest(**body)
+            service = ForgeMatchMappingService()
+            result = service.execute_view_draft_sql(
+                workspace_id=workspace_id,
+                session_id=session_id,
+                sql=req.sql,
+                catalog_name=req.catalog_name,
+                schema_name=req.schema_name,
+            )
+            return result, 200
+        except ValidationError as exc:
+            return {"error": "invalid request", "details": exc.errors()}, 400
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("forge_match execute view draft sql failed")
+            return {"error": "forge_match execute view draft sql failed"}, 500
 
 
 @forge_match_ns.route("/<string:session_id>/create-domain-draft")

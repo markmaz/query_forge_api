@@ -51,6 +51,14 @@ class ForgeMatchCreateDraftRequest(BaseModel):
     include_notes: bool = False
 
 
+class ForgeMatchExecuteDraftSqlRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    sql: str = Field(min_length=1)
+    catalog_name: Optional[str] = Field(default=None, max_length=255)
+    schema_name: Optional[str] = Field(default=None, max_length=255)
+
+
 class ForgeMatchUploadResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 

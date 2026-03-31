@@ -374,3 +374,82 @@ def test_forge_match_export_route(client, monkeypatch):
     )
     assert resp.status_code == 200
     assert resp.headers["Content-Type"].startswith("text/csv")
+
+
+def test_forge_match_create_view_draft_route(client, monkeypatch):
+    class _Svc:
+        def create_view_draft(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["session_id"] == "sess-1"
+            assert kwargs["name"] == "Student View Draft"
+            return {
+                "artifact_id": "fmdv_1",
+                "workspace_id": "ws-1",
+                "session_id": "sess-1",
+                "name": "Student View Draft",
+                "accepted_column_count": 2,
+                "columns": [],
+                "status": "draft_created",
+                "view_name": "student_view_draft",
+                "base_table_name": "catalog.analytics.dim_student",
+                "is_executable": True,
+                "blocking_reason": None,
+                "select_sql": "SELECT\n  `src`.`first_name` AS `firstname`\nFROM `catalog`.`analytics`.`dim_student` `src`",
+                "create_view_sql": "CREATE VIEW `student_view_draft` AS\nSELECT\n  `src`.`first_name` AS `firstname`\nFROM `catalog`.`analytics`.`dim_student` `src`;",
+                "editable_sql": "CREATE VIEW `student_view_draft` AS\nSELECT\n  `src`.`first_name` AS `firstname`\nFROM `catalog`.`analytics`.`dim_student` `src`;",
+                "join_domain_id": None,
+                "join_domain_name": None,
+                "involved_tables": [
+                    {
+                        "workspace_table_id": 556,
+                        "table_name": "dim_student",
+                        "full_name": "catalog.analytics.dim_student",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(forge_match_routes, "ForgeMatchMappingService", _Svc)
+    resp = client.post(
+        "/api/v1/forge-match/sess-1/create-view-draft",
+        json={"name": "Student View Draft"},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["is_executable"] is True
+    assert resp.json["view_name"] == "student_view_draft"
+
+
+def test_forge_match_execute_view_draft_sql_route(client, monkeypatch):
+    class _Svc:
+        def execute_view_draft_sql(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["session_id"] == "sess-1"
+            assert kwargs["catalog_name"] == "analytics"
+            assert kwargs["schema_name"] == "staging"
+            assert kwargs["sql"] == "CREATE VIEW `student_view_draft` AS SELECT 1 AS value"
+            return {
+                "workspace_id": "ws-1",
+                "session_id": "sess-1",
+                "statement_type": "create_view",
+                "status": "SUCCEEDED",
+                "catalog_name": "analytics",
+                "schema_name": "staging",
+                "effective_sql": "CREATE VIEW `analytics`.`staging`.`student_view_draft` AS SELECT 1 AS value",
+                "row_count": 0,
+                "rows": [],
+                "message": "View statement executed successfully.",
+            }
+
+    monkeypatch.setattr(forge_match_routes, "ForgeMatchMappingService", _Svc)
+    resp = client.post(
+        "/api/v1/forge-match/sess-1/execute-view-draft-sql",
+        json={
+            "sql": "CREATE VIEW `student_view_draft` AS SELECT 1 AS value",
+            "catalog_name": "analytics",
+            "schema_name": "staging",
+        },
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["status"] == "SUCCEEDED"
+    assert resp.json["effective_sql"] == "CREATE VIEW `analytics`.`staging`.`student_view_draft` AS SELECT 1 AS value"
