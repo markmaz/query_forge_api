@@ -37,7 +37,11 @@ from app.routes.request_helpers import extract_workspace_id
 from app.services.admin.domain_profile_embedding_service import DomainProfileEmbeddingService
 from app.services.admin.domain_profile_service import DomainProfileService
 from app.services.admin.health_service import AdminHealthService
+from app.services.domain.planner_domain_selection_policy_service import PlannerDomainSelectionPolicyService
+from app.services.domain.planner_prompt_intent_policy_service import PlannerPromptIntentPolicyService
 from app.services.domain.planner_projection_policy_service import PlannerProjectionPolicyService
+from app.services.domain.planner_retrieval_policy_service import PlannerRetrievalPolicyService
+from app.services.domain.planner_signal_policy_service import PlannerSignalPolicyService
 from app.services.embedding.embedding_index_service import EmbeddingIndexService
 from app.services.embedding.semantic_concept_embedding_service import SemanticConceptEmbeddingService
 from app.services.prompt_feedback_service import PromptFeedbackService
@@ -250,6 +254,74 @@ planner_projection_policy_model = admin_ns.model(
         "scope_workspace_id": fields.String(required=False),
         "scope_vertical_norm": fields.String(required=False),
         "scope_base_domain_id": fields.Integer(required=False),
+        "priority": fields.Integer(required=False, default=100),
+        "is_active": fields.Boolean(required=False, default=True),
+        "stop_on_match": fields.Boolean(required=False, default=False),
+        "policy_json": fields.Raw(required=True),
+    },
+)
+
+planner_signal_policy_model = admin_ns.model(
+    "PlannerSignalPolicyRequest",
+    {
+        "id": fields.Integer(required=False),
+        "policy_key": fields.String(required=True),
+        "name": fields.String(required=True),
+        "description": fields.String(required=False),
+        "scope_type": fields.String(required=True),
+        "scope_workspace_id": fields.String(required=False),
+        "scope_vertical_norm": fields.String(required=False),
+        "priority": fields.Integer(required=False, default=100),
+        "is_active": fields.Boolean(required=False, default=True),
+        "stop_on_match": fields.Boolean(required=False, default=False),
+        "policy_json": fields.Raw(required=True),
+    },
+)
+
+planner_prompt_intent_policy_model = admin_ns.model(
+    "PlannerPromptIntentPolicyRequest",
+    {
+        "id": fields.Integer(required=False),
+        "policy_key": fields.String(required=True),
+        "name": fields.String(required=True),
+        "description": fields.String(required=False),
+        "scope_type": fields.String(required=True),
+        "scope_workspace_id": fields.String(required=False),
+        "scope_vertical_norm": fields.String(required=False),
+        "priority": fields.Integer(required=False, default=100),
+        "is_active": fields.Boolean(required=False, default=True),
+        "stop_on_match": fields.Boolean(required=False, default=False),
+        "policy_json": fields.Raw(required=True),
+    },
+)
+
+planner_retrieval_policy_model = admin_ns.model(
+    "PlannerRetrievalPolicyRequest",
+    {
+        "id": fields.Integer(required=False),
+        "policy_key": fields.String(required=True),
+        "name": fields.String(required=True),
+        "description": fields.String(required=False),
+        "scope_type": fields.String(required=True),
+        "scope_workspace_id": fields.String(required=False),
+        "scope_vertical_norm": fields.String(required=False),
+        "priority": fields.Integer(required=False, default=100),
+        "is_active": fields.Boolean(required=False, default=True),
+        "stop_on_match": fields.Boolean(required=False, default=False),
+        "policy_json": fields.Raw(required=True),
+    },
+)
+
+planner_domain_selection_policy_model = admin_ns.model(
+    "PlannerDomainSelectionPolicyRequest",
+    {
+        "id": fields.Integer(required=False),
+        "policy_key": fields.String(required=True),
+        "name": fields.String(required=True),
+        "description": fields.String(required=False),
+        "scope_type": fields.String(required=True),
+        "scope_workspace_id": fields.String(required=False),
+        "scope_vertical_norm": fields.String(required=False),
         "priority": fields.Integer(required=False, default=100),
         "is_active": fields.Boolean(required=False, default=True),
         "stop_on_match": fields.Boolean(required=False, default=False),
@@ -487,6 +559,305 @@ class AdminPlannerProjectionPolicyDetail(Resource):
         except Exception:
             logger.exception("planner projection policy delete failed")
             return {"error": "planner projection policy delete failed"}, 500
+
+
+@admin_ns.route("/planner-signal-policies")
+class AdminPlannerSignalPolicies(Resource):
+    @token_required
+    @require_admin()
+    def get(self):
+        try:
+            workspace_id = extract_workspace_id()
+            include_inactive = str(request.args.get("include_inactive") or "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "y",
+                "on",
+            }
+            include_seeded = str(request.args.get("include_seeded") or "true").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "y",
+                "on",
+            }
+            result = PlannerSignalPolicyService().list_policies(
+                workspace_id=workspace_id,
+                include_inactive=include_inactive,
+                include_seeded=include_seeded,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("planner signal policy list failed")
+            return {"error": "planner signal policy list failed"}, 500
+
+    @token_required
+    @require_admin()
+    @admin_ns.expect(planner_signal_policy_model, validate=False)
+    def put(self):
+        try:
+            workspace_id = extract_workspace_id()
+            result = PlannerSignalPolicyService().upsert_policy(
+                workspace_id=workspace_id,
+                actor_user_id=str(getattr(g, "user_id", "") or ""),
+                payload=request.get_json(silent=True) or {},
+            )
+            return result, 200
+        except ValidationError as exc:
+            return {"error": "Invalid planner signal policy request", "details": {"errors": exc.errors()}}, 400
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("planner signal policy upsert failed")
+            return {"error": "planner signal policy upsert failed"}, 500
+
+
+@admin_ns.route("/planner-signal-policies/<int:policy_id>")
+class AdminPlannerSignalPolicyDetail(Resource):
+    @token_required
+    @require_admin()
+    def delete(self, policy_id: int):
+        try:
+            workspace_id = extract_workspace_id()
+            result = PlannerSignalPolicyService().delete_policy(
+                workspace_id=workspace_id,
+                actor_user_id=str(getattr(g, "user_id", "") or ""),
+                policy_id=policy_id,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("planner signal policy delete failed")
+            return {"error": "planner signal policy delete failed"}, 500
+
+
+@admin_ns.route("/planner-prompt-intent-policies")
+class AdminPlannerPromptIntentPolicies(Resource):
+    @token_required
+    @require_admin()
+    def get(self):
+        try:
+            workspace_id = extract_workspace_id()
+            include_inactive = str(request.args.get("include_inactive") or "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "y",
+                "on",
+            }
+            include_seeded = str(request.args.get("include_seeded") or "true").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "y",
+                "on",
+            }
+            result = PlannerPromptIntentPolicyService().list_policies(
+                workspace_id=workspace_id,
+                include_inactive=include_inactive,
+                include_seeded=include_seeded,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("planner prompt intent policy list failed")
+            return {"error": "planner prompt intent policy list failed"}, 500
+
+    @token_required
+    @require_admin()
+    @admin_ns.expect(planner_prompt_intent_policy_model, validate=False)
+    def put(self):
+        try:
+            workspace_id = extract_workspace_id()
+            result = PlannerPromptIntentPolicyService().upsert_policy(
+                workspace_id=workspace_id,
+                actor_user_id=str(getattr(g, "user_id", "") or ""),
+                payload=request.get_json(silent=True) or {},
+            )
+            return result, 200
+        except ValidationError as exc:
+            return {"error": "Invalid planner prompt intent policy request", "details": {"errors": exc.errors()}}, 400
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("planner prompt intent policy upsert failed")
+            return {"error": "planner prompt intent policy upsert failed"}, 500
+
+
+@admin_ns.route("/planner-prompt-intent-policies/<int:policy_id>")
+class AdminPlannerPromptIntentPolicyDetail(Resource):
+    @token_required
+    @require_admin()
+    def delete(self, policy_id: int):
+        try:
+            workspace_id = extract_workspace_id()
+            result = PlannerPromptIntentPolicyService().delete_policy(
+                workspace_id=workspace_id,
+                actor_user_id=str(getattr(g, "user_id", "") or ""),
+                policy_id=policy_id,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("planner prompt intent policy delete failed")
+            return {"error": "planner prompt intent policy delete failed"}, 500
+
+
+@admin_ns.route("/planner-retrieval-policies")
+class AdminPlannerRetrievalPolicies(Resource):
+    @token_required
+    @require_admin()
+    def get(self):
+        try:
+            workspace_id = extract_workspace_id()
+            include_inactive = str(request.args.get("include_inactive") or "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "y",
+                "on",
+            }
+            include_seeded = str(request.args.get("include_seeded") or "true").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "y",
+                "on",
+            }
+            result = PlannerRetrievalPolicyService().list_policies(
+                workspace_id=workspace_id,
+                include_inactive=include_inactive,
+                include_seeded=include_seeded,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("planner retrieval policy list failed")
+            return {"error": "planner retrieval policy list failed"}, 500
+
+    @token_required
+    @require_admin()
+    @admin_ns.expect(planner_retrieval_policy_model, validate=False)
+    def put(self):
+        try:
+            workspace_id = extract_workspace_id()
+            result = PlannerRetrievalPolicyService().upsert_policy(
+                workspace_id=workspace_id,
+                actor_user_id=str(getattr(g, "user_id", "") or ""),
+                payload=request.get_json(silent=True) or {},
+            )
+            return result, 200
+        except ValidationError as exc:
+            return {"error": "Invalid planner retrieval policy request", "details": {"errors": exc.errors()}}, 400
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("planner retrieval policy upsert failed")
+            return {"error": "planner retrieval policy upsert failed"}, 500
+
+
+@admin_ns.route("/planner-retrieval-policies/<int:policy_id>")
+class AdminPlannerRetrievalPolicyDetail(Resource):
+    @token_required
+    @require_admin()
+    def delete(self, policy_id: int):
+        try:
+            workspace_id = extract_workspace_id()
+            result = PlannerRetrievalPolicyService().delete_policy(
+                workspace_id=workspace_id,
+                actor_user_id=str(getattr(g, "user_id", "") or ""),
+                policy_id=policy_id,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("planner retrieval policy delete failed")
+            return {"error": "planner retrieval policy delete failed"}, 500
+
+
+@admin_ns.route("/planner-domain-selection-policies")
+class AdminPlannerDomainSelectionPolicies(Resource):
+    @token_required
+    @require_admin()
+    def get(self):
+        try:
+            workspace_id = extract_workspace_id()
+            include_inactive = str(request.args.get("include_inactive") or "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "y",
+                "on",
+            }
+            include_seeded = str(request.args.get("include_seeded") or "true").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "y",
+                "on",
+            }
+            result = PlannerDomainSelectionPolicyService().list_policies(
+                workspace_id=workspace_id,
+                include_inactive=include_inactive,
+                include_seeded=include_seeded,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("planner domain selection policy list failed")
+            return {"error": "planner domain selection policy list failed"}, 500
+
+    @token_required
+    @require_admin()
+    @admin_ns.expect(planner_domain_selection_policy_model, validate=False)
+    def put(self):
+        try:
+            workspace_id = extract_workspace_id()
+            result = PlannerDomainSelectionPolicyService().upsert_policy(
+                workspace_id=workspace_id,
+                actor_user_id=str(getattr(g, "user_id", "") or ""),
+                payload=request.get_json(silent=True) or {},
+            )
+            return result, 200
+        except ValidationError as exc:
+            return {
+                "error": "Invalid planner domain selection policy request",
+                "details": {"errors": exc.errors()},
+            }, 400
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("planner domain selection policy upsert failed")
+            return {"error": "planner domain selection policy upsert failed"}, 500
+
+
+@admin_ns.route("/planner-domain-selection-policies/<int:policy_id>")
+class AdminPlannerDomainSelectionPolicyDetail(Resource):
+    @token_required
+    @require_admin()
+    def delete(self, policy_id: int):
+        try:
+            workspace_id = extract_workspace_id()
+            result = PlannerDomainSelectionPolicyService().delete_policy(
+                workspace_id=workspace_id,
+                actor_user_id=str(getattr(g, "user_id", "") or ""),
+                policy_id=policy_id,
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("planner domain selection policy delete failed")
+            return {"error": "planner domain selection policy delete failed"}, 500
 
 
 # ---------------------------------------------------------------------------

@@ -21,7 +21,11 @@ from app.models.query.ai_suggest import AddSelectEdit, SetDomainEdit, SqlColumnK
 from app.nlp.normalization import normalize_prompt
 from app.nlp.time_normalizer import CanonicalTime, normalize_time_terms
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.domain.planner_concept_scoring_policy_service import PlannerConceptScoringPolicyService
 from app.services.domain.planner_projection_policy_service import PlannerProjectionPolicyService
+from app.services.domain.planner_semantic_join_policy_service import PlannerSemanticJoinPolicyService
+from app.services.domain.planner_semantic_projection_policy_service import PlannerSemanticProjectionPolicyService
+from app.services.domain.planner_semantic_time_policy_service import PlannerSemanticTimePolicyService
 from app.services.llm.llm_client import LLMClient
 from app.services.planner.semantic_extract_service import SemanticExtractService
 from app.services.sqljson_apply_service import apply_edits
@@ -131,6 +135,10 @@ class PlanService:
         domain_selector: Optional[DomainSelectionService] = None,
         value_alias_resolver: Optional[ValueAliasResolutionService] = None,
         projection_policy_service: Optional[PlannerProjectionPolicyService] = None,
+        concept_scoring_policy_service: Optional[PlannerConceptScoringPolicyService] = None,
+        semantic_join_policy_service: Optional[PlannerSemanticJoinPolicyService] = None,
+        semantic_projection_policy_service: Optional[PlannerSemanticProjectionPolicyService] = None,
+        semantic_time_policy_service: Optional[PlannerSemanticTimePolicyService] = None,
         llm_client: Optional[LLMClient] = None,
         tier2_runner: Optional[Any] = None,
         semantic_extractor: Optional[SemanticExtractService] = None,
@@ -143,6 +151,10 @@ class PlanService:
         self._domain_selector = domain_selector or DomainSelectionService(sql=self._sql)
         self._value_alias_resolver = value_alias_resolver or ValueAliasResolutionService(sql=self._sql)
         self._projection_policy_service = projection_policy_service or PlannerProjectionPolicyService(sql=self._sql)
+        self._concept_scoring_policy_service = concept_scoring_policy_service or PlannerConceptScoringPolicyService(sql=self._sql)
+        self._semantic_join_policy_service = semantic_join_policy_service or PlannerSemanticJoinPolicyService(sql=self._sql)
+        self._semantic_projection_policy_service = semantic_projection_policy_service or PlannerSemanticProjectionPolicyService(sql=self._sql)
+        self._semantic_time_policy_service = semantic_time_policy_service or PlannerSemanticTimePolicyService(sql=self._sql)
         self._explicit_llm = llm_client is not None
         self._llm = llm_client or LLMClient(timeout_seconds=SEMANTIC_PLAN_LLM_TIMEOUT_SECONDS)
         self._llm_runtime_meta: Dict[str, Any] = {
@@ -1240,37 +1252,16 @@ class PlanService:
             return "enrollment"
         return "generic"
 
-    @staticmethod
     def _select_preferred_time_column(
+        self,
         *,
         domain_hint: str,
         mapped_columns_for_time_concept: Sequence[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
-        preference_map: Dict[str, Dict[str, Any]] = {
-            "enrollment": {
-                "preferred_time_concept_key": "SCHOOL_YEAR",
-                "preferred_column_names": ["school_year", "school_year_id", "school_year_key"],
-            },
-            "generic": {
-                "preferred_time_concept_key": "SCHOOL_YEAR",
-                "preferred_column_names": ["school_year", "year"],
-            },
-        }
-        rule = preference_map.get(str(domain_hint or "generic").lower(), preference_map["generic"])
-        concept_key = str(rule.get("preferred_time_concept_key") or "SCHOOL_YEAR").upper()
-        preferred_names = [str(name).lower() for name in list(rule.get("preferred_column_names") or [])]
-        rows = [dict(row) for row in mapped_columns_for_time_concept if isinstance(row, dict)]
-        if not rows:
-            return None
-        rows.sort(
-            key=lambda row: (
-                0 if str(row.get("concept_key") or "").strip().upper() == concept_key else 1,
-                0 if str(row.get("column_name") or "").strip().lower() in preferred_names else 1,
-                -(_to_float(row.get("effective_weight")) or _to_float(row.get("final_score")) or 0.0),
-                _to_int(row.get("model_column_id")) or 0,
-            )
+        return self._semantic_time_policy_service.select_preferred_time_column(
+            domain_hint=domain_hint,
+            mapped_columns_for_time_concept=mapped_columns_for_time_concept,
         )
-        return rows[0]
 
     def _build_plan_skeleton(
         self,
@@ -1331,6 +1322,7 @@ class PlanService:
             candidate_by_mid=_candidate_by_mid(candidate_columns),
             candidate_by_concept=_candidate_by_concept(candidate_columns),
             llm_sql_json={},
+            policy_service=self._semantic_join_policy_service,
         )
         if slot_intent.implies_count_metric(prompt):
             sql_json = self._inject_count_aggregation(
@@ -1474,6 +1466,7 @@ class PlanService:
             candidate_by_mid=_candidate_by_mid(candidate_columns),
             candidate_by_concept=_candidate_by_concept(candidate_columns),
             llm_sql_json=dict((skeleton or {}).get("sql_json") or {}),
+            policy_service=self._semantic_join_policy_service,
         )
         if isinstance((skeleton or {}).get("sql_json"), dict) and isinstance(((skeleton or {}).get("sql_json") or {}).get("aggs"), dict):
             sql_json["aggs"] = ((skeleton or {}).get("sql_json") or {}).get("aggs")
@@ -1729,6 +1722,7 @@ class PlanService:
         candidate_by_mid: Dict[int, Dict[str, Any]],
         candidate_by_concept: Dict[str, List[Dict[str, Any]]],
         llm_sql_json: Dict[str, Any],
+        policy_service: Optional[PlannerSemanticJoinPolicyService] = None,
     ) -> Tuple[Dict[str, Any], int]:
         dropped = 0
         edits: List[Any] = []
@@ -1787,6 +1781,7 @@ class PlanService:
                 selected_rows_by_concept=selected_rows_by_concept,
                 candidate_by_concept=candidate_by_concept,
                 table_hint=table_hint,
+                policy_service=policy_service,
             )
             if not isinstance(row, dict):
                 dropped += 1
@@ -1851,6 +1846,7 @@ class PlanService:
         selected_rows_by_concept: Dict[str, List[Dict[str, Any]]],
         candidate_by_concept: Dict[str, List[Dict[str, Any]]],
         table_hint: Optional[str],
+        policy_service: Optional[PlannerSemanticJoinPolicyService] = None,
     ) -> Optional[Dict[str, Any]]:
         selected_rows = [dict(row, __selected__=True) for row in list(selected_rows_by_concept.get(concept_key) or [])]
         candidate_rows = [dict(row, __selected__=False) for row in list(candidate_by_concept.get(concept_key) or [])]
@@ -1868,31 +1864,20 @@ class PlanService:
             key=lambda row: PlanService._filter_column_rank(
                 concept_key=concept_key,
                 row=row,
+                policy_service=policy_service,
             )
         )
         return all_rows[0]
 
     @staticmethod
-    def _filter_column_rank(*, concept_key: str, row: Dict[str, Any]) -> Tuple[int, int, float, int]:
-        table_name = str(row.get("table_name") or "").strip().lower()
-        column_name = str(row.get("column_name") or "").strip().lower()
-        is_selected = 0 if bool(row.get("__selected__")) else 1
-
-        if concept_key in {"SCHOOL_NAME", "STUDENT_SCHOOL_NAME"}:
-            if table_name == "dim_school" and column_name == "school_name":
-                preference = 0
-            elif table_name.startswith("fct_student_") and "school_name" in column_name:
-                preference = 1
-            elif "school_name" in column_name:
-                preference = 2
-            else:
-                preference = 3
-        else:
-            preference = 5
-
-        score = -(_to_float(row.get("effective_weight")) or _to_float(row.get("final_score")) or 0.0)
-        model_column_id = _to_int(row.get("model_column_id")) or 0
-        return preference, is_selected, score, model_column_id
+    def _filter_column_rank(
+        *,
+        concept_key: str,
+        row: Dict[str, Any],
+        policy_service: Optional[PlannerSemanticJoinPolicyService] = None,
+    ) -> Tuple[int, int, float, int]:
+        service = policy_service or PlannerSemanticJoinPolicyService(enable_db_lookup=False)
+        return service.filter_column_rank(concept_key=concept_key, row=row)
 
     @staticmethod
     def _normalize_filter_operator(op: str) -> Optional[str]:
@@ -1976,6 +1961,7 @@ class PlanService:
                 intent_entity=intent,
                 concept_key=concept_key,
                 concept_entity=entity,
+                policy_service=self._concept_scoring_policy_service,
             )
             score = _to_float(row.get("score")) or 0.0
             row["score"] = round(score * factor, 4)
@@ -2016,25 +2002,60 @@ class PlanService:
                     intent_entity=subject_entity,
                     concept_key=concept_key,
                     concept_entity=subject_entity if concept_key.startswith(subject_entity.upper() + "_") else None,
+                    policy_service=self._concept_scoring_policy_service,
                 )
                 if subject_entity == "student" and concept_key.startswith(("STAFF_", "PARENT_")) and "NAME" in concept_key:
-                    factor *= 0.55
+                    action_key = "student_subject_staff_name_multiplier" if concept_key.startswith("STAFF_") else "student_subject_parent_name_multiplier"
+                    context_tokens = ["subject_student", "staff_name_concept" if concept_key.startswith("STAFF_") else "parent_name_concept"]
+                    factor *= self._concept_scoring_policy_service.resolve_factor(
+                        action_key=action_key,
+                        context_tokens=context_tokens,
+                        default=0.55,
+                    )
                 if subject_entity in {"staff", "parent"} and concept_key.startswith("STUDENT_") and "NAME" in concept_key:
-                    factor *= 0.6
+                    factor *= self._concept_scoring_policy_service.resolve_factor(
+                        action_key="staff_or_parent_subject_student_name_multiplier",
+                        context_tokens=[f"subject_{subject_entity}", "student_name_concept"],
+                        default=0.6,
+                    )
 
             if has_name and ("NAME" in concept_key or concept_key.endswith("_ID")):
                 if subject_entity == "student" and concept_key.startswith("STUDENT_") and "NAME" in concept_key:
-                    factor *= 1.3
+                    factor *= self._concept_scoring_policy_service.resolve_factor(
+                        action_key="name_slot_student_name_multiplier",
+                        context_tokens=["has_name_slot", "subject_student", "student_name_concept"],
+                        default=1.3,
+                    )
                 elif concept_key in {"FIRST_NAME", "LAST_NAME", "MIDDLE_NAME"}:
-                    factor *= 1.1
+                    factor *= self._concept_scoring_policy_service.resolve_factor(
+                        action_key="name_slot_generic_name_multiplier",
+                        context_tokens=["has_name_slot", "generic_name_concept"],
+                        default=1.1,
+                    )
             if has_school and ("SCHOOL" in concept_key or concept_key in {"DISTRICT_NAME", "LEA_ID"}):
-                factor *= 1.25
+                factor *= self._concept_scoring_policy_service.resolve_factor(
+                    action_key="school_slot_multiplier",
+                    context_tokens=["has_school_slot", "school_slot_match"],
+                    default=1.25,
+                )
             if has_district and "DISTRICT" in concept_key:
-                factor *= 1.2
+                factor *= self._concept_scoring_policy_service.resolve_factor(
+                    action_key="district_slot_multiplier",
+                    context_tokens=["has_district_slot", "district_slot_match"],
+                    default=1.2,
+                )
             if has_grade and "GRADE" in concept_key:
-                factor *= 1.18
+                factor *= self._concept_scoring_policy_service.resolve_factor(
+                    action_key="grade_slot_multiplier",
+                    context_tokens=["has_grade_slot", "grade_slot_match"],
+                    default=1.18,
+                )
             if has_race and ("RACE" in concept_key or "ETHNIC" in concept_key):
-                factor *= 1.18
+                factor *= self._concept_scoring_policy_service.resolve_factor(
+                    action_key="race_slot_multiplier",
+                    context_tokens=["has_race_slot", "race_slot_match"],
+                    default=1.18,
+                )
 
             row["score"] = round(score * factor, 4)
             row["tier2_factor"] = round(factor, 4)
@@ -2498,7 +2519,15 @@ class PlanService:
             if self._is_identifier_like_concept(concept_key=key, concept_info=info):
                 adjusted = dict(hit)
                 score = _to_float(adjusted.get("score")) or 0.0
-                penalty = 0.35 if has_subgroup_intent and not self._prompt_requests_identifier(prompt) else 0.2
+                action_key = "identifier_penalty_subgroup" if has_subgroup_intent else "identifier_penalty_default"
+                penalty_context = ["identifier_rebalance"]
+                if has_subgroup_intent:
+                    penalty_context.append("subgroup_intent")
+                penalty = self._concept_scoring_policy_service.resolve_penalty(
+                    action_key=action_key,
+                    context_tokens=penalty_context,
+                    default=0.35 if has_subgroup_intent else 0.2,
+                )
                 adjusted["score"] = round(score - penalty, 4)
                 identifier_hits.append(adjusted)
             else:
@@ -2510,7 +2539,11 @@ class PlanService:
         if not non_identifier_hits:
             return identifier_hits[:max_concepts]
 
-        identifier_limit = 1
+        identifier_limit = self._concept_scoring_policy_service.resolve_integer(
+            action_key="identifier_limit",
+            context_tokens=["identifier_rebalance"],
+            default=1,
+        )
         out = list(non_identifier_hits[:max_concepts])
         remaining = max(0, max_concepts - len(out))
         if remaining > 0 and identifier_hits:
@@ -2629,7 +2662,7 @@ class PlanService:
         if entity is None:
             return []
 
-        preferred_concepts = _name_concepts_for_entity(entity)
+        preferred_concepts = self._semantic_projection_policy_service.name_filter_concepts(entity=entity)
         available_concepts = {
             str(row.get("concept_key") or "").strip().upper()
             for row in mapped_columns
@@ -2652,8 +2685,8 @@ class PlanService:
 
         return [{"concept_key": selected_concept, "op": "=", "value": value}]
 
-    @staticmethod
     def _build_required_literal_filters(
+        self,
         *,
         extracted_values: Sequence[Dict[str, Any]],
         mapped_columns: Sequence[Dict[str, Any]],
@@ -2668,7 +2701,7 @@ class PlanService:
             if isinstance(row, dict) and str(row.get("concept_key") or "").strip()
         }
         for required_concept in required_filter_concept_keys:
-            for concept_key in _projection_concept_family(required_concept):
+            for concept_key in self._semantic_projection_policy_service.concept_family(concept_key=required_concept):
                 if concept_key in available_concepts:
                     return [{"concept_key": concept_key, "op": "contains", "value": school_value}]
         return []
@@ -2866,6 +2899,7 @@ class PlanService:
             candidate_by_mid=_candidate_by_mid(mapped_columns),
             candidate_by_concept=_candidate_by_concept(mapped_columns),
             llm_sql_json=out.get("sql_json") if isinstance(out.get("sql_json"), dict) else {},
+            policy_service=self._semantic_join_policy_service,
         )
         out["sql_json"] = sql_json
         return out, list(dict.fromkeys(warnings))
@@ -2954,6 +2988,7 @@ class PlanService:
                 candidate_by_mid=_candidate_by_mid(mapped_columns),
                 candidate_by_concept=_candidate_by_concept(mapped_columns),
                 llm_sql_json=out.get("sql_json") if isinstance(out.get("sql_json"), dict) else {},
+                policy_service=self._semantic_join_policy_service,
             )
             out["sql_json"] = sql_json
             return out, warnings
@@ -3008,19 +3043,21 @@ class PlanService:
             candidate_by_mid=_candidate_by_mid(mapped_columns),
             candidate_by_concept=_candidate_by_concept(mapped_columns),
             llm_sql_json=out.get("sql_json") if isinstance(out.get("sql_json"), dict) else {},
+            policy_service=self._semantic_join_policy_service,
         )
         out["sql_json"] = sql_json
         return out, warnings
 
-    @staticmethod
     def _build_default_projection(
+        self,
         *,
         intent_entity: str,
         mapped_columns: Sequence[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        keys = _default_projection_concepts(intent_entity)
+        keys = self._semantic_projection_policy_service.default_projection_concepts(entity=intent_entity)
         if not keys:
             return []
+        preferred_tables = set(self._semantic_projection_policy_service.preferred_projection_tables(entity=intent_entity))
 
         rows_by_concept: Dict[str, List[Dict[str, Any]]] = {}
         for row in mapped_columns:
@@ -3034,22 +3071,27 @@ class PlanService:
         selected: List[Dict[str, Any]] = []
         seen_mid: set[int] = set()
         for concept_key in keys:
-            rows = list(rows_by_concept.get(concept_key) or [])
-            if not rows:
-                continue
-            rows.sort(
-                key=lambda item: (
-                    0 if str(item.get("table_name") or "").strip().lower() == f"dim_{intent_entity}" else 1,
-                    -(_to_float(item.get("effective_weight")) or _to_float(item.get("final_score")) or 0.0),
-                    int(item.get("model_column_id") or 0),
+            best: Optional[Dict[str, Any]] = None
+            for family_key in self._semantic_projection_policy_service.concept_family(concept_key=concept_key):
+                rows = list(rows_by_concept.get(family_key) or [])
+                if not rows:
+                    continue
+                rows.sort(
+                    key=lambda item: (
+                        0 if str(item.get("table_name") or "").strip().lower() in preferred_tables else 1,
+                        -(_to_float(item.get("effective_weight")) or _to_float(item.get("final_score")) or 0.0),
+                        int(item.get("model_column_id") or 0),
+                    )
                 )
-            )
-            best = rows[0]
+                best = rows[0]
+                break
+            if not best:
+                continue
             mid = _to_int(best.get("model_column_id"))
             if mid is None or mid in seen_mid:
                 continue
             seen_mid.add(mid)
-            selected.append({"concept_key": concept_key, "model_column_id": mid})
+            selected.append({"concept_key": str(best.get("concept_key") or concept_key).strip().upper(), "model_column_id": mid})
         if not selected and intent_entity == "student":
             for concept_key in ("STUDENT_ID", "ID"):
                 rows = list(rows_by_concept.get(concept_key) or [])
@@ -3057,7 +3099,7 @@ class PlanService:
                     continue
                 rows.sort(
                     key=lambda item: (
-                        0 if str(item.get("table_name") or "").strip().lower() == "dim_student" else 1,
+                        0 if str(item.get("table_name") or "").strip().lower() in preferred_tables else 1,
                         -(_to_float(item.get("effective_weight")) or _to_float(item.get("final_score")) or 0.0),
                         int(item.get("model_column_id") or 0),
                     )
@@ -3095,8 +3137,8 @@ class PlanService:
             seen.add(key)
         return out
 
-    @staticmethod
     def _build_projection_policy_columns(
+        self,
         *,
         mapped_columns: Sequence[Dict[str, Any]],
         required_concept_keys: Sequence[str],
@@ -3113,7 +3155,7 @@ class PlanService:
         seen_mid: set[int] = set()
         for required_concept in required_concept_keys:
             chosen: Optional[Dict[str, Any]] = None
-            for concept_key in _projection_concept_family(required_concept):
+            for concept_key in self._semantic_projection_policy_service.concept_family(concept_key=required_concept):
                 rows = list(by_concept.get(concept_key) or [])
                 if not rows:
                     continue
@@ -3165,8 +3207,8 @@ class PlanService:
             prompt=prompt,
         )
 
-    @staticmethod
     def _ensure_required_join_plan(
+        self,
         *,
         join_plan: Any,
         selected_columns: Sequence[Dict[str, Any]],
@@ -3175,38 +3217,26 @@ class PlanService:
         required_filter_concept_keys: Sequence[str],
         required_join_tables: Sequence[str],
     ) -> Dict[str, Any]:
-        current = dict(join_plan) if isinstance(join_plan, dict) else {}
-        if not required_join_tables:
-            return current
         mid_to_row = _candidate_by_mid(mapped_columns)
         selected_tables = {
             str((mid_to_row.get(_to_int(col.get("model_column_id")) or -1) or {}).get("table_name") or "").strip().lower()
             for col in selected_columns
             if isinstance(col, dict)
         }
-        required_filter_keys = {str(item or "").strip().upper() for item in required_filter_concept_keys if str(item or "").strip()}
-        has_school_filter = any(
-            str(item.get("concept_key") or "").strip().upper() in required_filter_keys
+        required_filter_keys = {
+            str(item or "").strip().upper() for item in required_filter_concept_keys if str(item or "").strip()
+        }
+        present_filter_concepts = {
+            str(item.get("concept_key") or "").strip().upper()
             for item in filters
-            if isinstance(item, dict)
+            if isinstance(item, dict) and str(item.get("concept_key") or "").strip().upper() in required_filter_keys
+        }
+        return self._semantic_join_policy_service.ensure_required_join_plan(
+            join_plan=join_plan,
+            selected_tables=sorted(selected_tables),
+            present_filter_concept_keys=sorted(present_filter_concepts),
+            required_join_tables=required_join_tables,
         )
-        if "dim_student" not in selected_tables or not has_school_filter:
-            return current
-
-        joins = list(current.get("joins") or [])
-        for required_table in [str(item or "").strip().lower() for item in required_join_tables if str(item or "").strip()]:
-            if any(str(item.get("table") or "").strip().lower() == required_table for item in joins if isinstance(item, dict)):
-                continue
-            if required_table == "dim_school":
-                joins.append(
-                    {
-                        "table": "dim_school",
-                        "on": [{"concept_key": "SCHOOL_ID", "op": "=", "value": "SCHOOL_ID"}],
-                    }
-                )
-        current["primary_table"] = str(current.get("primary_table") or "dim_student")
-        current["joins"] = joins
-        return current
 
     def _load_value_alias_rules(self, *, vertical_norm: str, concept_keys: Sequence[str]) -> Dict[str, List[Dict[str, Any]]]:
         keys = [str(k or "").strip().upper() for k in concept_keys if str(k or "").strip()]
@@ -3480,32 +3510,6 @@ def _norm_entity(value: Any) -> Optional[str]:
     return None
 
 
-def _name_concepts_for_entity(entity: str) -> List[str]:
-    if entity == "student":
-        return ["STUDENT_LAST_NAME", "LAST_NAME", "STUDENT_FIRST_NAME", "FIRST_NAME"]
-    if entity == "staff":
-        return ["STAFF_LAST_NAME", "LAST_NAME", "STAFF_FIRST_NAME", "FIRST_NAME"]
-    if entity == "parent":
-        return ["PARENT_LAST_NAME", "LAST_NAME", "PARENT_FIRST_NAME", "FIRST_NAME"]
-    return []
-
-
-def _default_projection_concepts(entity: str) -> List[str]:
-    if entity == "student":
-        return [
-            "STUDENT_ID",
-            "STUDENT_FIRST_NAME",
-            "FIRST_NAME",
-            "STUDENT_LAST_NAME",
-            "LAST_NAME",
-        ]
-    if entity == "staff":
-        return ["STAFF_ID", "STAFF_FIRST_NAME", "FIRST_NAME", "STAFF_LAST_NAME", "LAST_NAME"]
-    if entity == "parent":
-        return ["PARENT_ID", "PARENT_FIRST_NAME", "FIRST_NAME", "PARENT_LAST_NAME", "LAST_NAME"]
-    return []
-
-
 def _resolve_name_literal(*, prompt: str, extracted_values: Sequence[Dict[str, Any]]) -> Optional[str]:
     for item in extracted_values:
         if not isinstance(item, dict):
@@ -3586,16 +3590,6 @@ def _has_student_first_last_projection(selected_columns: Sequence[Dict[str, Any]
     return has_first and has_last
 
 
-def _projection_concept_family(concept_key: str) -> tuple[str, ...]:
-    token = str(concept_key or "").strip().upper()
-    families = {
-        "STUDENT_ID": ("STUDENT_ID", "ID"),
-        "STUDENT_FIRST_NAME": ("STUDENT_FIRST_NAME", "FIRST_NAME"),
-        "STUDENT_LAST_NAME": ("STUDENT_LAST_NAME", "LAST_NAME"),
-    }
-    return families.get(token, (token,))
-
-
 def _has_school_name_filter(*, filters: Sequence[Dict[str, Any]], school_literal: Optional[str]) -> bool:
     target = str(school_literal or "").strip().lower()
     if target == "":
@@ -3617,25 +3611,63 @@ def _concept_entity_factor(
     intent_entity: str,
     concept_key: str,
     concept_entity: Optional[str],
+    policy_service: Optional[PlannerConceptScoringPolicyService] = None,
 ) -> float:
     key = str(concept_key or "").strip().upper()
     entity = _norm_entity(concept_entity)
+    service = policy_service or PlannerConceptScoringPolicyService(enable_db_lookup=False)
     factor = 1.0
 
     if entity == intent_entity:
-        factor = 1.4
+        factor = service.resolve_factor(
+            action_key="entity_exact_match_multiplier",
+            context_tokens=["entity_exact_match"],
+            default=1.4,
+        )
     elif entity is not None and entity != intent_entity:
-        factor = 0.7
+        factor = service.resolve_factor(
+            action_key="entity_mismatch_multiplier",
+            context_tokens=["entity_mismatch"],
+            default=0.7,
+        )
 
     if intent_entity == "student":
         if key in {"STUDENT_FIRST_NAME", "STUDENT_LAST_NAME", "STUDENT_MIDDLE_NAME"}:
-            return max(factor, 1.6)
+            return max(
+                factor,
+                service.resolve_factor(
+                    action_key="student_entity_name_exact_multiplier",
+                    context_tokens=["intent_student", "student_entity_name_exact"],
+                    default=1.6,
+                ),
+            )
         if key in {"FIRST_NAME", "LAST_NAME", "MIDDLE_NAME"}:
-            return min(factor, 0.85)
+            return min(
+                factor,
+                service.resolve_factor(
+                    action_key="student_entity_generic_name_multiplier",
+                    context_tokens=["intent_student", "generic_name_concept"],
+                    default=0.85,
+                ),
+            )
         if key.startswith("STAFF_") and "NAME" in key:
-            return min(factor, 0.5)
+            return min(
+                factor,
+                service.resolve_factor(
+                    action_key="student_cross_entity_name_multiplier",
+                    context_tokens=["intent_student", "staff_name_concept"],
+                    default=0.5,
+                ),
+            )
         if key.startswith("PARENT_") and "NAME" in key:
-            return min(factor, 0.5)
+            return min(
+                factor,
+                service.resolve_factor(
+                    action_key="student_cross_entity_name_multiplier",
+                    context_tokens=["intent_student", "parent_name_concept"],
+                    default=0.5,
+                ),
+            )
     return factor
 
 

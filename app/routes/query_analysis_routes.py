@@ -331,7 +331,7 @@ def _run_query(query_id: str, workspace_id: str) -> dict:
     import json as _json
     from app.adapters.mysql_sql_executor import ForgeMetaSQL
     from app.services.domain_resolver import DomainResolver
-    from app.services.query_forge_service import QueryForgeService
+    from app.services.query_forge.service import QueryForgeService
     from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 
     rows_q = ForgeMetaSQL().execute_query_mappings(
@@ -354,7 +354,7 @@ def _run_query(query_id: str, workspace_id: str) -> dict:
         executor=ctx.sql_exec,
         domain_resolver=DomainResolver(workspace_id=workspace_id),
     )
-    result = svc.run(raw_query=sql_json, mode="export", limit=500, offset=0)
+    result = svc.run(sql_json, mode="export", limit=500, offset=0)
 
     columns = result.columns or []
     rows = result.rows or []

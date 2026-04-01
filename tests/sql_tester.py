@@ -1,4 +1,4 @@
-from app.services.query_forge_service import QueryForgeService
+from app.services.query_forge.service import QueryForgeService
 
 
 class FakeDomainResolver:

@@ -1321,6 +1321,79 @@ def test_plan_injects_school_filter_for_quoted_school_phrase_prompt() -> None:
     )
 
 
+def test_filter_column_rank_prefers_dim_school_school_name() -> None:
+    dim_school_rank = PlanService._filter_column_rank(
+        concept_key="SCHOOL_NAME",
+        row={
+            "__selected__": False,
+            "table_name": "dim_school",
+            "column_name": "school_name",
+            "effective_weight": 1.0,
+            "model_column_id": 1,
+        },
+    )
+    fact_rank = PlanService._filter_column_rank(
+        concept_key="SCHOOL_NAME",
+        row={
+            "__selected__": False,
+            "table_name": "fct_student_school_association",
+            "column_name": "school_name",
+            "effective_weight": 1.1,
+            "model_column_id": 2,
+        },
+    )
+
+    assert dim_school_rank < fact_rank
+
+
+def test_build_default_projection_uses_semantic_projection_policy() -> None:
+    svc = PlanService(
+        sql=FakeForgeQueryPort(),
+        deterministic=object(),
+        concept_retrieval=object(),
+        concept_to_column=object(),
+        column_vector=object(),
+        llm_client=object(),
+    )
+
+    out = svc._build_default_projection(
+        intent_entity="student",
+        mapped_columns=[
+            {"model_column_id": 1, "table_name": "dim_student", "concept_key": "FIRST_NAME", "effective_weight": 1.0, "final_score": 2.0},
+            {"model_column_id": 2, "table_name": "dim_student", "concept_key": "LAST_NAME", "effective_weight": 1.0, "final_score": 2.0},
+            {"model_column_id": 3, "table_name": "dim_student", "concept_key": "ID", "effective_weight": 1.0, "final_score": 2.0},
+        ],
+    )
+
+    assert out == [
+        {"concept_key": "ID", "model_column_id": 3},
+        {"concept_key": "FIRST_NAME", "model_column_id": 1},
+        {"concept_key": "LAST_NAME", "model_column_id": 2},
+    ]
+
+
+def test_select_preferred_time_column_uses_semantic_time_policy() -> None:
+    svc = PlanService(
+        sql=FakeForgeQueryPort(),
+        deterministic=object(),
+        concept_retrieval=object(),
+        concept_to_column=object(),
+        column_vector=object(),
+        llm_client=object(),
+    )
+
+    out = svc._select_preferred_time_column(
+        domain_hint="enrollment",
+        mapped_columns_for_time_concept=[
+            {"model_column_id": 2, "column_name": "year", "concept_key": "SCHOOL_YEAR", "final_score": 3.8},
+            {"model_column_id": 1, "column_name": "school_year", "concept_key": "SCHOOL_YEAR", "final_score": 3.7},
+        ],
+    )
+
+    assert out is not None
+    assert out["model_column_id"] == 1
+
+
 def test_plan_uses_tier2_school_slot_to_force_filter(monkeypatch) -> None:
     import app.services.semantic.plan_service as plan_service_module
 

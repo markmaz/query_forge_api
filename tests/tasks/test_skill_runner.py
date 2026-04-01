@@ -158,7 +158,7 @@ def test_execute_skill_query_returns_query_metadata_bundle(monkeypatch):
         "app.services.workspace_inventory.workspace_context.WorkspaceSqlContextBuilder",
         _FakeWorkspaceBuilder,
     )
-    monkeypatch.setattr("app.services.query_forge_service.QueryForgeService", _FakeQueryForgeService)
+    monkeypatch.setattr("app.services.query_forge.service.QueryForgeService", _FakeQueryForgeService)
     monkeypatch.setattr("app.services.domain_resolver.DomainResolver", lambda workspace_id: {"workspace_id": workspace_id})
 
     bundle = skill_runner._execute_skill_query(workspace_id="ws-1", query_id="query-7")
@@ -211,7 +211,7 @@ def test_execute_skill_query_accepts_saved_query_title_alias(monkeypatch):
         "app.services.workspace_inventory.workspace_context.WorkspaceSqlContextBuilder",
         _FakeWorkspaceBuilder,
     )
-    monkeypatch.setattr("app.services.query_forge_service.QueryForgeService", _FakeQueryForgeService)
+    monkeypatch.setattr("app.services.query_forge.service.QueryForgeService", _FakeQueryForgeService)
     monkeypatch.setattr("app.services.domain_resolver.DomainResolver", lambda workspace_id: {"workspace_id": workspace_id})
 
     bundle = skill_runner._execute_skill_query(workspace_id="ws-1", query_id="query-8")
@@ -252,7 +252,7 @@ def test_execute_skill_query_allows_global_saved_queries(monkeypatch):
         "app.services.workspace_inventory.workspace_context.WorkspaceSqlContextBuilder",
         _FakeWorkspaceBuilder,
     )
-    monkeypatch.setattr("app.services.query_forge_service.QueryForgeService", _FakeQueryForgeService)
+    monkeypatch.setattr("app.services.query_forge.service.QueryForgeService", _FakeQueryForgeService)
     monkeypatch.setattr("app.services.domain_resolver.DomainResolver", lambda workspace_id: {"workspace_id": workspace_id})
 
     bundle = skill_runner._execute_skill_query(workspace_id="ws-1", query_id="query-9")

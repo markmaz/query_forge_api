@@ -25,7 +25,7 @@ from app.services.exports.export_policy import (
 )
 from app.services.exports.export_request_service import ExportRequestService
 from app.services.exports.export_token_store import ExportTokenStore
-from app.services.query_forge_service import QueryForgeService
+from app.services.query_forge.service import QueryForgeService
 from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 
 logger = logging.getLogger(__name__)

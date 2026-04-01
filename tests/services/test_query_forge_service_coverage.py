@@ -4,7 +4,7 @@ import pytest
 
 from app.exceptions.forge_error import ForgeError
 from app.services.domain_resolver import DomainPlan, DomainPlanJoin, DomainPlanTable
-from app.services.query_forge_service import QF_MAX_MANUAL_IN, TABLE_BY_TYPE, QueryForgeService
+from app.services.query_forge.service import QF_MAX_MANUAL_IN, TABLE_BY_TYPE, QueryForgeService
 from tests._support.fakes import FakeForgeQueryPort
 
 
@@ -521,7 +521,7 @@ def test_compile_where_in_normalization_edges(monkeypatch: pytest.MonkeyPatch) -
     assert where_sql == "t0.code IN (:p1)"
     assert params == {"p1": "[a]"}
 
-    monkeypatch.setattr("app.services.query_forge_service.QF_MAX_MANUAL_IN", 500)
+    monkeypatch.setattr("app.services.query_forge.service.QF_MAX_MANUAL_IN", 500)
     values = [str(i) for i in range(201)]
     node = {"type": "condition", "field": {"columnName": "code"}, "op": "in", "value": values}
     where_sql, _exists, params = _compile_where_with_params(svc, node, plan)

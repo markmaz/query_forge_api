@@ -181,7 +181,7 @@ def _execute_skill_query(*, workspace_id: str, query_id: str) -> Dict[str, Any]:
     import json
     from app.adapters.mysql_sql_executor import ForgeMetaSQL
     from app.services.domain_resolver import DomainResolver
-    from app.services.query_forge_service import QueryForgeService
+    from app.services.query_forge.service import QueryForgeService
     from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 
     sql = ForgeMetaSQL()
@@ -207,7 +207,7 @@ def _execute_skill_query(*, workspace_id: str, query_id: str) -> Dict[str, Any]:
         domain_resolver=DomainResolver(workspace_id=workspace_id),
     )
     started = perf_counter()
-    result = svc.run(raw_query=sql_json, mode="export", limit=_SKILL_EXECUTE_ROW_CAP, offset=0)
+    result = svc.run(sql_json, mode="export", limit=_SKILL_EXECUTE_ROW_CAP, offset=0)
     executed_at = datetime.now(timezone.utc)
     execution_time_ms = max(int((perf_counter() - started) * 1000), 0)
     rows = list(result.rows or [])

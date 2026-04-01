@@ -282,6 +282,256 @@ def test_admin_planner_projection_policy_delete(client, monkeypatch):
     assert resp.json["deleted"] is True
 
 
+def test_admin_planner_signal_policy_list(client, monkeypatch):
+    class _FakeSvc:
+        def list_policies(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["include_inactive"] is True
+            assert kwargs["include_seeded"] is True
+            return {
+                "workspace_id": "ws-1",
+                "can_edit": True,
+                "policies": [{"id": 12, "policy_key": "custom_listing_signal"}],
+            }
+
+    monkeypatch.setattr(admin_routes, "PlannerSignalPolicyService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/planner-signal-policies?include_inactive=true&include_seeded=true",
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["policies"][0]["policy_key"] == "custom_listing_signal"
+
+
+def test_admin_planner_signal_policy_upsert(client, monkeypatch):
+    class _FakeSvc:
+        def upsert_policy(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["actor_user_id"] == "user-1"
+            assert kwargs["payload"]["policy_key"] == "custom_listing_signal"
+            return {"id": 12, "policy_key": "custom_listing_signal"}
+
+    monkeypatch.setattr(admin_routes, "PlannerSignalPolicyService", _FakeSvc)
+    resp = client.put(
+        "/api/v1/admin/planner-signal-policies",
+        headers=_headers(monkeypatch),
+        json={
+            "policy_key": "custom_listing_signal",
+            "name": "Custom listing signal",
+            "scope_type": "workspace",
+            "policy_json": {
+                "version": 1,
+                "signal_keys": ["listing_intent"],
+                "match_type": "regex",
+                "patterns": ["provider roster"],
+            },
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json["id"] == 12
+
+
+def test_admin_planner_signal_policy_delete(client, monkeypatch):
+    class _FakeSvc:
+        def delete_policy(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["actor_user_id"] == "user-1"
+            assert kwargs["policy_id"] == 12
+            return {"deleted": True, "policy_id": 12}
+
+    monkeypatch.setattr(admin_routes, "PlannerSignalPolicyService", _FakeSvc)
+    resp = client.delete("/api/v1/admin/planner-signal-policies/12", headers=_headers(monkeypatch))
+    assert resp.status_code == 200
+    assert resp.json["deleted"] is True
+
+
+def test_admin_planner_prompt_intent_policy_list(client, monkeypatch):
+    class _FakeSvc:
+        def list_policies(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["include_inactive"] is True
+            assert kwargs["include_seeded"] is True
+            return {
+                "workspace_id": "ws-1",
+                "can_edit": True,
+                "policies": [{"id": 13, "policy_key": "custom_list_students"}],
+            }
+
+    monkeypatch.setattr(admin_routes, "PlannerPromptIntentPolicyService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/planner-prompt-intent-policies?include_inactive=true&include_seeded=true",
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["policies"][0]["policy_key"] == "custom_list_students"
+
+
+def test_admin_planner_prompt_intent_policy_upsert(client, monkeypatch):
+    class _FakeSvc:
+        def upsert_policy(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["actor_user_id"] == "user-1"
+            assert kwargs["payload"]["policy_key"] == "custom_list_students"
+            return {"id": 13, "policy_key": "custom_list_students"}
+
+    monkeypatch.setattr(admin_routes, "PlannerPromptIntentPolicyService", _FakeSvc)
+    resp = client.put(
+        "/api/v1/admin/planner-prompt-intent-policies",
+        headers=_headers(monkeypatch),
+        json={
+            "policy_key": "custom_list_students",
+            "name": "Custom list students",
+            "scope_type": "workspace",
+            "policy_json": {
+                "version": 1,
+                "action_key": "list_students",
+                "regex_patterns": ["provider roster"],
+            },
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json["id"] == 13
+
+
+def test_admin_planner_prompt_intent_policy_delete(client, monkeypatch):
+    class _FakeSvc:
+        def delete_policy(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["actor_user_id"] == "user-1"
+            assert kwargs["policy_id"] == 13
+            return {"deleted": True, "policy_id": 13}
+
+    monkeypatch.setattr(admin_routes, "PlannerPromptIntentPolicyService", _FakeSvc)
+    resp = client.delete("/api/v1/admin/planner-prompt-intent-policies/13", headers=_headers(monkeypatch))
+    assert resp.status_code == 200
+    assert resp.json["deleted"] is True
+
+
+def test_admin_planner_retrieval_policy_list(client, monkeypatch):
+    class _FakeSvc:
+        def list_policies(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["include_inactive"] is True
+            assert kwargs["include_seeded"] is True
+            return {
+                "workspace_id": "ws-1",
+                "can_edit": True,
+                "policies": [{"id": 21, "policy_key": "custom_retrieval"}],
+            }
+
+    monkeypatch.setattr(admin_routes, "PlannerRetrievalPolicyService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/planner-retrieval-policies?include_inactive=true&include_seeded=true",
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["policies"][0]["policy_key"] == "custom_retrieval"
+
+
+def test_admin_planner_retrieval_policy_upsert(client, monkeypatch):
+    class _FakeSvc:
+        def upsert_policy(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["actor_user_id"] == "user-1"
+            assert kwargs["payload"]["policy_key"] == "custom_retrieval"
+            return {"id": 21, "policy_key": "custom_retrieval"}
+
+    monkeypatch.setattr(admin_routes, "PlannerRetrievalPolicyService", _FakeSvc)
+    resp = client.put(
+        "/api/v1/admin/planner-retrieval-policies",
+        headers=_headers(monkeypatch),
+        json={
+            "policy_key": "custom_retrieval",
+            "name": "Custom retrieval",
+            "scope_type": "workspace",
+            "policy_json": {
+                "version": 1,
+                "when_signals_any": ["staff_work_context_prompt"],
+                "query_specs": [{"query": "provider territory", "source": "vector"}],
+            },
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json["id"] == 21
+
+
+def test_admin_planner_retrieval_policy_delete(client, monkeypatch):
+    class _FakeSvc:
+        def delete_policy(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["actor_user_id"] == "user-1"
+            assert kwargs["policy_id"] == 21
+            return {"deleted": True, "policy_id": 21}
+
+    monkeypatch.setattr(admin_routes, "PlannerRetrievalPolicyService", _FakeSvc)
+    resp = client.delete("/api/v1/admin/planner-retrieval-policies/21", headers=_headers(monkeypatch))
+    assert resp.status_code == 200
+    assert resp.json["deleted"] is True
+
+
+def test_admin_planner_domain_selection_policy_list(client, monkeypatch):
+    class _FakeSvc:
+        def list_policies(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["include_inactive"] is True
+            assert kwargs["include_seeded"] is True
+            return {
+                "workspace_id": "ws-1",
+                "can_edit": True,
+                "policies": [{"id": 31, "policy_key": "custom_domain_selection"}],
+            }
+
+    monkeypatch.setattr(admin_routes, "PlannerDomainSelectionPolicyService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/planner-domain-selection-policies?include_inactive=true&include_seeded=true",
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["policies"][0]["policy_key"] == "custom_domain_selection"
+
+
+def test_admin_planner_domain_selection_policy_upsert(client, monkeypatch):
+    class _FakeSvc:
+        def upsert_policy(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["actor_user_id"] == "user-1"
+            assert kwargs["payload"]["policy_key"] == "custom_domain_selection"
+            return {"id": 31, "policy_key": "custom_domain_selection"}
+
+    monkeypatch.setattr(admin_routes, "PlannerDomainSelectionPolicyService", _FakeSvc)
+    resp = client.put(
+        "/api/v1/admin/planner-domain-selection-policies",
+        headers=_headers(monkeypatch),
+        json={
+            "policy_key": "custom_domain_selection",
+            "name": "Custom domain selection",
+            "scope_type": "workspace",
+            "policy_json": {
+                "version": 1,
+                "when_signals_all": ["staff_work_context_prompt"],
+                "required_shortlist_features": ["STAFF_IDENTITY_COLUMN"],
+                "score_delta": 0.33,
+            },
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json["id"] == 31
+
+
+def test_admin_planner_domain_selection_policy_delete(client, monkeypatch):
+    class _FakeSvc:
+        def delete_policy(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["actor_user_id"] == "user-1"
+            assert kwargs["policy_id"] == 31
+            return {"deleted": True, "policy_id": 31}
+
+    monkeypatch.setattr(admin_routes, "PlannerDomainSelectionPolicyService", _FakeSvc)
+    resp = client.delete("/api/v1/admin/planner-domain-selection-policies/31", headers=_headers(monkeypatch))
+    assert resp.status_code == 200
+    assert resp.json["deleted"] is True
+
+
 # ---------------------------------------------------------------------------
 # Prompt feedback admin
 # ---------------------------------------------------------------------------

@@ -94,7 +94,9 @@
       "policy_adjustment": 0.0,
       "rerank_signals": [
         "birth_month_prompt",
+        "canonical_name_preference_prompt",
         "listing_intent",
+        "nativity_prompt",
         "needs_student_identity",
         "student_listing",
         "time_constraint_present"
@@ -118,7 +120,9 @@
   ],
   "rerank_signals": [
     "birth_month_prompt",
+    "canonical_name_preference_prompt",
     "listing_intent",
+    "nativity_prompt",
     "needs_student_identity",
     "student_listing",
     "time_constraint_present"
@@ -403,7 +407,9 @@
   "projection_policy": {
     "prompt_signals": [
       "birth_month_prompt",
+      "canonical_name_preference_prompt",
       "listing_intent",
+      "nativity_prompt",
       "needs_student_identity",
       "student_listing",
       "time_constraint_present"
@@ -449,7 +455,9 @@
           "source_text": "show me students born in January",
           "signals": [
             "birth_month_prompt",
+            "canonical_name_preference_prompt",
             "listing_intent",
+            "nativity_prompt",
             "needs_student_identity",
             "student_listing",
             "time_constraint_present"
@@ -460,7 +468,9 @@
           "policy_effect_count": 0,
           "signals": [
             "birth_month_prompt",
+            "canonical_name_preference_prompt",
             "listing_intent",
+            "nativity_prompt",
             "needs_student_identity",
             "student_listing",
             "time_constraint_present"
@@ -502,7 +512,9 @@
             "source_text": "show me students born in January",
             "signals": [
               "birth_month_prompt",
+              "canonical_name_preference_prompt",
               "listing_intent",
+              "nativity_prompt",
               "needs_student_identity",
               "student_listing",
               "time_constraint_present"
@@ -521,7 +533,9 @@
             "policy_effect_count": 0,
             "signals": [
               "birth_month_prompt",
+              "canonical_name_preference_prompt",
               "listing_intent",
+              "nativity_prompt",
               "needs_student_identity",
               "student_listing",
               "time_constraint_present"

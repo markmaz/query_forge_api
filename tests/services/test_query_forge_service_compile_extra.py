@@ -6,7 +6,7 @@ import pytest
 
 from app.exceptions.forge_error import ForgeError
 from app.services.domain_resolver import DomainPlan, DomainPlanJoin, DomainPlanTable
-from app.services.query_forge_service import QF_MAX_MANUAL_IN, QueryForgeService
+from app.services.query_forge.service import QF_MAX_MANUAL_IN, QueryForgeService
 from tests._support.fakes import FakeForgeQueryPort
 
 

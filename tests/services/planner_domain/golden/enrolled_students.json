@@ -128,13 +128,15 @@
       "vector_score": 1.0,
       "policy_adjustment": 0.0,
       "rerank_signals": [
+        "canonical_name_preference_prompt",
         "listing_intent",
         "needs_enrollment_status",
         "needs_school_filter",
         "needs_student_identity",
         "school_literal_present",
         "status_enrolled",
-        "student_listing"
+        "student_listing",
+        "student_school_context_prompt"
       ],
       "domain_capabilities": {
         "present": [
@@ -155,13 +157,15 @@
     }
   ],
   "rerank_signals": [
+    "canonical_name_preference_prompt",
     "listing_intent",
     "needs_enrollment_status",
     "needs_school_filter",
     "needs_student_identity",
     "school_literal_present",
     "status_enrolled",
-    "student_listing"
+    "student_listing",
+    "student_school_context_prompt"
   ],
   "column_shortlist_count": 3,
   "slot_hints": {
@@ -417,13 +421,15 @@
   },
   "projection_policy": {
     "prompt_signals": [
+      "canonical_name_preference_prompt",
       "listing_intent",
       "needs_enrollment_status",
       "needs_school_filter",
       "needs_student_identity",
       "school_literal_present",
       "status_enrolled",
-      "student_listing"
+      "student_listing",
+      "student_school_context_prompt"
     ],
     "matched_policies": [
       "student_listing_identity_projection",
@@ -474,26 +480,30 @@
         "extract_signals": {
           "source_text": "show me students enrolled at Barksdale Elementary",
           "signals": [
+            "canonical_name_preference_prompt",
             "listing_intent",
             "needs_enrollment_status",
             "needs_school_filter",
             "needs_student_identity",
             "school_literal_present",
             "status_enrolled",
-            "student_listing"
+            "student_listing",
+            "student_school_context_prompt"
           ]
         },
         "apply_policy_rerank": {
           "candidate_count": 1,
           "policy_effect_count": 0,
           "signals": [
+            "canonical_name_preference_prompt",
             "listing_intent",
             "needs_enrollment_status",
             "needs_school_filter",
             "needs_student_identity",
             "school_literal_present",
             "status_enrolled",
-            "student_listing"
+            "student_listing",
+            "student_school_context_prompt"
           ]
         }
       },
@@ -531,13 +541,15 @@
           "summary": {
             "source_text": "show me students enrolled at Barksdale Elementary",
             "signals": [
+              "canonical_name_preference_prompt",
               "listing_intent",
               "needs_enrollment_status",
               "needs_school_filter",
               "needs_student_identity",
               "school_literal_present",
               "status_enrolled",
-              "student_listing"
+              "student_listing",
+              "student_school_context_prompt"
             ]
           },
           "lineage": [
@@ -552,13 +564,15 @@
             "candidate_count": 1,
             "policy_effect_count": 0,
             "signals": [
+              "canonical_name_preference_prompt",
               "listing_intent",
               "needs_enrollment_status",
               "needs_school_filter",
               "needs_student_identity",
               "school_literal_present",
               "status_enrolled",
-              "student_listing"
+              "student_listing",
+              "student_school_context_prompt"
             ]
           },
           "lineage": [

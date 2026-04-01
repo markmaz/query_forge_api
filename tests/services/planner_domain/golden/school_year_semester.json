@@ -116,10 +116,13 @@
       "vector_score": 1.0,
       "policy_adjustment": 0.0,
       "rerank_signals": [
+        "canonical_name_preference_prompt",
         "needs_enrollment_status",
         "needs_school_filter",
         "school_literal_present",
+        "school_or_district_prompt",
         "status_enrolled",
+        "student_school_context_prompt",
         "time_constraint_present"
       ],
       "domain_capabilities": {
@@ -140,10 +143,13 @@
     }
   ],
   "rerank_signals": [
+    "canonical_name_preference_prompt",
     "needs_enrollment_status",
     "needs_school_filter",
     "school_literal_present",
+    "school_or_district_prompt",
     "status_enrolled",
+    "student_school_context_prompt",
     "time_constraint_present"
   ],
   "column_shortlist_count": 2,
@@ -483,12 +489,15 @@
   },
   "projection_policy": {
     "prompt_signals": [
+      "canonical_name_preference_prompt",
       "listing_intent",
       "needs_enrollment_status",
       "needs_school_filter",
       "school_listing",
       "school_literal_present",
+      "school_or_district_prompt",
       "status_enrolled",
+      "student_school_context_prompt",
       "time_constraint_present"
     ],
     "matched_policies": [
@@ -536,10 +545,13 @@
         "extract_signals": {
           "source_text": "show me enrollment data by semester for school year 2025",
           "signals": [
+            "canonical_name_preference_prompt",
             "needs_enrollment_status",
             "needs_school_filter",
             "school_literal_present",
+            "school_or_district_prompt",
             "status_enrolled",
+            "student_school_context_prompt",
             "time_constraint_present"
           ]
         },
@@ -547,10 +559,13 @@
           "candidate_count": 1,
           "policy_effect_count": 0,
           "signals": [
+            "canonical_name_preference_prompt",
             "needs_enrollment_status",
             "needs_school_filter",
             "school_literal_present",
+            "school_or_district_prompt",
             "status_enrolled",
+            "student_school_context_prompt",
             "time_constraint_present"
           ]
         }
@@ -589,10 +604,13 @@
           "summary": {
             "source_text": "show me enrollment data by semester for school year 2025",
             "signals": [
+              "canonical_name_preference_prompt",
               "needs_enrollment_status",
               "needs_school_filter",
               "school_literal_present",
+              "school_or_district_prompt",
               "status_enrolled",
+              "student_school_context_prompt",
               "time_constraint_present"
             ]
           },
@@ -608,10 +626,13 @@
             "candidate_count": 1,
             "policy_effect_count": 0,
             "signals": [
+              "canonical_name_preference_prompt",
               "needs_enrollment_status",
               "needs_school_filter",
               "school_literal_present",
+              "school_or_district_prompt",
               "status_enrolled",
+              "student_school_context_prompt",
               "time_constraint_present"
             ]
           },

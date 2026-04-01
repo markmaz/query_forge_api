@@ -34,7 +34,7 @@ class ExecutionModeQueryBuilder:
     ) -> ExecutionModePreparedSql:
         domain_resolver = self._domain_resolver_factory(workspace_id)
         service = self._query_forge_service_cls(executor=sql_exec, domain_resolver=domain_resolver)
-        prepared = service.prepare(raw_query=sql_json, mode=mode, limit=limit, offset=offset)
+        prepared = service.prepare(sql_json, mode=mode, limit=limit, offset=offset)
         return ExecutionModePreparedSql(
             sql=prepared.sql,
             params=prepared.params,

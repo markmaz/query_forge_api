@@ -93,11 +93,13 @@
       "vector_score": 1.0,
       "policy_adjustment": 0.0,
       "rerank_signals": [
+        "canonical_name_preference_prompt",
         "listing_intent",
         "needs_enrollment_status",
         "needs_student_identity",
         "status_enrolled",
         "student_listing",
+        "student_school_context_prompt",
         "subgroup_prompt"
       ],
       "domain_capabilities": {
@@ -118,11 +120,13 @@
     }
   ],
   "rerank_signals": [
+    "canonical_name_preference_prompt",
     "listing_intent",
     "needs_enrollment_status",
     "needs_student_identity",
     "status_enrolled",
     "student_listing",
+    "student_school_context_prompt",
     "subgroup_prompt"
   ],
   "column_shortlist_count": 2,
@@ -403,11 +407,13 @@
   },
   "projection_policy": {
     "prompt_signals": [
+      "canonical_name_preference_prompt",
       "listing_intent",
       "needs_enrollment_status",
       "needs_student_identity",
       "status_enrolled",
       "student_listing",
+      "student_school_context_prompt",
       "subgroup_prompt"
     ],
     "matched_policies": [
@@ -450,11 +456,13 @@
         "extract_signals": {
           "source_text": "show me all the african american students currently enrolled",
           "signals": [
+            "canonical_name_preference_prompt",
             "listing_intent",
             "needs_enrollment_status",
             "needs_student_identity",
             "status_enrolled",
             "student_listing",
+            "student_school_context_prompt",
             "subgroup_prompt"
           ]
         },
@@ -462,11 +470,13 @@
           "candidate_count": 1,
           "policy_effect_count": 0,
           "signals": [
+            "canonical_name_preference_prompt",
             "listing_intent",
             "needs_enrollment_status",
             "needs_student_identity",
             "status_enrolled",
             "student_listing",
+            "student_school_context_prompt",
             "subgroup_prompt"
           ]
         }
@@ -505,11 +515,13 @@
           "summary": {
             "source_text": "show me all the african american students currently enrolled",
             "signals": [
+              "canonical_name_preference_prompt",
               "listing_intent",
               "needs_enrollment_status",
               "needs_student_identity",
               "status_enrolled",
               "student_listing",
+              "student_school_context_prompt",
               "subgroup_prompt"
             ]
           },
@@ -525,11 +537,13 @@
             "candidate_count": 1,
             "policy_effect_count": 0,
             "signals": [
+              "canonical_name_preference_prompt",
               "listing_intent",
               "needs_enrollment_status",
               "needs_student_identity",
               "status_enrolled",
               "student_listing",
+              "student_school_context_prompt",
               "subgroup_prompt"
             ]
           },

@@ -1,27 +1,46 @@
-# app/services/query_forge_service.py
+# app/services/query_forge/service.py
 from __future__ import annotations
 
 import ast
 import json
 import re
-from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.domain_resolver import DomainPlan, DomainResolver
+from app.services.query_forge.result_mapper import (
+    cols_from_json as _rm_cols_from_json,
+    extract_total as _rm_extract_total,
+    infer_cols as _rm_infer_cols,
+    rows_to_dicts as _rm_rows_to_dicts,
+)
+from app.services.query_forge.sql_utils import (
+    col_expr as _su_col_expr,
+    dp_ident as _su_dp_ident,
+    literal_sql as _su_literal_sql,
+    physical_col_expr as _su_physical_col_expr,
+    render_sql as _su_render_sql,
+    safe_alias as _su_safe_alias,
+    safe_ident as _su_safe_ident,
+)
+from app.services.query_forge.where_compiler import (
+    QF_MAX_MANUAL_IN,
+    VALUE_OVERRIDE_IN_COLUMN_BY_TYPE,
+    build_and_filter_tree as _wc_build_and_filter_tree,
+    flatten_and_conditions as _wc_flatten_and_conditions,
+    is_and_only_filter_tree as _wc_is_and_only_filter_tree,
+)
+from app.services.query_forge.data_prep_compiler import DataPrepCompiler as _DataPrepCompiler
+from app.services.query_forge.split_ratio_compiler import (
+    SplitRatioCompiler as _SplitRatioCompiler,
+    detect_split_ratio_metric as _src_detect_split_ratio_metric,
+)
 from app.services.sqljson import validate_and_normalize_derived_sqljson
 from app.services.value_overrides.list_schema import TABLE_BY_TYPE
 
-QF_MAX_MANUAL_IN = 150
 GLOBAL_ROW_QUALITY_COLUMN = "tdoe_severity_code"
 GLOBAL_ROW_QUALITY_MAX_EXCLUSIVE = 4
-
-VALUE_OVERRIDE_IN_COLUMN_BY_TYPE = {
-    "regions": "zipcode",
-    "npiCategories": "npi",
-    "serviceLines": "procedure_code",
-}
 
 VALUE_OVERRIDE_KEY_BY_TYPE = {
     "regions": "zipcode",
@@ -58,35 +77,13 @@ VALUE_OVERRIDE_PROJECT_ALIASES_BY_TYPE = {
 }
 
 
-@dataclass(frozen=True)
-class ForgeCompiledQuery:
-    sql: str
-    qf_count_sql: str
-    params: Dict[str, Any]
-    qf_output_cols: List[Dict[str, Any]]
-
-
-@dataclass(frozen=True)
-class QueryForgeRunResult:
-    sql: str
-    qf_rendered_sql: str
-    params: Dict[str, Any]
-    rows: List[Any]
-    columns: List[Dict[str, Any]]
-    total: int
-    limit: int
-    offset: int
-
-
-@dataclass(frozen=True)
-class QueryForgePreparedQuery:
-    sql: str
-    qf_rendered_sql: str
-    params: Dict[str, Any]
-    qf_count_sql: str
-    columns: List[Dict[str, Any]]
-    limit: int
-    offset: int
+# Dataclasses moved to app.services.query_forge.types — re-exported here for
+# backwards-compatibility with any code that imports them from this module.
+from app.services.query_forge.types import (  # noqa: E402
+    ForgeCompiledQuery,
+    QueryForgePreparedQuery,
+    QueryForgeRunResult,
+)
 
 
 QfColumnKey = Union[str, Dict[str, Any]]  # legacy strings + new {workspaceTableId?,modelColumnId,columnName,exprId?}
@@ -115,12 +112,13 @@ class QueryForgeService:
 
     def run(
         self,
-        raw_query: Dict[str, Any],
+        query_json: Dict[str, Any],
+        *,
         mode: str = "preview",
         limit: int = 200,
         offset: int = 0,
     ) -> QueryForgeRunResult:
-        normalized = self.normalize(raw_query)
+        normalized = self.normalize(query_json)
         compiled = self.compile(normalized, mode=mode, limit=limit, offset=offset)
 
         data = self._executor.submit_statement(compiled.sql, parameters=compiled.params)
@@ -151,12 +149,13 @@ class QueryForgeService:
 
     def prepare(
         self,
-        raw_query: Dict[str, Any],
+        query_json: Dict[str, Any],
+        *,
         mode: str = "preview",
         limit: int = 200,
         offset: int = 0,
     ) -> QueryForgePreparedQuery:
-        normalized = self.normalize(raw_query)
+        normalized = self.normalize(query_json)
         compiled = self.compile(normalized, mode=mode, limit=limit, offset=offset)
         columns = compiled.qf_output_cols or self._qf_cols_from_json(normalized)
         rendered_sql = self._qf_render_sql(compiled.sql, compiled.params)
@@ -1017,46 +1016,15 @@ class QueryForgeService:
 
     @staticmethod
     def _is_and_only_filter_tree(node: Any) -> bool:
-        if not node:
-            return True
-        if not isinstance(node, dict):
-            return False
-        t = node.get("type")
-        if t == "condition":
-            return True
-        if t != "group":
-            return False
-        if (node.get("match") or "and").lower() != "and":
-            return False
-        children = node.get("children") or []
-        if not isinstance(children, list):
-            return False
-        return all(QueryForgeService._is_and_only_filter_tree(child) for child in children)
+        return _wc_is_and_only_filter_tree(node)
 
     @staticmethod
     def _flatten_and_conditions(node: Any) -> List[Dict[str, Any]]:
-        if not node:
-            return []
-        if not isinstance(node, dict):
-            return []
-        t = node.get("type")
-        if t == "condition":
-            return [node]
-        if t != "group":
-            return []
-        out: List[Dict[str, Any]] = []
-        for child in (node.get("children") or []):
-            out.extend(QueryForgeService._flatten_and_conditions(child))
-        return out
+        return _wc_flatten_and_conditions(node)
 
     @staticmethod
     def _build_and_filter_tree(conditions: Sequence[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        clean = [c for c in conditions if isinstance(c, dict)]
-        if not clean:
-            return None
-        if len(clean) == 1:
-            return clean[0]
-        return {"type": "group", "match": "and", "children": clean}
+        return _wc_build_and_filter_tree(conditions)
 
     def compile(self, q: Dict[str, Any], mode: str = "preview", limit: int = 200, offset: int = 0) -> ForgeCompiledQuery:
         if mode not in ("preview", "export"):
@@ -1580,70 +1548,7 @@ class QueryForgeService:
         return ForgeCompiledQuery(sql=sql, qf_count_sql=qf_count_sql, params=params, qf_output_cols=qf_output_cols)
 
     def _detect_split_ratio_metric(self, q: Dict[str, Any], plan: DomainPlan) -> Optional[Dict[str, Any]]:
-        aggs = q.get("aggs") or {}
-        if not bool(aggs.get("enabled")):
-            return None
-        metrics = aggs.get("metrics") or []
-        ratio_metrics: List[Dict[str, Any]] = []
-        primary_id = int(plan.primary.workspace_table_id)
-        for metric in metrics:
-            if not isinstance(metric, dict):
-                continue
-            if str(metric.get("fn") or "").strip().lower() != "expr":
-                continue
-            expr = metric.get("expr")
-            if not isinstance(expr, dict):
-                continue
-            if str(expr.get("kind") or "").strip().lower() != "ratio":
-                continue
-            numerator = expr.get("numerator") or {}
-            denominator = expr.get("denominator") or {}
-            if not isinstance(numerator, dict) or not isinstance(denominator, dict):
-                continue
-            n_field = numerator.get("field")
-            d_field = denominator.get("field")
-            if not isinstance(n_field, dict) or not isinstance(d_field, dict):
-                continue
-            try:
-                n_table = int(n_field.get("workspaceTableId") or primary_id)
-                d_table = int(d_field.get("workspaceTableId") or primary_id)
-            except Exception:
-                continue
-            if n_table != d_table:
-                ratio_metrics.append(metric)
-
-        if not ratio_metrics:
-            return None
-        if len(ratio_metrics) > 1:
-            raise ForgeError(
-                "derived_validation_failed: unsupported_split_ratio_metric_mix at aggs.metrics",
-                status_code=400,
-                details={
-                    "issues": [
-                        {
-                            "code": "unsupported_split_ratio_metric_mix",
-                            "path": "aggs.metrics",
-                            "message": "Only one split ratio metric is supported per query",
-                        }
-                    ]
-                },
-            )
-        if len(metrics) > 1:
-            raise ForgeError(
-                "derived_validation_failed: unsupported_split_ratio_metric_mix at aggs.metrics",
-                status_code=400,
-                details={
-                    "issues": [
-                        {
-                            "code": "unsupported_split_ratio_metric_mix",
-                            "path": "aggs.metrics",
-                            "message": "Split ratio metrics cannot be mixed with other aggregate metrics",
-                        }
-                    ]
-                },
-            )
-        return ratio_metrics[0]
-
+        return _src_detect_split_ratio_metric(q, primary_id=int(plan.primary.workspace_table_id))
     def _compile_split_ratio_query(
         self,
         *,
@@ -1665,288 +1570,51 @@ class QueryForgeService:
             workspace_table_id=primary_id,
             severity_table_ids=severity_table_ids,
         )
-        if bool(q.get("distinct", False)):
-            raise ForgeError("distinct is not supported with aggregations", status_code=400)
-        if q.get("dataPrep"):
-            raise ForgeError("Split ratio compilation does not support dataPrep", status_code=400)
-        if q.get("value_overrideAttachments") or q.get("cohortAttachment"):
-            raise ForgeError("Split ratio compilation does not support attachments", status_code=400)
-        aggs = q.get("aggs") or {}
-        group_by = aggs.get("groupBy") or []
-        if not self._is_and_only_filter_tree(q.get("filters")):
-            raise ForgeError(
-                "derived_validation_failed: unsupported_filter_tree_for_split_ratio at filters",
-                status_code=400,
-                details={
-                    "issues": [
-                        {
-                            "code": "unsupported_filter_tree_for_split_ratio",
-                            "path": "filters",
-                            "message": "Split ratio queries support deterministic AND-only global filters",
-                        }
-                    ]
-                },
-            )
 
-        expr = split_metric.get("expr") or {}
-        numerator = expr.get("numerator") or {}
-        denominator = expr.get("denominator") or {}
-        num_field = numerator.get("field") or {}
-        den_field = denominator.get("field") or {}
-        try:
-            num_table_id = int(num_field.get("workspaceTableId") or primary_id)
-            den_table_id = int(den_field.get("workspaceTableId") or primary_id)
-        except Exception:
-            raise ForgeError("Invalid ratio metric table bindings", status_code=400)
-
-        all_conditions = self._flatten_and_conditions(q.get("filters"))
-        num_conditions: List[Dict[str, Any]] = []
-        den_conditions: List[Dict[str, Any]] = []
-        for cond in all_conditions:
-            field = cond.get("field")
-            if isinstance(field, dict):
-                wt_id = field.get("workspaceTableId")
-            else:
-                wt_id = None
-            if wt_id is None:
-                wt_id = primary_id
-            try:
-                wt_id_int = int(wt_id)
-            except Exception:
-                wt_id_int = primary_id
-
-            if wt_id_int == num_table_id:
-                num_conditions.append(cond)
-            elif wt_id_int == den_table_id:
-                den_conditions.append(cond)
-            else:
-                num_conditions.append(cond)
-                den_conditions.append(cond)
-
-        if self._is_and_only_filter_tree(numerator.get("filters")):
-            num_conditions.extend(self._flatten_and_conditions(numerator.get("filters")))
-        elif numerator.get("filters") is not None:
-            raise ForgeError(
-                "derived_validation_failed: unsupported_filter_tree_for_split_ratio at aggs.metrics[0].expr.numerator.filters",
-                status_code=400,
-                details={
-                    "issues": [
-                        {
-                            "code": "unsupported_filter_tree_for_split_ratio",
-                            "path": "aggs.metrics[0].expr.numerator.filters",
-                            "message": "Numerator filters must be deterministic AND-only trees",
-                        }
-                    ]
-                },
-            )
-
-        if self._is_and_only_filter_tree(denominator.get("filters")):
-            den_conditions.extend(self._flatten_and_conditions(denominator.get("filters")))
-        elif denominator.get("filters") is not None:
-            raise ForgeError(
-                "derived_validation_failed: unsupported_filter_tree_for_split_ratio at aggs.metrics[0].expr.denominator.filters",
-                status_code=400,
-                details={
-                    "issues": [
-                        {
-                            "code": "unsupported_filter_tree_for_split_ratio",
-                            "path": "aggs.metrics[0].expr.denominator.filters",
-                            "message": "Denominator filters must be deterministic AND-only trees",
-                        }
-                    ]
-                },
-            )
-
-        num_filter_tree = self._build_and_filter_tree(num_conditions)
-        den_filter_tree = self._build_and_filter_tree(den_conditions)
-
-        params: Dict[str, Any] = {}
-        param_counter = 0
-
-        def new_param(val: Any) -> str:
-            nonlocal param_counter
-            param_counter += 1
-            key = f"p{param_counter}"
-            params[key] = val
-            return f":{key}"
-
-        grain_aliases: List[str] = []
-        grain_exprs: List[str] = []
-        used_aliases: set[str] = set()
-        for idx, gb in enumerate(group_by):
-            qf_expr_sql = self._col_expr(
-                gb,
-                {},
-                {},
-                {},
-                {},
-                False,
-                qf_base_alias,
-                alias_by_wt,
-            )
-            col_name = str((gb or {}).get("columnName") or f"group_{idx+1}").strip() or f"group_{idx+1}"
-            wt_id = (gb or {}).get("workspaceTableId")
-            if isinstance(wt_id, int):
-                alias = f"wt{wt_id}_{col_name}"
-            else:
-                alias = col_name
-            alias = re.sub(r"[^A-Za-z0-9_]+", "_", alias).strip("_") or f"group_{idx+1}"
-            if alias[0].isdigit():
-                alias = f"g_{alias}"
-            base = alias
-            inc = 2
-            while alias.lower() in used_aliases:
-                alias = f"{base}_{inc}"
-                inc += 1
-            used_aliases.add(alias.lower())
-            grain_aliases.append(alias)
-            grain_exprs.append(qf_expr_sql)
-
-        def build_side_cte(
-            *,
-            cte_name: str,
-            metric_part: Dict[str, Any],
-            metric_table_id: int,
-            filters_node: Optional[Dict[str, Any]],
-            value_alias: str,
-        ) -> str:
-            metric_field = metric_part.get("field")
-            metric_fn = str(metric_part.get("fn") or "").strip().lower()
-            if not isinstance(metric_field, dict):
-                raise ForgeError("Split ratio metric side must include a field", status_code=400)
-
-            side_query = {
-                "columns": [],
-                "aggs": {"enabled": True, "groupBy": group_by, "metrics": [{"fn": metric_fn, "field": metric_field}]},
-                "sorting": [],
-                "filters": filters_node,
-                "dataPrep": None,
-                "value_overrideAttachments": [],
-                "cohortAttachment": None,
-            }
-            required_table_ids = self._required_table_ids_from_query(side_query, plan)
-            required_table_ids.add(int(metric_table_id))
-            from_sql = self._from_clause_from_plan(
-                plan,
-                required_table_ids,
-                severity_table_ids=severity_table_ids,
-            )
-
-            where_sql, exists_parts = self._compile_where(
+        def _compile_where_fn(
+            filters_node, derived_by_exprid, derived_by_name, rewrite_by_colname,
+            rewrite_by_modelid, qf_using_prep, qf_base_alias_, alias_by_wt_, new_param_,
+            *, severity_table_ids=None,
+        ):
+            return self._compile_where(
                 filters_node,
-                {},
-                {},
-                {},
-                {},
-                False,
-                qf_base_alias,
-                alias_by_wt,
+                derived_by_exprid,
+                derived_by_name,
+                rewrite_by_colname,
+                rewrite_by_modelid,
+                qf_using_prep,
+                qf_base_alias_,
+                alias_by_wt_,
                 plan,
-                new_param,
+                new_param_,
                 severity_table_ids=severity_table_ids,
             )
-            where_parts = [p for p in ([where_sql] if where_sql else []) + exists_parts if p]
-            if primary_severity_pred:
-                where_parts.insert(0, primary_severity_pred)
 
-            metric_sql = self._compile_metric(
-                metric_fn,
-                metric_field,
-                {},
-                {},
-                {},
-                {},
-                False,
-                qf_base_alias,
-                alias_by_wt,
-                expr=None,
-            )
-            selects = [f"{qf_expr_sql} AS {self._safe_alias(alias)}" for qf_expr_sql, alias in zip(grain_exprs, grain_aliases)]
-            selects.append(f"{metric_sql} AS {self._safe_alias(value_alias)}")
-            side_sql = f"{self._qf_safe_ident(cte_name)} AS (\n  SELECT {', '.join(selects)}\n  FROM {from_sql}"
-            if where_parts:
-                side_sql += f"\n  WHERE {' AND '.join(where_parts)}"
-            if grain_exprs:
-                side_sql += f"\n  GROUP BY {', '.join(grain_exprs)}"
-            side_sql += "\n)"
-            return side_sql
+        def _from_clause_fn(required_table_ids, *, severity_table_ids=None):
+            return self._from_clause_from_plan(plan, required_table_ids, severity_table_ids=severity_table_ids)
 
-        num_cte = build_side_cte(
-            cte_name="num",
-            metric_part=numerator,
-            metric_table_id=num_table_id,
-            filters_node=num_filter_tree,
-            value_alias="num_val",
+        def _required_table_ids_fn(side_query):
+            return self._required_table_ids_from_query(side_query, plan)
+
+        def _compile_metric_fn(fn, field, derived_by_exprid, derived_by_name, rewrite_by_colname, rewrite_by_modelid, qf_using_prep, qf_base_alias_, alias_by_wt_):
+            return self._compile_metric(fn, field, derived_by_exprid, derived_by_name, rewrite_by_colname, rewrite_by_modelid, qf_using_prep, qf_base_alias_, alias_by_wt_)
+
+        return _SplitRatioCompiler().compile(
+            query_json=q,
+            split_metric=split_metric,
+            primary_id=primary_id,
+            qf_base_alias=qf_base_alias,
+            alias_by_wt=alias_by_wt,
+            mode=mode,
+            limit=limit,
+            offset=offset,
+            compile_where_fn=_compile_where_fn,
+            from_clause_fn=_from_clause_fn,
+            required_table_ids_fn=_required_table_ids_fn,
+            compile_metric_fn=_compile_metric_fn,
+            severity_pred=primary_severity_pred,
+            severity_table_ids=severity_table_ids,
         )
-        den_cte = build_side_cte(
-            cte_name="den",
-            metric_part=denominator,
-            metric_table_id=den_table_id,
-            filters_node=den_filter_tree,
-            value_alias="den_val",
-        )
-
-        metric_name = str(expr.get("name") or split_metric.get("id") or "derived_ratio")
-        metric_label = str(split_metric.get("label") or metric_name or "derived_ratio")
-        ratio_expr = "num.num_val / NULLIF(den.den_val, 0)" if bool(expr.get("safe_divide", True)) else "num.num_val / den.den_val"
-        multiply_by = expr.get("multiply_by")
-        if isinstance(multiply_by, (int, float)):
-            ratio_expr = f"({ratio_expr}) * {float(multiply_by)}"
-
-        select_list = [f"num.{self._qf_safe_ident(alias)} AS {self._safe_alias(alias)}" for alias in grain_aliases]
-        select_list.append(f"{ratio_expr} AS {self._safe_alias(metric_label)}")
-
-        debug_enabled = bool(((q.get("meta") or {}).get("debug")))
-        if debug_enabled:
-            select_list.append("num.num_val AS numerator_value")
-            select_list.append("den.den_val AS denominator_value")
-
-        if grain_aliases:
-            join_on = " AND ".join(f"num.{self._qf_safe_ident(alias)} = den.{self._qf_safe_ident(alias)}" for alias in grain_aliases)
-        else:
-            join_on = "1=1"
-
-        base_sql = (
-            f"WITH {num_cte},\n{den_cte}\n"
-            f"SELECT {', '.join(select_list)}\n"
-            "FROM num\n"
-            f"LEFT JOIN den ON {join_on}"
-        )
-        qf_count_sql = f"SELECT COUNT(*) AS total FROM (\n{base_sql}\n) q"
-
-        order_sql = ""
-        for entry in (q.get("sorting") or []):
-            if not isinstance(entry, dict):
-                continue
-            col = entry.get("col") if "col" in entry else entry.get("columnName")
-            direction = str(entry.get("dir") or "asc").strip().lower()
-            if direction not in ("asc", "desc"):
-                continue
-            alias = None
-            if isinstance(col, dict):
-                cn = str(col.get("columnName") or "").strip()
-                if cn in grain_aliases:
-                    alias = cn
-            elif isinstance(col, str) and col.strip() in grain_aliases:
-                alias = col.strip()
-            if alias:
-                order_sql = f"{self._safe_alias(alias)} {direction.upper()}"
-                break
-        if not order_sql and grain_aliases:
-            order_sql = ", ".join(f"{self._safe_alias(alias)} ASC" for alias in grain_aliases)
-
-        sql = base_sql
-        if order_sql:
-            sql += f"\nORDER BY {order_sql}"
-        if mode == "preview":
-            sql += f"\nLIMIT {int(limit)}\nOFFSET {int(offset)}"
-
-        qf_output_cols = [{"key": alias, "label": alias} for alias in grain_aliases]
-        qf_output_cols.append({"key": metric_label, "label": metric_label})
-        if debug_enabled:
-            qf_output_cols.append({"key": "numerator_value", "label": "numerator_value"})
-            qf_output_cols.append({"key": "denominator_value", "label": "denominator_value"})
-        return ForgeCompiledQuery(sql=sql, qf_count_sql=qf_count_sql, params=params, qf_output_cols=qf_output_cols)
 
     # -----------------------------
     # Data Prep compilation (CTE)
@@ -1992,255 +1660,7 @@ class QueryForgeService:
         qf_base_alias: str,
         alias_by_wt: Dict[int, str],
     ) -> Dict[str, Any]:
-        if not data_prep or not isinstance(data_prep, dict):
-            return {
-                "exprs": [],
-                "derived_by_exprid": {},
-                "computed_alias_by_expr_id": {},
-                "derived_by_name": {},
-                "rewrite_by_colname": {},
-                "rewrite_by_modelid": {},
-                "rewrite_by_wt_col": {},
-            }
-
-        rules = data_prep.get("rules") or []
-        if not isinstance(rules, list) or not rules:
-            return {
-                "exprs": [],
-                "derived_by_exprid": {},
-                "computed_alias_by_expr_id": {},
-                "derived_by_name": {},
-                "rewrite_by_colname": {},
-                "rewrite_by_modelid": {},
-                "rewrite_by_wt_col": {},
-            }
-
-        derived_by_exprid: Dict[str, str] = {}
-        computed_alias_by_expr_id: Dict[str, str] = {}
-        derived_by_name: Dict[str, str] = {}
-        rewrite_by_colname: Dict[str, str] = {}
-        rewrite_by_modelid: Dict[int, str] = {}
-        rewrite_by_wt_col: Dict[tuple, str] = {}
-
-        exprs: List[str] = []
-        qf_using_prep = False  # compiling inside CTE against src
-
-        def qf_normalize_date_fmt(fmt: Any) -> Optional[str]:
-            if fmt is None:
-                return None
-            if not isinstance(fmt, str):
-                raise ForgeError("parse_date.format must be string or null", status_code=400)
-            s = fmt.strip()
-            if s.startswith("(") and s.endswith(")"):
-                s = s[1:-1].strip()
-            if not s:
-                return None
-            return s.lower()
-
-        for i, r in enumerate(rules):
-            if not isinstance(r, dict):
-                raise ForgeError(f"dataPrep.rules[{i}] must be an object", status_code=400)
-
-            op = (r.get("op") or "").strip()
-            rid = r.get("id")
-            if not rid or not isinstance(rid, str):
-                raise ForgeError(f"dataPrep.rules[{i}].id is required", status_code=400)
-
-            target = r.get("target")
-            output = r.get("output")
-            if not isinstance(output, dict):
-                raise ForgeError(f"dataPrep.rules[{i}].output must be a column key", status_code=400)
-            if op != "concat" and not isinstance(target, dict):
-                raise ForgeError(f"dataPrep.rules[{i}].target must be a column key", status_code=400)
-
-            qf_out_name = output.get("columnName")
-            if not qf_out_name or not isinstance(qf_out_name, str):
-                raise ForgeError(f"dataPrep.rules[{i}].output.columnName is required", status_code=400)
-
-            # ✅ Always use an internal identifier to avoid collisions with SELECT *
-            qf_out_ident = self._dp_ident(qf_out_name)
-
-            target_expr = None
-            if op != "concat":
-                target_expr = self._col_expr(
-                    target,
-                    derived_by_exprid,
-                    derived_by_name,
-                    rewrite_by_colname,
-                    rewrite_by_modelid,
-                    qf_using_prep,
-                    qf_base_alias,
-                    alias_by_wt,
-                    rewrite_by_wt_col=rewrite_by_wt_col,
-                )
-
-            if op == "fill_empty":
-                treat_blank = bool(r.get("treatBlankAsEmpty"))
-                val = r.get("value")
-                fb = r.get("fallbackCol")
-
-                base = target_expr
-                if treat_blank:
-                    base = f"NULLIF(TRIM({target_expr}), '')"
-
-                if fb:
-                    fb_expr = self._col_expr(
-                        fb,
-                        derived_by_exprid,
-                        derived_by_name,
-                        rewrite_by_colname,
-                        rewrite_by_modelid,
-                        qf_using_prep,
-                        qf_base_alias,
-                        alias_by_wt,
-                        rewrite_by_wt_col=rewrite_by_wt_col,
-                    )
-                    expr = f"COALESCE({base}, {fb_expr})"
-                else:
-                    expr = f"COALESCE({base}, {self._literal_sql(val)})"
-
-                exprs.append(f"{expr} AS {qf_out_ident}")
-
-            elif op == "cast":
-                to_type = r.get("toType")
-                if not to_type or not isinstance(to_type, str):
-                    raise ForgeError("cast.toType is required", status_code=400)
-                safe = bool(r.get("safe"))
-                if safe:
-                    exprs.append(f"TRY_CAST({target_expr} AS {to_type}) AS {qf_out_ident}")
-                else:
-                    exprs.append(f"CAST({target_expr} AS {to_type}) AS {qf_out_ident}")
-
-            elif op == "normalize_text":
-                mode = r.get("mode")
-                if mode not in ("lower", "upper", "trim", "trim_lower"):
-                    raise ForgeError("normalize_text.mode invalid", status_code=400)
-                if mode == "lower":
-                    exprs.append(f"LOWER({target_expr}) AS {qf_out_ident}")
-                elif mode == "upper":
-                    exprs.append(f"UPPER({target_expr}) AS {qf_out_ident}")
-                elif mode == "trim":
-                    exprs.append(f"TRIM({target_expr}) AS {qf_out_ident}")
-                else:
-                    exprs.append(f"LOWER(TRIM({target_expr})) AS {qf_out_ident}")
-
-            elif op == "parse_date":
-                fmt = qf_normalize_date_fmt(r.get("format", None))
-                if fmt:
-                    exprs.append(f"TO_DATE({target_expr}, {self._literal_sql(fmt)}) AS {qf_out_ident}")
-                else:
-                    exprs.append(f"TO_DATE({target_expr}) AS {qf_out_ident}")
-
-            elif op == "date_part":
-                part = (r.get("part") or "").strip().lower()
-                if part not in ("year", "month", "day"):
-                    raise ForgeError("date_part.part must be year|month|day", status_code=400)
-                fn = part.upper()
-                # Use YEAR/MONTH/DAY to compare numerically instead of DATE = '2024' string comparisons.
-                exprs.append(f"{fn}({target_expr}) AS {qf_out_ident}")
-
-            elif op == "round":
-                dec = r.get("decimals")
-                if dec is None or not isinstance(dec, int):
-                    raise ForgeError("round.decimals must be an integer", status_code=400)
-                exprs.append(f"ROUND({target_expr}, {int(dec)}) AS {qf_out_ident}")
-
-            elif op == "concat":
-                inputs = r.get("inputs")
-                if not isinstance(inputs, list) or not inputs:
-                    raise ForgeError("concat.inputs must be a non-empty list", status_code=400)
-
-                separator = r.get("separator")
-                if separator is None:
-                    separator = ""
-                if not isinstance(separator, str):
-                    raise ForgeError("concat.separator must be a string or null", status_code=400)
-                sep_sql = self._literal_sql(separator)
-
-                nulls_mode = (r.get("nulls") or "skip").strip().lower()
-                if nulls_mode not in ("skip", "propagate", "empty"):
-                    raise ForgeError("concat.nulls must be skip|propagate|empty", status_code=400)
-
-                parts: List[str] = []
-                for j, ref in enumerate(inputs):
-                    if not isinstance(ref, dict):
-                        raise ForgeError(f"concat.inputs[{j}] must be an object", status_code=400)
-                    ref_type = (ref.get("type") or "").strip().lower()
-                    if ref_type == "column":
-                        expr = self._col_expr(
-                            ref.get("col"),
-                            derived_by_exprid,
-                            derived_by_name,
-                            rewrite_by_colname,
-                            rewrite_by_modelid,
-                            qf_using_prep,
-                            qf_base_alias,
-                            alias_by_wt,
-                            rewrite_by_wt_col=rewrite_by_wt_col,
-                        )
-                    elif ref_type == "literal":
-                        expr = self._literal_sql(ref.get("value"))
-                    else:
-                        raise ForgeError("concat.inputs type must be column or literal", status_code=400)
-
-                    if nulls_mode == "empty":
-                        expr = f"COALESCE({expr}, '')"
-                    parts.append(expr)
-
-                if nulls_mode == "skip":
-                    qf_expr_sql = f"CONCAT_WS({sep_sql}, {', '.join(parts)})"
-                else:
-                    if separator:
-                        interleaved: List[str] = []
-                        for idx, part in enumerate(parts):
-                            if idx:
-                                interleaved.append(sep_sql)
-                            interleaved.append(part)
-                        qf_expr_sql = f"CONCAT({', '.join(interleaved)})"
-                    else:
-                        qf_expr_sql = f"CONCAT({', '.join(parts)})"
-                exprs.append(f"{qf_expr_sql} AS {qf_out_ident}")
-
-            else:
-                raise ForgeError(f"Unsupported dataPrep op: {op}", status_code=400)
-
-            derived_by_exprid[rid] = qf_out_ident
-            out_expr_id = output.get("exprId")
-            if out_expr_id and isinstance(out_expr_id, str):
-                computed_alias_by_expr_id[out_expr_id] = qf_out_ident
-            derived_by_name[qf_out_name] = qf_out_ident
-
-            # ✅ query-wide rewrite: target -> internal output identifier
-            if isinstance(target, dict):
-                tgt_name = target.get("columnName")
-                if isinstance(tgt_name, str) and tgt_name:
-                    rewrite_by_colname[tgt_name] = qf_out_ident
-
-                tgt_id = target.get("modelColumnId")
-                if isinstance(tgt_id, int):
-                    rewrite_by_modelid[tgt_id] = qf_out_ident
-
-        if not exprs:
-            return {
-                "exprs": [],
-                "derived_by_exprid": {},
-                "computed_alias_by_expr_id": {},
-                "derived_by_name": {},
-                "rewrite_by_colname": {},
-                "rewrite_by_modelid": {},
-                "rewrite_by_wt_col": {},
-            }
-
-        return {
-            "exprs": exprs,
-            "derived_by_exprid": derived_by_exprid,
-            "computed_alias_by_expr_id": computed_alias_by_expr_id,
-            "derived_by_name": derived_by_name,
-            "rewrite_by_colname": rewrite_by_colname,
-            "rewrite_by_modelid": rewrite_by_modelid,
-            "rewrite_by_wt_col": rewrite_by_wt_col,
-        }
-
+        return _DataPrepCompiler()._compile_meta(data_prep, qf_base_alias=qf_base_alias, alias_by_wt=alias_by_wt)
     def _render_data_prep_cte(
         self,
         *,
@@ -2249,22 +1669,12 @@ class QueryForgeService:
         exprs: List[str],
         base_where_sql: str = "",
     ) -> str:
-        if not exprs:
-            return ""
-        select_exprs = list(base_selects or [])
-        select_exprs.extend(exprs)
-        joined_exprs = ",\n    ".join(select_exprs)
-        sql = (
-            "WITH prep AS (\n"
-            "  SELECT\n"
-            f"    {joined_exprs}\n"
-            f"  FROM {base_from_sql}\n"
+        return _DataPrepCompiler()._render_cte(
+            base_from_sql=base_from_sql,
+            base_selects=base_selects,
+            exprs=exprs,
+            base_where_sql=base_where_sql,
         )
-        if base_where_sql:
-            sql += f"  WHERE {base_where_sql}\n"
-        sql += ")"
-        return sql
-
     def _from_clause_from_plan(
         self,
         plan: DomainPlan,
@@ -2586,123 +1996,23 @@ class QueryForgeService:
         qf_base_alias: str,
         alias_by_wt: Dict[int, str],
     ) -> Tuple[List[str], Dict[str, str], Dict[int, str], Dict[tuple, str]]:
-        if not required_cols:
-            return [], {}, {}, {}
-
-        name_counts: Dict[str, int] = {}
-        refs_by_name: Dict[str, List[Dict[str, Any]]] = {}
-        for c in required_cols:
-            cn = c.get("columnName") or ""
-            name_counts[cn] = name_counts.get(cn, 0) + 1
-            refs_by_name.setdefault(cn, []).append(c)
-
-        used: set[str] = set()
-
-        def unique_name(base: str) -> str:
-            key = base.lower()
-            if key not in used:
-                used.add(key)
-                return base
-            i = 2
-            while True:
-                candidate = f"{base}_{i}"
-                key = candidate.lower()
-                if key not in used:
-                    used.add(key)
-                    return candidate
-                i += 1
-
-        base_selects: List[str] = []
-        by_colname: Dict[str, str] = {}
-        by_modelid: Dict[int, str] = {}
-        by_wt_col: Dict[tuple, str] = {}
-
-        for c in required_cols:
-            cn = c.get("columnName")
-            if not cn:
-                continue
-            wt_id = c.get("workspaceTableId")
-            if wt_id is None:
-                wt_id = primary_id
-            try:
-                wt_id_int = int(wt_id)
-            except Exception:
-                continue
-
-            alias = alias_by_wt.get(wt_id_int) or (qf_base_alias if wt_id_int == primary_id else None)
-            if not alias:
-                raise ForgeError("workspaceTableId is not in domain", status_code=400)
-
-            qf_alias_hint = alias_by_wt.get(wt_id_int) or (qf_base_alias if wt_id_int == primary_id else f"t{wt_id_int}")
-
-            qf_out_name = cn
-            if name_counts.get(cn, 0) > 1:
-                if wt_id_int != primary_id:
-                    qf_out_name = f"{qf_alias_hint}_{cn}"
-            qf_out_name = unique_name(qf_out_name)
-
-            base_selects.append(
-                f"{self._qf_safe_ident(alias)}.{self._qf_safe_ident(cn)} AS {self._qf_safe_ident(qf_out_name)}"
-            )
-
-            mid = c.get("modelColumnId")
-            if isinstance(mid, int):
-                by_modelid[mid] = qf_out_name
-            by_wt_col[(wt_id_int, cn)] = qf_out_name
-
-        for cn, refs in refs_by_name.items():
-            chosen = None
-            for r in refs:
-                if int(r.get("workspaceTableId") or primary_id) == primary_id:
-                    chosen = r
-                    break
-            if not chosen and len(refs) == 1:
-                chosen = refs[0]
-            if not chosen:
-                continue
-            wt_id = int(chosen.get("workspaceTableId") or primary_id)
-            mapped = by_wt_col.get((wt_id, cn))
-            if mapped:
-                by_colname[cn] = mapped
-
-        return base_selects, by_colname, by_modelid, by_wt_col
-
+        return _DataPrepCompiler().build_prep_base_selects(
+            required_cols,
+            primary_id=primary_id,
+            qf_base_alias=qf_base_alias,
+            alias_by_wt=alias_by_wt,
+        )
     def _qf_render_sql(self, sql: str, params: Dict[str, Any]) -> str:
-        if not sql or not params:
-            return sql
-
-        def render_value(v: Any) -> str:
-            if isinstance(v, (list, tuple, set)):
-                return "(" + ", ".join(self._literal_sql(x) for x in v) + ")"
-            return self._literal_sql(v)
-
-        def repl(match: re.Match) -> str:
-            key = match.group(0).lstrip(":")
-            v = params.get(key, None)
-            if v is None and key not in params:
-                return match.group(0)
-            return render_value(v)
-
-        return re.sub(r":p\d+", repl, sql)
+        return _su_render_sql(sql, params)
 
     def _literal_sql(self, v: Any) -> str:
-        if v is None:
-            return "NULL"
-        if isinstance(v, bool):
-            return "TRUE" if v else "FALSE"
-        if isinstance(v, (int, float)):
-            return str(v)
-        s = str(v)
-        s = s.replace("\\", "\\\\").replace("'", "''")
-        return f"'{s}'"
+        return _su_literal_sql(v)
 
     # -----------------------------
-    # Helpers (safe identifiers)
+    # Helpers (safe identifiers — delegated to sql_utils)
     # -----------------------------
     def _qf_safe_ident(self, s: str) -> str:
-        if not s or not isinstance(s, str) or not self._IDENT_RE.match(s):
-            raise ForgeError(f"Invalid identifier: {s}", status_code=400)
-        return s
+        return _su_safe_ident(s)
 
     def _safe_table_full_name(self, name: str) -> str:
         if not name or not isinstance(name, str):
@@ -2713,34 +2023,10 @@ class QueryForgeService:
         return ".".join(f"`{self._qf_safe_ident(p)}`" for p in parts)
 
     def _safe_alias(self, s: str) -> str:
-        if s is None or not isinstance(s, str):
-            raise ForgeError("Invalid alias", status_code=400)
-
-        v = s.strip()
-        if not v:
-            raise ForgeError("Invalid alias", status_code=400)
-
-        if self._IDENT_RE.match(v):
-            return v
-
-        if any(ord(ch) < 32 for ch in v):
-            raise ForgeError("Invalid alias (control characters)", status_code=400)
-
-        v = v.replace("`", "``")
-        return f"`{v}`"
+        return _su_safe_alias(s)
 
     def _dp_ident(self, qf_out_name: str) -> str:
-        """
-        Internal DP column identifier, guaranteed safe and collision-resistant.
-        Example: qf_out_name="claim type" -> "__dp_claim_type"
-        """
-        base = re.sub(r"[^A-Za-z0-9_]+", "_", (qf_out_name or "").strip())
-        if not base:
-            base = "col"
-        # ensure doesn't start with a digit
-        if base[0].isdigit():
-            base = f"c_{base}"
-        return self._qf_safe_ident(f"__dp_{base}")
+        return _su_dp_ident(qf_out_name)
 
     def _project_expr(self, expr: str, desired_name: str | None, user_alias: str | None) -> str:
         """
@@ -2772,76 +2058,20 @@ class QueryForgeService:
         *,
         rewrite_by_wt_col: Optional[Dict[tuple, str]] = None,
     ) -> str:
-        if rewrite_by_wt_col is None:
-            rewrite_by_wt_col = {}
-        # legacy string
-        if isinstance(key_or_ref, str):
-            cn = key_or_ref.strip()
-            if "." in cn:
-                raise ForgeError(f"Qualified column names are not allowed: {cn}", status_code=400)
-
-            if qf_using_prep and cn in rewrite_by_colname:
-                return rewrite_by_colname[cn]
-
-            return self._physical_col_expr(cn, qf_using_prep=qf_using_prep, qf_base_alias=qf_base_alias, alias=None)
-
-        if not isinstance(key_or_ref, dict):
-            raise ForgeError("Invalid column reference", status_code=400)
-
-        expr_id = key_or_ref.get("exprId")
-        cn = key_or_ref.get("columnName")
-        mid = key_or_ref.get("modelColumnId")
-        wt_id = key_or_ref.get("workspaceTableId")
-
-        if expr_id and expr_id in derived_by_exprid:
-            return derived_by_exprid[expr_id]
-
-        if cn and cn in derived_by_name:
-            return derived_by_name[cn]
-
-        if not cn or not isinstance(cn, str):
-            raise ForgeError("Invalid columnName", status_code=400)
-        if "." in cn:
-            raise ForgeError(f"Qualified column names are not allowed: {cn}", status_code=400)
-
-        if qf_using_prep:
-            if isinstance(mid, int) and mid in rewrite_by_modelid:
-                return rewrite_by_modelid[mid]
-            if wt_id is not None:
-                try:
-                    wt_id_int = int(wt_id)
-                except Exception:
-                    wt_id_int = None
-                if wt_id_int is not None:
-                    mapped = rewrite_by_wt_col.get((wt_id_int, cn))
-                    if mapped:
-                        return mapped
-            if cn in rewrite_by_colname:
-                return rewrite_by_colname[cn]
-
-        alias = None
-        if wt_id is not None:
-            try:
-                wt_id_int = int(wt_id)
-            except Exception:
-                raise ForgeError("Invalid workspaceTableId", status_code=400)
-            alias = alias_by_wt.get(wt_id_int)
-            if not alias:
-                raise ForgeError("workspaceTableId is not in domain", status_code=400)
-
-        return self._physical_col_expr(cn, qf_using_prep=qf_using_prep, qf_base_alias=qf_base_alias, alias=alias)
+        return _su_col_expr(
+            key_or_ref,
+            derived_by_exprid,
+            derived_by_name,
+            rewrite_by_colname,
+            rewrite_by_modelid,
+            qf_using_prep,
+            qf_base_alias,
+            alias_by_wt,
+            rewrite_by_wt_col=rewrite_by_wt_col,
+        )
 
     def _physical_col_expr(self, col_name: str, qf_using_prep: bool, qf_base_alias: str, alias: str | None) -> str:
-        if not col_name or not isinstance(col_name, str):
-            raise ForgeError("Invalid columnName", status_code=400)
-        if "." in col_name:
-            raise ForgeError(f"Qualified column names are not allowed: {col_name}", status_code=400)
-
-        if qf_using_prep:
-            return self._qf_safe_ident(col_name)
-
-        base = alias or qf_base_alias
-        return f"{self._qf_safe_ident(base)}.{self._qf_safe_ident(col_name)}"
+        return _su_physical_col_expr(col_name, qf_using_prep=qf_using_prep, qf_base_alias=qf_base_alias, alias=alias)
 
     # -----------------------------
     # Metric compilation
@@ -3603,76 +2833,16 @@ class QueryForgeService:
 
     # -----------------------------
     # Column/row inference & shaping
+    # (delegated to result_mapper module)
     # -----------------------------
     def _qf_cols_from_json(self, q: dict) -> List[Dict[str, Any]]:
-        aggs = (q.get("aggs") or {})
-        if aggs.get("enabled"):
-            cols: List[Dict[str, Any]] = []
-
-            alias_map = {
-                (c.get("columnName")): (c.get("alias") or None)
-                for c in (q.get("columns") or [])
-                if isinstance(c, dict)
-            }
-
-            for gb in (aggs.get("groupBy") or []):
-                raw = gb.get("columnName") if isinstance(gb, dict) else str(gb)
-                cols.append({"key": raw, "label": (alias_map.get(raw) or raw)})
-
-            for m in (aggs.get("metrics") or []):
-                label = (m.get("label") or "").strip() or None
-                fn = (m.get("fn") or "").strip() or "metric"
-                key = label or fn
-                cols.append({"key": key, "label": label or fn})
-
-            return cols
-
-        out: List[Dict[str, Any]] = []
-        for c in (q.get("columns") or []):
-            if not isinstance(c, dict):
-                continue
-            k = c.get("alias") or c.get("columnName")
-            if not k:
-                continue
-            out.append({"key": k, "label": k})
-        return out
+        return _rm_cols_from_json(q)
 
     def _qf_infer_cols(self, rows: List[Any]) -> List[Dict[str, Any]]:
-        if not rows:
-            return []
-        first = rows[0]
-        if isinstance(first, dict):
-            return [{"key": k, "label": k} for k in first.keys()]
-        return []
+        return _rm_infer_cols(rows)
 
     def _qf_extract_total(self, count_rows: List[Any]) -> int:
-        if not count_rows:
-            return 0
-        first = count_rows[0]
-        if isinstance(first, dict):
-            return int(first.get("total") or 0)
-        if isinstance(first, (list, tuple)) and len(first) >= 1:
-            return int(first[0] or 0)
-        return 0
+        return _rm_extract_total(count_rows)
 
     def _qf_rows_to_dicts(self, qf_result_rows, columns):
-        if not qf_result_rows:
-            return []
-
-        if isinstance(qf_result_rows, list) and qf_result_rows and isinstance(qf_result_rows[0], dict):
-            return qf_result_rows
-
-        if not columns:
-            return []
-
-        if isinstance(columns, list) and columns and isinstance(columns[0], dict):
-            keys = [c.get("key") for c in columns]
-        else:
-            keys = list(columns)
-
-        out = []
-        for row in qf_result_rows:
-            if not isinstance(row, (list, tuple)):
-                continue
-            out.append({keys[i]: (row[i] if i < len(row) else None) for i in range(len(keys))})
-        return out
+        return _rm_rows_to_dicts(qf_result_rows, columns)

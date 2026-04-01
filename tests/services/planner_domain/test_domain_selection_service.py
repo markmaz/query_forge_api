@@ -4,6 +4,8 @@ from __future__ import annotations
 from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
+from app.services.domain.planner_domain_selection_policy_service import PlannerDomainSelectionPolicyService
+from app.services.domain.planner_retrieval_policy_service import PlannerRetrievalPolicyService
 from app.services.planner_domain.domain_selection_service import DomainSelectionService
 
 
@@ -161,6 +163,42 @@ def test_score_domain_candidate_staff_boost() -> None:
     assert score > base_score
 
 
+def test_score_domain_candidate_uses_retrieval_policy_domain_name_bias() -> None:
+    candidate: Dict[str, Any] = {"score": 0.5, "name": "academic calendar and scheduling"}
+    capabilities: Dict[str, Any] = {"dimensions": [{"col": f"d{i}"} for i in range(10)]}
+    shortlisted: List[Dict[str, Any]] = [{"column_name": "calendar_date", "column_key": "wt1.calendar_date"}]
+
+    score = DomainSelectionService._score_domain_candidate(
+        prompt="Show me all the days off barksdale elementary has in December",
+        candidate=candidate,
+        capabilities=capabilities,
+        shortlisted_columns=shortlisted,
+    )
+
+    base_score = 0.5 * 0.65 + (1 / 10) * 0.35 + 0.16  # calendar-day shortlist boost only
+    assert score > base_score
+
+
+def test_score_domain_candidate_uses_domain_selection_policy_boosts() -> None:
+    candidate: Dict[str, Any] = {"score": 0.5, "name": "student_demographics"}
+    capabilities: Dict[str, Any] = {"dimensions": [{"col": f"d{i}"} for i in range(10)]}
+    shortlisted: List[Dict[str, Any]] = [
+        {"column_name": "student_unique_id", "column_key": "wt1.student_unique_id"},
+        {"column_name": "first_name", "column_key": "wt1.first_name"},
+    ]
+
+    score = DomainSelectionService._score_domain_candidate(
+        prompt="show students",
+        candidate=candidate,
+        capabilities=capabilities,
+        shortlisted_columns=shortlisted,
+        selection_policy_service=PlannerDomainSelectionPolicyService(enable_db_lookup=False),
+    )
+
+    base_score = 0.5 * 0.65 + (2 / 10) * 0.35
+    assert score > base_score
+
+
 # ---------------------------------------------------------------------------
 # _score_semantic_grounding_bundle
 # ---------------------------------------------------------------------------
@@ -230,3 +268,39 @@ def test_score_semantic_grounding_bundle_capped_at_0_22() -> None:
         prompt="school year semester terms", grounding_bundle=bundle
     )
     assert score <= 0.22
+
+
+def test_get_domain_candidates_uses_retrieval_policy_query_specs() -> None:
+    class _RecordingDomainVector:
+        def __init__(self) -> None:
+            self.queries: List[str] = []
+
+        def search_domains(self, *, workspace_id, query, limit, score_threshold, include_payload):
+            assert workspace_id == "ws-1"
+            assert limit == 6
+            assert score_threshold == 0.0
+            assert include_payload is False
+            self.queries.append(query)
+            return {"results": [{"domain_id": 21, "name": "Student Demographics", "score": 0.7}]}
+
+    vector = _RecordingDomainVector()
+    svc = DomainSelectionService(
+        domain_vector=vector,
+        capabilities_service=MagicMock(),
+        rerank_policy_engine=MagicMock(extract_prompt_signals=lambda *, prompt: ["student_listing", "age_extreme_prompt"]),
+        embedding_model_factory=MagicMock(),
+        column_vector_factory=MagicMock(),
+        semantic_grounding_factory=MagicMock(),
+        semantic_alias_constraints_fn=MagicMock(return_value=[]),
+        retrieval_policy_service=PlannerRetrievalPolicyService(enable_db_lookup=False),
+    )
+
+    out = svc._get_domain_candidates(
+        workspace_id="ws-1",
+        vertical_norm="education",
+        prompt="Show me the eldest student",
+        provided_domain_id=None,
+    )
+
+    assert any(query == "student demographics birth date age" for query in vector.queries)
+    assert any(row["domain_id"] == 21 for row in out)

@@ -156,10 +156,12 @@
       "vector_score": 1.0,
       "policy_adjustment": 0.0,
       "rerank_signals": [
+        "canonical_name_preference_prompt",
         "listing_intent",
         "needs_school_filter",
         "school_literal_present",
-        "staff_listing"
+        "staff_listing",
+        "staff_work_context_prompt"
       ],
       "domain_capabilities": {
         "present": [
@@ -181,10 +183,12 @@
     }
   ],
   "rerank_signals": [
+    "canonical_name_preference_prompt",
     "listing_intent",
     "needs_school_filter",
     "school_literal_present",
-    "staff_listing"
+    "staff_listing",
+    "staff_work_context_prompt"
   ],
   "column_shortlist_count": 4,
   "slot_hints": {
@@ -468,10 +472,12 @@
   },
   "projection_policy": {
     "prompt_signals": [
+      "canonical_name_preference_prompt",
       "listing_intent",
       "needs_school_filter",
       "school_literal_present",
-      "staff_listing"
+      "staff_listing",
+      "staff_work_context_prompt"
     ],
     "matched_policies": [
       "human_school_filter_projection"
@@ -513,20 +519,24 @@
         "extract_signals": {
           "source_text": "show me the staff at barksdale elementary",
           "signals": [
+            "canonical_name_preference_prompt",
             "listing_intent",
             "needs_school_filter",
             "school_literal_present",
-            "staff_listing"
+            "staff_listing",
+            "staff_work_context_prompt"
           ]
         },
         "apply_policy_rerank": {
           "candidate_count": 1,
           "policy_effect_count": 0,
           "signals": [
+            "canonical_name_preference_prompt",
             "listing_intent",
             "needs_school_filter",
             "school_literal_present",
-            "staff_listing"
+            "staff_listing",
+            "staff_work_context_prompt"
           ]
         }
       },
@@ -564,10 +574,12 @@
           "summary": {
             "source_text": "show me the staff at barksdale elementary",
             "signals": [
+              "canonical_name_preference_prompt",
               "listing_intent",
               "needs_school_filter",
               "school_literal_present",
-              "staff_listing"
+              "staff_listing",
+              "staff_work_context_prompt"
             ]
           },
           "lineage": [
@@ -582,10 +594,12 @@
             "candidate_count": 1,
             "policy_effect_count": 0,
             "signals": [
+              "canonical_name_preference_prompt",
               "listing_intent",
               "needs_school_filter",
               "school_literal_present",
-              "staff_listing"
+              "staff_listing",
+              "staff_work_context_prompt"
             ]
           },
           "lineage": [

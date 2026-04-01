@@ -94,9 +94,11 @@
       "policy_adjustment": 0.0,
       "rerank_signals": [
         "age_extreme_prompt",
+        "canonical_name_preference_prompt",
         "listing_intent",
         "needs_student_identity",
-        "student_listing"
+        "student_listing",
+        "student_school_context_prompt"
       ],
       "domain_capabilities": {
         "present": [
@@ -117,9 +119,11 @@
   ],
   "rerank_signals": [
     "age_extreme_prompt",
+    "canonical_name_preference_prompt",
     "listing_intent",
     "needs_student_identity",
-    "student_listing"
+    "student_listing",
+    "student_school_context_prompt"
   ],
   "column_shortlist_count": 2,
   "slot_hints": {
@@ -403,9 +407,11 @@
   "projection_policy": {
     "prompt_signals": [
       "age_extreme_prompt",
+      "canonical_name_preference_prompt",
       "listing_intent",
       "needs_student_identity",
-      "student_listing"
+      "student_listing",
+      "student_school_context_prompt"
     ],
     "matched_policies": [
       "student_listing_identity_projection"
@@ -448,9 +454,11 @@
           "source_text": "show me the oldest student",
           "signals": [
             "age_extreme_prompt",
+            "canonical_name_preference_prompt",
             "listing_intent",
             "needs_student_identity",
-            "student_listing"
+            "student_listing",
+            "student_school_context_prompt"
           ]
         },
         "apply_policy_rerank": {
@@ -458,9 +466,11 @@
           "policy_effect_count": 0,
           "signals": [
             "age_extreme_prompt",
+            "canonical_name_preference_prompt",
             "listing_intent",
             "needs_student_identity",
-            "student_listing"
+            "student_listing",
+            "student_school_context_prompt"
           ]
         }
       },
@@ -499,9 +509,11 @@
             "source_text": "show me the oldest student",
             "signals": [
               "age_extreme_prompt",
+              "canonical_name_preference_prompt",
               "listing_intent",
               "needs_student_identity",
-              "student_listing"
+              "student_listing",
+              "student_school_context_prompt"
             ]
           },
           "lineage": [
@@ -517,9 +529,11 @@
             "policy_effect_count": 0,
             "signals": [
               "age_extreme_prompt",
+              "canonical_name_preference_prompt",
               "listing_intent",
               "needs_student_identity",
-              "student_listing"
+              "student_listing",
+              "student_school_context_prompt"
             ]
           },
           "lineage": [

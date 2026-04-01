@@ -138,7 +138,7 @@ def test_projection_policy_service_prefers_more_specific_db_policy_over_seed() -
                     _policy_row(
                         id=7,
                         policy_key="student_listing_identity_projection",
-                        scope_type="workspace_domain",
+                        scope_type="workspace",
                         priority=20,
                         required_concepts=["STUDENT_ID", "STUDENT_FIRST_NAME"],
                     )
@@ -156,6 +156,31 @@ def test_projection_policy_service_prefers_more_specific_db_policy_over_seed() -
     assert out["required_concept_keys"] == ["STUDENT_ID", "STUDENT_FIRST_NAME"]
     assert out["excluded_concept_keys"] == []
     assert out["matched_policies"] == ["student_listing_identity_projection"]
+
+
+def test_projection_policy_service_rejects_legacy_scope_types_on_upsert() -> None:
+    svc = PlannerProjectionPolicyService(sql=_FakeSQL(rows_by_call=[[]]))
+
+    try:
+        svc.upsert_policy(
+            workspace_id="ws-1",
+            actor_user_id="user-1",
+            payload={
+                "policy_key": "legacy_scope_rule",
+                "name": "Legacy scope rule",
+                "scope_type": "workspace_domain",
+                "policy_json": {
+                    "version": 1,
+                    "when_signals_all": ["school_listing"],
+                    "projection_mode": "prepend",
+                    "required_column_names": ["school_name"],
+                },
+            },
+        )
+    except Exception as exc:
+        assert "Only global and workspace policy scopes are supported" in str(exc)
+    else:  # pragma: no cover - defensive
+        raise AssertionError("Expected legacy scope type to be rejected")
 
 
 def test_projection_policy_service_lists_seeded_and_db_policies() -> None:

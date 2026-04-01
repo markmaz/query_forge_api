@@ -9,8 +9,13 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.models.domain.planner_projection_policy import PlannerProjectionPolicyRule, PlannerProjectionPolicyUpsertRequest
-from app.models.domain.planner_rerank_policy import PLANNER_RERANK_SCOPE_TYPES
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.domain.policy_scope_service import (
+    annotate_effective_rows,
+    global_workspace_query_predicate,
+    require_global_workspace_scope,
+    sort_and_dedupe_global_workspace_policies,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -248,41 +253,16 @@ class PlannerProjectionPolicyService:
                   policy_json
                 FROM planner_projection_policy
                 WHERE is_active = 1
-                  AND (
-                    scope_type = 'global'
-                    OR (scope_type = 'vertical' AND scope_vertical_norm = :vertical_norm)
-                    OR (scope_type = 'workspace' AND scope_workspace_id = :workspace_id)
-                    OR (
-                      :base_domain_id IS NOT NULL
-                      AND scope_type = 'global_domain'
-                      AND scope_base_domain_id = :base_domain_id
-                    )
-                    OR (
-                      :base_domain_id IS NOT NULL
-                      AND scope_type = 'vertical_domain'
-                      AND scope_vertical_norm = :vertical_norm
-                      AND scope_base_domain_id = :base_domain_id
-                    )
-                    OR (
-                      :base_domain_id IS NOT NULL
-                      AND scope_type = 'workspace_domain'
-                      AND scope_workspace_id = :workspace_id
-                      AND scope_base_domain_id = :base_domain_id
-                    )
-                  )
+                  AND {global_workspace_query_predicate()}
                 """,
                 {
                     "workspace_id": str(workspace_id or "").strip() or None,
-                    "vertical_norm": str(vertical_norm or "generic").strip() or "generic",
-                    "base_domain_id": int(base_domain_id) if base_domain_id is not None else None,
                 },
             )
         except Exception as exc:  # pragma: no cover - defensive runtime fallback
             logger.warning(
-                "planner projection policy lookup failed workspace_id=%s vertical_norm=%s base_domain_id=%s err=%s",
+                "planner projection policy lookup failed workspace_id=%s err=%s",
                 workspace_id,
-                vertical_norm,
-                base_domain_id,
                 exc,
             )
             db_rows = []
@@ -295,27 +275,9 @@ class PlannerProjectionPolicyService:
                 payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             except Exception:
                 continue
-            payload["scope_rank"] = _scope_rank(str(payload.get("scope_type") or ""))
             normalized.append(payload)
 
-        normalized.sort(
-            key=lambda row: (
-                -int(row.get("scope_rank") or 0),
-                int(row.get("priority") or 100),
-                -(0 if bool(row.get("_seeded")) else 1),
-                int(row.get("id") or 0),
-            )
-        )
-
-        deduped: List[Dict[str, Any]] = []
-        seen_keys: set[str] = set()
-        for row in normalized:
-            policy_key = str(row.get("policy_key") or "").strip()
-            if policy_key == "" or policy_key in seen_keys:
-                continue
-            seen_keys.add(policy_key)
-            deduped.append(row)
-        return deduped
+        return sort_and_dedupe_global_workspace_policies(normalized)
 
     def list_policies(
         self,
@@ -347,34 +309,11 @@ class PlannerProjectionPolicyService:
               created_at,
               updated_at
             FROM planner_projection_policy
-            WHERE (
-              scope_type = 'global'
-              OR (scope_type = 'vertical' AND scope_vertical_norm = :vertical_norm)
-              OR (scope_type = 'workspace' AND scope_workspace_id = :workspace_id)
-              OR (
-                :base_domain_id IS NOT NULL
-                AND scope_type = 'global_domain'
-                AND scope_base_domain_id = :base_domain_id
-              )
-              OR (
-                :base_domain_id IS NOT NULL
-                AND scope_type = 'vertical_domain'
-                AND scope_vertical_norm = :vertical_norm
-                AND scope_base_domain_id = :base_domain_id
-              )
-              OR (
-                :base_domain_id IS NOT NULL
-                AND scope_type = 'workspace_domain'
-                AND scope_workspace_id = :workspace_id
-                AND scope_base_domain_id = :base_domain_id
-              )
-            )
+            WHERE {global_workspace_query_predicate()}
             {"AND is_active = 1" if not include_inactive else ""}
             """,
             {
                 "workspace_id": str(workspace_id),
-                "vertical_norm": str(vertical_norm or "generic").strip() or "generic",
-                "base_domain_id": int(base_domain_id) if base_domain_id is not None else None,
             },
         )
         rows.extend({**dict(row), "_seeded": False} for row in db_rows)
@@ -383,26 +322,12 @@ class PlannerProjectionPolicyService:
         for row in rows:
             payload = _json_safe_mapping(dict(row))
             payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
-            payload["scope_rank"] = _scope_rank(str(payload.get("scope_type") or ""))
             payload["is_seeded"] = bool(payload.get("_seeded"))
             payload["can_edit"] = not payload["is_seeded"]
             payload["can_delete"] = not payload["is_seeded"]
             policies.append(payload)
 
-        policies.sort(
-            key=lambda row: (
-                -int(row.get("scope_rank") or 0),
-                int(row.get("priority") or 100),
-                -(0 if bool(row.get("is_seeded")) else 1),
-                int(row.get("id") or 0),
-            )
-        )
-        effective_keys: set[str] = set()
-        for row in policies:
-            policy_key = str(row.get("policy_key") or "").strip()
-            row["is_effective"] = policy_key != "" and policy_key not in effective_keys
-            if policy_key:
-                effective_keys.add(policy_key)
+        policies = annotate_effective_rows(policies)
 
         return {
             "workspace_id": str(workspace_id),
@@ -421,16 +346,17 @@ class PlannerProjectionPolicyService:
     ) -> Dict[str, Any]:
         del actor_user_id
         req = PlannerProjectionPolicyUpsertRequest.model_validate(payload)
-        if req.scope_type.startswith("workspace") and (req.scope_workspace_id or workspace_id) != workspace_id:
+        scope_type = require_global_workspace_scope(scope_type=req.scope_type)
+        if scope_type == "workspace" and (req.scope_workspace_id or workspace_id) != workspace_id:
             raise ForgeError("workspace scope must match the active workspace", status_code=400)
         params = {
             "policy_key": req.policy_key,
             "name": req.name,
             "description": req.description,
-            "scope_type": req.scope_type,
-            "scope_workspace_id": req.scope_workspace_id or (workspace_id if req.scope_type.startswith("workspace") else None),
-            "scope_vertical_norm": req.scope_vertical_norm,
-            "scope_base_domain_id": req.scope_base_domain_id,
+            "scope_type": scope_type,
+            "scope_workspace_id": req.scope_workspace_id or (workspace_id if scope_type == "workspace" else None),
+            "scope_vertical_norm": None,
+            "scope_base_domain_id": None,
             "priority": int(req.priority),
             "is_active": 1 if req.is_active else 0,
             "stop_on_match": 1 if req.stop_on_match else 0,
@@ -619,20 +545,6 @@ def _rule_matches(*, rule: PlannerProjectionPolicyRule, prompt_signals: Sequence
     if rule.exclude_signals_any and any(item in signal_set for item in rule.exclude_signals_any):
         return False
     return True
-
-
-def _scope_rank(scope_type: str) -> int:
-    token = str(scope_type or "").strip().lower()
-    if token not in PLANNER_RERANK_SCOPE_TYPES:
-        return 0
-    return {
-        "workspace_domain": 6,
-        "vertical_domain": 5,
-        "global_domain": 4,
-        "workspace": 3,
-        "vertical": 2,
-        "global": 1,
-    }.get(token, 0)
 
 
 def _json_safe_mapping(row: Mapping[str, Any]) -> Dict[str, Any]:

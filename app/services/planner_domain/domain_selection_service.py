@@ -23,7 +23,10 @@ from app.config import (
 from app.exceptions.forge_error import ForgeError
 from app.infra.embedding_model import EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
+from app.services.domain.planner_capability_packing_policy_service import PlannerCapabilityPackingPolicyService
+from app.services.domain.planner_domain_selection_policy_service import PlannerDomainSelectionPolicyService
 from app.services.domain.planner_projection_policy_service import PlannerProjectionPolicyService
+from app.services.domain.planner_retrieval_policy_service import PlannerRetrievalPolicyService
 from app.services.domains.capabilities_service import DomainCapabilitiesService
 from app.services.planner_domain.prompt_signal_service import PromptSignalService
 from app.services.planner_domain.column_scoring import (
@@ -45,7 +48,6 @@ from app.services.planner_domain.column_scoring import (
     _is_canonical_name_column_name,
     _is_name_column_needed_for_prompt,
     _is_preferred_name_column_name,
-    _is_state_school_code_name,
     _prompt_explicitly_requests_school_key,
     _prompt_prefers_staff_role_title_filter,
     _required_column_keys,
@@ -59,15 +61,9 @@ from app.services.planner_domain.prompt_intents import (
     _prompt_has_adm_intent,
     _prompt_has_age_extreme,
     _prompt_has_birth_month_constraint,
-    _prompt_has_calendar_days_off,
-    _prompt_has_city_state_pattern,
-    _prompt_has_name_constraint,
-    _prompt_has_nativity,
     _prompt_has_subgroup,
     _prompt_implies_staff_work_context,
     _prompt_implies_student_school_context,
-    _prompt_mentions_school_or_district,
-    _prompt_prefers_canonical_name_columns,
 )
 from app.services.planner_domain.rerank_policy_engine import PlannerDomainRerankPolicyEngine
 from app.services.planner_domain.pipeline_definition import build_planner_domain_selection_pipeline_definition
@@ -176,6 +172,43 @@ def _merge_dimension_rows(*, dimensions: Sequence[Mapping[str, Any]], time_colum
     return out
 
 
+def _collect_domain_selection_shortlist_features(*, shortlisted_columns: Sequence[Mapping[str, Any]]) -> List[str]:
+    features: List[str] = []
+    if _has_subgroup_column(shortlisted_columns):
+        features.append("SUBGROUP_COLUMN")
+    if _has_student_identity_column(shortlisted_columns):
+        features.append("STUDENT_IDENTITY_COLUMN")
+    if _has_staff_identity_column(shortlisted_columns):
+        features.append("STAFF_IDENTITY_COLUMN")
+    if _has_adm_signal_columns(shortlisted_columns):
+        features.append("ADM_SIGNAL_COLUMN")
+    if _has_birth_date_columns(shortlisted_columns):
+        features.append("BIRTH_DATE_COLUMN")
+    if _has_age_columns(shortlisted_columns):
+        features.append("AGE_COLUMN")
+    if _has_calendar_day_columns(shortlisted_columns):
+        features.append("CALENDAR_DAY_COLUMN")
+    if _has_school_day_flag_columns(shortlisted_columns):
+        features.append("SCHOOL_DAY_FLAG_COLUMN")
+    return features
+
+
+def _collect_domain_selection_capability_features(*, capabilities: Mapping[str, Any]) -> List[str]:
+    features: List[str] = []
+    if _has_adm_metric(capabilities):
+        features.append("ADM_METRIC")
+    return features
+
+
+def _collect_capability_packing_features(*, full_dims: Sequence[Mapping[str, Any]]) -> List[str]:
+    features: List[str] = []
+    if _has_preferred_state_column(rows=full_dims):
+        features.append("HAS_PREFERRED_STATE_COLUMN")
+    if _has_canonical_name_columns(rows=full_dims):
+        features.append("HAS_CANONICAL_NAME_COLUMNS")
+    return features
+
+
 def _build_column_query_texts(prompt: str) -> List[str]:
     text = str(prompt or "").strip()
     out = [text]
@@ -218,44 +251,16 @@ def _build_column_query_texts(prompt: str) -> List[str]:
     return _dedupe_text_items(out)
 
 
-def _build_domain_query_texts(prompt: str) -> List[str]:
-    text = str(prompt or "").strip()
-    if text == "":
-        return []
-    out = [text]
-    text_l = text.lower()
-    if _prompt_implies_staff_work_context(text):
-        out.extend(["staff assignments", "staff workplace", "teacher employment", "employee roster"])
-    if _prompt_implies_student_school_context(text):
-        out.extend(["student enrollment", "student demographics", "student profile"])
-    if _prompt_has_age_extreme(text):
-        out.extend(["student demographics birth date age", "student profile date of birth"])
-    if _prompt_has_birth_month_constraint(text):
-        out.extend(["student demographics birth date birthday month", "student profile date of birth month"])
-    if _DISCIPLINE_HINT_RE.search(text) is not None:
-        out.extend(["discipline incidents", "student behavior"])
-    if "district" in text_l or "lea" in text_l:
-        out.append("school district lea")
-    if _prompt_has_adm_intent(text):
-        out.extend(
-            [
-                "average daily membership adm base adm",
-                "student base adm attendance membership",
-                "enrollment adm report period school year",
-            ]
-        )
-    if _prompt_has_calendar_days_off(text):
-        out.extend(
-            [
-                "academic calendar days off",
-                "school calendar no school non instructional days",
-                "calendar school day holiday schedule",
-            ]
-        )
-    return _dedupe_text_items(out)
+def _semantic_constraint_concept_keys(semantic_constraints: Sequence[Mapping[str, Any]]) -> List[str]:
+    constraints = _dedupe_constraints(semantic_constraints)
+    out: List[str] = []
+    for concept_key in (_semantic_alias_concept_key(item) for item in constraints):
+        if concept_key and concept_key not in out:
+            out.append(concept_key)
+    return out
 
 
-def _build_semantic_domain_query_specs(
+def _build_semantic_alias_domain_query_specs(
     *,
     prompt: str,
     semantic_constraints: Sequence[Mapping[str, Any]],
@@ -267,11 +272,6 @@ def _build_semantic_domain_query_specs(
     if not constraints:
         return []
 
-    concept_keys = {
-        key
-        for key in (_semantic_alias_concept_key(item) for item in constraints)
-        if key
-    }
     specs: List[Dict[str, Any]] = []
 
     for constraint in constraints:
@@ -292,89 +292,13 @@ def _build_semantic_domain_query_specs(
                 }
             )
 
-    if _prompt_has_nativity(text) or any("COUNTRY" in key for key in concept_keys):
-        specs.extend(
-            [
-                {
-                    "query": "student demographics birth country nativity",
-                    "score_boost": 0.06,
-                    "reasons": ["semantic_query:nativity"],
-                    "source": "semantic_vector",
-                },
-                {
-                    "query": "country of birth student profile demographics",
-                    "score_boost": 0.04,
-                    "reasons": ["semantic_query:nativity"],
-                    "source": "semantic_vector",
-                },
-            ]
-        )
-    if _prompt_has_calendar_days_off(text) or any(
-        any(token in key for token in ("SCHOOL_DAY", "INSTRUCTIONAL_DAY", "NON_INSTRUCTIONAL", "DAY_OFF", "HOLIDAY"))
-        for key in concept_keys
-    ):
-        specs.extend(
-            [
-                {
-                    "query": "academic calendar days off no school school day",
-                    "score_boost": 0.08,
-                    "reasons": ["semantic_query:calendar_days_off"],
-                    "source": "semantic_vector",
-                },
-                {
-                    "query": "non instructional days school calendar holiday schedule",
-                    "score_boost": 0.06,
-                    "reasons": ["semantic_query:calendar_days_off"],
-                    "source": "semantic_vector",
-                },
-            ]
-        )
-    if any("SEMESTER" in key or "TERM" in key for key in concept_keys):
-        specs.append(
-            {
-                "query": "academic calendar semester terms",
-                "score_boost": 0.05,
-                "reasons": ["semantic_query:semester"],
-                "source": "semantic_vector",
-            }
-        )
-    if any("SCHOOL_YEAR" in key or key.endswith("_YEAR") for key in concept_keys):
-        specs.append(
-            {
-                "query": "school year academic calendar enrollment",
-                "score_boost": 0.04,
-                "reasons": ["semantic_query:school_year"],
-                "source": "semantic_vector",
-            }
-        )
-    if _prompt_has_subgroup(text):
-        specs.append(
-            {
-                "query": "student subgroup demographics race ethnicity language",
-                "score_boost": 0.04,
-                "reasons": ["semantic_query:subgroup"],
-                "source": "semantic_vector",
-            }
-        )
     return specs
 
 
-def _build_domain_query_specs(
+def _merge_domain_query_specs(
     *,
-    prompt: str,
-    semantic_constraints: Sequence[Mapping[str, Any]],
+    specs: Sequence[Mapping[str, Any]],
 ) -> List[Dict[str, Any]]:
-    specs: List[Dict[str, Any]] = [
-        {
-            "query": query_text,
-            "score_boost": 0.0,
-            "reasons": [],
-            "source": "vector",
-        }
-        for query_text in _build_domain_query_texts(prompt)
-    ]
-    specs.extend(_build_semantic_domain_query_specs(prompt=prompt, semantic_constraints=semantic_constraints))
-
     merged: Dict[str, Dict[str, Any]] = {}
     for raw_spec in specs:
         query_text = " ".join(str(raw_spec.get("query") or "").strip().split())
@@ -398,55 +322,6 @@ def _build_domain_query_specs(
         if source != "vector":
             existing["source"] = source
     return list(merged.values())
-
-
-def _domain_name_intent_bias(*, prompt: str, candidate: Mapping[str, Any]) -> float:
-    name = str(candidate.get("name") or "").strip().lower()
-    if name == "":
-        return 0.0
-    prompt_text = str(prompt or "").strip().lower()
-    bias = 0.0
-
-    if _prompt_implies_staff_work_context(prompt_text):
-        if any(token in name for token in ("staff", "assignment", "employee", "teacher", "workforce")):
-            bias += 0.18
-        if "student" in name and _DISCIPLINE_HINT_RE.search(prompt_text) is None:
-            bias -= 0.24
-        if "discipline" in name and _DISCIPLINE_HINT_RE.search(prompt_text) is None:
-            bias -= 0.28
-
-    if _prompt_implies_student_school_context(prompt_text):
-        if any(token in name for token in ("student", "demographic", "profile", "enrollment", "enrolment")):
-            bias += 0.14
-        if "discipline" in name and _DISCIPLINE_HINT_RE.search(prompt_text) is None:
-            bias -= 0.12
-
-    if _DISCIPLINE_HINT_RE.search(prompt_text) is not None and "discipline" in name:
-        bias += 0.2
-
-    if _prompt_has_adm_intent(prompt_text):
-        if any(token in name for token in ("adm", "average daily membership", "membership", "enrollment", "attendance")):
-            bias += 0.22
-        if any(token in name for token in ("calendar", "academic time", "term", "semester")):
-            bias -= 0.24
-
-    if _prompt_has_age_extreme(prompt_text):
-        if any(token in name for token in ("demographic", "profile", "student")):
-            bias += 0.18
-        if any(token in name for token in ("program", "service", "membership")):
-            bias -= 0.16
-
-    if _prompt_has_birth_month_constraint(prompt_text):
-        if any(token in name for token in ("demographic", "profile", "student")):
-            bias += 0.2
-        if any(token in name for token in ("program", "service", "membership")):
-            bias -= 0.18
-
-    if _prompt_has_calendar_days_off(prompt_text):
-        if any(token in name for token in ("calendar", "scheduling", "schedule", "term", "semester")):
-            bias += 0.18
-
-    return bias
 
 
 def _slot_implies_student_listing(slot_hints: Optional[Mapping[str, Any]]) -> bool:
@@ -686,6 +561,8 @@ class DomainSelectionService:
         semantic_grounding_factory: Callable[[], SemanticGroundingService],
         semantic_alias_constraints_fn: Callable[..., List[Dict[str, Any]]],
         projection_policy_service: Optional[PlannerProjectionPolicyService] = None,
+        retrieval_policy_service: Optional[PlannerRetrievalPolicyService] = None,
+        domain_selection_policy_service: Optional[PlannerDomainSelectionPolicyService] = None,
     ) -> None:
         from app.services.shared_ai.adapters.capabilities import DomainCapabilityResolverAdapter
         from app.services.shared_ai.adapters.policies import PolicyDrivenRerankAdapter
@@ -705,6 +582,8 @@ class DomainSelectionService:
         self._semantic_grounding_factory = semantic_grounding_factory
         self._semantic_alias_constraints_fn = semantic_alias_constraints_fn
         self._projection_policy_service = projection_policy_service or PlannerProjectionPolicyService()
+        self._retrieval_policy_service = retrieval_policy_service or PlannerRetrievalPolicyService()
+        self._domain_selection_policy_service = domain_selection_policy_service or PlannerDomainSelectionPolicyService()
         self._last_pipeline_context: Optional[PipelineContext] = None
 
     def select_domain_and_shortlist(
@@ -757,6 +636,7 @@ class DomainSelectionService:
         workspace_id: Optional[str] = None,
         vertical_norm: Optional[str] = None,
         projection_policy_service: Optional[PlannerProjectionPolicyService] = None,
+        capability_packing_policy_service: Optional[PlannerCapabilityPackingPolicyService] = None,
         include_projection_policy_debug: bool = False,
     ) -> Dict[str, Any]:
         full_dims = [dict(row) for row in list(capabilities.get("dimensions") or []) if isinstance(row, dict)]
@@ -764,13 +644,6 @@ class DomainSelectionService:
         full_filter_candidates = _merge_dimension_rows(dimensions=full_dims, time_columns=full_time)
         dim_by_key = {_norm_key(row.get("column_key")): row for row in full_dims if _norm_key(row.get("column_key"))}
         is_school_listing = _looks_like_list_schools_prompt(prompt) or _slot_implies_school_listing(slot_hints)
-        prompt_mentions_school_district = _prompt_mentions_school_or_district(prompt)
-        city_state_pattern = _prompt_has_city_state_pattern(prompt)
-        has_preferred_state = _has_preferred_state_column(rows=full_dims)
-        prefer_canonical_name_columns = (
-            _prompt_prefers_canonical_name_columns(prompt)
-            and _has_canonical_name_columns(rows=full_filter_candidates)
-        )
         prompt_signals = set(PromptSignalService().extract_signals(prompt=prompt))
         if is_school_listing:
             prompt_signals.update({"school_listing", "listing_intent"})
@@ -784,9 +657,22 @@ class DomainSelectionService:
             base_domain_id=_to_int(capabilities.get("domain_id")),
             prompt_signals=sorted(prompt_signals),
         )
+        packing_policy_result = (
+            capability_packing_policy_service or PlannerCapabilityPackingPolicyService()
+        ).get_packing_requirements(
+            workspace_id=workspace_id,
+            vertical_norm=vertical_norm,
+            prompt_signals=sorted(prompt_signals),
+            capability_features=_collect_capability_packing_features(full_dims=full_dims),
+        )
+        prefer_canonical_name_columns = bool(packing_policy_result.get("prefer_canonical_name_columns"))
+        include_name_constraint_columns = bool(packing_policy_result.get("include_name_constraint_columns"))
         excluded_concept_keys = policy_result.get("excluded_concept_keys") or []
         required_column_names = policy_result.get("required_column_names") or []
-        excluded_column_names = policy_result.get("excluded_column_names") or []
+        excluded_column_names = [
+            *list(policy_result.get("excluded_column_names") or []),
+            *list(packing_policy_result.get("excluded_column_names") or []),
+        ]
 
         selected_dims: List[Dict[str, Any]] = []
         seen: set[str] = set()
@@ -826,36 +712,40 @@ class DomainSelectionService:
                 required_column_names=required_column_names,
             )
             seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
-        if prompt_mentions_school_district:
-            lea_dim = _find_dimension_by_column_name_candidates(
+        prepend_column_names = packing_policy_result.get("prepend_column_names") or []
+        if prepend_column_names:
+            selected_dims = _prepend_required_named_dimensions(
+                selected_dims=selected_dims,
                 full_dims=full_dims,
-                targets=("lea_name", "district_name", "district"),
+                required_column_names=prepend_column_names,
             )
-            if lea_dim is not None:
-                lea_key = _norm_key(lea_dim.get("column_key"))
-                if lea_key and lea_key not in seen:
-                    selected_dims.append(dict(lea_dim))
-                    seen.add(lea_key)
-        if is_school_listing:
-            if city_state_pattern and has_preferred_state:
-                selected_dims = [
-                    dict(row)
-                    for row in selected_dims
-                    if not _is_state_school_code_name(str(row.get("column_name") or "").strip().lower())
-                ]
-                seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
+            seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
+        append_first_match_column_name_groups = packing_policy_result.get("append_first_match_column_name_groups") or []
+        for target_group in append_first_match_column_name_groups:
+            matched_dim = _find_dimension_by_column_name_candidates(
+                full_dims=full_dims,
+                targets=tuple(str(item) for item in list(target_group or [])),
+            )
+            if matched_dim is None:
+                continue
+            matched_key = _norm_key(matched_dim.get("column_key"))
+            if matched_key and matched_key not in seen:
+                selected_dims.append(dict(matched_dim))
+                seen.add(matched_key)
+        append_column_names = {
+            str(item).strip().lower()
+            for item in list(packing_policy_result.get("append_column_names") or [])
+            if str(item).strip()
+        }
+        if append_column_names:
             for row in full_dims:
                 key = _norm_key(row.get("column_key"))
                 if key in seen:
                     continue
                 col_name = str(row.get("column_name") or key).lower()
-                if city_state_pattern and has_preferred_state and _is_state_school_code_name(col_name):
-                    continue
-                if any(token in col_name for token in ("school_name", "lea_name", "school_number", "city", "state")):
-                    selected_dims.append(row)
+                if col_name in append_column_names:
+                    selected_dims.append(dict(row))
                     seen.add(key)
-                    if len(selected_dims) >= 55:
-                        break
 
         if prefer_canonical_name_columns:
             selected_dims = [
@@ -873,7 +763,7 @@ class DomainSelectionService:
                     selected_dims.append(row)
                     seen.add(key)
 
-        if _prompt_has_name_constraint(prompt):
+        if include_name_constraint_columns:
             for row in full_dims:
                 key = _norm_key(row.get("column_key"))
                 if key in seen:
@@ -920,14 +810,18 @@ class DomainSelectionService:
         for row in selected_time:
             _add_filter_row(row)
 
-        if _prompt_has_nativity(prompt):
-            nativity_names = {"birth_country", "country_of_birth", "date_entered_us"}
+        required_filter_column_names = {
+            str(item).strip().lower()
+            for item in list(packing_policy_result.get("required_filter_column_names") or [])
+            if str(item).strip()
+        }
+        if required_filter_column_names:
             for row in full_filter_candidates:
                 col_name = str(row.get("column_name") or "").strip().lower()
-                if col_name in nativity_names:
+                if col_name in required_filter_column_names:
                     _add_filter_row(row)
 
-        if _prompt_has_name_constraint(prompt):
+        if include_name_constraint_columns:
             for row in full_filter_candidates:
                 col_name = str(row.get("column_name") or "").strip().lower()
                 if _is_name_column_needed_for_prompt(prompt=prompt, column_name=col_name):
@@ -989,39 +883,25 @@ class DomainSelectionService:
         candidate: Mapping[str, Any],
         capabilities: Mapping[str, Any],
         shortlisted_columns: Sequence[Mapping[str, Any]],
+        selection_policy_service: Optional[PlannerDomainSelectionPolicyService] = None,
     ) -> float:
         vector_score = max(0.0, float(candidate.get("score") or 0.0))
         dimension_count = max(1, len(list(capabilities.get("dimensions") or [])))
         shortlist_ratio = min(1.0, len(list(shortlisted_columns)) / float(min(70, dimension_count)))
         score = (vector_score * 0.65) + (shortlist_ratio * 0.35)
-
-        if _prompt_has_subgroup(prompt) and _has_subgroup_column(shortlisted_columns):
-            score += 0.15
-        if _looks_like_list_students_prompt(prompt) and _has_student_identity_column(shortlisted_columns):
-            score += 0.08
-        if _prompt_implies_staff_work_context(prompt) and _has_staff_identity_column(shortlisted_columns):
-            score += 0.14
-        if _prompt_implies_student_school_context(prompt) and _has_student_identity_column(shortlisted_columns):
-            score += 0.12
-        if _prompt_has_adm_intent(prompt):
-            if _has_adm_signal_columns(shortlisted_columns):
-                score += 0.2
-            if _has_adm_metric(capabilities):
-                score += 0.12
-        if _prompt_has_age_extreme(prompt):
-            if _has_birth_date_columns(shortlisted_columns):
-                score += 0.2
-            if _has_age_columns(shortlisted_columns):
-                score += 0.16
-        if _prompt_has_birth_month_constraint(prompt):
-            if _has_birth_date_columns(shortlisted_columns):
-                score += 0.24
-        if _prompt_has_calendar_days_off(prompt):
-            if _has_calendar_day_columns(shortlisted_columns):
-                score += 0.16
-            if _has_school_day_flag_columns(shortlisted_columns):
-                score += 0.18
-        score += _domain_name_intent_bias(prompt=prompt, candidate=candidate)
+        score += (selection_policy_service or PlannerDomainSelectionPolicyService()).score_adjustment(
+            workspace_id=None,
+            vertical_norm=None,
+            prompt_signals=PromptSignalService().extract_signals(prompt=prompt),
+            shortlist_features=_collect_domain_selection_shortlist_features(shortlisted_columns=shortlisted_columns),
+            capability_features=_collect_domain_selection_capability_features(capabilities=capabilities),
+        )
+        score += PlannerRetrievalPolicyService(enable_db_lookup=False).score_domain_name_bias(
+            workspace_id=None,
+            vertical_norm=None,
+            prompt_signals=PromptSignalService().extract_signals(prompt=prompt),
+            candidate_name=str(candidate.get("name") or ""),
+        )
         if len(shortlisted_columns) < 5:
             score -= 0.1
         return round(score, 5)
@@ -1072,9 +952,27 @@ class DomainSelectionService:
             return [{"domain_id": provided, "name": f"domain_{provided}", "score": 1.0, "source": "provided"}]
 
         semantic_constraints = self._semantic_alias_constraints_fn(prompt=prompt, vertical_norm=vertical_norm)
-        query_specs = _build_domain_query_specs(
-            prompt=prompt,
-            semantic_constraints=semantic_constraints,
+        prompt_signals = self._rerank_policy_engine.extract_prompt_signals(prompt=prompt)
+        semantic_concept_keys = _semantic_constraint_concept_keys(semantic_constraints)
+        query_specs = _merge_domain_query_specs(
+            specs=[
+                {
+                    "query": prompt,
+                    "score_boost": 0.0,
+                    "reasons": [],
+                    "source": "vector",
+                },
+                *self._retrieval_policy_service.build_query_specs(
+                    workspace_id=workspace_id,
+                    vertical_norm=vertical_norm,
+                    prompt_signals=prompt_signals,
+                    semantic_concept_keys=semantic_concept_keys,
+                ),
+                *_build_semantic_alias_domain_query_specs(
+                    prompt=prompt,
+                    semantic_constraints=semantic_constraints,
+                ),
+            ],
         )
         rows: List[Dict[str, Any]] = []
         for query_spec in query_specs:
@@ -1207,6 +1105,7 @@ class DomainSelectionService:
                 candidate=candidate,
                 capabilities=capabilities,
                 shortlisted_columns=shortlist,
+                selection_policy_service=self._domain_selection_policy_service,
             )
             base_score = round(score + semantic_score, 5)
             ranking_seed_rows.append(

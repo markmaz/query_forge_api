@@ -1,7 +1,58 @@
 # Backend Agent Audit
 
 ## Date
-2026-03-28 (last updated)
+2026-03-31 (last updated)
+
+---
+
+## Phase 8 — Wire extracted modules into QueryForgeService (2026-03-31)
+
+### Goal
+Slim `app/services/query_forge/service.py` from ~3600 lines by replacing inline private method bodies with thin wrappers delegating to the already-extracted modules.
+
+### Files Modified
+- `app/services/query_forge/service.py` — added imports for `result_mapper`, `sql_utils`, `where_compiler`, `data_prep_compiler`, `split_ratio_compiler`; replaced 15 private method bodies with 1-line delegations; kept methods as thin wrappers (tests call them directly); reduced from 3657 to 2853 lines (-804 lines)
+- `app/services/query_forge/sql_utils.py` — fixed `col_expr` non-prep path to raise `ForgeError` when `workspaceTableId` is non-null but invalid (e.g., `"bad"`) and when the table id is not in the domain, matching the original service.py behavior that tests assert
+- `app/services/query_forge/where_compiler.py` — broke circular import: replaced `from app.services.query_forge.service import QF_MAX_MANUAL_IN, VALUE_OVERRIDE_IN_COLUMN_BY_TYPE` with local constant definitions (values are identical)
+
+### Methods wired (replaced with thin wrapper delegations)
+**result_mapper:**
+- `_qf_cols_from_json` → `_rm_cols_from_json(q)`
+- `_qf_infer_cols` → `_rm_infer_cols(rows)`
+- `_qf_extract_total` → `_rm_extract_total(count_rows)`
+- `_qf_rows_to_dicts` → `_rm_rows_to_dicts(qf_result_rows, columns)`
+
+**sql_utils:**
+- `_qf_render_sql` → `_su_render_sql(sql, params)`
+- `_literal_sql` → `_su_literal_sql(v)`
+- `_qf_safe_ident` → `_su_safe_ident(s)`
+- `_safe_alias` → `_su_safe_alias(s)`
+- `_dp_ident` → `_su_dp_ident(qf_out_name)`
+- `_col_expr` → `_su_col_expr(...)`
+- `_physical_col_expr` → `_su_physical_col_expr(...)`
+
+**where_compiler (kept as @staticmethod):**
+- `_is_and_only_filter_tree` → `_wc_is_and_only_filter_tree(node)`
+- `_flatten_and_conditions` → `_wc_flatten_and_conditions(node)`
+- `_build_and_filter_tree` → `_wc_build_and_filter_tree(conditions)`
+
+**data_prep_compiler:**
+- `_compile_data_prep_meta` → `_DataPrepCompiler()._compile_meta(...)`
+- `_render_data_prep_cte` → `_DataPrepCompiler()._render_cte(...)`
+- `_build_prep_base_selects` → `_DataPrepCompiler().build_prep_base_selects(...)`
+
+**split_ratio_compiler:**
+- `_detect_split_ratio_metric` → `_src_detect_split_ratio_metric(q, primary_id=...)`
+- `_compile_split_ratio_query` → `_SplitRatioCompiler().compile(...)` with closure callbacks for `compile_where_fn`, `from_clause_fn`, `required_table_ids_fn`, `compile_metric_fn`
+
+### Key Design Decisions
+- `_compile_where` is NOT delegated to `WhereCompiler` because the service's `_compile_where` has full EXISTS support (using `self._domains`, `self._qf_join_predicates`, `self._severity_predicate_for_alias`) while `WhereCompiler.compile` stubs out EXISTS. Tests call `svc._compile_where(...)` directly and test EXISTS paths — keeping the full implementation in place is correct.
+- Thin wrappers kept (not deleted) because test files `test_query_forge_service_compile_extra.py` and `test_query_forge_service_coverage.py` call the private methods directly on `svc`.
+- Circular import between `service.py` and `where_compiler.py` resolved by copying the two constants into `where_compiler.py`.
+- `sql_utils.col_expr` behavior aligned with original service implementation to preserve test contracts.
+
+### Test Results
+- 2241 passed, 79 skipped (full suite — matches pre-change baseline)
 
 ---
 

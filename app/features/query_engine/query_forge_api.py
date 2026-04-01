@@ -17,7 +17,7 @@ from app.services.exports.export_policy import build_qf_export_policy, qf_rowcou
 from app.services.nlp.dictionary_ner import extract_signals as extract_dictionary_signals
 from app.services.nlp.ed_ner import extract_signals as extract_ed_signals
 from app.services.nlp.nlp_to_vector import build_vector_search_request
-from app.services.query_forge_service import QueryForgeService
+from app.services.query_forge.service import QueryForgeService
 from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,7 @@ class QueryForgeRun(Resource):
             sql_exec = analytics_executor if analytics_executor is not None else ctx.sql_exec
 
             svc = QueryForgeService(executor=sql_exec, domain_resolver=domain_resolver)
-            out = svc.run(raw_query=raw, mode=mode, limit=limit, offset=offset)
+            out = svc.run(raw, mode=mode, limit=limit, offset=offset)
             signature = qf_rowcount_signature(out.sql, out.params)
             store_cached_rowcount(signature, out.total)
 
