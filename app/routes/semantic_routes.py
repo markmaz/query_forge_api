@@ -11,7 +11,7 @@ from app.decorators.security import token_required
 from app.decorators.rbac import require_access
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import extract_workspace_id
-from app.services.semantic.plan_service import PlanService
+from app.services.semantic.plan import PlanService
 
 logger = logging.getLogger(__name__)
 

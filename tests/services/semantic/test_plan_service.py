@@ -1,7 +1,12 @@
 from __future__ import annotations
 
-from app.services.semantic.plan_service import LLMFilter, LLMPlanPayload, LLMSelectedColumn, PlanService
+from app.services.semantic.plan import PlanService
+from app.services.semantic.plan.models import LLMFilter, LLMPlanPayload, LLMSelectedColumn
+from app.services.semantic.plan.sql_json_builder import SqlJsonBuilder
+from app.services.semantic.plan.value_alias_applier import ValueAliasApplier
+from app.services.semantic.plan.plan_validator import PlanValidator
 from app.services.semantic.deterministic_matcher import DeterministicMatcher
+from app.services.domain.planner_semantic_time_policy_service import PlannerSemanticTimePolicyService
 from tests._support.fakes import FakeForgeQueryPort
 
 
@@ -24,7 +29,7 @@ def test_normalize_llm_payload_coerces_common_alternate_shapes() -> None:
         "notes": "single note",
     }
 
-    out = PlanService._normalize_llm_payload(payload, candidate_columns=candidate_columns)
+    out = SqlJsonBuilder.normalize_llm_payload(payload, candidate_columns=candidate_columns)
 
     assert out["selected_columns"] == [
         {"concept_key": "RACE", "model_column_id": 383},
@@ -52,7 +57,7 @@ def test_normalize_llm_payload_can_map_filter_column_expression() -> None:
         "confidence": 2.2,
     }
 
-    out = PlanService._normalize_llm_payload(payload, candidate_columns=candidate_columns)
+    out = SqlJsonBuilder.normalize_llm_payload(payload, candidate_columns=candidate_columns)
     assert out["filters"] == [{"concept_key": "RACE", "op": "=", "value": "black"}]
     assert out["confidence"] == 1.0
 
@@ -71,14 +76,7 @@ def test_apply_value_aliases_to_llm_plan_rewrites_filter_and_sql_json() -> None:
             }
         ]
     ]
-    svc = PlanService(
-        sql=sql,
-        deterministic=object(),
-        concept_retrieval=object(),
-        concept_to_column=object(),
-        column_vector=object(),
-        llm_client=object(),
-    )
+    applier = ValueAliasApplier(sql=sql)
     llm_plan = {
         "sql_json": {
             "where": [
@@ -96,7 +94,7 @@ def test_apply_value_aliases_to_llm_plan_rewrites_filter_and_sql_json() -> None:
         "notes": [],
     }
 
-    out = svc._apply_value_aliases_to_llm_plan(vertical_norm="education", llm_plan=llm_plan)
+    out = applier.apply(vertical_norm="education", llm_plan=llm_plan)
 
     assert out["filters"] == [
         {"concept_key": "DISTRICT_NAME", "op": "=", "value": "Metro Schools District"}
@@ -137,7 +135,7 @@ def test_ground_plan_builds_sql_json_from_grounded_candidates() -> None:
         notes=[],
     )
 
-    out = PlanService._ground_plan(
+    out = SqlJsonBuilder.ground_plan(
         plan,
         candidate_columns,
         concepts,
@@ -178,7 +176,7 @@ def test_ground_plan_drops_filters_without_mapped_columns() -> None:
         notes=[],
     )
 
-    out = PlanService._ground_plan(
+    out = SqlJsonBuilder.ground_plan(
         plan,
         candidate_columns,
         concepts,
@@ -205,14 +203,7 @@ def test_apply_value_aliases_to_llm_plan_rewrites_sql_json_filter_tree_values() 
             }
         ]
     ]
-    svc = PlanService(
-        sql=sql,
-        deterministic=object(),
-        concept_retrieval=object(),
-        concept_to_column=object(),
-        column_vector=object(),
-        llm_client=object(),
-    )
+    applier = ValueAliasApplier(sql=sql)
     llm_plan = {
         "sql_json": {
             "filters": {
@@ -236,7 +227,7 @@ def test_apply_value_aliases_to_llm_plan_rewrites_sql_json_filter_tree_values() 
         "notes": [],
     }
 
-    out = svc._apply_value_aliases_to_llm_plan(vertical_norm="education", llm_plan=llm_plan)
+    out = applier.apply(vertical_norm="education", llm_plan=llm_plan)
 
     assert out["sql_json"]["filters"]["children"][0]["value"] == "Metro Schools District"
 
@@ -1322,7 +1313,7 @@ def test_plan_injects_school_filter_for_quoted_school_phrase_prompt() -> None:
 
 
 def test_filter_column_rank_prefers_dim_school_school_name() -> None:
-    dim_school_rank = PlanService._filter_column_rank(
+    dim_school_rank = SqlJsonBuilder.filter_column_rank(
         concept_key="SCHOOL_NAME",
         row={
             "__selected__": False,
@@ -1332,7 +1323,7 @@ def test_filter_column_rank_prefers_dim_school_school_name() -> None:
             "model_column_id": 1,
         },
     )
-    fact_rank = PlanService._filter_column_rank(
+    fact_rank = SqlJsonBuilder.filter_column_rank(
         concept_key="SCHOOL_NAME",
         row={
             "__selected__": False,
@@ -1347,16 +1338,9 @@ def test_filter_column_rank_prefers_dim_school_school_name() -> None:
 
 
 def test_build_default_projection_uses_semantic_projection_policy() -> None:
-    svc = PlanService(
-        sql=FakeForgeQueryPort(),
-        deterministic=object(),
-        concept_retrieval=object(),
-        concept_to_column=object(),
-        column_vector=object(),
-        llm_client=object(),
-    )
+    validator = PlanValidator()
 
-    out = svc._build_default_projection(
+    out = validator._build_default_projection(
         intent_entity="student",
         mapped_columns=[
             {"model_column_id": 1, "table_name": "dim_student", "concept_key": "FIRST_NAME", "effective_weight": 1.0, "final_score": 2.0},
@@ -1373,16 +1357,9 @@ def test_build_default_projection_uses_semantic_projection_policy() -> None:
 
 
 def test_select_preferred_time_column_uses_semantic_time_policy() -> None:
-    svc = PlanService(
-        sql=FakeForgeQueryPort(),
-        deterministic=object(),
-        concept_retrieval=object(),
-        concept_to_column=object(),
-        column_vector=object(),
-        llm_client=object(),
-    )
+    time_policy_svc = PlannerSemanticTimePolicyService()
 
-    out = svc._select_preferred_time_column(
+    out = time_policy_svc.select_preferred_time_column(
         domain_hint="enrollment",
         mapped_columns_for_time_concept=[
             {"model_column_id": 2, "column_name": "year", "concept_key": "SCHOOL_YEAR", "final_score": 3.8},
@@ -1395,7 +1372,7 @@ def test_select_preferred_time_column_uses_semantic_time_policy() -> None:
 
 
 def test_plan_uses_tier2_school_slot_to_force_filter(monkeypatch) -> None:
-    import app.services.semantic.plan_service as plan_service_module
+    import app.services.semantic.plan.service as plan_service_module
 
     monkeypatch.setattr(plan_service_module, "NLP_TIER2_ENABLED", True)
 

@@ -4,7 +4,7 @@ from app.services.semantic.concept_to_column_service import ConceptToColumnServi
 from app.services.semantic.constrained_column_vector_service import ConstrainedColumnVectorService
 from app.services.semantic.deterministic_matcher import DeterministicMatcher
 from app.services.semantic.domain_selection_service import DomainSelectionService
-from app.services.semantic.plan_service import PlanService
+from app.services.semantic.plan import PlanService
 from app.services.semantic.semantic_assignment_service import SemanticAssignmentService
 from app.services.semantic.semantic_concept_matcher import SemanticConceptMatcher
 from app.services.semantic.semantic_concept_service import SemanticConceptService

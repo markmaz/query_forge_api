@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.semantic.plan_service import PlanService
+from app.services.semantic.plan import PlanService
 from tests._support.fakes import FakeForgeQueryPort
 
 
