@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from app.services.ai_suggest.utils import (
     COUNTRY_ABBR_TO_NAME,
