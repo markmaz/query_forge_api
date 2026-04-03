@@ -125,20 +125,6 @@ class ForgeInsightsProjectsRoute(Resource):
 class ForgeInsightsProjectRoute(Resource):
     @token_required
     @require_access("forge_insights")
-    def get(self, project_id: int):
-        try:
-            workspace_id = extract_workspace_id()
-            user_id = require_user_id()
-            row = _service().get_project(workspace_id=workspace_id, user_id=user_id, project_id=project_id)
-            return ForgeInsightsProjectResponse.model_validate(row).model_dump(mode="json"), 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("forge insights get project failed")
-            return {"error": "forge insights get project failed"}, 500
-
-    @token_required
-    @require_access("forge_insights")
     @forge_insights_ns.expect(_project_patch_model, validate=False)
     def patch(self, project_id: int):
         try:

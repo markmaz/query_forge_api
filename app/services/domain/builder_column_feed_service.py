@@ -6,7 +6,6 @@ from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.domain.builder_feed import (
     BuilderFeedQuery,
-    BuilderTableFeedService,
     ColumnNamePolicyService,
     build_builder_feed_params,
     build_builder_feed_sql,
@@ -38,15 +37,7 @@ class BuilderColumnFeedService:
     def __init__(self, *, sql: Optional[ForgeQueryPort] = None, metadata_mode: Optional[str] = None) -> None:
         del metadata_mode
         self._sql = sql or ForgeMetaSQL()
-        self._table_feed = BuilderTableFeedService(sql=self._sql)
         self._column_name_policy = ColumnNamePolicyService(sql=self._sql)
-
-    def list_domain_tables(self, *, workspace_id: str, user_id: str, domain_id: Optional[int]) -> Dict[str, Any]:
-        return self._table_feed.list_domain_tables(
-            workspace_id=workspace_id,
-            user_id=user_id,
-            domain_id=domain_id,
-        )
 
     def list_available_columns(self, q: BuilderFeedQuery) -> Dict[str, Any]:
         params = self._build_params(q)

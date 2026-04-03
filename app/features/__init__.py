@@ -6,6 +6,7 @@ FEATURE_MODULES = [
     "app.features.workspaces.routes",
     "app.features.admin.routes",
     "app.features.catalog.routes",
+    "app.features.domains.routes",
     "app.features.skills.routes",
     "app.features.query_engine.routes",
     "app.features.saved_queries.routes",

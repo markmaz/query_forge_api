@@ -33,8 +33,8 @@ from app.config import (
     VLLM_MODEL,
     VLLM_TIMEOUT,
 )
+from app.config import DEFAULT_MAIL_SENDER, SMTP_PASSWORD, SMTP_PORT, SMTP_SERVER, SMTP_USERNAME
 from app.config.logging_config import configure_logging
-from app.config.mail_config import ForgeMailConfig
 from app.exceptions.forge_error import ForgeError
 from app.extensions import db, mail
 from app.features import register_features
@@ -104,7 +104,12 @@ def create_app():
         )
     authorizations = {"BearerAuth": {"type": "apiKey", "in": "header", "name": "Authorization"}}
 
-    app.config.from_object(ForgeMailConfig)
+    app.config["MAIL_SERVER"] = SMTP_SERVER
+    app.config["MAIL_PORT"] = int(SMTP_PORT or 587)
+    app.config["MAIL_USE_TLS"] = True
+    app.config["MAIL_USERNAME"] = SMTP_USERNAME
+    app.config["MAIL_PASSWORD"] = SMTP_PASSWORD
+    app.config["MAIL_DEFAULT_SENDER"] = DEFAULT_MAIL_SENDER
     mail.init_app(app=app)
 
     app.config["broker_url"] = VALKEY_CONFIG

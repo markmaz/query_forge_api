@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.domain_routes as domain_routes
+import app.features.domains.shared as domain_routes
 from app.exceptions.forge_error import ForgeError
 
 
@@ -329,6 +329,11 @@ def test_domain_time_policy_put_success(client, auth_headers, monkeypatch):
                 "default_grain": "quarter",
                 "allow_relative_ranges": True,
                 "relative_map": {"this_quarter": "current_fiscal_quarter"},
+                "semester": {
+                    "labels": {"spring": "Spring", "fall": "Fall", "year_round": "Summer"},
+                    "month_ranges": {"spring": [1, 5], "fall": [8, 12], "year_round": [6, 7]},
+                    "indicator_columns": {"fall": "wt24.is_fall_term"},
+                },
             }
         },
     )

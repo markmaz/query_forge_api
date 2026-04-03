@@ -11,7 +11,11 @@ from app.exceptions.forge_error import ForgeError
 import app.routes.ai as ai_routes
 from app.routes.ai import ai_ns
 from app.routes import request_helpers as _route_utils
-from app.services import ai_suggest_service
+from app.services.ai_suggest import AISuggestService
+import app.services.ai_suggest.domain_seeder as domain_seeder
+import app.services.ai_suggest.edit_inspector as edit_inspector
+import app.services.ai_suggest.prompt_analysis as prompt_analysis
+import app.services.ai_suggest.vllm_client as vllm_client
 
 
 class _FakeResponse:
@@ -21,7 +25,7 @@ class _FakeResponse:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            raise ai_suggest_service.requests.HTTPError(f"status={self.status_code}")
+            raise vllm_client.requests.HTTPError(f"status={self.status_code}")
 
     def json(self) -> Dict[str, Any]:
         return self._payload
@@ -152,7 +156,7 @@ def test_suggest_valid_json_first_attempt(client, monkeypatch: pytest.MonkeyPatc
         calls.append({"url": url, "json": json, "timeout": timeout})
         return _FakeResponse({"choices": [{"message": {"content": valid_content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=_request_body(), headers=_headers())
     assert response.status_code == 200
@@ -178,7 +182,7 @@ def test_suggest_normalizes_operation_and_missing_top_level_fields(client, monke
         calls.append({"url": url, "json": json, "timeout": timeout})
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=_request_body(), headers=_headers())
     assert response.status_code == 200
@@ -205,7 +209,7 @@ def test_suggest_normalization_drops_invalid_ops(client, monkeypatch: pytest.Mon
         calls.append({"url": url, "json": json, "timeout": timeout})
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=_request_body(), headers=_headers())
     assert response.status_code == 200
@@ -232,7 +236,7 @@ def test_suggest_normalizes_columnkey_to_col_for_filter_and_aggregate(client, mo
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=_request_body(), headers=_headers())
     assert response.status_code == 200
@@ -258,7 +262,7 @@ def test_suggest_strips_extra_keys_inside_col_before_validation(client, monkeypa
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=_request_body(), headers=_headers())
     assert response.status_code == 200
@@ -282,7 +286,7 @@ def test_suggest_drops_edit_when_col_missing_column_name_after_sanitize(client, 
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=_request_body(), headers=_headers())
     assert response.status_code == 200
@@ -301,7 +305,7 @@ def test_suggest_invalid_col_type_still_fails_validation(client, monkeypatch: py
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=_request_body(), headers=_headers())
     assert response.status_code == 500
@@ -321,7 +325,7 @@ def test_suggest_accepts_equals_operator_enum(client, monkeypatch: pytest.Monkey
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=_request_body(), headers=_headers())
     assert response.status_code == 200
@@ -338,7 +342,7 @@ def test_suggest_uses_header_workspace_over_body_workspace(client, monkeypatch: 
         calls.append({"url": url, "json": json, "timeout": timeout})
         return _FakeResponse({"choices": [{"message": {"content": valid_content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     body = _request_body()
     body["workspaceId"] = "tampered-ws"
@@ -373,7 +377,7 @@ def test_suggest_retries_once_after_invalid_json(client, monkeypatch: pytest.Mon
         calls.append({"url": url, "json": json, "timeout": timeout})
         return responses[len(calls) - 1]
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=_request_body(), headers=_headers())
     assert response.status_code == 200
@@ -389,146 +393,146 @@ def test_suggest_retries_once_after_invalid_json(client, monkeypatch: pytest.Mon
 
 
 def test_prompt_contains_literal_heuristics() -> None:
-    assert ai_suggest_service.prompt_contains_literal("first name: Holden")
-    assert ai_suggest_service.prompt_contains_literal('name "Holden"')
-    assert ai_suggest_service.prompt_contains_literal("school year 2024")
-    assert ai_suggest_service.prompt_contains_literal("grade 11")
-    assert ai_suggest_service.prompt_contains_literal("active true")
-    assert ai_suggest_service.prompt_contains_literal("student name Holden")
-    assert not ai_suggest_service.prompt_contains_literal("show student enrollment by race")
+    assert prompt_analysis.prompt_contains_literal("first name: Holden")
+    assert prompt_analysis.prompt_contains_literal('name "Holden"')
+    assert prompt_analysis.prompt_contains_literal("school year 2024")
+    assert prompt_analysis.prompt_contains_literal("grade 11")
+    assert prompt_analysis.prompt_contains_literal("active true")
+    assert prompt_analysis.prompt_contains_literal("student name Holden")
+    assert not prompt_analysis.prompt_contains_literal("show student enrollment by race")
 
 
 def test_expand_geo_literal() -> None:
-    assert ai_suggest_service._expand_geo_literal("Mexico") == ["Mexico", "MX"]
-    assert ai_suggest_service._expand_geo_literal("CA") == ["CA", "California"]
-    assert ai_suggest_service._expand_geo_literal("California") == ["California", "CA"]
-    assert ai_suggest_service._expand_geo_literal("unknown") == ["unknown"]
+    assert edit_inspector._expand_geo_literal("Mexico") == ["Mexico", "MX"]
+    assert edit_inspector._expand_geo_literal("CA") == ["CA", "California"]
+    assert edit_inspector._expand_geo_literal("California") == ["California", "CA"]
+    assert edit_inspector._expand_geo_literal("unknown") == ["unknown"]
 
 
 def test_expand_ordinal_literal() -> None:
-    assert ai_suggest_service._expand_ordinal_literal("3rd") == ["3rd", "third"]
-    assert ai_suggest_service._expand_ordinal_literal("third") == ["third", "3rd"]
-    assert ai_suggest_service._expand_ordinal_literal("4th") == ["4th", "fourth"]
-    assert ai_suggest_service._expand_ordinal_literal("fourth") == ["fourth", "4th"]
-    assert ai_suggest_service._expand_ordinal_literal("11th") == ["11th", "eleventh"]
-    assert ai_suggest_service._expand_ordinal_literal("grade") == ["grade"]
+    assert edit_inspector._expand_ordinal_literal("3rd") == ["3rd", "third"]
+    assert edit_inspector._expand_ordinal_literal("third") == ["third", "3rd"]
+    assert edit_inspector._expand_ordinal_literal("4th") == ["4th", "fourth"]
+    assert edit_inspector._expand_ordinal_literal("fourth") == ["fourth", "4th"]
+    assert edit_inspector._expand_ordinal_literal("11th") == ["11th", "eleventh"]
+    assert edit_inspector._expand_ordinal_literal("grade") == ["grade"]
 
 
 def test_to_grade_integer() -> None:
-    assert ai_suggest_service._to_grade_integer("3rd") == 3
-    assert ai_suggest_service._to_grade_integer("third") == 3
-    assert ai_suggest_service._to_grade_integer("grade 4") == 4
-    assert ai_suggest_service._to_grade_integer("11th grade") == 11
-    assert ai_suggest_service._to_grade_integer("2") == 2
-    assert ai_suggest_service._to_grade_integer(5) == 5
-    assert ai_suggest_service._to_grade_integer("mexico") is None
+    assert edit_inspector._to_grade_integer("3rd") == 3
+    assert edit_inspector._to_grade_integer("third") == 3
+    assert edit_inspector._to_grade_integer("grade 4") == 4
+    assert edit_inspector._to_grade_integer("11th grade") == 11
+    assert edit_inspector._to_grade_integer("2") == 2
+    assert edit_inspector._to_grade_integer(5) == 5
+    assert edit_inspector._to_grade_integer("mexico") is None
 
 
 def test_prompt_implies_aggregation_heuristics() -> None:
-    assert ai_suggest_service.prompt_implies_aggregation("How many students?")
-    assert ai_suggest_service.prompt_implies_aggregation("count students")
-    assert ai_suggest_service.prompt_implies_aggregation("total enrollment")
-    assert ai_suggest_service.prompt_implies_aggregation("average score")
-    assert ai_suggest_service.prompt_implies_aggregation("avg score")
-    assert not ai_suggest_service.prompt_implies_aggregation("show student records")
+    assert prompt_analysis.prompt_implies_aggregation("How many students?")
+    assert prompt_analysis.prompt_implies_aggregation("count students")
+    assert prompt_analysis.prompt_implies_aggregation("total enrollment")
+    assert prompt_analysis.prompt_implies_aggregation("average score")
+    assert prompt_analysis.prompt_implies_aggregation("avg score")
+    assert not prompt_analysis.prompt_implies_aggregation("show student records")
 
 
 def test_prompt_requests_distinct_count_heuristics() -> None:
-    assert ai_suggest_service.prompt_requests_distinct_count("count distinct students")
-    assert ai_suggest_service.prompt_requests_distinct_count("how many unique students")
-    assert not ai_suggest_service.prompt_requests_distinct_count("how many students")
+    assert prompt_analysis.prompt_requests_distinct_count("count distinct students")
+    assert prompt_analysis.prompt_requests_distinct_count("how many unique students")
+    assert not prompt_analysis.prompt_requests_distinct_count("how many students")
 
 
 def test_prompt_implies_grouping_heuristics() -> None:
-    assert ai_suggest_service.prompt_implies_grouping("count students by race")
-    assert ai_suggest_service.prompt_implies_grouping("attendance per school")
-    assert ai_suggest_service.prompt_implies_grouping("distribution by gender")
-    assert not ai_suggest_service.prompt_implies_grouping("show students")
+    assert prompt_analysis.prompt_implies_grouping("count students by race")
+    assert prompt_analysis.prompt_implies_grouping("attendance per school")
+    assert prompt_analysis.prompt_implies_grouping("distribution by gender")
+    assert not prompt_analysis.prompt_implies_grouping("show students")
 
 
 def test_prompt_implies_sorting_heuristics() -> None:
-    assert ai_suggest_service.prompt_implies_sorting("show top students")
-    assert ai_suggest_service.prompt_implies_sorting("courses sorted by credits descending")
-    assert ai_suggest_service.prompt_implies_sorting("rank schools by performance")
-    assert not ai_suggest_service.prompt_implies_sorting("show students")
+    assert prompt_analysis.prompt_implies_sorting("show top students")
+    assert prompt_analysis.prompt_implies_sorting("courses sorted by credits descending")
+    assert prompt_analysis.prompt_implies_sorting("rank schools by performance")
+    assert not prompt_analysis.prompt_implies_sorting("show students")
 
 
 def test_prompt_implies_entity_listing_heuristics() -> None:
-    assert ai_suggest_service.prompt_implies_entity_listing("show students")
-    assert ai_suggest_service.prompt_implies_entity_listing("list all schools")
-    assert ai_suggest_service.prompt_implies_entity_listing("give me courses")
-    assert not ai_suggest_service.prompt_implies_entity_listing("count students by race")
-    assert not ai_suggest_service.prompt_implies_entity_listing("show attendance")
+    assert prompt_analysis.prompt_implies_entity_listing("show students")
+    assert prompt_analysis.prompt_implies_entity_listing("list all schools")
+    assert prompt_analysis.prompt_implies_entity_listing("give me courses")
+    assert not prompt_analysis.prompt_implies_entity_listing("count students by race")
+    assert not prompt_analysis.prompt_implies_entity_listing("show attendance")
 
 
 def test_edits_reference_columns_heuristic() -> None:
-    assert ai_suggest_service.edits_reference_columns(
+    assert edit_inspector.edits_reference_columns(
         [{"op": "addFilter"}, {"op": "setDomain"}]
     )
-    assert not ai_suggest_service.edits_reference_columns(
+    assert not edit_inspector.edits_reference_columns(
         [{"op": "setDomain"}]
     )
 
 
 def test_edits_have_aggregate_heuristic() -> None:
-    assert ai_suggest_service.edits_have_aggregate(
+    assert edit_inspector.edits_have_aggregate(
         [{"op": "addAggregate"}, {"op": "addFilter"}]
     )
-    assert not ai_suggest_service.edits_have_aggregate(
+    assert not edit_inspector.edits_have_aggregate(
         [{"op": "addFilter"}]
     )
 
 
 def test_edits_have_groupby_heuristic() -> None:
-    assert ai_suggest_service.edits_have_groupby(
+    assert edit_inspector.edits_have_groupby(
         [{"op": "addGroupBy"}, {"op": "addFilter"}]
     )
-    assert not ai_suggest_service.edits_have_groupby(
+    assert not edit_inspector.edits_have_groupby(
         [{"op": "addFilter"}]
     )
 
 
 def test_edits_have_sorting_heuristic() -> None:
-    assert ai_suggest_service.edits_have_sorting(
+    assert edit_inspector.edits_have_sorting(
         [{"op": "addSort"}, {"op": "addFilter"}]
     )
-    assert not ai_suggest_service.edits_have_sorting(
+    assert not edit_inspector.edits_have_sorting(
         [{"op": "addFilter"}]
     )
 
 
 def test_count_add_select_edits() -> None:
-    assert ai_suggest_service.count_add_select_edits(
+    assert edit_inspector.count_add_select_edits(
         [{"op": "addSelect"}, {"op": "addFilter"}, {"op": "addSelect"}]
     ) == 2
 
 
 def test_has_identifier_projection() -> None:
-    assert ai_suggest_service.has_identifier_projection(
+    assert edit_inspector.has_identifier_projection(
         [{"op": "addSelect", "col": {"columnName": "first_name"}}]
     )
-    assert ai_suggest_service.has_identifier_projection(
+    assert edit_inspector.has_identifier_projection(
         [{"op": "addSelect", "col": {"columnName": "student_id"}}]
     )
-    assert not ai_suggest_service.has_identifier_projection(
+    assert not edit_inspector.has_identifier_projection(
         [{"op": "addSelect", "col": {"columnName": "school_year"}}]
     )
 
 
 def test_is_aggregation_only_heuristic() -> None:
-    assert ai_suggest_service.is_aggregation_only(
+    assert edit_inspector.is_aggregation_only(
         [{"op": "addAggregate"}, {"op": "addFilter"}]
     )
-    assert not ai_suggest_service.is_aggregation_only(
+    assert not edit_inspector.is_aggregation_only(
         [{"op": "addAggregate"}, {"op": "addSelect"}]
     )
-    assert not ai_suggest_service.is_aggregation_only(
+    assert not edit_inspector.is_aggregation_only(
         [{"op": "addFilter"}]
     )
 
 
 def test_extract_column_refs_from_edits_dedupes() -> None:
-    refs = ai_suggest_service.extract_column_refs_from_edits(
+    refs = edit_inspector.extract_column_refs_from_edits(
         [
             {"op": "addFilter", "col": {"modelColumnId": 10, "columnName": "first_name", "workspaceTableId": 24}},
             {"op": "addGroupBy", "col": {"modelColumnId": 10, "columnName": "first_name", "workspaceTableId": 24}},
@@ -542,7 +546,7 @@ def test_extract_column_refs_from_edits_dedupes() -> None:
 
 
 def test_determine_default_aggregate_column_prefers_select_then_filter() -> None:
-    from_select = ai_suggest_service.determine_default_aggregate_column(
+    from_select = edit_inspector.determine_default_aggregate_column(
         [
             {"op": "addSelect", "col": {"modelColumnId": 1, "columnName": "student_id", "workspaceTableId": 24}},
             {"op": "addFilter", "col": {"modelColumnId": 2, "columnName": "first_name", "workspaceTableId": 24}},
@@ -551,7 +555,7 @@ def test_determine_default_aggregate_column_prefers_select_then_filter() -> None
     assert from_select is not None
     assert from_select["columnName"] == "student_id"
 
-    from_filter = ai_suggest_service.determine_default_aggregate_column(
+    from_filter = edit_inspector.determine_default_aggregate_column(
         [
             {"op": "addFilter", "col": {"modelColumnId": 2, "columnName": "first_name", "workspaceTableId": 24}},
         ]
@@ -559,11 +563,11 @@ def test_determine_default_aggregate_column_prefers_select_then_filter() -> None
     assert from_filter is not None
     assert from_filter["columnName"] == "first_name"
 
-    assert ai_suggest_service.determine_default_aggregate_column([{"op": "setDomain", "domainId": 1}]) is None
+    assert edit_inspector.determine_default_aggregate_column([{"op": "setDomain", "domainId": 1}]) is None
 
 
 def test_determine_default_groupby_columns_prefers_filter_select_for_aggregate_case() -> None:
-    cols = ai_suggest_service.determine_default_groupby_columns(
+    cols = edit_inspector.determine_default_groupby_columns(
         [
             {"op": "addAggregate", "col": {"modelColumnId": 2, "columnName": "student_id", "workspaceTableId": 24}},
             {"op": "addFilter", "col": {"modelColumnId": 3, "columnName": "race", "workspaceTableId": 24}},
@@ -576,10 +580,10 @@ def test_determine_default_groupby_columns_prefers_filter_select_for_aggregate_c
 
 
 def test_determine_default_groupby_columns_requires_single_column_outside_aggregate_case() -> None:
-    assert ai_suggest_service.determine_default_groupby_columns(
+    assert edit_inspector.determine_default_groupby_columns(
         [{"op": "addFilter", "col": {"modelColumnId": 3, "columnName": "race", "workspaceTableId": 24}}]
     ) == [{"modelColumnId": 3, "columnName": "race", "workspaceTableId": 24}]
-    assert ai_suggest_service.determine_default_groupby_columns(
+    assert edit_inspector.determine_default_groupby_columns(
         [
             {"op": "addFilter", "col": {"modelColumnId": 3, "columnName": "race", "workspaceTableId": 24}},
             {"op": "addSelect", "col": {"modelColumnId": 4, "columnName": "school", "workspaceTableId": 24}},
@@ -588,7 +592,7 @@ def test_determine_default_groupby_columns_requires_single_column_outside_aggreg
 
 
 def test_determine_default_sort_heuristics() -> None:
-    sort_edit = ai_suggest_service.determine_default_sort(
+    sort_edit = edit_inspector.determine_default_sort(
         [{"op": "addSelect", "col": {"modelColumnId": 1, "columnName": "credits", "workspaceTableId": 9}}],
         "show top courses",
     )
@@ -603,19 +607,19 @@ def test_get_identifier_candidates_limits_to_two() -> None:
         {"columnName": "student_id", "modelColumnId": 3, "workspaceTableId": 24},
         {"columnName": "last_name", "modelColumnId": 4, "workspaceTableId": 24},
     ]
-    selected = ai_suggest_service.get_identifier_candidates(candidates)
+    selected = edit_inspector.get_identifier_candidates(candidates)
     assert len(selected) == 2
     assert selected[0]["columnName"] == "student_id"
     assert selected[1]["columnName"] == "first_name"
 
-    sort_edit = ai_suggest_service.determine_default_sort(
+    sort_edit = edit_inspector.determine_default_sort(
         [{"op": "addFilter", "col": {"modelColumnId": 2, "columnName": "credits", "workspaceTableId": 9}}],
         "show lowest courses",
     )
     assert sort_edit is not None
     assert sort_edit["dir"] == "asc"
 
-    sort_edit = ai_suggest_service.determine_default_sort(
+    sort_edit = edit_inspector.determine_default_sort(
         [{"op": "addAggregate", "col": {"modelColumnId": 2, "columnName": "student_id", "workspaceTableId": 24}}],
         "count students",
     )
@@ -628,7 +632,7 @@ def test_infer_domain_from_columns_single_result() -> None:
             _ = (query, params)
             return [{"domain_id": 6}]
 
-    qf_inferred = ai_suggest_service.infer_domain_from_columns(
+    qf_inferred = domain_seeder.infer_domain_from_columns(
         workspace_id="ws-1",
         edits=[{"op": "addFilter", "col": {"workspaceTableId": 24}}],
         sql_executor=_SQL(),
@@ -642,7 +646,7 @@ def test_infer_domain_from_columns_ambiguous_returns_none() -> None:
             _ = (query, params)
             return [{"domain_id": 6}, {"domain_id": 7}]
 
-    qf_inferred = ai_suggest_service.infer_domain_from_columns(
+    qf_inferred = domain_seeder.infer_domain_from_columns(
         workspace_id="ws-1",
         edits=[{"op": "addSelect", "col": {"workspaceTableId": 24}}],
         sql_executor=_SQL(),
@@ -688,7 +692,7 @@ def test_suggest_retries_when_literals_present_but_filters_missing(client, monke
         calls.append({"url": url, "json": json, "timeout": timeout})
         return responses[len(calls) - 1]
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     body = _request_body()
     body["prompt"] = "Find first name: Holden"
@@ -735,7 +739,7 @@ def test_suggest_returns_first_valid_response_if_filter_retry_output_is_invalid(
         calls.append({"url": url, "json": json, "timeout": timeout})
         return responses[len(calls) - 1]
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     body = _request_body()
     body["prompt"] = "Find first name: Holden"
@@ -798,8 +802,8 @@ def test_suggest_retries_when_setdomain_missing_and_inference_is_ambiguous(
         calls.append({"url": url, "json": json, "timeout": timeout})
         return responses[len(calls) - 1]
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
-    monkeypatch.setattr(ai_suggest_service, "infer_domain_from_columns", lambda **kwargs: None)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
+    monkeypatch.setattr(domain_seeder, "infer_domain_from_columns", lambda **kwargs: None)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
@@ -851,7 +855,7 @@ def test_suggest_retries_when_aggregate_missing_with_aggregation_intent(
         calls.append({"url": url, "json": json, "timeout": timeout})
         return responses[len(calls) - 1]
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
@@ -902,7 +906,7 @@ def test_suggest_aggregation_fallback_injects_addaggregate_on_attempt_two(
         calls.append({"url": url, "json": json, "timeout": timeout})
         return responses[len(calls) - 1]
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
@@ -929,7 +933,7 @@ def test_suggest_keeps_count_distinct_when_prompt_requests_unique(
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
@@ -983,7 +987,7 @@ def test_suggest_retries_when_groupby_missing_with_grouping_intent(
         calls.append({"url": url, "json": json, "timeout": timeout})
         return responses[len(calls) - 1]
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
@@ -1041,7 +1045,7 @@ def test_suggest_grouping_fallback_injects_groupby_on_attempt_two(
         calls.append({"url": url, "json": json, "timeout": timeout})
         return responses[len(calls) - 1]
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
@@ -1065,7 +1069,7 @@ def test_suggest_sorting_fallback_injects_addsort(client, monkeypatch: pytest.Mo
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
@@ -1091,7 +1095,7 @@ def test_suggest_aggregation_cleanup_removes_addselect_when_no_groupby(
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
@@ -1114,7 +1118,7 @@ def test_suggest_sqljson_groupby_preserved_when_no_addaggregate(client, monkeypa
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
@@ -1142,7 +1146,7 @@ def test_suggest_seeds_domain_from_single_domain_candidate_when_selected_missing
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
@@ -1161,7 +1165,7 @@ def test_projection_fallback_injects_addselect_for_filter_columns(client, monkey
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=_request_body(), headers=_headers())
     assert response.status_code == 200
@@ -1182,7 +1186,7 @@ def test_projection_fallback_skips_aggregation_only_queries(client, monkeypatch:
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=_request_body(), headers=_headers())
     assert response.status_code == 200
@@ -1235,14 +1239,14 @@ def test_suggest_retries_when_listing_intent_has_too_few_projection_columns(
         calls.append({"url": url, "json": json, "timeout": timeout})
         return responses[len(calls) - 1]
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
     data = response.get_json()
     assert data["debug"]["attempts"] == 2
     assert len(calls) == 2
-    assert ai_suggest_service.count_add_select_edits(data["edits"]) >= 2
+    assert edit_inspector.count_add_select_edits(data["edits"]) >= 2
     assert (
         "You must include at least two projection columns when listing entities."
         in calls[1]["json"]["messages"][-1]["content"]
@@ -1292,7 +1296,7 @@ def test_suggest_projection_completeness_fallback_injects_identifier_columns(
         calls.append({"url": url, "json": json, "timeout": timeout})
         return responses[len(calls) - 1]
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
@@ -1347,7 +1351,7 @@ def test_sqljson_projection_safety_net_populates_columns_from_filters(client, mo
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
@@ -1369,7 +1373,7 @@ def test_suggest_does_not_override_existing_current_sqljson_domain(client, monke
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
@@ -1384,7 +1388,7 @@ def test_suggest_returns_500_when_model_response_stays_invalid(client, monkeypat
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": invalid_schema}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=_request_body(), headers=_headers())
     assert response.status_code == 500
@@ -1395,7 +1399,7 @@ def test_suggest_returns_500_when_model_response_stays_invalid(client, monkeypat
 
 
 def test_health_success(client, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ai_suggest_service.AISuggestService, "health", lambda self: {"data": [{"id": "qwen25-7b"}]})
+    monkeypatch.setattr(AISuggestService, "health", lambda self: {"data": [{"id": "qwen25-7b"}]})
 
     response = client.get("/api/ai/health")
     assert response.status_code == 200
@@ -1407,9 +1411,9 @@ def test_health_success(client, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_health_unavailable_returns_503(client, monkeypatch: pytest.MonkeyPatch) -> None:
     def _raise(self):
-        raise ai_suggest_service.requests.RequestException("connection refused")
+        raise vllm_client.requests.RequestException("connection refused")
 
-    monkeypatch.setattr(ai_suggest_service.AISuggestService, "health", _raise)
+    monkeypatch.setattr(AISuggestService, "health", _raise)
 
     response = client.get("/api/ai/health")
     assert response.status_code == 503
@@ -1441,7 +1445,7 @@ def test_suggest_calls_retrieval_when_candidates_missing(client, monkeypatch: py
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": '{"edits":[],"explanation":"ok","confidence":0.7}'}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post(
         "/api/ai/suggest",
@@ -1475,7 +1479,7 @@ def test_suggest_removes_unknown_grounding_edits(client, monkeypatch: pytest.Mon
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": model_content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post(
         "/api/ai/suggest",
@@ -1504,7 +1508,7 @@ def test_suggest_passes_column_description_to_llm_prompt(client, monkeypatch: py
         calls.append({"url": url, "json": json, "timeout": timeout})
         return _FakeResponse({"choices": [{"message": {"content": '{"edits":[],"explanation":"ok","confidence":0.8}'}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post(
         "/api/ai/suggest",
@@ -1529,7 +1533,7 @@ def test_suggest_expands_country_filter_to_include_abbreviation(client, monkeypa
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
@@ -1555,7 +1559,7 @@ def test_suggest_expands_state_abbreviation_filter_to_include_name(client, monke
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
@@ -1578,7 +1582,7 @@ def test_suggest_expands_ordinal_filter_to_include_word_variant(client, monkeypa
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200
@@ -1601,7 +1605,7 @@ def test_suggest_non_grade_ordinal_still_expands_to_word_variant(client, monkeyp
         _ = (json, timeout)
         return _FakeResponse({"choices": [{"message": {"content": content}}]})
 
-    monkeypatch.setattr(ai_suggest_service.requests, "post", _fake_post)
+    monkeypatch.setattr(vllm_client.requests, "post", _fake_post)
 
     response = client.post("/api/ai/suggest", json=payload, headers=_headers())
     assert response.status_code == 200

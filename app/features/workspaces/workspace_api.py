@@ -75,12 +75,25 @@ class WorkSpaceDetails(Resource):
 
 @workspace_ns.route("/<string:workspace_id>/users")
 class WorkspaceUsers(Resource):
-    @workspace_ns.marshal_list_with(user_model)
     @workspace_ns.doc(params={"workspace_id": "The ID of the workspace"})
     @token_required
     @require_admin()
     def get(self, workspace_id: str):
-        return _workspace_service().get_workspace_users_from_dbx(workspace_id)
+        try:
+            rows = WorkspaceUserReadService().list_workspace_users(
+                workspace_id=workspace_id,
+                q=(request.args.get("q") or "").strip() or None,
+                limit=_int_arg("limit", default=5000),
+                offset=_int_arg("offset", default=0),
+                include_inactive=str(request.args.get("include_inactive") or "").strip().lower()
+                in {"1", "true", "yes", "y", "on"},
+            )
+            return {"rows": rows}, 200
+        except ForgeError as exc:
+            return {"error": str(exc)}, getattr(exc, "status_code", 400) or 400
+        except Exception:
+            logger.exception("Workspace users fetch failed")
+            return {"error": "Workspace users fetch failed"}, 500
 
 
 @workspace_ns.route("/<string:workspace_id>/namespaces")

@@ -28,14 +28,13 @@
 - Domain services: `DomainAdminWriteService`, `DomainJoinService`, `DomainTableReadService`, `DomainTableWriteService`, `DomainSummaryReadService`, `DomainUserReadService`, `DomainUserWriteService`, `BuilderColumnFeedService`, `DomainColumnSampleReadService`
 - Query tree: `SavedQueryTreeService`, `SavedQueryReadService`, `SavedQueryWriteService`, `SavedQueryShareService`, `SavedQueryFolderWriteService`, `QueryFolderService`
 - Models: `ModelReadService`, `ModelWriteService`, `ModelUpdateService`, `ModelUploadService`, `ModelSnapshotImportService`, `ModelSampleService`, `ModelColumnSampleReadService`
-- Workspace inventory: `WorkspaceSnapshotService`, `WorkspaceSnapshotEnsureService`, `UnmappedWorkspaceTablesReadService`, `WorkspacePipelineService`
+- Workspace inventory: `WorkspaceSnapshotService`, `WorkspaceSnapshotEnsureService`, `WorkspacePipelineService`
 - Users: `UserService`, `WorkspaceUserReadService`
 - Auth: `AuthService`, `OtpService`, `PasswordService`
 - Products: `ProductService`, `ProductGroupService`, `RoleService`
-- ValueOverrides: `ListReadService`, `ListUploadService`, `ListTemplateService`, `ListWriter`
+- ValueOverrides: `ListReadService`, `ListUploadService`, `ListWriter`
 - Query Forge: `QueryForgeService`
 - Misc: `ConnectionService`, `DashboardService`, `WorkspaceService`, `WarehouseService`, `UdfService`
-- Recon: `WorkspaceReconService`
 
 ## Ports / Adapters
 

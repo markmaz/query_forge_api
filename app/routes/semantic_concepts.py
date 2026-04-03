@@ -184,18 +184,6 @@ class SemanticConceptKeyCollection(Resource):
 @semantic_concepts_ns.route("/<int:concept_id>")
 class SemanticConceptById(Resource):
     @token_required
-    @require_access("semantic")
-    def get(self, concept_id: int):
-        try:
-            row = SemanticConceptService().get_concept(concept_id)
-            return {"row": row}, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("semantic concept get failed")
-            return {"error": "semantic concept get failed"}, 500
-
-    @token_required
     @require_access("semantic", role="admin")
     @semantic_concepts_ns.expect(concept_patch_model, validate=False)
     def patch(self, concept_id: int):
@@ -330,18 +318,6 @@ class SemanticConceptAliasCollection(Resource):
 @semantic_concept_aliases_ns.route("/<int:alias_id>")
 class SemanticConceptAliasById(Resource):
     @token_required
-    @require_access("semantic")
-    def get(self, alias_id: int):
-        try:
-            row = SemanticConceptService().get_alias(alias_id)
-            return {"row": row}, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("semantic alias get failed")
-            return {"error": "semantic alias get failed"}, 500
-
-    @token_required
     @require_access("semantic", role="admin")
     @semantic_concept_aliases_ns.expect(alias_patch_model, validate=False)
     def patch(self, alias_id: int):
@@ -417,18 +393,6 @@ class SemanticValueAliasCollection(Resource):
 
 @semantic_value_aliases_ns.route("/<int:value_alias_id>")
 class SemanticValueAliasById(Resource):
-    @token_required
-    @require_access("semantic")
-    def get(self, value_alias_id: int):
-        try:
-            row = SemanticConceptService().get_value_alias(value_alias_id)
-            return {"row": row}, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("semantic value alias get failed")
-            return {"error": "semantic value alias get failed"}, 500
-
     @token_required
     @require_access("semantic", role="admin")
     @semantic_value_aliases_ns.expect(value_alias_patch_model, validate=False)
@@ -513,18 +477,6 @@ class SemanticConceptColumnMapCollection(Resource):
 
 @semantic_concept_column_maps_ns.route("/<int:map_id>")
 class SemanticConceptColumnMapById(Resource):
-    @token_required
-    @require_access("semantic")
-    def get(self, map_id: int):
-        try:
-            row = SemanticConceptService().get_concept_column_map(map_id)
-            return {"row": row}, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("semantic concept-column map get failed")
-            return {"error": "semantic concept-column map get failed"}, 500
-
     @token_required
     @require_access("semantic", role="admin")
     @semantic_concept_column_maps_ns.expect(concept_column_map_patch_model, validate=False)

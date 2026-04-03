@@ -25,8 +25,7 @@ qf_saved_query_ns = Namespace("saved-queries", description="Saved queries (read/
 share_request_model = qf_saved_query_ns.model(
     "SavedQueryShareRequest",
     {
-        "shareKind": fields.String(required=True, description="WORKSPACE|USER"),
-        "sharedWithUserId": fields.String(required=False),
+        "shareKind": fields.String(required=True, description="WORKSPACE"),
         "canEdit": fields.Boolean(required=False, default=False),
     },
 )
@@ -466,20 +465,11 @@ class SavedQueryShares(Resource):
             payload = _json_body()
             share_kind = (payload.get("shareKind") or "").strip().upper()
             can_edit = bool(payload.get("canEdit", False))
-            if share_kind not in ("WORKSPACE", "USER"):
+            if share_kind != "WORKSPACE":
                 raise ForgeError("Invalid shareKind", status_code=400)
 
             svc = SavedQueryShareService(workspace_id=_workspace_id(), user_id=_current_user_id())
-            if share_kind == "WORKSPACE":
-                return svc.share_to_workspace(query_id=query_id, can_edit=can_edit), 200
-
-            shared_with = payload.get("sharedWithUserId")
-            if not shared_with:
-                raise ForgeError("sharedWithUserId is required", status_code=400)
-            return (
-                svc.share_to_user(query_id=query_id, shared_with_user_id=shared_with, can_edit=can_edit),
-                200,
-            )
+            return svc.share_to_workspace(query_id=query_id, can_edit=can_edit), 200
 
         return _run_route("Saved query share failed", _execute)
 
@@ -491,17 +481,10 @@ class SavedQueryShares(Resource):
         def _execute():
             payload = _json_body()
             share_kind = (payload.get("shareKind") or "").strip().upper()
-            if share_kind not in ("WORKSPACE", "USER"):
+            if share_kind != "WORKSPACE":
                 raise ForgeError("Invalid shareKind", status_code=400)
 
             svc = SavedQueryShareService(workspace_id=_workspace_id(), user_id=_current_user_id())
-            return (
-                svc.unshare(
-                    query_id=query_id,
-                    share_kind=share_kind,
-                    shared_with_user_id=payload.get("sharedWithUserId"),
-                ),
-                200,
-            )
+            return svc.unshare(query_id=query_id), 200
 
         return _run_route("Saved query unshare failed", _execute)

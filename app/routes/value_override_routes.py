@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import io
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from flask import g, request, send_file
+from flask import g, request
 from flask_restx import Namespace
 from flask_restx import Resource
 
@@ -19,7 +18,6 @@ from app.routes.request_helpers import require_user_id
 from app.services.value_overrides.value_override_meta_writer import ValueOverrideMetaWriter
 from app.services.value_overrides.value_override_visibility_service import ValueOverrideVisibilityService
 from app.services.value_overrides.list_read_service import ForgeListReadService
-from app.services.value_overrides.list_template_service import ForgeListTemplateService
 from app.services.value_overrides.list_upload_service import ForgeListUploadService
 from app.services.value_overrides.list_writer import ForgeListWriter
 from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
@@ -308,43 +306,6 @@ class ValueOverrideUpload(Resource):
             logger.exception("Upload failed type=%s", value_override_type)
             return {"error": "Upload failed"}, 500
     
-@value_override_ns.route("/templates/<string:value_override_type>")
-class ValueOverrideTemplateDownload(Resource):
-    @token_required
-    @require_access("catalog")
-    def get(self, value_override_type: str):
-        """
-        GET /value_overrides/templates/<type>
-        type: regions | npiCategories | serviceLines
-        optional query param: qf_include_time=1
-        """
-        qf_include_time = _bool_arg("qf_include_time", default=False)
-
-        try:
-            value_override_type = _validate_value_override_type(value_override_type)
-
-            tf = ForgeListTemplateService().generate_forge_template(
-                value_override_type,  # type: ignore[arg-type]
-                qf_include_time=qf_include_time,
-            )
-
-            return send_file(
-                io.BytesIO(tf.bytes),
-                mimetype=tf.content_type,
-                as_attachment=True,
-                download_name=tf.filename,  # Flask 2.x+
-                max_age=0,
-            )
-
-        except ValueError as e:
-            return {"error": str(e)}, 404
-        except ForgeError as e:
-            return _handle_service_error(e)
-        except Exception:
-            logger.exception("Template generation failed type=%s", value_override_type)
-            return {"error": "Template generation failed"}, 500
-
-
 @value_override_ns.route("/<string:value_override_type>/<string:list_id>")
 class ValueOverrideDetail(Resource):
     @token_required

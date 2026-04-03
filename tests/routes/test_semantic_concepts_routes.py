@@ -166,9 +166,6 @@ def test_delete_concept_route(client, monkeypatch):
 
 def test_alias_crud_routes(client, monkeypatch):
     class _Svc:
-        def get_alias(self, alias_id):
-            return {"id": alias_id, "alias_key": "k_school"}
-
         def patch_alias(self, alias_id, payload):
             return {"id": alias_id, **payload}
 
@@ -177,10 +174,6 @@ def test_alias_crud_routes(client, monkeypatch):
             return None
 
     monkeypatch.setattr(semantic_concepts, "SemanticConceptService", _Svc)
-
-    get_resp = client.get("/api/v1/semantic/concept-aliases/9", headers=_headers(monkeypatch))
-    assert get_resp.status_code == 200
-    assert get_resp.json["row"]["id"] == 9
 
     patch_resp = client.patch(
         "/api/v1/semantic/concept-aliases/9",
@@ -206,9 +199,6 @@ def test_value_alias_crud_routes(client, monkeypatch):
 
         def create_value_alias(self, payload):
             return {"id": 2, **payload}
-
-        def get_value_alias(self, value_alias_id):
-            return {"id": value_alias_id}
 
         def patch_value_alias(self, value_alias_id, payload):
             return {"id": value_alias_id, **payload}
@@ -237,10 +227,6 @@ def test_value_alias_crud_routes(client, monkeypatch):
     assert create_resp.status_code == 201
     assert create_resp.json["row"]["id"] == 2
 
-    get_resp = client.get("/api/v1/semantic/value-aliases/2", headers=_headers(monkeypatch))
-    assert get_resp.status_code == 200
-    assert get_resp.json["row"]["id"] == 2
-
     patch_resp = client.patch(
         "/api/v1/semantic/value-aliases/2",
         json={"weight": 0.7},
@@ -264,9 +250,6 @@ def test_concept_column_map_crud_routes(client, monkeypatch):
 
         def create_concept_column_map(self, payload):
             return {"id": 6, **payload}
-
-        def get_concept_column_map(self, map_id):
-            return {"id": map_id}
 
         def patch_concept_column_map(self, map_id, payload):
             return {"id": map_id, **payload}
@@ -296,10 +279,6 @@ def test_concept_column_map_crud_routes(client, monkeypatch):
     assert create_resp.status_code == 201
     assert create_resp.json["row"]["id"] == 6
     assert create_resp.json["row"]["workspace_column_id"] == 88
-
-    get_resp = client.get("/api/v1/semantic/concept-column-maps/6", headers=_headers(monkeypatch))
-    assert get_resp.status_code == 200
-    assert get_resp.json["row"]["id"] == 6
 
     patch_resp = client.patch(
         "/api/v1/semantic/concept-column-maps/6",

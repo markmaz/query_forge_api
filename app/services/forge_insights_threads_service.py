@@ -79,25 +79,6 @@ class ForgeInsightsThreadsService:
         )
         return [_normalize_project_row(r) for r in rows]
 
-    def get_project(self, *, workspace_id: str, user_id: str, project_id: int) -> Dict[str, Any]:
-        ws = _required_text(workspace_id, "workspace_id", max_len=64)
-        uid = _required_text(user_id, "user_id", max_len=255)
-        project_key = _required_int(project_id, "project_id")
-        rows = self._sql.execute_query_mappings(
-            """
-            SELECT id, workspace_id, user_id, name, description, is_archived, created_at, updated_at
-            FROM forge_insights_project
-            WHERE id = :project_id
-              AND workspace_id = :workspace_id
-              AND user_id = :user_id
-            LIMIT 1
-            """,
-            {"project_id": project_key, "workspace_id": ws, "user_id": uid},
-        )
-        if not rows:
-            raise ForgeError("ForgeInsights project not found", status_code=404)
-        return _normalize_project_row(rows[0])
-
     def update_project(
         self,
         *,

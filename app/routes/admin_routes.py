@@ -1301,18 +1301,6 @@ class OrganizationListCreate(Resource):
 class OrganizationDetail(Resource):
     @token_required
     @require_role("system:admin")
-    def get(self, organization_id: str):
-        try:
-            _require_admin()
-            return TenancyAdminService().get_organization(organization_id), 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("organization get failed")
-            return {"error": "organization get failed"}, 500
-
-    @token_required
-    @require_role("system:admin")
     @admin_ns.expect(organization_update_model, validate=False)
     def patch(self, organization_id: str):
         try:
@@ -1466,20 +1454,6 @@ class OrganizationDatasourceListCreate(Resource):
 
 @admin_ns.route("/datasources/<int:datasource_id>")
 class DatasourceDetail(Resource):
-    @token_required
-    @require_admin()
-    def get(self, datasource_id: int):
-        try:
-            _require_admin()
-            service = TenancyAdminService()
-            row = _assert_workspace_admin_datasource_access(service, datasource_id)
-            return row, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("datasource get failed")
-            return {"error": "datasource get failed"}, 500
-
     @token_required
     @require_admin()
     @admin_ns.expect(datasource_update_model, validate=False)

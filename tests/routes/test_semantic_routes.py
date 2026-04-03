@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import app.routes.semantic_mappings as semantic_mappings
 import app.routes.semantic_registry as semantic_registry
 import app.routes.semantic_relationships as semantic_relationships
 from app.services.semantic.semantic_registry_service import SemanticRegistryService
@@ -90,38 +89,6 @@ def test_semantic_registry_invalid_semantic_type_returns_400(client, monkeypatch
     resp = client.get("/api/v1/semantic/registry?semantic_type=invalid_type", headers=_headers(monkeypatch))
     assert resp.status_code == 400
     assert "semantic_type" in resp.json["error"]
-
-
-def test_semantic_mapping_create_route(client, monkeypatch):
-    class _Svc:
-        def create_mapping(self, payload):
-            return {"id": 1, **payload}
-
-    monkeypatch.setattr(semantic_mappings, "SemanticMappingService", _Svc)
-
-    resp = client.post(
-        "/api/v1/semantic/mappings",
-        json={"semantic_registry_id": 7, "model_column_id": 8},
-        headers=_headers(monkeypatch),
-    )
-    assert resp.status_code == 201
-    assert resp.json["row"]["id"] == 1
-
-
-def test_semantic_mapping_create_route_accepts_workspace_column_id(client, monkeypatch):
-    class _Svc:
-        def create_mapping(self, payload):
-            return {"id": 2, **payload}
-
-    monkeypatch.setattr(semantic_mappings, "SemanticMappingService", _Svc)
-
-    resp = client.post(
-        "/api/v1/semantic/mappings",
-        json={"semantic_registry_id": 7, "workspace_column_id": 77},
-        headers=_headers(monkeypatch),
-    )
-    assert resp.status_code == 201
-    assert resp.json["row"]["workspace_column_id"] == 77
 
 
 def test_semantic_relationship_create_route(client, monkeypatch):

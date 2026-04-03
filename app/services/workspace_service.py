@@ -6,27 +6,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
-import requests
-
-from app.adapters.databricks_workspace_token_provider import (
-    DatabricksWorkspaceTokenProvider,
-    create_databricks_oauth_provider,
-)
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
-from app.config import DATABRICKS_WORKSPACE_USERS_URL
-from app.utils.param_guard import validate_params
 from app.exceptions.forge_error import ForgeError
-from app.models.tenancy.user import User
 from app.models.tenancy.workspace import Workspace
 from app.ports.sql_executor import ForgeQueryPort
-from app.services.base_service import build_url, process_response
-from app.services.tenancy.datasource_resolver_service import WorkspaceDatasourceResolverService
-from app.services.tenancy.secret_resolver import SecretResolver
-from app.services.workspace_user_read_service import WorkspaceUserReadService
 
 logger = logging.getLogger(__name__)
-
-_DBX_TIMEOUT_SECONDS = 15
 
 
 @dataclass(frozen=True)
@@ -52,85 +37,11 @@ def _as_workspace(row: dict[str, Any]) -> Workspace:
 class WorkspaceService:
     def __init__(self, *, sql: Optional[ForgeQueryPort] = None):
         self._sql = sql or ForgeMetaSQL()
-        self._resolver = WorkspaceDatasourceResolverService(sql=self._sql)
-        self._secrets = SecretResolver()
-        self._workspace_users = WorkspaceUserReadService(sql=self._sql)
 
     def get_all_workspaces(self) -> list[dict[str, str]]:
         rows = self._list_workspace_rows()
         return [self._workspace_payload_from_row(r) for r in rows]
 
-    @validate_params("workspace_id")
-    def get_workspace_users_from_dbx(self, workspace_id: str) -> list[dict[str, str]]:
-        try:
-            resolved = self._resolver.resolve_for_workspace(workspace_id=str(workspace_id), require_active=True)
-        except ForgeError as exc:
-            logger.error("Workspace not found. workspace_id=%s", workspace_id)
-            raise ForgeError(f"Workspace {workspace_id} not found", status_code=404) from exc
-
-        if not resolved or str(resolved.datasource_type or "").strip().lower() != "databricks":
-            return self._workspace_users.list_workspace_users(
-                workspace_id=str(workspace_id),
-                include_inactive=False,
-            )
-
-        cfg = dict(resolved.config_json or {})
-        host = str(cfg.get("host") or cfg.get("workspace_url") or cfg.get("server") or "").strip()
-        auth_method = str(cfg.get("auth_method") or "").strip().lower()
-        token = str(cfg.get("token") or "").strip()
-        if not token and auth_method != "oauth_client_credentials":
-            token = str(self._secrets.resolve(resolved.secret_ref) or "").strip()
-
-        if not host:
-            raise ForgeError(
-                f"Workspace {workspace_id} has no Databricks host configured in datasource config_json",
-                status_code=400,
-            )
-        if not token:
-            provider = create_databricks_oauth_provider(
-                workspace_host=host,
-                workspace_id=str(workspace_id),
-                config=cfg,
-            )
-            if provider is None:
-                provider = DatabricksWorkspaceTokenProvider(
-                    workspace_host=host,
-                    workspace_id=str(workspace_id),
-                )
-            token = str(provider.fetch_forge_token() or "").strip()
-        if not token:
-            raise ForgeError(
-                f"Workspace {workspace_id} Databricks datasource is missing token/secret_ref or OAuth credentials",
-                status_code=503,
-            )
-
-        response = requests.get(
-            build_url(host, DATABRICKS_WORKSPACE_USERS_URL),
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            timeout=_DBX_TIMEOUT_SECONDS,
-        )
-        payload = process_response(response)
-        members = payload.get("Resources", []) if isinstance(payload, dict) else []
-
-        org_name = str(self.get_workspace(workspace_id).get("name") or "")
-        users: list[dict[str, str]] = []
-        for member in members:
-            given = str((member.get("name") or {}).get("givenName") or "")
-            family = str((member.get("name") or {}).get("familyName") or "")
-            profile = User(
-                first_name=given,
-                last_name=family,
-                organization=org_name,
-                display_name=str(member.get("displayName") or ""),
-                user_name=str(member.get("userName") or ""),
-            )
-            users.append(profile.model_dump(mode="json"))
-        return users
-
-    @validate_params("workspace_id")
     def get_workspace(self, workspace_id: str) -> dict[str, str]:
         ws = str(workspace_id or "").strip()
         if not ws:

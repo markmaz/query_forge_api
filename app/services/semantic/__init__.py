@@ -10,7 +10,6 @@ from app.services.semantic.semantic_concept_matcher import SemanticConceptMatche
 from app.services.semantic.semantic_concept_service import SemanticConceptService
 from app.services.semantic.semantic_card_service import SemanticCardService
 from app.services.semantic.semantic_llm_labeler import SemanticLLMLabeler
-from app.services.semantic.semantic_mapping_service import SemanticMappingService
 from app.services.semantic.value_alias_resolution_service import ValueAliasResolutionService
 from app.services.semantic.semantic_postprocess import (
     apply_deterministic_overrides,
@@ -42,7 +41,6 @@ __all__ = [
     "ConceptSeedService",
     "SemanticLLMLabeler",
     "SemanticRegistryService",
-    "SemanticMappingService",
     "SemanticRelationshipService",
     "SemanticSuggestionService",
     "ValueAliasResolutionService",

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import time
 from contextlib import contextmanager
@@ -13,10 +15,9 @@ from app.ports.sql_executor import ForgeExecResult, ForgeQueryPort, ForgeQueryTx
 
 logger = logging.getLogger(__name__)
 
-# Queries taking longer than this threshold are logged as warnings for performance monitoring.
-FORGE_SLOW_QUERY_THRESHOLD_MS: int = 1000
+_SLOW_QUERY_WARN_MS: int = 1000
 
-engine = create_engine(
+_engine = create_engine(
     DB_URI,
     poolclass=QueuePool,
     pool_size=POOL_SIZE,
@@ -26,78 +27,59 @@ engine = create_engine(
     pool_pre_ping=True,
 )
 
+# Backward-compatible public engine export used across route/service modules.
+engine = _engine
 
-def _forge_log_slow_query(query: str, elapsed_ms: float, label: str = "query") -> None:
-    """Emit a structured warning for queries exceeding the slow-query threshold."""
-    if elapsed_ms >= FORGE_SLOW_QUERY_THRESHOLD_MS:
-        snippet = query.strip()[:120].replace("\n", " ")
+
+@contextmanager
+def _timed(label: str, query: str):
+    """Emit a structured warning if query execution exceeds the slow-query threshold."""
+    t0 = time.monotonic()
+    yield
+    elapsed_ms = (time.monotonic() - t0) * 1000
+    if elapsed_ms >= _SLOW_QUERY_WARN_MS:
         logger.warning(
-            "forge_slow_%s elapsed_ms=%.0f sql=%r",
+            "slow_%s elapsed_ms=%.0f sql=%r",
             label,
             elapsed_ms,
-            snippet,
+            query.strip()[:120].replace("\n", " "),
         )
 
 
 def open_forge_connection() -> Connection:
-    """
-    Connects to the database and returns a connection.
-
-    Returns:
-        Connection: A SQLAlchemy database connection object.
-    """
-    return engine.connect()
+    return _engine.connect()
 
 
-def execute_query(query: str, params: dict[str, Any] = None) -> List[Tuple]:
-    """
-    Executes a database query and returns the results.
-
-    :param query: The SQL query to execute.
-    :type query: str
-    :param params: Optional query parameters.
-    :type params: dict[str, Any], optional
-
-    Returns:
-        List[Tuple]: The results of the database query.
-    """
-    t0 = time.monotonic()
-    with open_forge_connection() as conn:
-        result: Result = conn.execute(text(query), params or {})
-        rows = result.fetchall()
-    _forge_log_slow_query(query, (time.monotonic() - t0) * 1000)
-    return rows
+def execute_query(query: str, params: Optional[Dict[str, Any]] = None) -> List[Tuple]:
+    with _timed("read", query):
+        with open_forge_connection() as conn:
+            result: Result = conn.execute(text(query), params or {})
+            return result.fetchall()
 
 
-def show_status():
-    logger.info(f"URI: {DB_URI}")
+def show_status() -> None:
+    logger.info("DB_URI=%s", DB_URI)
 
 
-def execute_query_mappings(query: str, params: dict[str, Any] = None) -> List[dict[str, Any]]:
-    t0 = time.monotonic()
-    with open_forge_connection() as conn:
-        result: Result = conn.execute(text(query), params or {})
-        rows = [dict(r) for r in result.mappings().all()]
-    _forge_log_slow_query(query, (time.monotonic() - t0) * 1000)
-    return rows
+def execute_query_mappings(query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    with _timed("read", query):
+        with open_forge_connection() as conn:
+            result: Result = conn.execute(text(query), params or {})
+            return [dict(r) for r in result.mappings().all()]
 
 
 def execute_write(query: str, params: Optional[Dict[str, Any]] = None) -> int:
-    """
-    Executes INSERT/UPDATE/DELETE. Returns affected rowcount.
-    """
-    t0 = time.monotonic()
-    with open_forge_connection() as conn:
-        tx = conn.begin()
-        try:
-            result = conn.execute(text(query), params or {})
-            tx.commit()
-            rowcount = int(result.rowcount or 0)
-        except Exception:
-            tx.rollback()
-            raise
-    _forge_log_slow_query(query, (time.monotonic() - t0) * 1000, label="write")
-    return rowcount
+    """Execute INSERT/UPDATE/DELETE and return the affected rowcount."""
+    with _timed("write", query):
+        with open_forge_connection() as conn:
+            tx = conn.begin()
+            try:
+                result = conn.execute(text(query), params or {})
+                tx.commit()
+                return int(result.rowcount or 0)
+            except Exception:
+                tx.rollback()
+                raise
 
 
 class ForgeMetaSQL(ForgeQueryPort):
@@ -106,7 +88,7 @@ class ForgeMetaSQL(ForgeQueryPort):
         conn = open_forge_connection()
         tx = conn.begin()
         try:
-            yield _ForgeMetaTransaction(conn)
+            yield _ForgeTransaction(conn)
             tx.commit()
         except Exception:
             tx.rollback()
@@ -129,7 +111,6 @@ class ForgeMetaSQL(ForgeQueryPort):
         if sql_str.lower().startswith("select"):
             rows = execute_query_mappings(sql_str, parameters or {})
             return {"status": {"state": "SUCCEEDED"}, "rows": rows}
-
         affected = execute_write(sql_str, parameters or {})
         return {"status": {"state": "SUCCEEDED"}, "rowcount": affected, "rows": []}
 
@@ -143,7 +124,6 @@ class ForgeMetaSQL(ForgeQueryPort):
 
     def cancel(self, qf_statement_id: str) -> None:
         del qf_statement_id
-        return None
 
     def execute_write(self, query: str, params: Optional[Dict[str, Any]] = None) -> int:
         return execute_write(query, params)
@@ -166,35 +146,29 @@ class ForgeMetaSQL(ForgeQueryPort):
                 raise
 
 
-class _ForgeMetaTransaction(ForgeQueryTx):
-    def __init__(self, conn: Connection):
+class _ForgeTransaction(ForgeQueryTx):
+    def __init__(self, conn: Connection) -> None:
         self._conn = conn
 
     def execute_write(self, query: str, params: Optional[Dict[str, Any]] = None) -> int:
-        t0 = time.monotonic()
-        result = self._conn.execute(text(query), params or {})
-        _forge_log_slow_query(query, (time.monotonic() - t0) * 1000, label="tx_write")
-        return int(result.rowcount or 0)
+        with _timed("tx_write", query):
+            result = self._conn.execute(text(query), params or {})
+            return int(result.rowcount or 0)
 
     def execute_query_mappings(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        t0 = time.monotonic()
-        result: Result = self._conn.execute(text(query), params or {})
-        rows = [dict(r) for r in result.mappings().all()]
-        _forge_log_slow_query(query, (time.monotonic() - t0) * 1000, label="tx_read")
-        return rows
+        with _timed("tx_read", query):
+            result: Result = self._conn.execute(text(query), params or {})
+            return [dict(r) for r in result.mappings().all()]
 
     def execute_query(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Tuple]:
-        t0 = time.monotonic()
-        result: Result = self._conn.execute(text(query), params or {})
-        rows = result.fetchall()
-        _forge_log_slow_query(query, (time.monotonic() - t0) * 1000, label="tx_read")
-        return rows
+        with _timed("tx_read", query):
+            result: Result = self._conn.execute(text(query), params or {})
+            return result.fetchall()
 
     def execute_insert(self, query: str, params: Optional[Dict[str, Any]] = None) -> ForgeExecResult:
-        t0 = time.monotonic()
-        result = self._conn.execute(text(query), params or {})
-        _forge_log_slow_query(query, (time.monotonic() - t0) * 1000, label="tx_insert")
-        return ForgeExecResult(rowcount=int(result.rowcount or 0), lastrowid=result.lastrowid)
+        with _timed("tx_insert", query):
+            result = self._conn.execute(text(query), params or {})
+            return ForgeExecResult(rowcount=int(result.rowcount or 0), lastrowid=result.lastrowid)
 
 
 def ensure_workspace(conn: Connection, workspace_id: str, display_name: Optional[str] = None) -> None:

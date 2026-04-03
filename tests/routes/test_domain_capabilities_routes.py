@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.domain_routes as domain_routes
+import app.features.domains.shared as domain_routes
 
 
 def _headers(monkeypatch):

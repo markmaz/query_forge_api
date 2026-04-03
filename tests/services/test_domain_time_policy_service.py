@@ -54,6 +54,7 @@ def _base_row(
     can_edit: int = 1,
     policy_id: Optional[int] = 11,
     relative_map: Any = None,
+    semester_config: Any = None,
 ) -> Dict[str, Any]:
     return {
         "domain_id": 3,
@@ -72,6 +73,7 @@ def _base_row(
         "prefer_time_object_over_filter": 1 if policy_id else None,
         "strict_mode": 1 if policy_id else None,
         "relative_map": relative_map if policy_id else None,
+        "semester_config": semester_config if policy_id else None,
         "notes": "policy note" if policy_id else None,
     }
 
@@ -83,6 +85,7 @@ def test_get_policy_returns_defaults_when_missing() -> None:
     assert out["has_policy"] is False
     assert out["policy"]["calendar_mode"] == "calendar"
     assert out["policy"]["relative_map"] == {}
+    assert out["policy"]["semester"]["labels"]["spring"] == "Spring"
 
 
 def test_update_policy_updates_existing_policy() -> None:
@@ -152,5 +155,61 @@ def test_update_policy_requires_edit_permission() -> None:
             user_id="user-1",
             domain_id=3,
             policy_payload={"calendar_mode": "calendar"},
-        )
+    )
     assert exc_info.value.status_code == 403
+
+
+def test_update_policy_accepts_semester_config() -> None:
+    semester_config = {
+        "labels": {
+            "spring": "Spring Term",
+            "fall": "Fall Term",
+            "year_round": "Summer Session",
+        },
+        "month_ranges": {
+            "spring": [1, 4],
+            "fall": [8, 12],
+            "year_round": [5, 7],
+        },
+        "indicator_columns": {
+            "fall": "wt24.is_fall_term",
+        },
+    }
+    sql = _FakeSQL(
+        rows_by_call=[
+            [_base_row(policy_id=11, relative_map=json.dumps({}), semester_config=json.dumps({}))],
+            [_base_row(policy_id=11, relative_map=json.dumps({}), semester_config=json.dumps(semester_config))],
+        ]
+    )
+    svc = DomainTimePolicyService(sql=sql)
+    out = svc.update_policy(
+        workspace_id="ws-1",
+        user_id="user-1",
+        domain_id=3,
+        policy_payload={"semester": semester_config},
+    )
+    assert out["policy"]["semester"]["labels"]["year_round"] == "Summer Session"
+    assert out["policy"]["semester"]["month_ranges"]["spring"] == [1, 4]
+    assert out["policy"]["semester"]["indicator_columns"]["fall"] == "wt24.is_fall_term"
+    assert sql.last_write_params is not None
+    assert json.loads(str(sql.last_write_params["semester_config"]))["labels"]["spring"] == "Spring Term"
+
+
+def test_update_policy_rejects_invalid_semester_month_range() -> None:
+    sql = _FakeSQL(rows_by_call=[[_base_row(policy_id=11)]])
+    svc = DomainTimePolicyService(sql=sql)
+    with pytest.raises(ForgeError) as exc_info:
+        svc.update_policy(
+            workspace_id="ws-1",
+            user_id="user-1",
+            domain_id=3,
+            policy_payload={
+                "semester": {
+                    "month_ranges": {
+                        "spring": [0, 5],
+                    }
+                }
+            },
+        )
+    assert exc_info.value.status_code == 400
+    assert "month_ranges.spring[0]" in str(exc_info.value)

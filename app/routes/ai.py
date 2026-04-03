@@ -14,7 +14,7 @@ from app.exceptions.forge_error import ForgeError
 from app.models.query.ai_suggest import SuggestAPIResponse, SuggestRequest
 from app.routes.request_helpers import extract_workspace_id
 from app.services.embedding.embedding_search_service import EmbeddingSearchService
-from app.services.ai_suggest_service import AISuggestService, InvalidModelResponseError
+from app.services.ai_suggest import AISuggestService, InvalidModelResponseError
 from app.services.semantic.plan import PlanService
 
 logger = logging.getLogger(__name__)
