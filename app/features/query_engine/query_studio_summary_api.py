@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-
 from flask import request
 from flask_restx import Namespace, Resource, fields
 
@@ -10,8 +8,6 @@ from app.decorators.security import token_required
 from app.exceptions.llm_unavailable_error import LLMUnavailableError
 from app.routes.request_helpers import extract_workspace_id
 from app.services.query_studio_summary_service import generate_preview_summary
-
-logger = logging.getLogger(__name__)
 
 query_studio_summary_ns = Namespace(
     "query_studio_summary",
@@ -80,8 +76,7 @@ class QueryStudioSummarize(Resource):
             )
         except LLMUnavailableError:
             return {"error": "LLM not configured for this workspace", "code": "llm_unavailable"}, 503
-        except Exception:
-            logger.exception("Summary generation failed")
-            return {"error": "Summary generation failed", "code": "summary_failed"}, 500
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return {"error": "Failed to generate summary", "code": "summary_failed"}, 500
 
         return result, 200

@@ -154,7 +154,7 @@ def _to_int(value: Any) -> Optional[int]:
         return None
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 

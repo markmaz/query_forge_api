@@ -574,7 +574,7 @@ def _to_int_or_none(value: Any) -> Optional[int]:
         return None
     try:
         parsed = int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
 

@@ -122,24 +122,21 @@ class UserList(Resource):
         workspace_id = _admin_user_scope_workspace_id()
         logger.info("Parsed args: %s", args)
         logger.info(args["status"])
-        try:
-            user_service = UserService()
-            users, next_cursor, prev_cursor, total_count = user_service.get_users(
-                status=args["status"],
-                cursor=args["cursor"],
-                limit=args["limit"],
-                direction=args["direction"],
-                username=args["q"],
-                workspace_id=workspace_id,
-            )
-            return {
-                "users": [_public_user_payload(user) for user in users],
-                "next_cursor": next_cursor,
-                "prev_cursor": prev_cursor,
-                "total_count": total_count,
-            }, 200
-        except Exception as exc:
-            qf_user_ns.abort(500, f"Error fetching users: {exc}")
+        user_service = UserService()
+        users, next_cursor, prev_cursor, total_count = user_service.get_users(
+            status=args["status"],
+            cursor=args["cursor"],
+            limit=args["limit"],
+            direction=args["direction"],
+            username=args["q"],
+            workspace_id=workspace_id,
+        )
+        return {
+            "users": [_public_user_payload(user) for user in users],
+            "next_cursor": next_cursor,
+            "prev_cursor": prev_cursor,
+            "total_count": total_count,
+        }, 200
 
 
 @qf_user_ns.route("/<string:user_id>")

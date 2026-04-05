@@ -298,7 +298,7 @@ def _parse_json_list(value: Any) -> List[Any]:
         return []
     try:
         parsed = json.loads(text)
-    except Exception:
+    except (TypeError, ValueError, json.JSONDecodeError):
         return []
     return parsed if isinstance(parsed, list) else []
 
@@ -353,7 +353,7 @@ def _looks_like_time_column(*, column_name: str, data_type: str, semantic_type: 
 def _to_int(value: Any) -> Optional[int]:
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 

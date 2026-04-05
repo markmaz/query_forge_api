@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.engine.result import Result
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import QueuePool
 
 from app.config import DB_URI, MAX_OVERFLOW, POOL_RECYCLE, POOL_SIZE, POOL_TIMEOUT
@@ -77,7 +78,7 @@ def execute_write(query: str, params: Optional[Dict[str, Any]] = None) -> int:
                 result = conn.execute(text(query), params or {})
                 tx.commit()
                 return int(result.rowcount or 0)
-            except Exception:
+            except SQLAlchemyError:
                 tx.rollback()
                 raise
 
@@ -90,7 +91,7 @@ class ForgeMetaSQL(ForgeQueryPort):
         try:
             yield _ForgeTransaction(conn)
             tx.commit()
-        except Exception:
+        except SQLAlchemyError:
             tx.rollback()
             raise
         finally:
@@ -141,7 +142,7 @@ class ForgeMetaSQL(ForgeQueryPort):
                 result = conn.execute(text(query), params or {})
                 tx.commit()
                 return ForgeExecResult(rowcount=int(result.rowcount or 0), lastrowid=result.lastrowid)
-            except Exception:
+            except SQLAlchemyError:
                 tx.rollback()
                 raise
 

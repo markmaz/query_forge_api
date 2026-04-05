@@ -6,7 +6,6 @@ from typing import Any, Dict
 from flask import request
 from flask_restx import Namespace, fields
 from flask_restx import Resource
-from pydantic import ValidationError
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -77,48 +76,31 @@ class ForgeInsightsProjectsRoute(Resource):
     @token_required
     @require_access("forge_insights")
     def get(self):
-        try:
-            workspace_id = extract_workspace_id()
-            user_id = require_user_id()
-            include_archived = bool_arg("include_archived", False) is True
-            items = _service().list_projects(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                include_archived=include_archived,
-            )
-            return {"items": [ForgeInsightsProjectResponse.model_validate(i).model_dump(mode="json") for i in items]}, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("forge insights list projects failed")
-            return {"error": "forge insights list projects failed"}, 500
+        workspace_id = extract_workspace_id()
+        user_id = require_user_id()
+        include_archived = bool_arg("include_archived", False) is True
+        items = _service().list_projects(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            include_archived=include_archived,
+        )
+        return {"items": [ForgeInsightsProjectResponse.model_validate(i).model_dump(mode="json") for i in items]}, 200
 
     @token_required
     @require_access("forge_insights")
     @forge_insights_ns.expect(_project_create_model, validate=False)
     def post(self):
-        try:
-            workspace_id = extract_workspace_id()
-            user_id = require_user_id()
-            body: Dict[str, Any] = request.get_json(silent=True) or {}
-            parsed = ForgeInsightsProjectCreateRequest.model_validate(body)
-            row = _service().create_project(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                name=parsed.name,
-                description=parsed.description,
-            )
-            return ForgeInsightsProjectResponse.model_validate(row).model_dump(mode="json"), 201
-        except ValidationError as exc:
-            return {
-                "error": "Invalid request",
-                "details": exc.errors(include_url=False, include_context=False, include_input=False),
-            }, 400
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("forge insights create project failed")
-            return {"error": "forge insights create project failed"}, 500
+        workspace_id = extract_workspace_id()
+        user_id = require_user_id()
+        body: Dict[str, Any] = request.get_json(silent=True) or {}
+        parsed = ForgeInsightsProjectCreateRequest.model_validate(body)
+        row = _service().create_project(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            name=parsed.name,
+            description=parsed.description,
+        )
+        return ForgeInsightsProjectResponse.model_validate(row).model_dump(mode="json"), 201
 
 
 @forge_insights_ns.route("/projects/<int:project_id>")
@@ -127,44 +109,27 @@ class ForgeInsightsProjectRoute(Resource):
     @require_access("forge_insights")
     @forge_insights_ns.expect(_project_patch_model, validate=False)
     def patch(self, project_id: int):
-        try:
-            workspace_id = extract_workspace_id()
-            user_id = require_user_id()
-            body: Dict[str, Any] = request.get_json(silent=True) or {}
-            parsed = ForgeInsightsProjectUpdateRequest.model_validate(body)
-            row = _service().update_project(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                project_id=project_id,
-                name=parsed.name,
-                description=parsed.description,
-                is_archived=parsed.is_archived,
-            )
-            return ForgeInsightsProjectResponse.model_validate(row).model_dump(mode="json"), 200
-        except ValidationError as exc:
-            return {
-                "error": "Invalid request",
-                "details": exc.errors(include_url=False, include_context=False, include_input=False),
-            }, 400
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("forge insights update project failed")
-            return {"error": "forge insights update project failed"}, 500
+        workspace_id = extract_workspace_id()
+        user_id = require_user_id()
+        body: Dict[str, Any] = request.get_json(silent=True) or {}
+        parsed = ForgeInsightsProjectUpdateRequest.model_validate(body)
+        row = _service().update_project(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            project_id=project_id,
+            name=parsed.name,
+            description=parsed.description,
+            is_archived=parsed.is_archived,
+        )
+        return ForgeInsightsProjectResponse.model_validate(row).model_dump(mode="json"), 200
 
     @token_required
     @require_access("forge_insights")
     def delete(self, project_id: int):
-        try:
-            workspace_id = extract_workspace_id()
-            user_id = require_user_id()
-            result = _service().delete_project(workspace_id=workspace_id, user_id=user_id, project_id=project_id)
-            return result, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("forge insights delete project failed")
-            return {"error": "forge insights delete project failed"}, 500
+        workspace_id = extract_workspace_id()
+        user_id = require_user_id()
+        result = _service().delete_project(workspace_id=workspace_id, user_id=user_id, project_id=project_id)
+        return result, 200
 
 
 @forge_insights_ns.route("/threads")
@@ -195,40 +160,26 @@ class ForgeInsightsThreadsRoute(Resource):
             return {"error": "Invalid integer for 'project_id'"}, 400
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("forge insights list threads failed")
-            return {"error": "forge insights list threads failed"}, 500
 
     @token_required
     @require_access("forge_insights")
     @forge_insights_ns.expect(_thread_create_model, validate=False)
     def post(self):
-        try:
-            workspace_id = extract_workspace_id()
-            user_id = require_user_id()
-            body: Dict[str, Any] = request.get_json(silent=True) or {}
-            parsed = ForgeInsightsThreadCreateRequest.model_validate(body)
-            row = _service().create_thread(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                project_id=parsed.project_id,
-                conversation_id=parsed.conversation_id,
-                title=parsed.title,
-                preview_text=parsed.preview_text,
-                is_pinned=parsed.is_pinned,
-                is_archived=parsed.is_archived,
-            )
-            return ForgeInsightsThreadResponse.model_validate(row).model_dump(mode="json"), 201
-        except ValidationError as exc:
-            return {
-                "error": "Invalid request",
-                "details": exc.errors(include_url=False, include_context=False, include_input=False),
-            }, 400
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("forge insights create thread failed")
-            return {"error": "forge insights create thread failed"}, 500
+        workspace_id = extract_workspace_id()
+        user_id = require_user_id()
+        body: Dict[str, Any] = request.get_json(silent=True) or {}
+        parsed = ForgeInsightsThreadCreateRequest.model_validate(body)
+        row = _service().create_thread(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            project_id=parsed.project_id,
+            conversation_id=parsed.conversation_id,
+            title=parsed.title,
+            preview_text=parsed.preview_text,
+            is_pinned=parsed.is_pinned,
+            is_archived=parsed.is_archived,
+        )
+        return ForgeInsightsThreadResponse.model_validate(row).model_dump(mode="json"), 201
 
 
 @forge_insights_ns.route("/threads/<int:thread_id>")
@@ -236,59 +187,36 @@ class ForgeInsightsThreadRoute(Resource):
     @token_required
     @require_access("forge_insights")
     def get(self, thread_id: int):
-        try:
-            workspace_id = extract_workspace_id()
-            user_id = require_user_id()
-            row = _service().get_thread(workspace_id=workspace_id, user_id=user_id, thread_id=thread_id)
-            return ForgeInsightsThreadResponse.model_validate(row).model_dump(mode="json"), 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("forge insights get thread failed")
-            return {"error": "forge insights get thread failed"}, 500
+        workspace_id = extract_workspace_id()
+        user_id = require_user_id()
+        row = _service().get_thread(workspace_id=workspace_id, user_id=user_id, thread_id=thread_id)
+        return ForgeInsightsThreadResponse.model_validate(row).model_dump(mode="json"), 200
 
     @token_required
     @require_access("forge_insights")
     @forge_insights_ns.expect(_thread_patch_model, validate=False)
     def patch(self, thread_id: int):
-        try:
-            workspace_id = extract_workspace_id()
-            user_id = require_user_id()
-            body: Dict[str, Any] = request.get_json(silent=True) or {}
-            parsed = ForgeInsightsThreadUpdateRequest.model_validate(body)
-            row = _service().update_thread(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                thread_id=thread_id,
-                project_id=parsed.project_id,
-                title=parsed.title,
-                preview_text=parsed.preview_text,
-                is_pinned=parsed.is_pinned,
-                is_archived=parsed.is_archived,
-                last_message_at=parsed.last_message_at,
-            )
-            return ForgeInsightsThreadResponse.model_validate(row).model_dump(mode="json"), 200
-        except ValidationError as exc:
-            return {
-                "error": "Invalid request",
-                "details": exc.errors(include_url=False, include_context=False, include_input=False),
-            }, 400
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("forge insights update thread failed")
-            return {"error": "forge insights update thread failed"}, 500
+        workspace_id = extract_workspace_id()
+        user_id = require_user_id()
+        body: Dict[str, Any] = request.get_json(silent=True) or {}
+        parsed = ForgeInsightsThreadUpdateRequest.model_validate(body)
+        row = _service().update_thread(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            thread_id=thread_id,
+            project_id=parsed.project_id,
+            title=parsed.title,
+            preview_text=parsed.preview_text,
+            is_pinned=parsed.is_pinned,
+            is_archived=parsed.is_archived,
+            last_message_at=parsed.last_message_at,
+        )
+        return ForgeInsightsThreadResponse.model_validate(row).model_dump(mode="json"), 200
 
     @token_required
     @require_access("forge_insights")
     def delete(self, thread_id: int):
-        try:
-            workspace_id = extract_workspace_id()
-            user_id = require_user_id()
-            result = _service().delete_thread(workspace_id=workspace_id, user_id=user_id, thread_id=thread_id)
-            return result, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("forge insights delete thread failed")
-            return {"error": "forge insights delete thread failed"}, 500
+        workspace_id = extract_workspace_id()
+        user_id = require_user_id()
+        result = _service().delete_thread(workspace_id=workspace_id, user_id=user_id, thread_id=thread_id)
+        return result, 200

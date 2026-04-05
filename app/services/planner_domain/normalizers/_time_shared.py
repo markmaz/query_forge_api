@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any, Dict, Mapping, Optional
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 def _norm_key(value: Any) -> str:
@@ -141,7 +141,7 @@ def _policy_anchor_date(*, today: Optional[date], timezone_name: str) -> date:
     if tz:
         try:
             return datetime.now(ZoneInfo(tz)).date()
-        except Exception:
+        except (ZoneInfoNotFoundError, ValueError):
             pass
     return date.today()
 

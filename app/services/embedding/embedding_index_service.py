@@ -289,7 +289,7 @@ def _to_int_or_none(value: Any) -> Optional[int]:
         return None
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -298,7 +298,7 @@ def _to_float_or_none(value: Any) -> Optional[float]:
         return None
     try:
         return float(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -314,7 +314,7 @@ def _parse_json_list(value: Any) -> List[str]:
         return []
     try:
         parsed = json.loads(text)
-    except Exception:
+    except (TypeError, ValueError, json.JSONDecodeError):
         return []
     if not isinstance(parsed, list):
         return []

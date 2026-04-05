@@ -15,8 +15,14 @@ _valkey_client: Any = None
 
 try:
     import valkey  # type: ignore
-except Exception:  # pragma: no cover
+    from valkey.exceptions import ValkeyError
+except ImportError:  # pragma: no cover
     valkey = None
+    ValkeyError = None  # type: ignore[assignment]
+
+
+VALKEY_BACKEND_ERRORS = ((OSError, ValkeyError) if ValkeyError is not None else (OSError,))
+JSON_PARSE_ERRORS = (TypeError, ValueError)
 
 
 class PlannerDomainConversationStore(Protocol):
@@ -43,7 +49,7 @@ class HybridPlannerDomainConversationStore:
             return None
         try:
             data = json.loads(payload)
-        except Exception:
+        except JSON_PARSE_ERRORS:
             logger.debug("planner_domain conversation payload parse failed key=%s", key)
             return None
         if not isinstance(data, Mapping):
@@ -72,7 +78,7 @@ class HybridPlannerDomainConversationStore:
                     return value.decode("utf-8", errors="ignore")
                 if isinstance(value, str):
                     return value
-            except Exception:
+            except VALKEY_BACKEND_ERRORS:
                 logger.debug("planner_domain valkey read failed", exc_info=True)
         return _IN_MEMORY_CONV_STORE.get(key)
 
@@ -82,7 +88,7 @@ class HybridPlannerDomainConversationStore:
             try:
                 client.setex(key, int(qf_ttl_seconds), value)
                 return
-            except Exception:
+            except VALKEY_BACKEND_ERRORS:
                 logger.debug("planner_domain valkey write failed", exc_info=True)
         _IN_MEMORY_CONV_STORE[key] = value
 
@@ -134,7 +140,7 @@ def _get_valkey_client():
     try:
         _valkey_client = valkey.Redis(host=host, port=port, decode_responses=False)
         return _valkey_client
-    except Exception:
+    except VALKEY_BACKEND_ERRORS:
         logger.debug("planner_domain valkey init failed", exc_info=True)
         _valkey_client = None
         return None

@@ -136,6 +136,6 @@ class WorkspaceDatasourceResolverService:
                 if isinstance(parsed, dict):
                     return parsed
                 return {}
-            except Exception:
+            except (TypeError, ValueError, json.JSONDecodeError):
                 return {}
         return {}

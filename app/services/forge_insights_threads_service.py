@@ -589,7 +589,7 @@ def _optional_text(value: Any, *, max_len: int) -> Optional[str]:
 def _required_int(value: Any, field_name: str) -> int:
     try:
         parsed = int(value)
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         raise ForgeError(f"{field_name} must be an integer", status_code=400) from exc
     if parsed <= 0:
         raise ForgeError(f"{field_name} must be > 0", status_code=400)

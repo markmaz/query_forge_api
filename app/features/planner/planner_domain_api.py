@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import AbstractContextManager
 from typing import Any, Dict
 
 from flask import g, request
@@ -15,6 +16,25 @@ from app.routes.request_helpers import extract_workspace_id, require_user_id
 from app.services.planner_domain import PlannerDomainService
 
 logger = logging.getLogger(__name__)
+
+
+class _PlanFailureTraceContext(AbstractContextManager[None]):
+    def __init__(self, *, planner_service: PlannerDomainService, payload: Dict[str, Any]) -> None:
+        self._planner_service = planner_service
+        self._payload = payload
+
+    def __exit__(self, exc_type, exc, exc_tb) -> bool:
+        del exc_type, exc_tb
+        if exc is None:
+            return False
+        trace_id = self._planner_service.emit_failed_plan_trace(
+            payload=self._payload,
+            user_id=str(getattr(g, "user_id", "") or ""),
+            error=exc,
+        )
+        if trace_id:
+            g.failed_trace_id = trace_id
+        return False
 
 plan_domain_request_model = planner_ns.model(
     "PlannerDomainRequest",
@@ -58,7 +78,7 @@ class PlannerPlanDomain(Resource):
     def post(self):
         body: Dict[str, Any] = {}
         planner_service = PlannerDomainService()
-        try:
+        with _PlanFailureTraceContext(planner_service=planner_service, payload=body):
             body = request.get_json(silent=True) or {}
             header_workspace_id = extract_workspace_id()
             payload_workspace_id = str(body.get("workspace_id") or "").strip()
@@ -69,31 +89,6 @@ class PlannerPlanDomain(Resource):
             user_id = require_user_id()
             result = planner_service.plan(body, user_id=user_id)
             return result, 200
-        except ForgeError as exc:
-            trace_id = planner_service.emit_failed_plan_trace(
-                payload=body,
-                user_id=str(getattr(g, "user_id", "") or ""),
-                error=exc,
-            )
-            response = exc.to_dict()
-            if trace_id:
-                details = response.get("details")
-                if not isinstance(details, dict):
-                    details = {}
-                details.setdefault("trace_id", trace_id)
-                response["details"] = details
-            return response, exc.status_code
-        except Exception as exc:
-            trace_id = planner_service.emit_failed_plan_trace(
-                payload=body,
-                user_id=str(getattr(g, "user_id", "") or ""),
-                error=exc,
-            )
-            logger.exception("planner domain failed")
-            response: Dict[str, Any] = {"error": "planner domain failed"}
-            if trace_id:
-                response["details"] = {"trace_id": trace_id}
-            return response, 500
 
 
 @planner_ns.route("/plan_domain/profile/<string:trace_id>")
@@ -101,20 +96,14 @@ class PlannerPlanDomainProfile(Resource):
     @token_required
     @require_access("planner")
     def get(self, trace_id: str):
-        try:
-            workspace_id = extract_workspace_id()
-            user_id = require_user_id()
-            result = PlannerDomainService().get_pipeline_profile(
-                trace_id=trace_id,
-                workspace_id=workspace_id,
-                user_id=user_id,
-            )
-            return result, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("planner domain profile lookup failed")
-            return {"error": "planner domain profile lookup failed"}, 500
+        workspace_id = extract_workspace_id()
+        user_id = require_user_id()
+        result = PlannerDomainService().get_pipeline_profile(
+            trace_id=trace_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        return result, 200
 
 
 @planner_ns.route("/plan_domain/next_actions")
@@ -123,19 +112,13 @@ class PlannerPlanDomainNextActions(Resource):
     @require_access("planner")
     @planner_ns.expect(next_actions_request_model, validate=False)
     def post(self):
-        try:
-            body: Dict[str, Any] = request.get_json(silent=True) or {}
-            header_workspace_id = extract_workspace_id()
-            payload_workspace_id = str(body.get("workspace_id") or "").strip()
-            if payload_workspace_id and payload_workspace_id != header_workspace_id:
-                raise ForgeError("workspace_id must match X-Workspace-Id header", status_code=400)
+        body: Dict[str, Any] = request.get_json(silent=True) or {}
+        header_workspace_id = extract_workspace_id()
+        payload_workspace_id = str(body.get("workspace_id") or "").strip()
+        if payload_workspace_id and payload_workspace_id != header_workspace_id:
+            raise ForgeError("workspace_id must match X-Workspace-Id header", status_code=400)
 
-            body["workspace_id"] = header_workspace_id
-            user_id = require_user_id()
-            result = PlannerDomainService().generate_next_actions(body, user_id=user_id)
-            return result, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("planner domain next actions failed")
-            return {"error": "planner domain next actions failed"}, 500
+        body["workspace_id"] = header_workspace_id
+        user_id = require_user_id()
+        result = PlannerDomainService().generate_next_actions(body, user_id=user_id)
+        return result, 200

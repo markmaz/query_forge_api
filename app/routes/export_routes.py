@@ -58,31 +58,25 @@ class ExcelExport(Resource):
     @token_required
     @require_access("exports")
     def post(self):
-        try:
-            workspace_id = extract_workspace_id()
-            payload = request.get_json(silent=True) or {}
-            result = ExportRequestService(
-                workspace_context_builder=WorkspaceSqlContextBuilder(),
-                query_forge_service_cls=QueryForgeService,
-                domain_resolver_factory=lambda ws: DomainResolver(workspace_id=ws),
-                token_store=_build_token_store(),
-                fetch_cached_rowcount=fetch_cached_rowcount,
-                store_cached_rowcount=store_cached_rowcount,
-                build_export_policy=build_qf_export_policy,
-                rowcount_signature=qf_rowcount_signature,
-                excel_max_rows=QF_EXCEL_MAX_ROWS,
-            ).prepare_excel_export(
-                workspace_id=workspace_id,
-                payload=payload,
-            )
-            if result.get("error") == "EXCEL_ROW_LIMIT":
-                return result, 409
-            return result, 200
-        except ForgeError as e:
-            return _abort_with_service_error(e)
-        except Exception:
-            logger.exception("Excel export failed")
-            return {"error": "Excel export failed"}, 500
+        workspace_id = extract_workspace_id()
+        payload = request.get_json(silent=True) or {}
+        result = ExportRequestService(
+            workspace_context_builder=WorkspaceSqlContextBuilder(),
+            query_forge_service_cls=QueryForgeService,
+            domain_resolver_factory=lambda ws: DomainResolver(workspace_id=ws),
+            token_store=_build_token_store(),
+            fetch_cached_rowcount=fetch_cached_rowcount,
+            store_cached_rowcount=store_cached_rowcount,
+            build_export_policy=build_qf_export_policy,
+            rowcount_signature=qf_rowcount_signature,
+            excel_max_rows=QF_EXCEL_MAX_ROWS,
+        ).prepare_excel_export(
+            workspace_id=workspace_id,
+            payload=payload,
+        )
+        if result.get("error") == "EXCEL_ROW_LIMIT":
+            return result, 409
+        return result, 200
 
 
 @exports_ns.route("/excel/<string:token>")
@@ -90,21 +84,15 @@ class ExcelDownload(Resource):
     @token_required
     @require_access("exports")
     def get(self, token: str):
-        try:
-            workspace_id = extract_workspace_id()
-            result = ExportMaterializationService(
-                workspace_context_builder=WorkspaceSqlContextBuilder(),
-                token_store=_build_token_store(),
-            ).build_excel_download(workspace_id=workspace_id, token=token)
-            return send_file(
-                io.BytesIO(result.content),
-                mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                as_attachment=True,
-                download_name=result.filename,
-                max_age=0,
-            )
-        except ForgeError as e:
-            return _abort_with_service_error(e)
-        except Exception:
-            logger.exception("Excel download failed")
-            return {"error": "Excel download failed"}, 500
+        workspace_id = extract_workspace_id()
+        result = ExportMaterializationService(
+            workspace_context_builder=WorkspaceSqlContextBuilder(),
+            token_store=_build_token_store(),
+        ).build_excel_download(workspace_id=workspace_id, token=token)
+        return send_file(
+            io.BytesIO(result.content),
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=result.filename,
+            max_age=0,
+        )

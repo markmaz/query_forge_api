@@ -32,6 +32,8 @@ from app.services.tenancy.datasource_config_crypto import (
 from app.services.tenancy.secret_resolver import SecretResolver
 
 _SUPPORTED_DATASOURCE_TYPES = {"databricks", "snowflake", "mysql", "postgres", "bigquery"}
+TENANCY_ADMIN_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, ValueError)
+JSON_PARSE_ERRORS = (json.JSONDecodeError,)
 
 
 class TenancyAdminService:
@@ -442,7 +444,7 @@ class TenancyAdminService:
         try:
             executor = ExecutorFactory.create(ds_type, config_json)
             executor.test_connection()
-        except Exception as exc:
+        except TENANCY_ADMIN_FALLBACK_ERRORS as exc:
             status = "error"
             message = str(exc)
         latency_ms = int((time.perf_counter() - start) * 1000)
@@ -621,7 +623,7 @@ class TenancyAdminService:
             rows = executor.execute("SHOW DATABASES")
             values = [row.get("Database") or row.get("database") or row.get("name") for row in rows]
             return _dedupe_namespace_values([*values, configured_catalog])
-        except Exception:
+        except TENANCY_ADMIN_FALLBACK_ERRORS:
             return fallback
 
     def _list_schema_options(
@@ -641,7 +643,7 @@ class TenancyAdminService:
             provider = MetadataProviderFactory.create(datasource_type, executor)
             values = provider.list_schemas(catalog)
             return _dedupe_namespace_values([*values, configured_schema])
-        except Exception:
+        except TENANCY_ADMIN_FALLBACK_ERRORS:
             return fallback
 
     def create_workspace(self, req: WorkspaceCreateRequest) -> Dict[str, Any]:
@@ -1101,7 +1103,7 @@ def _json_loads(value: Any) -> Any:
             return None
         try:
             return json.loads(text)
-        except Exception:
+        except JSON_PARSE_ERRORS:
             return value
     return value
 

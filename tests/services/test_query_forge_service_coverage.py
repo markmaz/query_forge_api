@@ -263,7 +263,7 @@ def test_normalize_filters_collapses_or_equals() -> None:
             {"type": "condition", "field": {"columnName": "code"}, "op": "equals", "value": "B"},
         ],
     }
-    out = svc._qf_norm_filters(node)
+    out = svc._normalizer.normalize_filters(node)
     assert out["op"] == "in"
     assert out["value"] == ["A", "B"]
     assert out["id"] == "g1"
@@ -286,7 +286,7 @@ def test_normalize_filters_collapses_or_equals() -> None:
 )
 def test_normalize_filters_no_collapse(node: dict) -> None:
     svc = QueryForgeService(executor=FakeForgeQueryPort(), domain_resolver=FakeResolver(_single_table_plan()))
-    out = svc._qf_norm_filters(node)
+    out = svc._normalizer.normalize_filters(node)
     assert out.get("type") == "group"
 
 
@@ -361,7 +361,7 @@ def test_normalize_filters_or_children_non_condition() -> None:
             "bad",
         ],
     }
-    normalized = svc._qf_norm_filters(node)
+    normalized = svc._normalizer.normalize_filters(node)
     assert normalized["children"][1] == "bad"
 
     node = {
@@ -372,7 +372,7 @@ def test_normalize_filters_or_children_non_condition() -> None:
             {"type": "condition", "field": {"columnName": "id"}, "op": "gt", "value": 2},
         ],
     }
-    normalized = svc._qf_norm_filters(node)
+    normalized = svc._normalizer.normalize_filters(node)
     assert normalized["children"][1]["op"] == "gt"
 
 
@@ -778,8 +778,8 @@ def test_compile_attachments_join_default_suffix(monkeypatch: pytest.MonkeyPatch
         return f":p{_counter[0]}"
 
     monkeypatch.setattr(
-        svc,
-        "_qf_norm_col_key",
+        svc._normalizer,
+        "normalize_col_key",
         lambda _col, _path: {"columnName": "patient_id", "workspaceTableId": 1, "modelColumnId": None, "exprId": None},
     )
     ctx = svc._compile_attachments(

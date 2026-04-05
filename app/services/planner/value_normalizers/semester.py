@@ -128,7 +128,7 @@ def _month_in_range(month: int, month_range: Tuple[int, int]) -> bool:
 def _normalize_month(value: Any, *, default: int) -> int:
     try:
         out = int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return int(default)
     if out < 1 or out > 12:
         return int(default)

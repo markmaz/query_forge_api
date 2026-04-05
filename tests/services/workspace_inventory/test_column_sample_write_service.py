@@ -9,7 +9,8 @@ from tests._support.fakes import FakeDatabricksForgeQueryPort, FakeForgeQueryPor
 
 
 class _SampleService(ColumnSampleWriteService):
-    def _fetch_column_stats(self, *, full_name: str, column_name: str, qf_timeout_s: Optional[int] = 120) -> Dict[str, Any]:
+    def _fetch_column_stats(self, *, full_name: str, column_name: str, timeout_s: Optional[int] = 120, qf_timeout_s: Optional[int] = None) -> Dict[str, Any]:
+        del full_name, column_name, timeout_s, qf_timeout_s
         return {"sample_row_count": 10, "null_count": 1, "null_pct": 0.1, "approx_distinct": 2}
 
     def _fetch_column_samples(
@@ -18,14 +19,18 @@ class _SampleService(ColumnSampleWriteService):
         full_name: str,
         column_name: str,
         limit: int = 10,
-        qf_timeout_s: Optional[int] = 120,
+        timeout_s: Optional[int] = 120,
+        qf_timeout_s: Optional[int] = None,
+        distinct: bool = True,
         **_kwargs: Any,
     ) -> List[str]:
+        del full_name, column_name, limit, timeout_s, qf_timeout_s, distinct
         return ["a", "b"]
 
 
 class _FailingSampleService(_SampleService):
-    def _fetch_column_stats(self, *, full_name: str, column_name: str, qf_timeout_s: Optional[int] = 120) -> Dict[str, Any]:
+    def _fetch_column_stats(self, *, full_name: str, column_name: str, timeout_s: Optional[int] = 120, qf_timeout_s: Optional[int] = None) -> Dict[str, Any]:
+        del full_name, column_name, timeout_s, qf_timeout_s
         raise RuntimeError("boom")
 
 

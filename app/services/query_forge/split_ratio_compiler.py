@@ -46,7 +46,7 @@ def detect_split_ratio_metric(
         try:
             n_table = int(n_field.get("workspaceTableId") or primary_id)
             d_table = int(d_field.get("workspaceTableId") or primary_id)
-        except Exception:
+        except (TypeError, ValueError):
             continue
         if n_table != d_table:
             ratio_metrics.append(metric)
@@ -167,7 +167,7 @@ class SplitRatioCompiler:
         try:
             num_table_id = int(num_field.get("workspaceTableId") or primary_id)
             den_table_id = int(den_field.get("workspaceTableId") or primary_id)
-        except Exception:
+        except (TypeError, ValueError):
             raise ForgeError("Invalid ratio metric table bindings", status_code=400)
 
         all_conditions = flatten_and_conditions(query_json.get("filters"))
@@ -180,7 +180,7 @@ class SplitRatioCompiler:
                 wt_id = primary_id
             try:
                 wt_id_int = int(wt_id)
-            except Exception:
+            except (TypeError, ValueError):
                 wt_id_int = primary_id
             if wt_id_int == num_table_id:
                 num_conditions.append(cond)

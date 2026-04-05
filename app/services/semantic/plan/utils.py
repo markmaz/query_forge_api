@@ -328,7 +328,7 @@ def _to_int(value: Any) -> Optional[int]:
         return None
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -337,7 +337,7 @@ def _to_float(value: Any) -> Optional[float]:
         return None
     try:
         return float(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 

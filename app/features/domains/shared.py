@@ -105,10 +105,4 @@ def handle_service_error(error: ForgeError):
 
 
 def run(handler: Callable[[], Tuple[Any, int]], *, log_message: str, client_error: str):
-    try:
-        return handler()
-    except ForgeError as error:
-        return handle_service_error(error)
-    except Exception:
-        logger.exception(log_message)
-        return {"error": client_error}, 500
+    return handler()

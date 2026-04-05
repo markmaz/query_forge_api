@@ -367,7 +367,7 @@ def _coerce_json(value: Any) -> Any:
     if isinstance(value, (bytes, bytearray)):
         try:
             value = value.decode("utf-8")
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             return str(value)
     if isinstance(value, str):
         text = value.strip()
@@ -375,6 +375,6 @@ def _coerce_json(value: Any) -> Any:
             return None
         try:
             return json.loads(text)
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             return {"_raw": text}
     return value

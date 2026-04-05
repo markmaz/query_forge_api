@@ -8,6 +8,7 @@ from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
+from app.exceptions.forge_error import ForgeError
 from app.services.embedding.embedding_search_service import EmbeddingSearchService
 from app.services.nlp.dictionary_ner import extract_signals as extract_dictionary_signals
 from app.services.nlp.ed_ner import extract_signals as extract_ed_signals
@@ -40,17 +41,13 @@ class NlpExtractAndSearch(Resource):
         if error:
             return error
 
-        try:
-            vector_request = build_vector_search_request(response)
-            vector_response = _run_vector_search(vector_request)
-            return {
-                "nlp": response,
-                "vector_request": vector_request,
-                "vector": vector_response,
-            }, 200
-        except Exception:
-            logger.exception("NLP extract-and-search failed")
-            return {"error": "NLP extract-and-search failed"}, 500
+        vector_request = build_vector_search_request(response)
+        vector_response = _run_vector_search(vector_request)
+        return {
+            "nlp": response,
+            "vector_request": vector_request,
+            "vector": vector_response,
+        }, 200
 
 
 def _domain_hints(workspace_id: str, text: str) -> list[int]:
@@ -68,7 +65,7 @@ def _domain_hints(workspace_id: str, text: str) -> list[int]:
             if value not in hints:
                 hints.append(value)
         return hints
-    except Exception:
+    except (ForgeError, RuntimeError, TypeError, ValueError):
         logger.exception("NLP domain hint search failed")
         return []
 
@@ -112,7 +109,7 @@ def _run_nlp_extract(body: dict) -> tuple[dict, tuple[dict, int] | None]:
                 "debug": result.get("debug", {}),
             }
         return response, None
-    except Exception:
+    except (ForgeError, RuntimeError, TypeError, ValueError):
         logger.exception("NLP extraction failed")
         return {}, ({"error": "NLP extraction failed"}, 500)
 

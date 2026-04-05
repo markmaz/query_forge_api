@@ -26,13 +26,7 @@ def _service_error(error: ForgeError):
 
 
 def _run(handler: Callable[[], Any], *, log_message: str, client_error: str):
-    try:
-        return handler()
-    except ForgeError as error:
-        return _service_error(error)
-    except Exception:
-        logger.exception(log_message)
-        return {"error": client_error}, 500
+    return handler()
 
 
 def _json_payload() -> Dict[str, Any]:

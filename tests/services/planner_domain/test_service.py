@@ -4,6 +4,8 @@ from datetime import date
 import logging
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
+from valkey.exceptions import ValkeyError
 
 from app.exceptions.forge_error import ForgeError
 from app.services.planner.semantic_candidate_models import SemanticCandidatePayload, SemanticConceptCandidate
@@ -1126,6 +1128,114 @@ def test_generate_next_actions_from_plan_payload(monkeypatch) -> None:
     assert len(list(out.get("next_actions") or [])) >= 1
     assert out["trace_id"] == "trace-abc"
     assert out["conversation_id"] == "pdc_abc123"
+
+
+def test_plan_tolerates_conversation_store_backend_failures() -> None:
+    class _FailingConversationStore:
+        def get_state(self, **kwargs):
+            del kwargs
+            raise ValkeyError("valkey unavailable")
+
+        def save_state(self, **kwargs):
+            del kwargs
+
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+        conversation_store=_FailingConversationStore(),
+    )
+
+    out = svc.plan(
+        {
+            "workspace_id": "ws-1",
+            "vertical_norm": "education",
+            "base_domain_id": 6,
+            "prompt": "list students by county",
+        },
+        user_id="user-1",
+    )
+
+    assert out["validation"]["is_valid"] is True
+
+
+def test_plan_surfaces_unexpected_conversation_store_errors() -> None:
+    class _FailingConversationStore:
+        def get_state(self, **kwargs):
+            del kwargs
+            raise AssertionError("unexpected conversation store failure")
+
+        def save_state(self, **kwargs):
+            del kwargs
+
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+        conversation_store=_FailingConversationStore(),
+    )
+
+    with pytest.raises(AssertionError, match="unexpected conversation store failure"):
+        svc.plan(
+            {
+                "workspace_id": "ws-1",
+                "vertical_norm": "education",
+                "base_domain_id": 6,
+                "prompt": "list students by county",
+            },
+            user_id="user-1",
+        )
+
+
+def test_plan_tolerates_optional_time_policy_failures() -> None:
+    class _FailingTimePolicyService:
+        def get_policy(self, **kwargs):
+            del kwargs
+            raise SQLAlchemyError("db unavailable")
+
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+        domain_time_policy_service=_FailingTimePolicyService(),
+    )
+
+    out = svc.plan(
+        {
+            "workspace_id": "ws-1",
+            "vertical_norm": "education",
+            "base_domain_id": 6,
+            "prompt": "list students by county",
+        },
+        user_id="user-1",
+    )
+
+    assert out["validation"]["is_valid"] is True
+
+
+def test_plan_surfaces_unexpected_time_policy_errors() -> None:
+    class _FailingTimePolicyService:
+        def get_policy(self, **kwargs):
+            del kwargs
+            raise AssertionError("unexpected time policy failure")
+
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeLLM(),
+        domain_time_policy_service=_FailingTimePolicyService(),
+    )
+
+    with pytest.raises(AssertionError, match="unexpected time policy failure"):
+        svc.plan(
+            {
+                "workspace_id": "ws-1",
+                "vertical_norm": "education",
+                "base_domain_id": 6,
+                "prompt": "list students by county",
+            },
+            user_id="user-1",
+        )
 
 
 def test_plan_accepts_llm_payload_missing_time_block() -> None:

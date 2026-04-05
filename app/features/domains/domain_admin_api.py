@@ -55,7 +55,7 @@ class DomainRecommendationsGenerate(Resource):
             if llm_id_raw not in (None, ""):
                 try:
                     llm_id = int(llm_id_raw)
-                except Exception as exc:
+                except (TypeError, ValueError) as exc:
                     raise domain_routes.ForgeError("llm_id must be an integer", status_code=400) from exc
                 if llm_id <= 0:
                     raise domain_routes.ForgeError("llm_id must be greater than 0", status_code=400)

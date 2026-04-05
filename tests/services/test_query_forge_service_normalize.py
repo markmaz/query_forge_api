@@ -335,21 +335,21 @@ def test_normalize_requires_columns_or_aggs() -> None:
 
 def test_normalize_col_key() -> None:
     svc = _svc()
-    assert svc._qf_norm_col_key("id", "path")["columnName"] == "id"
+    assert svc._normalizer.normalize_col_key("id", "path")["columnName"] == "id"
     with pytest.raises(ForgeError):
-        svc._qf_norm_col_key("t.id", "path")
+        svc._normalizer.normalize_col_key("t.id", "path")
     with pytest.raises(ForgeError):
-        svc._qf_norm_col_key("  ", "path")
+        svc._normalizer.normalize_col_key("  ", "path")
     with pytest.raises(ForgeError):
-        svc._qf_norm_col_key({}, "path")
+        svc._normalizer.normalize_col_key({}, "path")
     with pytest.raises(ForgeError):
-        svc._qf_norm_col_key({"columnName": "id", "modelColumnId": "bad"}, "path")
+        svc._normalizer.normalize_col_key({"columnName": "id", "modelColumnId": "bad"}, "path")
     with pytest.raises(ForgeError):
-        svc._qf_norm_col_key({"columnName": "id", "exprId": 123}, "path")
+        svc._normalizer.normalize_col_key({"columnName": "id", "exprId": 123}, "path")
     with pytest.raises(ForgeError):
-        svc._qf_norm_col_key({"columnName": "bad.name"}, "path")
+        svc._normalizer.normalize_col_key({"columnName": "bad.name"}, "path")
     with pytest.raises(ForgeError):
-        svc._qf_norm_col_key({"columnName": "id", "workspaceTableId": "bad"}, "path")
+        svc._normalizer.normalize_col_key({"columnName": "id", "workspaceTableId": "bad"}, "path")
 
 
 def test_compile_invalid_mode() -> None:

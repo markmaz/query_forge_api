@@ -3,8 +3,6 @@ set -euo pipefail
 
 QF_RUFF="${QF_RUFF:-.venv/bin/ruff}"
 
-echo "All checks passed!"
-
 if [ -x "$QF_RUFF" ]; then
   "$QF_RUFF" check .
 else
@@ -16,3 +14,5 @@ if [ -x .venv/bin/pytest ]; then
 else
   pytest -q --cov=app --cov-report=term-missing
 fi
+
+echo "All checks passed!"

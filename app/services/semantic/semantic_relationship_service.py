@@ -4,6 +4,8 @@ from collections import deque
 from datetime import date, datetime
 from typing import Any, Dict, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
@@ -194,7 +196,7 @@ class SemanticRelationshipService:
                     "relationship_type": relation_type,
                 },
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc)
 
         if result.lastrowid:
@@ -271,7 +273,7 @@ class SemanticRelationshipService:
                     "relationship_type": relation_type,
                 },
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc)
             affected = 0
 

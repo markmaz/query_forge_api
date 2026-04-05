@@ -157,9 +157,15 @@ def _get_refresh_candidates_from_request() -> list[str]:
 class Authenticate(Resource):
     @public
     def post(self):
-        data = request.json
+        data = request.get_json(silent=True) or {}
         username = data.get("username")
         password = data.get("password")
+
+        limiter = RateLimitService()
+        ip = str(request.remote_addr or "unknown")
+        limiter.enforce(scope="auth:login:ip", identifier=ip, max_attempts=20, window_s=900)
+        if username:
+            limiter.enforce(scope="auth:login:user", identifier=str(username), max_attempts=10, window_s=900)
 
         auth = AuthService()
         user = auth.non_interactive_authentication(username, password)
@@ -210,6 +216,12 @@ class Login(Resource):
         data = request.get_json(silent=True) or {}
         username = data.get("username")
         password = data.get("password")
+
+        limiter = RateLimitService()
+        ip = str(request.remote_addr or "unknown")
+        limiter.enforce(scope="auth:login:ip", identifier=ip, max_attempts=20, window_s=900)
+        if username:
+            limiter.enforce(scope="auth:login:user", identifier=str(username), max_attempts=10, window_s=900)
 
         auth = AuthService()
         user = auth.authenticate(username, password)
@@ -462,10 +474,13 @@ class InviteValidationResource(Resource):
 
         try:
             user_id = validate_token(token)
+        except Exception:
+            return {"error": "Invalid or expired token"}, 400
+        try:
             user_service = UserService()
             user = user_service.get_user(user_id)
             return {"email": user.email, "user_id": user_id}
-        except Exception:
+        except (ForgeError, TypeError, ValueError):
             return {"error": "Invalid or expired token"}, 400
 
 
@@ -545,7 +560,11 @@ class InviteAcceptResource(Resource):
 class ResetPasswordRequest(Resource):
     @public
     def post(self):
-        email = request.json["email"]
+        ip = str(request.remote_addr or "unknown")
+        RateLimitService().enforce(scope="auth:reset:request:ip", identifier=ip, max_attempts=5, window_s=900)
+        email = (request.get_json(silent=True) or {}).get("email")
+        if not email:
+            return {"error": "email is required"}, 400
         auth = AuthService()
         return auth.send_reset_request(email)
 

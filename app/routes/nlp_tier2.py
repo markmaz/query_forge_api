@@ -33,27 +33,21 @@ class Tier2Parse(Resource):
     @require_access("ai")
     @nlp_tier2_ns.expect(parse_model, validate=False)
     def post(self):
-        try:
-            body: Dict[str, Any] = request.get_json(silent=True) or {}
-            workspace_id = (
-                str(body.get("workspaceId") or body.get("workspace_id") or "").strip()
-                or extract_workspace_id()
-            )
-            prompt = str(body.get("prompt") or "").strip()
-            if workspace_id == "":
-                raise ForgeError("workspaceId is required", status_code=400)
-            if prompt == "":
-                raise ForgeError("prompt is required", status_code=400)
+        body: Dict[str, Any] = request.get_json(silent=True) or {}
+        workspace_id = (
+            str(body.get("workspaceId") or body.get("workspace_id") or "").strip()
+            or extract_workspace_id()
+        )
+        prompt = str(body.get("prompt") or "").strip()
+        if workspace_id == "":
+            raise ForgeError("workspaceId is required", status_code=400)
+        if prompt == "":
+            raise ForgeError("prompt is required", status_code=400)
 
-            payload = run_tier2_with_meta(prompt)
-            return {
-                "workspaceId": workspace_id,
-                "plan_ir": payload["plan_ir"],
-                "model": payload["model"],
-                "timings_ms": payload["timings_ms"],
-            }, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("tier2 parse failed")
-            return {"error": "tier2 parse failed"}, 500
+        payload = run_tier2_with_meta(prompt)
+        return {
+            "workspaceId": workspace_id,
+            "plan_ir": payload["plan_ir"],
+            "model": payload["model"],
+            "timings_ms": payload["timings_ms"],
+        }, 200

@@ -8,8 +8,11 @@ from app.config import (
     QF_PLAN_DOMAIN_LLM_EXPLANATION_ENABLED,
     QF_PLAN_DOMAIN_LLM_EXPLANATION_MAX_TOKENS,
 )
+from app.exceptions.forge_error import ForgeError
 
 logger = logging.getLogger(__name__)
+
+EXPLANATION_LLM_ERRORS = (ForgeError,)
 
 
 # ---------------------------------------------------------------------------
@@ -20,7 +23,7 @@ logger = logging.getLogger(__name__)
 def _to_int(value: Any) -> Optional[int]:
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -417,7 +420,7 @@ class ExplanationService:
                 response_format=True,
                 max_tokens=QF_PLAN_DOMAIN_LLM_EXPLANATION_MAX_TOKENS,
             )
-        except Exception as exc:
+        except EXPLANATION_LLM_ERRORS as exc:
             logger.warning("planner_domain explanation polish failed err=%s", exc)
             return out, {"enabled": True, "used": False, "error": str(exc)}
 

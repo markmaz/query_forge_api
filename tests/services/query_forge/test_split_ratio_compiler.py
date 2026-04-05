@@ -122,6 +122,32 @@ class TestDetectSplitRatioMetric:
 
         assert detect_split_ratio_metric({}, primary_id=1) is None
 
+    def test_surfaces_unexpected_workspace_table_id_errors(self):
+        from app.services.query_forge.split_ratio_compiler import detect_split_ratio_metric
+
+        class _BadInt:
+            def __int__(self) -> int:
+                raise RuntimeError("bad ratio table id")
+
+        q = {
+            "aggs": {
+                "enabled": True,
+                "metrics": [
+                    {
+                        "fn": "expr",
+                        "expr": {
+                            "kind": "ratio",
+                            "numerator": {"fn": "count", "field": {"columnName": "a", "workspaceTableId": _BadInt()}},
+                            "denominator": {"fn": "count", "field": {"columnName": "a", "workspaceTableId": 2}},
+                        },
+                    }
+                ],
+            }
+        }
+
+        with pytest.raises(RuntimeError, match="bad ratio table id"):
+            detect_split_ratio_metric(q, primary_id=1)
+
 
 class TestSplitRatioCompilerStateless:
     def test_stateless_no_constructor_args(self):
@@ -129,3 +155,57 @@ class TestSplitRatioCompilerStateless:
 
         compiler = SplitRatioCompiler()
         assert compiler is not None
+
+    def test_compile_surfaces_unexpected_filter_workspace_table_id_errors(self):
+        from app.services.query_forge.split_ratio_compiler import SplitRatioCompiler
+
+        class _BadInt:
+            def __int__(self) -> int:
+                raise RuntimeError("bad filter table id")
+
+        compiler = SplitRatioCompiler()
+        q = {
+            "aggs": {
+                "enabled": True,
+                "groupBy": [],
+                "metrics": [
+                    {
+                        "fn": "expr",
+                        "expr": {
+                            "kind": "ratio",
+                            "numerator": {"fn": "count", "field": {"columnName": "member_id", "workspaceTableId": 1}},
+                            "denominator": {"fn": "count", "field": {"columnName": "member_id", "workspaceTableId": 2}},
+                        },
+                    }
+                ],
+            },
+            "filters": {
+                "type": "group",
+                "match": "and",
+                "children": [
+                    {
+                        "type": "condition",
+                        "field": {"columnName": "status", "workspaceTableId": _BadInt()},
+                        "op": "equals",
+                        "value": "active",
+                    }
+                ],
+            },
+        }
+        metric = q["aggs"]["metrics"][0]
+
+        with pytest.raises(RuntimeError, match="bad filter table id"):
+            compiler.compile(
+                query_json=q,
+                split_metric=metric,
+                primary_id=1,
+                qf_base_alias="qf",
+                alias_by_wt={1: "a", 2: "b"},
+                mode="query_builder",
+                limit=100,
+                offset=0,
+                compile_where_fn=lambda *args, **kwargs: ("1=1", {}),
+                from_clause_fn=lambda *args, **kwargs: "FROM table_a",
+                required_table_ids_fn=lambda *args, **kwargs: {1, 2},
+                compile_metric_fn=lambda *args, **kwargs: "COUNT(*)",
+            )

@@ -4,6 +4,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.services.planner.semantic_candidate_models import SemanticCandidatePayload
 from app.services.planner.semantic_retrieval_service import SemanticRetrievalService
 from app.services.semantic.value_alias_resolution_service import ValueAliasResolutionService
@@ -86,7 +88,7 @@ class SemanticGroundingService:
                     vertical_norm=vertical_norm,
                     capabilities_compact=capabilities_compact,
                 )
-            except Exception as exc:
+            except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
                 logger.warning("semantic grounding candidate retrieval failed err=%s", exc)
                 warnings.append("candidate_retrieval_failed")
 
@@ -104,7 +106,7 @@ class SemanticGroundingService:
     ) -> List[Dict[str, Any]]:
         try:
             rows = self._value_alias_resolver.resolve(prompt=prompt, vertical_norm=vertical_norm)
-        except Exception as exc:
+        except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
             logger.warning("semantic grounding alias resolution failed err=%s", exc)
             return []
         return _rows_to_alias_constraints(rows)

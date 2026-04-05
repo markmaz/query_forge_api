@@ -310,7 +310,7 @@ def _run_test(dest: WorkspaceDestination) -> tuple[bool, str]:
         channel = get_channel(dtype)
         return channel.send(payload, config)
 
-    except Exception as exc:
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
         logger.exception("Destination test failed for id=%s", dest.id)
         return False, str(exc)
 

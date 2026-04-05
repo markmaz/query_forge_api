@@ -126,7 +126,7 @@ def _as_values(value_or_values: Any) -> List[Any]:
 def _normalize_month(value: Any, *, default: int) -> int:
     try:
         month = int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return int(default)
     if month < 1 or month > 12:
         return int(default)

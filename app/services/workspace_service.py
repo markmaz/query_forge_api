@@ -122,7 +122,7 @@ def _coerce_json_obj(value: Any) -> Dict[str, Any]:
             return {}
         try:
             parsed = json.loads(text)
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}

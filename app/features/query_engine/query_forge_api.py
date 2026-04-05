@@ -61,45 +61,39 @@ class QueryForgeRun(Resource):
     @token_required
     @require_access("query_studio")
     def post(self):
-        try:
-            workspace_id = extract_workspace_id()
-            mode = (request.args.get("mode") or "preview").strip().lower()
-            limit = int_arg("limit", 200)
-            offset = int_arg("offset", 0)
-            datasource_name = (request.args.get("datasource") or "").strip() or None
+        workspace_id = extract_workspace_id()
+        mode = (request.args.get("mode") or "preview").strip().lower()
+        limit = int_arg("limit", 200)
+        offset = int_arg("offset", 0)
+        datasource_name = (request.args.get("datasource") or "").strip() or None
 
-            raw = request.get_json(silent=True) or {}
-            if not isinstance(raw, dict):
-                raise ForgeError("Invalid JSON body", status_code=400)
+        raw = request.get_json(silent=True) or {}
+        if not isinstance(raw, dict):
+            raise ForgeError("Invalid JSON body", status_code=400)
 
-            ctx = WorkspaceSqlContextBuilder().build(workspace_id)
-            domain_resolver = DomainResolver(workspace_id=workspace_id)
-            analytics_executor = _resolve_analytics_executor(datasource_name)
-            sql_exec = analytics_executor if analytics_executor is not None else ctx.sql_exec
+        ctx = WorkspaceSqlContextBuilder().build(workspace_id)
+        domain_resolver = DomainResolver(workspace_id=workspace_id)
+        analytics_executor = _resolve_analytics_executor(datasource_name)
+        sql_exec = analytics_executor if analytics_executor is not None else ctx.sql_exec
 
-            svc = QueryForgeService(executor=sql_exec, domain_resolver=domain_resolver)
-            out = svc.run(raw, mode=mode, limit=limit, offset=offset)
-            signature = qf_rowcount_signature(out.sql, out.params)
-            store_cached_rowcount(signature, out.total)
+        svc = QueryForgeService(executor=sql_exec, domain_resolver=domain_resolver)
+        out = svc.run(raw, mode=mode, limit=limit, offset=offset)
+        signature = qf_rowcount_signature(out.sql, out.params)
+        store_cached_rowcount(signature, out.total)
 
-            return {
-                "sql": out.sql,
-                "sqlRendered": out.qf_rendered_sql,
-                "params": out.params,
-                "rows": out.rows,
-                "columns": out.columns,
-                "total": out.total,
-                "totalRowCount": out.total,
-                "export": build_qf_export_policy(out.total),
-                "rowCountSignature": signature,
-                "limit": out.limit,
-                "offset": out.offset,
-            }, 200
-        except ForgeError as error:
-            return _handle_service_error(error)
-        except Exception:
-            logger.exception("Query Forge query run failed")
-            return {"error": "Query Forge query run failed"}, 500
+        return {
+            "sql": out.sql,
+            "sqlRendered": out.qf_rendered_sql,
+            "params": out.params,
+            "rows": out.rows,
+            "columns": out.columns,
+            "total": out.total,
+            "totalRowCount": out.total,
+            "export": build_qf_export_policy(out.total),
+            "rowCountSignature": signature,
+            "limit": out.limit,
+            "offset": out.offset,
+        }, 200
 
 
 @query_forge_ns.route("/plan")
@@ -107,47 +101,41 @@ class QueryForgePlan(Resource):
     @token_required
     @require_access("query_studio")
     def post(self):
-        try:
-            workspace_id = extract_workspace_id()
-            payload = request.get_json(silent=True) or {}
-            if not isinstance(payload, dict):
-                raise ForgeError("Invalid JSON body", status_code=400)
+        workspace_id = extract_workspace_id()
+        payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict):
+            raise ForgeError("Invalid JSON body", status_code=400)
 
-            text = (payload.get("text") or payload.get("prompt") or "").strip()
-            if not text:
-                raise ForgeError("text is required", status_code=400)
-            domain_id = payload.get("domain_id")
+        text = (payload.get("text") or payload.get("prompt") or "").strip()
+        if not text:
+            raise ForgeError("text is required", status_code=400)
+        domain_id = payload.get("domain_id")
 
-            nlp_response = _run_nlp_extract(workspace_id, text, domain_id)
-            vector_request = build_vector_search_request(nlp_response)
-            vector_response = _run_vector_search(vector_request)
+        nlp_response = _run_nlp_extract(workspace_id, text, domain_id)
+        vector_request = build_vector_search_request(nlp_response)
+        vector_response = _run_vector_search(vector_request)
 
-            table_hits = _table_hits_from_vector(vector_response)
-            domain_resolution = DomainResolverService().resolve_from_table_hits(
-                workspace_id=workspace_id,
-                table_hits=table_hits,
-            )
+        table_hits = _table_hits_from_vector(vector_response)
+        domain_resolution = DomainResolverService().resolve_from_table_hits(
+            workspace_id=workspace_id,
+            table_hits=table_hits,
+        )
 
-            sql_json = {
-                "meta": {"tool": "query_builder", "prompt": text},
-                "input": {"prompt": text},
-            }
+        sql_json = {
+            "meta": {"tool": "query_builder", "prompt": text},
+            "input": {"prompt": text},
+        }
 
-            return {
-                "sqlJson": sql_json,
-                "explain": {
-                    "nlp": nlp_response,
-                    "vector_request": vector_request,
-                    "vector": vector_response,
-                    "domain_resolution": domain_resolution,
-                    "sql": None,
-                },
-            }, 200
-        except ForgeError as error:
-            return _handle_service_error(error)
-        except Exception:
-            logger.exception("Query Forge query plan failed")
-            return {"error": "Query Forge query plan failed"}, 500
+        return {
+            "sqlJson": sql_json,
+            "explain": {
+                "nlp": nlp_response,
+                "vector_request": vector_request,
+                "vector": vector_response,
+                "domain_resolution": domain_resolution,
+                "sql": None,
+            },
+        }, 200
 
 
 def _run_nlp_extract(workspace_id: str, text: str, domain_id: object | None) -> dict:
@@ -195,7 +183,7 @@ def _domain_hints(workspace_id: str, text: str) -> list[int]:
             if value not in hints:
                 hints.append(value)
         return hints
-    except Exception:
+    except (ForgeError, KeyError, RuntimeError, TypeError, ValueError):
         logger.exception("Domain hint search failed")
         return []
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.services.planner.semantic_catalog_lookup_repository import SemanticCatalogLookupRepository
 from app.services.planner import semantic_retrieval_service as retrieval_mod
 from app.services.planner.planner_validation_service import PlannerValidationService
 from app.services.planner.semantic_candidate_models import CompactSemanticPlan
@@ -334,3 +335,63 @@ def test_j_group_by_account_does_not_fall_back_to_account_type_filter_hint() -> 
         capabilities_compact=_capabilities_without_account_dimension(),
     )
     assert candidates.lexical_hints.get("account") != ["ACCOUNT_TYPE"]
+
+
+class _FallbackSql:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def execute_query_mappings(self, query: str, params=None):
+        del params
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("Unknown column 'm.model_column_id' in 'field list'")
+        assert "NULL AS model_column_id" in query
+        return [
+            {
+                "semantic_concept_id": 5,
+                "concept_key": "ACCOUNT_NAME",
+                "workspace_column_id": 11,
+                "model_column_id": None,
+                "relationship_kind": "primary",
+                "weight": 1.0,
+            }
+        ]
+
+
+def test_k_repository_falls_back_when_model_column_id_is_missing() -> None:
+    repo = SemanticCatalogLookupRepository(sql=_FallbackSql())
+    rows = repo.load_concept_column_maps(vertical_norm="generic")
+
+    assert rows == [
+        {
+            "semantic_concept_id": 5,
+            "concept_key": "ACCOUNT_NAME",
+            "workspace_column_id": 11,
+            "model_column_id": None,
+            "relationship_kind": "primary",
+            "weight": 1.0,
+        }
+    ]
+
+
+class _FatalRepo(_Repo):
+    def load_relationships(self, *, vertical_norm: str):
+        del vertical_norm
+        raise RuntimeError("semantic relationship query failed")
+
+
+def test_l_retrieval_falls_back_when_repository_fails() -> None:
+    svc = SemanticRetrievalService(repository=_FatalRepo())
+    candidates = svc.retrieve(
+        prompt="Show total net amount by territory",
+        workspace_id="ws-1",
+        base_domain_id=3,
+        base_domain_name="Sales Performance",
+        vertical_norm="generic",
+        capabilities_compact=_capabilities(),
+    )
+
+    assert candidates.metadata["semantic_source"] == "capabilities_fallback"
+    assert candidates.base_domain_key == "SALES_PERFORMANCE"
+    assert any(row.concept_key == "TERRITORY_NAME" for row in candidates.dimension_candidates)

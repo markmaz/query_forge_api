@@ -177,7 +177,7 @@ class DomainProfileEmbeddingService:
                     llm_id=llm_id,
                 )
                 results.append(result)
-            except Exception as exc:
+            except ForgeError as exc:
                 failed += 1
                 trace_id = f"dpg_{uuid.uuid4().hex[:24]}"
                 logger.exception(
@@ -441,7 +441,7 @@ def _extract_first_json_object(raw_text: str) -> Optional[Dict[str, Any]]:
         parsed = json.loads(text)
         if isinstance(parsed, dict):
             return parsed
-    except Exception:
+    except (TypeError, ValueError, json.JSONDecodeError):
         pass
 
     decoder = json.JSONDecoder()
@@ -450,7 +450,7 @@ def _extract_first_json_object(raw_text: str) -> Optional[Dict[str, Any]]:
             continue
         try:
             obj, _ = decoder.raw_decode(text[idx:])
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             continue
         if isinstance(obj, dict):
             return obj
@@ -494,7 +494,7 @@ def _extract_model_and_tokens(trace: Mapping[str, Any]) -> Tuple[str, Dict[str, 
         return model, tokens
     try:
         body = json.loads(raw)
-    except Exception:
+    except (TypeError, ValueError, json.JSONDecodeError):
         return model, tokens
     if isinstance(body, dict):
         raw_model = body.get("model")
@@ -624,7 +624,7 @@ def _as_list(value: Any) -> List[Any]:
             parsed = json.loads(text)
             if isinstance(parsed, list):
                 return parsed
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             pass
         return [text]
     if isinstance(value, tuple):
@@ -643,7 +643,7 @@ def _normalize_domain_ids(domain_ids: Sequence[int]) -> List[int]:
     for raw in list(domain_ids or []):
         try:
             domain_id = int(raw)
-        except Exception:
+        except (TypeError, ValueError):
             continue
         if domain_id <= 0 or domain_id in seen:
             continue

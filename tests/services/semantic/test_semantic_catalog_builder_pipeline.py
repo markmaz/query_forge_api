@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
+import app.services.semantic.catalog.column_profile_builder as column_profile_builder
 from app.services.semantic.catalog.catalog_models import ColumnProfile
 from app.services.semantic.catalog.column_profile_builder import ColumnProfileBuilder
 from app.services.semantic.catalog.semantic_catalog_builder import SemanticCatalogBuilder
@@ -186,3 +189,34 @@ def test_semantic_catalog_builder_sales_example_generates_expected_derived_metri
     assert "DISCOUNT_RATE" in keys
     assert result.derived_metrics_created >= 3
     assert result.relationships_upserted > 0
+
+
+def test_to_int_first_ignores_invalid_numeric_values() -> None:
+    assert column_profile_builder._to_int_first({"row_count": "not-a-number"}, keys=("row_count",)) is None
+
+
+def test_to_int_first_surfaces_unexpected_int_errors() -> None:
+    class _BadInt:
+        def __int__(self) -> int:
+            raise RuntimeError("bad int conversion")
+
+    with pytest.raises(RuntimeError, match="bad int conversion"):
+        column_profile_builder._to_int_first({"row_count": _BadInt()}, keys=("row_count",))
+
+
+def test_looks_like_date_surfaces_unexpected_parser_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _BrokenDateTime:
+        @staticmethod
+        def fromisoformat(value: str):
+            del value
+            raise RuntimeError("broken iso parser")
+
+        @staticmethod
+        def strptime(value: str, fmt: str):
+            del value, fmt
+            raise RuntimeError("broken strptime parser")
+
+    monkeypatch.setattr(column_profile_builder, "datetime", _BrokenDateTime)
+
+    with pytest.raises(RuntimeError, match="broken iso parser"):
+        column_profile_builder._looks_like_date("2026-01-01")

@@ -618,7 +618,7 @@ class DomainRecommendationService:
     def _normalize_confidence(value: Any) -> float:
         try:
             parsed = float(value)
-        except Exception:
+        except (TypeError, ValueError):
             return 0.5
         if parsed < 0.0:
             return 0.0

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from qdrant_client.http import models as qdrant_models
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import EMBEDDING_MODEL_NAME, QDRANT_DOMAIN_COLLECTION
@@ -22,6 +23,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_COLLECTION = QDRANT_DOMAIN_COLLECTION or "domain_catalog_v1"
 DEFAULT_LIMIT = 5
 MAX_LIMIT = 50
+DOMAIN_INDEX_SQL_FALLBACK_ERRORS = (ForgeError, SQLAlchemyError)
+DOMAIN_INDEX_JSON_LOAD_ERRORS = (OSError, json.JSONDecodeError)
+JSON_PARSE_ERRORS = (json.JSONDecodeError,)
 
 _DOMAIN_PROFILE_QUERY = """
 SELECT
@@ -304,7 +308,7 @@ class DomainVectorIndexService:
         ws = str(workspace_id or "").strip() or None
         try:
             rows = self._sql.execute_query_mappings(_DOMAIN_PROFILE_QUERY, {"workspace_id": ws})
-        except Exception as exc:
+        except DOMAIN_INDEX_SQL_FALLBACK_ERRORS as exc:
             logger.warning("domain profile query failed; attempting fallback err=%s", exc)
             rows = []
 
@@ -317,7 +321,7 @@ class DomainVectorIndexService:
         try:
             with open(json_fallback_path, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
-        except Exception as exc:
+        except DOMAIN_INDEX_JSON_LOAD_ERRORS as exc:
             logger.warning("domain profile fallback load failed path=%s err=%s", json_fallback_path, exc)
             return []
 
@@ -356,7 +360,7 @@ class DomainVectorIndexService:
 
         try:
             rows = self._sql.execute_query_mappings(sql, params)
-        except Exception as exc:
+        except DOMAIN_INDEX_SQL_FALLBACK_ERRORS as exc:
             if _is_missing_table_error(exc, "domain_embedding_state"):
                 logger.warning("domain_embedding_state table missing; incremental mode disabled")
                 return {}
@@ -414,7 +418,7 @@ class DomainVectorIndexService:
                         "embedding_hash": row.embedding_hash,
                     },
                 )
-            except Exception as exc:
+            except DOMAIN_INDEX_SQL_FALLBACK_ERRORS as exc:
                 if _is_missing_table_error(exc, "domain_embedding_state"):
                     logger.warning("domain_embedding_state table missing; state write skipped")
                     return
@@ -477,7 +481,7 @@ def _as_text_list(value: Any) -> List[str]:
         if text.startswith("[") and text.endswith("]"):
             try:
                 parsed = json.loads(text)
-            except Exception:
+            except JSON_PARSE_ERRORS:
                 parsed = [text]
         elif text == "":
             parsed = []
@@ -547,7 +551,7 @@ def _coerce_bool(value: Any, *, default: bool) -> bool:
 def _coerce_int(value: Any, *, default: int) -> int:
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return int(default)
 
 

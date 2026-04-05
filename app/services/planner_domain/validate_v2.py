@@ -332,7 +332,7 @@ def _norm_metric_id(row: Mapping[str, Any]) -> str:
 def _to_int(value: Any) -> Optional[int]:
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 

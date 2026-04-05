@@ -6,6 +6,8 @@ import logging
 from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import (
     SEMANTIC_AUTO_APPROVE_MAX_ERRORS,
@@ -25,6 +27,9 @@ from app.services.semantic.semantic_validation import validate_semantic_suggesti
 RUN_STATUSES = {"created", "running", "completed", "failed", "applied"}
 ITEM_DECISIONS = {"pending", "auto_approved", "approved", "rejected", "applied", "failed_apply"}
 logger = logging.getLogger(__name__)
+SEMANTIC_MATCHER_FALLBACK_ERRORS = (ForgeError, SQLAlchemyError)
+SEMANTIC_APPLY_ITEM_FALLBACK_ERRORS = (ForgeError, SQLAlchemyError)
+JSON_PARSE_ERRORS = (json.JSONDecodeError,)
 
 
 class SemanticSuggestionService:
@@ -141,7 +146,7 @@ class SemanticSuggestionService:
             try:
                 known_concepts = self._matcher.load_known_concepts(vertical_norm)
                 alias_rules = self._matcher.load_alias_rules(vertical_norm)
-            except Exception:
+            except SEMANTIC_MATCHER_FALLBACK_ERRORS:
                 logger.exception("Failed to load known concepts/aliases for vertical=%s", vertical_norm)
                 known_concepts = []
                 alias_rules = []
@@ -490,7 +495,7 @@ class SemanticSuggestionService:
                     """,
                     {"id": int(item["id"])},
                 )
-            except Exception as exc:
+            except SEMANTIC_APPLY_ITEM_FALLBACK_ERRORS as exc:
                 self._sql.execute_write(
                     """
                     UPDATE semantic_suggestion_item
@@ -739,7 +744,7 @@ class SemanticSuggestionService:
             return None
         try:
             return int(row_id)
-        except Exception:
+        except (TypeError, ValueError):
             return None
 
     def _upsert_registry(self, *, run: Dict[str, Any], item: Dict[str, Any]) -> int:
@@ -1092,6 +1097,10 @@ class SemanticSuggestionService:
     @staticmethod
     def _normalize_item_row(row: Dict[str, Any]) -> Dict[str, Any]:
         out = dict(row)
+        if out.get("workspace_column_id") is None and out.get("model_column_id") is not None:
+            out["workspace_column_id"] = out.get("model_column_id")
+        if out.get("workspace_table_id") is None and out.get("model_table_id") is not None:
+            out["workspace_table_id"] = out.get("model_table_id")
         int_fields = {
             "id",
             "run_id",
@@ -1159,14 +1168,14 @@ def _normalize_optional_int(value: Any, *, field: str) -> Optional[int]:
         return None
     try:
         return int(value)
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         raise ForgeError(f"{field} must be an integer", status_code=400) from exc
 
 
 def _require_positive_int(value: Any, *, field: str) -> int:
     try:
         out = int(value)
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         raise ForgeError(f"{field} must be a positive integer", status_code=400) from exc
     if out <= 0:
         raise ForgeError(f"{field} must be a positive integer", status_code=400)
@@ -1191,7 +1200,7 @@ def _parse_json_any(value: Any) -> Any:
             return None
         try:
             return json.loads(text)
-        except Exception:
+        except JSON_PARSE_ERRORS:
             return None
     return value
 
@@ -1225,7 +1234,7 @@ def _format_exception_for_run(exc: Exception) -> str:
         if details:
             try:
                 details_text = json.dumps(_to_jsonable(details), ensure_ascii=True)
-            except Exception:
+            except (TypeError, ValueError):
                 details_text = str(details)
             return f"{message} | details={details_text}"[:8000]
         return message[:8000]

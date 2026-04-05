@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 from flask import redirect, request
 from flask_restx import Namespace, Resource, fields
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import ERROR_SERVER_URL, ERROR_VALIDATION_URL, THANK_YOU_REDIRECT
 from app.decorators.rbac import public
@@ -152,7 +153,7 @@ class SalesInquiry(Resource):
         service = SalesInquiryService()
         try:
             service.create_inquiry(payload)
-        except Exception:
+        except SQLAlchemyError:
             logger.exception("Sales inquiry insert failed")
             return redirect(ERROR_SERVER_URL, code=303)
 

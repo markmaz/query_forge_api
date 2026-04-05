@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED
 from app.services.planner.semantic_grounding_service import SemanticGroundingService
@@ -48,7 +50,7 @@ _SEMESTER_BUCKET_CONCEPT_KEYS: Dict[str, set] = {
 def _to_int(value: Any) -> Optional[int]:
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -298,7 +300,7 @@ class SemanticIntegrationService:
                 prompt=prompt,
                 vertical_norm=vertical_norm,
             )
-        except Exception as exc:
+        except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
             logger.warning("planner_domain semantic alias constraints failed err=%s", exc)
             return []
         return _dedupe_constraints(constraints)
@@ -474,7 +476,7 @@ class SemanticIntegrationService:
         """
         try:
             rows = ForgeMetaSQL().execute_query_mappings(sql, params)
-        except Exception as exc:
+        except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
             logger.warning("planner_domain semantic concept lookup failed err=%s", exc)
             return out
 
@@ -525,7 +527,7 @@ class SemanticIntegrationService:
         """
         try:
             rows = ForgeMetaSQL().execute_query_mappings(sql, params)
-        except Exception as exc:
+        except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
             logger.warning(
                 "planner_domain workspace column semantic concept lookup failed err=%s", exc
             )
@@ -580,7 +582,7 @@ class SemanticIntegrationService:
         """
         try:
             rows = ForgeMetaSQL().execute_query_mappings(sql, params)
-        except Exception as exc:
+        except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
             logger.warning("planner_domain semantic value alias lookup failed err=%s", exc)
             return {}
 
@@ -675,7 +677,7 @@ class SemanticIntegrationService:
         """
         try:
             rows = ForgeMetaSQL().execute_query_mappings(sql, params)
-        except Exception as exc:
+        except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
             logger.warning(
                 "planner_domain semantic semester indicator lookup failed err=%s", exc
             )

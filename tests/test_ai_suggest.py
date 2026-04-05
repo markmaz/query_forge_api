@@ -12,10 +12,12 @@ import app.routes.ai as ai_routes
 from app.routes.ai import ai_ns
 from app.routes import request_helpers as _route_utils
 from app.services.ai_suggest import AISuggestService
+import app.services.ai_suggest.service as ai_suggest_service
 import app.services.ai_suggest.domain_seeder as domain_seeder
 import app.services.ai_suggest.edit_inspector as edit_inspector
 import app.services.ai_suggest.prompt_analysis as prompt_analysis
 import app.services.ai_suggest.vllm_client as vllm_client
+from tests._support.fakes import FakeForgeQueryPort
 
 
 class _FakeResponse:
@@ -1613,3 +1615,85 @@ def test_suggest_non_grade_ordinal_still_expands_to_word_variant(client, monkeyp
     filter_edit = _edit_by_op(data["edits"], "addFilter")
     assert filter_edit["operator"] == "in"
     assert filter_edit["value"] == ["3rd", "third"]
+
+
+class _StubSuggestVllmClient:
+    def __init__(self, content: str) -> None:
+        self._content = content
+
+    def call(self, messages: List[Dict[str, str]]):
+        del messages
+        return {"choices": [{"message": {"content": self._content}}]}
+
+    def extract_content(self, raw: Dict[str, Any]) -> str:
+        del raw
+        return self._content
+
+
+class _StubDomainSeeder:
+    def current_sqljson_domain_id(self, current_sqljson: Dict[str, Any] | None) -> int | None:
+        del current_sqljson
+        return None
+
+    def fallback_domain_id(self, suggest_request) -> int | None:
+        del suggest_request
+        return 10
+
+    def infer_domain_safely(self, *, workspace_id: str, edits: List[Dict[str, Any]]) -> int | None:
+        del workspace_id, edits
+        return None
+
+    def seed_sqljson_domain_if_missing(self, *, current_sqljson, suggest_request, validated):
+        del current_sqljson, suggest_request, validated
+        return {"version": 1}
+
+    def columns_from_filter_tree(self, filters):
+        del filters
+        return []
+
+
+def _direct_service_request(prompt: str):
+    body = _request_body()
+    body["workspaceId"] = "ws-1"
+    body["prompt"] = prompt
+    return ai_routes.SuggestRequest.model_validate(body)
+
+
+def test_service_surfaces_unexpected_projection_fallback_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    content = (
+        '{"edits":[{"op":"addFilter","col":{"modelColumnId":351,"columnName":"school_year","workspaceTableId":24},'
+        '"operator":"equals","value":"2024"}],"explanation":"ok","confidence":0.7}'
+    )
+    svc = AISuggestService(sql_executor=FakeForgeQueryPort())
+    svc._vllm_client = _StubSuggestVllmClient(content)  # type: ignore[assignment]
+    svc._domain_seeder = _StubDomainSeeder()  # type: ignore[assignment]
+
+    class _BrokenAddSelectEdit:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+            raise RuntimeError("broken projection fallback")
+
+    monkeypatch.setattr(ai_suggest_service, "AddSelectEdit", _BrokenAddSelectEdit)
+
+    with pytest.raises(RuntimeError, match="broken projection fallback"):
+        svc.suggest(_direct_service_request("show school year"))
+
+
+def test_service_surfaces_unexpected_aggregate_fallback_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    content = (
+        '{"edits":[{"op":"addSelect","col":{"modelColumnId":352,"columnName":"student_id","workspaceTableId":24},'
+        '"alias":"student_id"}],"explanation":"ok","confidence":0.7}'
+    )
+    svc = AISuggestService(sql_executor=FakeForgeQueryPort())
+    svc._vllm_client = _StubSuggestVllmClient(content)  # type: ignore[assignment]
+    svc._domain_seeder = _StubDomainSeeder()  # type: ignore[assignment]
+
+    class _BrokenAddAggregateEdit:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+            raise RuntimeError("broken aggregate fallback")
+
+    monkeypatch.setattr(ai_suggest_service, "AddAggregateEdit", _BrokenAddAggregateEdit)
+
+    with pytest.raises(RuntimeError, match="broken aggregate fallback"):
+        svc.suggest(_direct_service_request("how many students"))

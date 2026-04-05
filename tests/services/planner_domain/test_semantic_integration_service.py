@@ -155,6 +155,37 @@ def test_resolve_semester_indicator_columns_uses_semantic_concepts(monkeypatch) 
     assert result.get("spring") == "wt1.spring_flag"
 
 
+def test_resolve_semester_indicator_columns_keeps_inferred_values_when_semantic_lookup_fails(monkeypatch) -> None:
+    monkeypatch.setattr(sem_mod, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
+
+    class _FailingSql:
+        def execute_query_mappings(self, query, params):
+            del query, params
+            raise RuntimeError("semantic lookup unavailable")
+
+    monkeypatch.setattr(sem_mod, "ForgeMetaSQL", lambda: _FailingSql())
+
+    caps: Dict[str, Any] = {
+        "filter_columns": [
+            {"column_key": "wt1.is_spring", "column_name": "is_spring", "filterable": True},
+            {"column_key": "wt1.is_fall", "column_name": "is_fall", "filterable": True},
+        ],
+        "dimensions": [],
+        "time_columns": [],
+    }
+    svc = SemanticIntegrationService()
+    result = svc.resolve_semester_indicator_columns(
+        workspace_id="ws-1",
+        vertical_norm="education",
+        capabilities=caps,
+    )
+
+    assert result == {
+        "spring": "wt1.is_spring",
+        "fall": "wt1.is_fall",
+    }
+
+
 # ---------------------------------------------------------------------------
 # normalize_semantic_value_alias_filters
 # ---------------------------------------------------------------------------
@@ -280,3 +311,38 @@ def test_normalize_semantic_value_alias_filters_coerces_boolean(monkeypatch) -> 
     )
     assert result_plan["filters"][0]["value"] is False
     assert debug["applied"] == 1
+
+
+def test_normalize_semantic_value_alias_filters_returns_passthrough_when_lookup_fails(monkeypatch) -> None:
+    monkeypatch.setattr(sem_mod, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
+
+    class _FailingSql:
+        def execute_query_mappings(self, query, params):
+            del query, params
+            raise RuntimeError("semantic alias lookup unavailable")
+
+    monkeypatch.setattr(sem_mod, "ForgeMetaSQL", lambda: _FailingSql())
+
+    plan: Dict[str, Any] = {
+        "filters": [{"column_key": "wt24.race_ethnicity", "op": "=", "value": "African American"}]
+    }
+    caps: Dict[str, Any] = {
+        "filter_columns": [
+            {
+                "column_key": "wt24.race_ethnicity",
+                "filterable": True,
+                "workspace_column_id": 1004,
+            }
+        ]
+    }
+    svc = SemanticIntegrationService()
+    result_plan, issues, debug = svc.normalize_semantic_value_alias_filters(
+        plan_json=plan,
+        workspace_id="ws-1",
+        vertical_norm="education",
+        capabilities=caps,
+    )
+
+    assert result_plan == plan
+    assert issues == []
+    assert debug["applied"] == 0

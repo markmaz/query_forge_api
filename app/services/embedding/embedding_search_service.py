@@ -353,7 +353,7 @@ class EmbeddingSearchService:
 def _clamp_limit(limit: Optional[int]) -> int:
     try:
         parsed = int(limit) if limit is not None else DEFAULT_LIMIT
-    except Exception:
+    except (TypeError, ValueError):
         parsed = DEFAULT_LIMIT
     if parsed <= 0:
         parsed = DEFAULT_LIMIT

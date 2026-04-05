@@ -28,7 +28,7 @@
 - Domain services: `DomainAdminWriteService`, `DomainJoinService`, `DomainTableReadService`, `DomainTableWriteService`, `DomainSummaryReadService`, `DomainUserReadService`, `DomainUserWriteService`, `BuilderColumnFeedService`, `DomainColumnSampleReadService`
 - Query tree: `SavedQueryTreeService`, `SavedQueryReadService`, `SavedQueryWriteService`, `SavedQueryShareService`, `SavedQueryFolderWriteService`, `QueryFolderService`
 - Models: `ModelReadService`, `ModelWriteService`, `ModelUpdateService`, `ModelUploadService`, `ModelSnapshotImportService`, `ModelSampleService`, `ModelColumnSampleReadService`
-- Workspace inventory: `WorkspaceSnapshotService`, `WorkspaceSnapshotEnsureService`, `WorkspacePipelineService`
+- Workspace inventory: `WorkspaceSnapshotService`, `WorkspacePipelineService`
 - Users: `UserService`, `WorkspaceUserReadService`
 - Auth: `AuthService`, `OtpService`, `PasswordService`
 - Products: `ProductService`, `ProductGroupService`, `RoleService`

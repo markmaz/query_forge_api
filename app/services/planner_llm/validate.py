@@ -685,7 +685,7 @@ def _norm_text(value: Any) -> str:
 def _to_int(value: Any) -> Optional[int]:
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 

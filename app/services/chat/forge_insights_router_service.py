@@ -51,6 +51,8 @@ _ROUTE_SYSTEM_PROMPT = (
     "route must be one of: education_pipeline, chat."
 )
 _MAX_INBOUND_MESSAGES = 30
+ROUTER_LLM_FALLBACK_ERRORS = (ForgeError,)
+ROUTER_VECTOR_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, ValueError)
 
 
 class ForgeInsightsRouterService:
@@ -220,7 +222,7 @@ class ForgeInsightsRouterService:
 
         try:
             self._resolve_runtime_llm(workspace_id=workspace_id)
-        except Exception:
+        except ROUTER_LLM_FALLBACK_ERRORS:
             return fallback
 
         try:
@@ -231,7 +233,7 @@ class ForgeInsightsRouterService:
                 max_tokens=self._route_llm_max_tokens,
                 validator=lambda body: isinstance(body.get("route"), str) and body.get("route") in {"education_pipeline", "chat"},
             )
-        except Exception:
+        except ROUTER_LLM_FALLBACK_ERRORS:
             return fallback
 
         route = str(llm_out.get("route") or "").strip().lower()
@@ -239,7 +241,7 @@ class ForgeInsightsRouterService:
             return fallback
         try:
             confidence = float(llm_out.get("confidence"))
-        except Exception:
+        except (TypeError, ValueError):
             confidence = 0.0
         confidence = max(0.0, min(confidence, 1.0))
         reason = str(llm_out.get("reason") or "").strip() or "llm route decision"
@@ -276,7 +278,7 @@ class ForgeInsightsRouterService:
             try:
                 service = DomainVectorIndexService()
                 self._domain_vector = service
-            except Exception:
+            except ROUTER_VECTOR_FALLBACK_ERRORS:
                 return {"enabled": True, "matched": False, "error": "init_failed"}
         try:
             out = service.search_domains(
@@ -287,7 +289,7 @@ class ForgeInsightsRouterService:
                 score_threshold=self._route_domain_vector_score_threshold,
                 include_payload=False,
             )
-        except Exception:
+        except ROUTER_VECTOR_FALLBACK_ERRORS:
             return {"enabled": True, "matched": False, "error": "search_failed"}
         rows = out.get("results") if isinstance(out, Mapping) else []
         if not isinstance(rows, list):

@@ -362,7 +362,7 @@ def _normalize_vertical(value: Optional[str]) -> Optional[str]:
 def _coerce_positive_int(value: Any, *, field: str) -> int:
     try:
         as_int = int(value)
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         raise ForgeError(f"{field} must be a positive integer", status_code=400) from exc
     if as_int <= 0:
         raise ForgeError(f"{field} must be a positive integer", status_code=400)

@@ -47,7 +47,7 @@ def _parse_int(value: Any, *, default: int, minimum: int = 1) -> int:
         return default
     try:
         parsed = int(value)
-    except Exception:
+    except (TypeError, ValueError):
         raise ForgeError("limit must be an integer", status_code=400)
     return max(minimum, parsed)
 
@@ -57,7 +57,7 @@ def _parse_float(value: Any, *, default: float) -> float:
         return default
     try:
         return float(value)
-    except Exception:
+    except (TypeError, ValueError):
         raise ForgeError("score_threshold must be numeric", status_code=400)
 
 
@@ -67,34 +67,28 @@ class DomainVectorSearch(Resource):
     @require_access("vector")
     @vector_ns.expect(_domain_search_request_model, validate=False)
     def post(self):
-        try:
-            body: Dict[str, Any] = request.get_json(silent=True) or {}
-            header_workspace_id = extract_workspace_id()
-            payload_workspace_id = str(body.get("workspace_id") or "").strip()
-            if payload_workspace_id and payload_workspace_id != header_workspace_id:
-                raise ForgeError("workspace_id must match X-Workspace-Id header", status_code=400)
+        body: Dict[str, Any] = request.get_json(silent=True) or {}
+        header_workspace_id = extract_workspace_id()
+        payload_workspace_id = str(body.get("workspace_id") or "").strip()
+        if payload_workspace_id and payload_workspace_id != header_workspace_id:
+            raise ForgeError("workspace_id must match X-Workspace-Id header", status_code=400)
 
-            query = str(body.get("query") or "").strip()
-            if not query:
-                raise ForgeError("query is required", status_code=400)
+        query = str(body.get("query") or "").strip()
+        if not query:
+            raise ForgeError("query is required", status_code=400)
 
-            vertical_norm = str(body.get("vertical_norm") or "generic").strip().lower() or "generic"
-            limit = _parse_int(body.get("limit"), default=5)
-            score_threshold = _parse_float(body.get("score_threshold"), default=0.2)
-            include_payload = _parse_bool(body.get("include_payload"), default=True)
+        vertical_norm = str(body.get("vertical_norm") or "generic").strip().lower() or "generic"
+        limit = _parse_int(body.get("limit"), default=5)
+        score_threshold = _parse_float(body.get("score_threshold"), default=0.2)
+        include_payload = _parse_bool(body.get("include_payload"), default=True)
 
-            svc = DomainVectorIndexService()
-            result = svc.search_domains(
-                workspace_id=header_workspace_id,
-                query=query,
-                vertical_norm=vertical_norm,
-                limit=limit,
-                score_threshold=score_threshold,
-                include_payload=include_payload,
-            )
-            return result, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("domain vector search failed")
-            return {"error": "domain vector search failed"}, 500
+        svc = DomainVectorIndexService()
+        result = svc.search_domains(
+            workspace_id=header_workspace_id,
+            query=query,
+            vertical_norm=vertical_norm,
+            limit=limit,
+            score_threshold=score_threshold,
+            include_payload=include_payload,
+        )
+        return result, 200

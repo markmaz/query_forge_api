@@ -341,7 +341,7 @@ class AISuggest(Resource):
             return result.model_dump(mode="json"), 200, DEPRECATION_HEADERS
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code, DEPRECATION_HEADERS
-        except Exception:
+        except (RuntimeError, TypeError, ValueError, requests.RequestException):
             logger.exception("ai/suggest semantic bridge failed; falling back to legacy ai_suggest_service")
             try:
                 result = _legacy_suggest_response(suggest_request)
@@ -352,7 +352,7 @@ class AISuggest(Resource):
             except requests.RequestException as exc:
                 logger.error("AI suggest upstream request failed: %s", exc)
                 return {"error": "vLLM request failed", "details": str(exc)}, 502, DEPRECATION_HEADERS
-            except Exception as exc:
+            except (RuntimeError, TypeError, ValueError) as exc:
                 logger.exception("AI suggest failed unexpectedly")
                 return {"error": "AI suggest failed", "details": str(exc)}, 500, DEPRECATION_HEADERS
 
@@ -533,7 +533,7 @@ class AISuggestSemanticAdapter(Resource):
             return payload.model_dump(mode="json"), 200, DEPRECATION_HEADERS
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code, DEPRECATION_HEADERS
-        except Exception as exc:
+        except (RuntimeError, TypeError, ValueError, requests.RequestException) as exc:
             logger.exception("AI semantic adapter failed unexpectedly")
             return {"error": "AI semantic adapter failed", "details": str(exc)}, 500, DEPRECATION_HEADERS
 

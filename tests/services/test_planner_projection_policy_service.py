@@ -13,9 +13,10 @@ class _FakeSQL:
         self._call_index = 0
         self.write_calls: list[tuple[str, Dict[str, Any]]] = []
         self.insert_calls: list[tuple[str, Dict[str, Any]]] = []
+        self.query_calls: list[tuple[str, Dict[str, Any]]] = []
 
     def execute_query_mappings(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        del query, params
+        self.query_calls.append((query, dict(params or {})))
         if self._call_index >= len(self._rows_by_call):
             return []
         rows = self._rows_by_call[self._call_index]
@@ -279,3 +280,42 @@ def test_projection_policy_service_upserts_policy() -> None:
     assert out["id"] == 44
     assert out["policy_key"] == "custom_school_listing"
     assert out["policy_json"]["required_column_names"] == ["school_name"]
+
+
+def test_projection_policy_service_interpolates_scope_predicate() -> None:
+    sql = _FakeSQL(rows_by_call=[[]])
+    svc = PlannerProjectionPolicyService(sql=sql)
+
+    svc.get_applicable_policies(
+        workspace_id="ws-1",
+        vertical_norm="education",
+        base_domain_id=9,
+    )
+
+    query, params = sql.query_calls[0]
+    assert "{global_workspace_query_predicate()}" not in query
+    assert "scope_type = 'global'" in query
+    assert params["workspace_id"] == "ws-1"
+
+
+class _RaisingSQL(_FakeSQL):
+    def execute_query_mappings(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        self.query_calls.append((query, dict(params or {})))
+        raise RuntimeError("planner_projection_policy table missing")
+
+
+def test_projection_policy_service_keeps_seeded_defaults_when_db_lookup_fails() -> None:
+    svc = PlannerProjectionPolicyService(sql=_RaisingSQL(rows_by_call=[]))
+    out = svc.get_projection_requirements(
+        workspace_id="ws-1",
+        vertical_norm="education",
+        base_domain_id=9,
+        prompt_signals=["student_listing"],
+    )
+
+    assert out["required_concept_keys"] == [
+        "STUDENT_ID",
+        "STUDENT_FIRST_NAME",
+        "STUDENT_LAST_NAME",
+    ]
+    assert out["matched_policies"] == ["student_listing_identity_projection"]

@@ -134,13 +134,7 @@ def _library_service() -> SavedQueryLibraryService:
 
 
 def _run_route(error_message: str, fn: Callable[[], Tuple[Dict[str, Any], int]]) -> Tuple[Dict[str, Any], int]:
-    try:
-        return fn()
-    except ForgeError as error:
-        return _handle_service_error(error)
-    except Exception:
-        logger.exception(error_message)
-        return {"error": error_message}, 500
+    return fn()
 
 
 @qf_tree_ns.route("/")

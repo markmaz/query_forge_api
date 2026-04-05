@@ -3,7 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
+import pytest
+
 from app.services.semantic.semantic_concept_service import SemanticConceptService
+from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeExecResult
 from tests._support.fakes import FakeForgeQueryPort
 
@@ -302,3 +305,35 @@ def test_create_concept_column_map_accepts_workspace_column_id() -> None:
     assert row["id"] == 7
     assert row["model_column_id"] == 20
     assert row["workspace_column_id"] == 88
+
+
+def test_create_alias_rejects_non_numeric_weight() -> None:
+    svc = SemanticConceptService(sql=FakeForgeQueryPort())
+
+    with pytest.raises(ForgeError, match="weight must be numeric"):
+        svc.create_alias(
+            {
+                "vertical_norm": "education",
+                "alias_key": "k_school",
+                "concept_key": "SCHOOL_ID",
+                "weight": "not-a-number",
+            }
+        )
+
+
+def test_create_alias_surfaces_unexpected_weight_conversion_errors() -> None:
+    class _BadFloat:
+        def __float__(self) -> float:
+            raise RuntimeError("bad weight conversion")
+
+    svc = SemanticConceptService(sql=FakeForgeQueryPort())
+
+    with pytest.raises(RuntimeError, match="bad weight conversion"):
+        svc.create_alias(
+            {
+                "vertical_norm": "education",
+                "alias_key": "k_school",
+                "concept_key": "SCHOOL_ID",
+                "weight": _BadFloat(),
+            }
+        )

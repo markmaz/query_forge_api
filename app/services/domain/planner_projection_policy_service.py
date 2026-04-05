@@ -6,6 +6,9 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.models.domain.planner_projection_policy import PlannerProjectionPolicyRule, PlannerProjectionPolicyUpsertRequest
@@ -237,7 +240,7 @@ class PlannerProjectionPolicyService:
         rows: List[Dict[str, Any]] = [dict(item) for item in _SEED_POLICIES]
         try:
             db_rows = self._sql.execute_query_mappings(
-                """
+                f"""
                 SELECT
                   id,
                   policy_key,
@@ -259,7 +262,7 @@ class PlannerProjectionPolicyService:
                     "workspace_id": str(workspace_id or "").strip() or None,
                 },
             )
-        except Exception as exc:  # pragma: no cover - defensive runtime fallback
+        except (OSError, RuntimeError, ValueError, SQLAlchemyError) as exc:  # pragma: no cover - defensive runtime fallback
             logger.warning(
                 "planner projection policy lookup failed workspace_id=%s err=%s",
                 workspace_id,
@@ -273,7 +276,7 @@ class PlannerProjectionPolicyService:
             payload = dict(row)
             try:
                 payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
-            except Exception:
+            except (TypeError, ValueError, ValidationError):
                 continue
             normalized.append(payload)
 

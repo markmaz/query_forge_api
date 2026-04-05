@@ -6,6 +6,8 @@ from time import perf_counter
 from typing import Any, Dict, List, Mapping, Optional
 
 from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
+from valkey.exceptions import ValkeyError
 
 from app.config.llm_resolver import build_llm_client_for_role
 from app.config import (
@@ -90,6 +92,9 @@ from app.services.semantic.value_alias_resolution_service import ValueAliasResol
 from app.services.vector import DomainVectorIndexService
 
 logger = logging.getLogger(__name__)
+
+CONVERSATION_STORE_FALLBACK_ERRORS = (OSError, ValkeyError)
+OPTIONAL_TIME_POLICY_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, ValueError, SQLAlchemyError)
 
 
 class PlannerDomainService:
@@ -268,7 +273,7 @@ class PlannerDomainService:
                 user_id=str(user_id),
                 conversation_id=conversation_id,
             )
-        except Exception as exc:
+        except CONVERSATION_STORE_FALLBACK_ERRORS as exc:
             logger.warning("planner_domain conversation load failed conversation_id=%s err=%s", conversation_id, exc)
             prior_state = None
         if req.conversation_id and prior_state is None:
@@ -421,7 +426,7 @@ class PlannerDomainService:
                 policy_obj = policy_resp.get("policy") if isinstance(policy_resp, Mapping) else None
                 if isinstance(policy_obj, Mapping):
                     domain_time_policy = dict(policy_obj)
-            except Exception as exc:
+            except OPTIONAL_TIME_POLICY_FALLBACK_ERRORS as exc:
                 logger.warning(
                     "planner_domain time_policy_load_failed workspace_id=%s domain_id=%s trace_id=%s err=%s",
                     req.workspace_id,

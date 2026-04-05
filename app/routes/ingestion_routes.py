@@ -14,6 +14,7 @@ from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import QF_INGESTION_STALE_GUARD_ENABLED, QF_INGESTION_STALE_SECONDS
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
+from app.exceptions.forge_error import ForgeError
 from flask_restx import Resource
 from app.services.analytics.metadata_provider_factory import MetadataProviderFactory
 from app.services.analytics.runtime_registry import build_runtime_registry
@@ -121,25 +122,17 @@ def _to_utc(value: Any) -> datetime | None:
 
 
 def _get_celery_task_state(task_id: str) -> str:
-    try:
-        return str(sync_metadata_task.AsyncResult(task_id).state or "").upper()
-    except Exception:
-        logger.exception("Failed to fetch celery state for ingestion run %s", task_id)
-        return "UNKNOWN"
+    return str(sync_metadata_task.AsyncResult(task_id).state or "").upper()
 
 
 def _task_id_in_worker_queues(task_id: str) -> bool:
     """Best-effort worker queue check for brokers without a results backend."""
-    try:
-        inspector = sync_metadata_task.app.control.inspect(timeout=0.8)
-        snapshots = (
-            inspector.active() or {},
-            inspector.reserved() or {},
-            inspector.scheduled() or {},
-        )
-    except Exception:
-        logger.exception("Failed to inspect celery worker queues for ingestion run %s", task_id)
-        return True
+    inspector = sync_metadata_task.app.control.inspect(timeout=0.8)
+    snapshots = (
+        inspector.active() or {},
+        inspector.reserved() or {},
+        inspector.scheduled() or {},
+    )
 
     for snapshot in snapshots:
         for entries in snapshot.values():
@@ -380,7 +373,7 @@ VALUES
                 },
                 task_id=run_id,
             )
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             logger.exception("Failed to enqueue sync_metadata_task for run %s", run_id)
             logger.warning(
                 "Falling back to inline metadata sync for run %s because task enqueue failed",
@@ -401,7 +394,7 @@ VALUES
                     sync_service=_get_sync_service(),
                     mysql=mysql,
                 )
-            except Exception:
+            except (ForgeError, OSError, RuntimeError, TypeError, ValueError):
                 logger.exception("Inline fallback sync failed for run %s", run_id)
                 # Mark the run as failed so it is not stuck in "running" state.
                 with mysql.transaction() as tx:
@@ -502,7 +495,7 @@ class IngestionCancel(Resource):
         revoke_ok = True
         try:
             sync_metadata_task.AsyncResult(job_id).revoke(terminate=True, signal="SIGTERM")
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             revoke_ok = False
             logger.exception("Failed to revoke ingestion Celery task id=%s", job_id)
 
@@ -600,7 +593,7 @@ class IngestionSchemas(Resource):
         try:
             provider = MetadataProviderFactory.create(executor.get_dialect(), executor)
             schemas = provider.list_schemas(catalog)
-        except Exception:
+        except (ForgeError, OSError, RuntimeError, TypeError, ValueError):
             logger.exception(
                 "Schema discovery failed: datasource=%s catalog=%s",
                 datasource_name,

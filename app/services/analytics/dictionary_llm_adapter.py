@@ -151,7 +151,7 @@ def _clamp_confidence(value: Any) -> float | None:
         return None
     try:
         parsed = float(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
     if parsed < 0.0:
         return 0.0

@@ -1,5 +1,8 @@
 """Unit tests for app.services.planner_domain.explanation_service."""
+import pytest
+
 import app.services.planner_domain.explanation_service as explanation_service_module
+from app.exceptions.forge_error import ForgeError
 from app.services.planner_domain.explanation_service import ExplanationService
 
 
@@ -136,3 +139,40 @@ def test_maybe_polish_summary_uses_llm_result(monkeypatch):
     assert out["summary_source"] == "llm"
     assert trace["enabled"] is True
     assert trace["used"] is True
+
+
+def test_maybe_polish_summary_tolerates_llm_provider_failures(monkeypatch):
+    monkeypatch.setattr(explanation_service_module, "QF_PLAN_DOMAIN_LLM_EXPLANATION_ENABLED", True)
+
+    class _FailingLLM:
+        def chat_json_with_trace(self, **kwargs):
+            del kwargs
+            raise ForgeError("LLM provider unavailable", status_code=503)
+
+    svc = ExplanationService(llm_client=_FailingLLM())
+    out, trace = svc.maybe_polish_summary(
+        prompt="show me the students",
+        explanation={"summary": "Fallback summary", "domain": {"selected_domain_name": "Domain"}},
+    )
+
+    assert out["summary"] == "Fallback summary"
+    assert out["summary_source"] == "deterministic"
+    assert trace["enabled"] is True
+    assert trace["used"] is False
+    assert "LLM provider unavailable" in trace["error"]
+
+
+def test_maybe_polish_summary_surfaces_unexpected_llm_errors(monkeypatch):
+    monkeypatch.setattr(explanation_service_module, "QF_PLAN_DOMAIN_LLM_EXPLANATION_ENABLED", True)
+
+    class _FailingLLM:
+        def chat_json_with_trace(self, **kwargs):
+            del kwargs
+            raise AssertionError("unexpected llm failure")
+
+    svc = ExplanationService(llm_client=_FailingLLM())
+    with pytest.raises(AssertionError, match="unexpected llm failure"):
+        svc.maybe_polish_summary(
+            prompt="show me the students",
+            explanation={"summary": "Fallback summary", "domain": {"selected_domain_name": "Domain"}},
+        )

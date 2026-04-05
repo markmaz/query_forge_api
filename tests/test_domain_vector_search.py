@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import math
+import json
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from app.services.vector import DomainVectorIndexService
+import pytest
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.services.vector import DomainEmbeddingState, DomainVectorIndexService
 from tests._support.fakes import FakeForgeQueryPort
 
 
@@ -305,3 +309,123 @@ def test_domain_reindex_does_not_filter_rows_by_vertical() -> None:
     assert out["upserted"] == 1
     assert 31 in qdrant.points
     assert "vertical_norm" not in qdrant.points[31]["payload"]
+
+
+def test_domain_reindex_falls_back_to_json_on_sql_query_failure(tmp_path) -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_exceptions = [
+        SQLAlchemyError("domain query failed"),
+        SQLAlchemyError("1146 Table 'forge.domain_embedding_state' doesn't exist"),
+    ]
+
+    fallback_path = tmp_path / "domains.json"
+    fallback_path.write_text(
+        json.dumps(
+            {
+                "domains": [
+                    {
+                        "domain_id": 41,
+                        "workspace_id": "ws-1",
+                        "name": "Attendance",
+                        "summary": "Student attendance",
+                        "embedding_text": "student attendance by school",
+                        "domain_version": 2,
+                        "is_active": True,
+                        "table_count": 2,
+                        "join_edge_count": 1,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    qdrant = _FakeQdrant()
+    svc = DomainVectorIndexService(
+        sql=sql,
+        qdrant=qdrant,
+        model=_FakeEmbeddingModel(),
+        collection_name="domain_catalog_v1",
+    )
+
+    out = svc.reindex_domains(workspace_id="ws-1", force=True, json_fallback_path=str(fallback_path))
+
+    assert out["total"] == 1
+    assert out["upserted"] == 1
+    assert 41 in qdrant.points
+
+
+def test_domain_reindex_surfaces_unexpected_query_errors() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_exceptions = [TypeError("bad query wiring")]
+    svc = DomainVectorIndexService(
+        sql=sql,
+        qdrant=_FakeQdrant(),
+        model=_FakeEmbeddingModel(),
+        collection_name="domain_catalog_v1",
+    )
+
+    with pytest.raises(TypeError, match="bad query wiring"):
+        svc.reindex_domains(workspace_id="ws-1", force=True)
+
+
+def test_load_embedding_state_tolerates_missing_table() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_exceptions = [SQLAlchemyError("1146 Table 'forge.domain_embedding_state' doesn't exist")]
+    svc = DomainVectorIndexService(
+        sql=sql,
+        qdrant=_FakeQdrant(),
+        model=_FakeEmbeddingModel(),
+        collection_name="domain_catalog_v1",
+    )
+
+    out = svc._load_embedding_state(workspace_id="ws-1", vertical_norm=None)
+
+    assert out == {}
+
+
+def test_upsert_embedding_state_tolerates_missing_table() -> None:
+    sql = FakeForgeQueryPort()
+    sql.write_exceptions = [SQLAlchemyError("1146 Table 'forge.domain_embedding_state' doesn't exist")]
+    svc = DomainVectorIndexService(
+        sql=sql,
+        qdrant=_FakeQdrant(),
+        model=_FakeEmbeddingModel(),
+        collection_name="domain_catalog_v1",
+    )
+
+    svc._upsert_embedding_state(
+        [
+            DomainEmbeddingState(
+                domain_id=51,
+                workspace_id="ws-1",
+                vertical_norm="education",
+                domain_version=3,
+                embedding_hash="abc123",
+            )
+        ]
+    )
+
+
+def test_upsert_embedding_state_surfaces_unexpected_write_errors() -> None:
+    sql = FakeForgeQueryPort()
+    sql.write_exceptions = [TypeError("bad state write")]
+    svc = DomainVectorIndexService(
+        sql=sql,
+        qdrant=_FakeQdrant(),
+        model=_FakeEmbeddingModel(),
+        collection_name="domain_catalog_v1",
+    )
+
+    with pytest.raises(TypeError, match="bad state write"):
+        svc._upsert_embedding_state(
+            [
+                DomainEmbeddingState(
+                    domain_id=52,
+                    workspace_id="ws-1",
+                    vertical_norm="education",
+                    domain_version=4,
+                    embedding_hash="def456",
+                )
+            ]
+        )

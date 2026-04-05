@@ -10,6 +10,10 @@ import valkey
 from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 from flask_restx import Api
+from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
+from werkzeug.exceptions import BadRequest
+from werkzeug.exceptions import HTTPException
 
 from app.celery_app import celery, configure_forge_celery
 from app.config import (
@@ -56,14 +60,14 @@ def _register_analytics_registry(app: Flask) -> None:
 
 def try_get_json_body(req):
     try:
-        data = req.get_json()
+        data = req.get_json(silent=True)
         if data:
             masked = data.copy()
             for key in ["password", "token"]:
                 if key in masked:
                     masked[key] = "*****"
             return masked
-    except Exception:
+    except BadRequest:
         pass
     return None
 
@@ -134,7 +138,7 @@ def create_app():
 
     CORS(
         app,
-        resources={r"/*": {"origins": "*"}},
+        resources={r"/*": {"origins": [FRONTEND_BASE_URL]}},
         supports_credentials=True,
         expose_headers=["Content-Disposition"],
     )
@@ -149,7 +153,7 @@ def create_app():
         try:
             ConceptSeedService().ensure_seeded(SEMANTIC_VERTICAL_DEFAULT)
             logger.info("Seeded semantic concepts on startup for vertical=%s", SEMANTIC_VERTICAL_DEFAULT)
-        except Exception:
+        except (ForgeError, OSError, RuntimeError, ValueError):
             logger.exception("Semantic concept startup seed failed")
     valkey_client = valkey.StrictValkey(host=VALKEY_ADDRESS, port=VALKEY_PORT, decode_responses=True)
 
@@ -171,15 +175,30 @@ def create_app():
 
     @app.after_request
     def log_response_metadata(response):
-        duration_ms = int((time.time() - g.start_time) * 1000)
-        g.audit_data["status_code"] = response.status_code
-        g.audit_data["response_time_ms"] = duration_ms
-        try:
-            valkey_client.rpush(LOG_QUEUE, json.dumps(g.audit_data))
-        except Exception as e:
-            app.logger.error(f"Error storing audit log in Valkey: {e}")
+        start_time = getattr(g, "start_time", None)
+        duration_ms = (
+            int((time.time() - start_time) * 1000)
+            if isinstance(start_time, (int, float))
+            else None
+        )
+        audit_data = getattr(g, "audit_data", None)
+        if isinstance(audit_data, dict):
+            audit_data["status_code"] = response.status_code
+            if duration_ms is not None:
+                audit_data["response_time_ms"] = duration_ms
+            try:
+                valkey_client.rpush(LOG_QUEUE, json.dumps(audit_data))
+            except valkey.ValkeyError as e:
+                app.logger.error(f"Error storing audit log in Valkey: {e}")
 
-        response.headers["X-Correlation-ID"] = g.correlation_id
+        correlation_id = getattr(g, "correlation_id", None)
+        if correlation_id:
+            response.headers["X-Correlation-ID"] = correlation_id
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Content-Security-Policy"] = "default-src 'self'"
         return response
 
     @app.teardown_appcontext
@@ -187,17 +206,64 @@ def create_app():
         del exception
         try:
             db.session.rollback()
-        except Exception:
+        except SQLAlchemyError:
             pass
         try:
             db.session.remove()
-        except Exception:
+        except (SQLAlchemyError, RuntimeError):
             pass
 
     @app.errorhandler(ForgeError)
     def handle_service_error(error):
-        response = jsonify(error.to_dict())
+        payload = error.to_dict()
+        trace_id = getattr(g, "failed_trace_id", None)
+        if trace_id:
+            details = payload.get("details")
+            if not isinstance(details, dict):
+                details = {}
+            details.setdefault("trace_id", trace_id)
+            payload["details"] = details
+        response = jsonify(payload)
         response.status_code = error.status_code
+        return response
+
+    @app.errorhandler(ValidationError)
+    def handle_validation_error(error: ValidationError):
+        validation_errors = json.loads(error.json())
+        response = jsonify(
+            {
+                "error": "Invalid request payload",
+                "status_code": 400,
+                "details": {"errors": validation_errors},
+            }
+        )
+        response.status_code = 400
+        return response
+
+    @app.errorhandler(Exception)
+    def handle_unexpected_error(error: Exception):
+        if isinstance(error, HTTPException):
+            return error
+        correlation_id = getattr(g, "correlation_id", None)
+        trace_id = getattr(g, "failed_trace_id", None)
+        app.logger.exception(
+            "Unhandled application error path=%s method=%s correlation_id=%s",
+            request.path,
+            request.method,
+            correlation_id,
+            exc_info=error,
+        )
+        response = jsonify(
+            {
+                "error": "Internal server error",
+                "status_code": 500,
+                "details": {
+                    "correlation_id": correlation_id,
+                    **({"trace_id": trace_id} if trace_id else {}),
+                },
+            }
+        )
+        response.status_code = 500
         return response
 
     _register_analytics_registry(app)

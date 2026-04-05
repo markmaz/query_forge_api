@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Dict, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import METADATA_SOURCE_MODE
 from app.exceptions.forge_error import ForgeError
@@ -128,7 +130,7 @@ class SemanticConceptService:
                 """,
                 data,
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "concept")
 
         if not result.lastrowid:
@@ -151,7 +153,7 @@ class SemanticConceptService:
                 """,
                 data,
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "concept")
             affected = 0
         if int(affected or 0) <= 0:
@@ -187,7 +189,7 @@ class SemanticConceptService:
                 """,
                 {"id": concept_id},
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "concept")
             affected = 0
         if int(affected or 0) <= 0:
@@ -242,7 +244,7 @@ class SemanticConceptService:
                 """,
                 data,
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "alias")
 
         if not result.lastrowid:
@@ -295,7 +297,7 @@ class SemanticConceptService:
                 """,
                 data,
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "alias")
             affected = 0
         if int(affected or 0) <= 0:
@@ -312,7 +314,7 @@ class SemanticConceptService:
                 """,
                 {"id": alias_id},
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "alias")
             affected = 0
         if int(affected or 0) <= 0:
@@ -396,7 +398,7 @@ class SemanticConceptService:
                 """,
                 data,
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "value_alias")
         if not result.lastrowid:
             raise ForgeError("failed to create value_alias", status_code=500)
@@ -446,7 +448,7 @@ class SemanticConceptService:
                 """,
                 data,
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "value_alias")
             affected = 0
         if int(affected or 0) <= 0:
@@ -463,7 +465,7 @@ class SemanticConceptService:
                 """,
                 {"id": value_alias_id},
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "value_alias")
             affected = 0
         if int(affected or 0) <= 0:
@@ -583,7 +585,7 @@ class SemanticConceptService:
                 """,
                 data,
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "concept_column_map")
         if not result.lastrowid:
             raise ForgeError("failed to create concept_column_map", status_code=500)
@@ -641,7 +643,7 @@ class SemanticConceptService:
                 """,
                 data,
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "concept_column_map")
             affected = 0
         if int(affected or 0) <= 0:
@@ -658,7 +660,7 @@ class SemanticConceptService:
                 """,
                 {"id": map_id},
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "concept_column_map")
             affected = 0
         if int(affected or 0) <= 0:
@@ -866,7 +868,7 @@ def _normalize_workspace(value: Optional[str]) -> Optional[str]:
 def _as_pos_int(value: Any, field: str) -> int:
     try:
         out = int(value)
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         raise ForgeError(f"{field} must be a positive integer", status_code=400) from exc
     if out <= 0:
         raise ForgeError(f"{field} must be a positive integer", status_code=400)
@@ -978,7 +980,7 @@ def _normalize_alias_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         weight = float(payload.get("weight", 1.0))
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         raise ForgeError("weight must be numeric", status_code=400) from exc
 
     return {
@@ -1009,7 +1011,7 @@ def _normalize_alias_patch_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if "weight" in out:
         try:
             out["weight"] = float(out["weight"])
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             raise ForgeError("weight must be numeric", status_code=400) from exc
     return out
 
@@ -1039,7 +1041,7 @@ def _normalize_value_alias_payload(payload: Dict[str, Any], *, partial: bool) ->
     if "weight" in out:
         try:
             out["weight"] = float(out["weight"])
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             raise ForgeError("weight must be numeric", status_code=400) from exc
     if not partial:
         out.setdefault("match_kind", "contains")
@@ -1072,7 +1074,7 @@ def _normalize_concept_column_map_payload(payload: Dict[str, Any], *, partial: b
     if "weight" in out:
         try:
             out["weight"] = float(out["weight"])
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             raise ForgeError("weight must be numeric", status_code=400) from exc
     if not partial:
         out.setdefault("relationship_kind", "primary")

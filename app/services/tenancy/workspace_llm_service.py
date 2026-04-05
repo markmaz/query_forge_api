@@ -4,6 +4,8 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.constants.llm_roles import LLMProvider, LLMRole
 from app.ports.sql_executor import ForgeQueryPort
@@ -34,7 +36,7 @@ class WorkspaceLLMService:
                 f"SELECT {_SELECT_COLS} FROM workspace_llm WHERE workspace_id = :ws ORDER BY role, id",
                 {"ws": ws},
             )
-        except Exception:
+        except SQLAlchemyError:
             logger.exception("get_all_for_workspace failed for %s", ws)
             return []
         return [self._to_public_dict(row) for row in rows]
@@ -45,7 +47,7 @@ class WorkspaceLLMService:
                 f"SELECT {_SELECT_COLS} FROM workspace_llm WHERE id = :id LIMIT 1",
                 {"id": llm_id},
             )
-        except Exception:
+        except SQLAlchemyError:
             logger.exception("get_by_id failed for id=%s", llm_id)
             return None
         if not rows:
@@ -87,7 +89,7 @@ class WorkspaceLLMService:
                 out["_source"] = "workspace_any_role"
                 out["_resolved_role"] = str(fallback_rows[0].get("role") or "").strip()
                 return out
-        except Exception:
+        except SQLAlchemyError:
             logger.exception("get_llm_for_role DB lookup failed ws=%s role=%s", ws, r)
         return None
 
@@ -97,7 +99,7 @@ class WorkspaceLLMService:
                 f"SELECT {_SELECT_COLS} FROM workspace_llm WHERE id = :id LIMIT 1",
                 {"id": llm_id},
             )
-        except Exception:
+        except SQLAlchemyError:
             logger.exception("get_internal_by_id failed for id=%s", llm_id)
             return None
         if not rows:
@@ -316,11 +318,8 @@ class WorkspaceLLMService:
         has_api_key = bool(encrypted)
         masked = None
         if has_api_key:
-            try:
-                plaintext = decrypt_api_key(encrypted)
-                masked = mask_api_key(plaintext) if plaintext else None
-            except Exception:
-                masked = "****"
+            plaintext = decrypt_api_key(encrypted)
+            masked = mask_api_key(plaintext) if plaintext else "****"
         config_json = self._coerce_json(row.get("config_json"))
         return {
             "id": row.get("id"),
@@ -363,7 +362,7 @@ class WorkspaceLLMService:
         try:
             parsed = json.loads(str(value))
             return parsed if isinstance(parsed, dict) else None
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             return None
 
     def _test_openai_compatible(self, endpoint: str, api_key: str) -> Dict[str, Any]:
@@ -377,7 +376,7 @@ class WorkspaceLLMService:
             if r.status_code < 400:
                 return {"success": True, "message": f"Connected to {endpoint} (HTTP {r.status_code})"}
             return {"success": False, "message": f"HTTP {r.status_code}: {r.text[:200]}"}
-        except Exception as exc:
+        except httpx.HTTPError as exc:
             return {"success": False, "message": str(exc)}
 
     def _test_ollama(self, endpoint: str) -> Dict[str, Any]:
@@ -388,7 +387,7 @@ class WorkspaceLLMService:
             if r.status_code < 400:
                 return {"success": True, "message": f"Connected to {endpoint} (HTTP {r.status_code})"}
             return {"success": False, "message": f"HTTP {r.status_code}: {r.text[:200]}"}
-        except Exception as exc:
+        except httpx.HTTPError as exc:
             return {"success": False, "message": str(exc)}
 
     @staticmethod
@@ -410,5 +409,5 @@ class WorkspaceLLMService:
             if r.status_code < 400:
                 return {"success": True, "message": f"Anthropic API reachable (HTTP {r.status_code})"}
             return {"success": False, "message": f"HTTP {r.status_code}: {r.text[:200]}"}
-        except Exception as exc:
+        except httpx.HTTPError as exc:
             return {"success": False, "message": str(exc)}

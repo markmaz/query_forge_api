@@ -22,6 +22,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Tuple
 
+from app.services.query_forge.normalizers.query_json import QueryForgeQueryNormalizer
+
 
 @dataclass
 class NormalizationPipelineResult:
@@ -66,3 +68,10 @@ class NormalizationPipeline:
             all_issues=all_issues,
             debug=debug,
         )
+
+
+__all__ = [
+    "NormalizationPipeline",
+    "NormalizationPipelineResult",
+    "QueryForgeQueryNormalizer",
+]

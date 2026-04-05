@@ -19,6 +19,8 @@ from app.services.llm.io_logging import (
 
 logger = logging.getLogger(__name__)
 
+RESPONSE_JSON_PARSE_ERRORS = (TypeError, ValueError, json.JSONDecodeError)
+
 
 class LLMClient:
     def __init__(
@@ -152,10 +154,7 @@ class LLMClient:
         if temperature_value is not None:
             payload["temperature"] = temperature_value
         if max_tokens is not None:
-            try:
-                mt = int(max_tokens)
-            except Exception:
-                mt = 0
+            mt = self._coerce_positive_int(max_tokens)
             if mt > 0:
                 payload[token_param_name] = mt
         normalized_response_format = self._normalize_response_format(response_format)
@@ -197,7 +196,7 @@ class LLMClient:
                         parsed_body = body
                     content = self._extract_chat_content(body if isinstance(body, dict) else {})
                     finish_reason = self._extract_finish_reason(body if isinstance(body, dict) else {})
-                except Exception as exc:
+                except RESPONSE_JSON_PARSE_ERRORS as exc:
                     error = f"response_json_parse_error:{str(exc)}"
                     finish_reason = None
 
@@ -227,7 +226,7 @@ class LLMClient:
                         "error": fallback.get("error"),
                     }
                 return fallback
-        except Exception as exc:
+        except httpx.HTTPError as exc:
             log_llm_exception(
                 logger,
                 client_name="LLMClient.chat",
@@ -293,10 +292,7 @@ class LLMClient:
             if temperature_value is not None:
                 payload["temperature"] = temperature_value
             if max_tokens is not None:
-                try:
-                    mt = int(max_tokens)
-                except Exception:
-                    mt = 0
+                mt = self._coerce_positive_int(max_tokens)
                 if mt > 0:
                     payload[self._completion_token_param_name()] = mt
             normalized_response_format = self._normalize_response_format(response_format)
@@ -311,10 +307,7 @@ class LLMClient:
             if temperature_value is not None:
                 payload["temperature"] = temperature_value
             if max_tokens is not None:
-                try:
-                    mt = int(max_tokens)
-                except Exception:
-                    mt = 0
+                mt = self._coerce_positive_int(max_tokens)
                 if mt > 0:
                     payload["max_tokens"] = mt
         if isinstance(extra_params, Mapping):
@@ -351,7 +344,7 @@ class LLMClient:
 
         try:
             body = resp.json()
-        except Exception as exc:
+        except RESPONSE_JSON_PARSE_ERRORS as exc:
             return {
                 "raw_text": raw_text,
                 "parsed": None,
@@ -359,19 +352,20 @@ class LLMClient:
                 "error": f"response_json_parse_error:{str(exc)}",
             }
 
+        body_dict = dict(body) if isinstance(body, Mapping) else None
         content: Optional[str] = None
         for key in ("output_text", "text", "content"):
-            val = body.get(key)
+            val = (body_dict or {}).get(key)
             if isinstance(val, str) and val.strip() != "":
                 content = val
                 break
-        if content is None and isinstance(body.get("choices"), list):
-            content = self._extract_chat_content(body)
+        if content is None and isinstance((body_dict or {}).get("choices"), list):
+            content = self._extract_chat_content(body_dict or {})
 
         if content is None:
             return {
                 "raw_text": raw_text,
-                "parsed": body if isinstance(body, dict) else None,
+                "parsed": body_dict,
                 "content": None,
                 "error": "missing_content",
             }
@@ -411,6 +405,14 @@ class LLMClient:
         if model.startswith("gpt-5"):
             return None
         return 0
+
+    @staticmethod
+    def _coerce_positive_int(value: Any) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return 0
+        return parsed if parsed > 0 else 0
 
     @staticmethod
     def _normalize_response_format(value: Any) -> Optional[Dict[str, Any]]:
@@ -506,7 +508,7 @@ class LLMClient:
             if isinstance(parsed, dict):
                 return parsed
             return None
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             return None
 
     @staticmethod

@@ -211,5 +211,5 @@ class NLPReviewService:
             return None
         try:
             return json.loads(text)
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             return None

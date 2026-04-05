@@ -79,7 +79,22 @@ def build_and_filter_tree(conditions: Sequence[Dict[str, Any]]) -> Optional[Dict
 
 
 class WhereCompiler:
-    """Stateless — no constructor args.  Instantiate fresh per call."""
+    """Optional callback-powered WHERE/EXISTS compiler."""
+
+    def __init__(
+        self,
+        *,
+        get_join_path: Optional[Callable[[Any, int], List[Any]]] = None,
+        join_predicates: Optional[Callable[[Any, str, str], List[str]]] = None,
+        severity_predicate_for_alias: Optional[Callable[..., str]] = None,
+        effective_filter_mode: Optional[Callable[[Any, int], str]] = None,
+        max_manual_in: Optional[Callable[[], int]] = None,
+    ) -> None:
+        self._get_join_path = get_join_path
+        self._join_predicates = join_predicates
+        self._severity_predicate_for_alias = severity_predicate_for_alias
+        self._effective_filter_mode = effective_filter_mode
+        self._max_manual_in = max_manual_in or (lambda: QF_MAX_MANUAL_IN)
 
     def compile(
         self,
@@ -149,7 +164,7 @@ class WhereCompiler:
         def compile_in_list(field_expr: str, values: List[Any], *, negate: bool = False) -> str:
             if not values:
                 return ""
-            if len(values) > QF_MAX_MANUAL_IN:
+            if len(values) > self._max_manual_in():
                 raise ForgeError(
                     "Too many IN values; upload a list/value_override instead",
                     status_code=400,
@@ -267,15 +282,88 @@ class WhereCompiler:
 
             if plan is None:
                 raise ForgeError("EXISTS filters require a domain plan", status_code=400)
+            if not self._get_join_path or not self._join_predicates or not self._severity_predicate_for_alias:
+                raise ForgeError(
+                    "EXISTS filter rendering requires join-resolution callbacks",
+                    status_code=500,
+                )
 
-            # Circular import guard: import domains accessor via plan's resolver at call site
-            # The caller must inject join resolution via the plan object directly.
-            # This path is only reached for EXISTS-mode filters.
-            raise ForgeError(
-                "EXISTS filter rendering requires domain join resolution — "
-                "use service._compile_where for full EXISTS support",
-                status_code=500,
+            sub_alias = f"e{exists_counter}"
+            target_id = int(group_info["workspace_table_id"])
+            path = self._get_join_path(plan, target_id)
+            tables_by_id = {t.workspace_table_id: t for t in plan.tables}
+            if not path:
+                raise ForgeError("EXISTS requires non-primary table", status_code=400)
+
+            first_edge = path[0]
+            first_to = int(first_edge.to_workspace_table_id)
+            from_alias = plan.primary.alias
+            to_alias = sub_alias
+
+            first_table = tables_by_id.get(first_to)
+            if not first_table:
+                raise ForgeError("Join path invalid for EXISTS", status_code=400)
+
+            join_clauses = [f"{first_table.full_name} {safe_ident(to_alias)}"]
+
+            where_preds: List[str] = []
+            where_preds.extend(self._join_predicates(first_edge, from_alias, to_alias))
+            first_severity_pred = self._severity_predicate_for_alias(
+                alias=safe_ident(to_alias),
+                workspace_table_id=first_to,
+                severity_table_ids=severity_table_ids,
             )
+            if first_severity_pred:
+                where_preds.append(first_severity_pred)
+
+            current_alias = to_alias
+            current_id = first_to
+
+            for edge in path[1:]:
+                if int(edge.from_workspace_table_id) != int(current_id):
+                    raise ForgeError("Join path invalid for EXISTS", status_code=400)
+                next_id = int(edge.to_workspace_table_id)
+                next_table = tables_by_id.get(next_id)
+                if not next_table:
+                    raise ForgeError("Join path invalid for EXISTS", status_code=400)
+                next_alias = f"{sub_alias}_{next_id}"
+                join_preds = self._join_predicates(edge, current_alias, next_alias)
+                next_severity_pred = self._severity_predicate_for_alias(
+                    alias=safe_ident(next_alias),
+                    workspace_table_id=next_id,
+                    severity_table_ids=severity_table_ids,
+                )
+                if next_severity_pred:
+                    join_preds.append(next_severity_pred)
+                join_clauses.append(
+                    f"JOIN {next_table.full_name} {safe_ident(next_alias)} "
+                    f"ON {' AND '.join(join_preds)}"
+                )
+                current_alias = next_alias
+                current_id = next_id
+
+            pred_sqls = []
+            for cond in group_info["predicates"]:
+                field_expr = field_expr_for_exists(cond["field"], current_alias)
+                pred_sqls.append(
+                    compile_condition_expr(
+                        field_expr,
+                        cond["op"],
+                        cond["value"],
+                        field_ref=cond.get("field"),
+                    )
+                )
+
+            all_where = [p for p in where_preds + pred_sqls if p]
+            if not all_where:
+                raise ForgeError("EXISTS predicates missing", status_code=400)
+
+            subquery = (
+                "SELECT 1\n"
+                f"FROM {' '.join(join_clauses)}\n"
+                f"WHERE {' AND '.join(all_where)}"
+            )
+            return f"EXISTS (\n{subquery}\n)"
 
         def walk(n: Any) -> Tuple[str, Dict[str, Any]]:
             if not isinstance(n, dict):
@@ -329,7 +417,12 @@ class WhereCompiler:
                     else:
                         wt_id = 0
 
-                filter_mode = "WHERE" if is_virtual_expr else filter_mode_fn(plan, int(wt_id))
+                if is_virtual_expr:
+                    filter_mode = "WHERE"
+                elif self._effective_filter_mode is not None:
+                    filter_mode = self._effective_filter_mode(plan, int(wt_id))
+                else:
+                    filter_mode = filter_mode_fn(plan, int(wt_id))
                 if (
                     not is_virtual_expr
                     and force_exists_for_tables

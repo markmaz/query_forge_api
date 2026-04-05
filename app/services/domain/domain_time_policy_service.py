@@ -366,7 +366,7 @@ def _parse_json(value: Any) -> Any:
         return None
     try:
         return json.loads(text)
-    except Exception:
+    except (TypeError, ValueError, json.JSONDecodeError):
         return None
 
 

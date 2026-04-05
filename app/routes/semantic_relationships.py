@@ -61,35 +61,23 @@ class SemanticRelationshipsCollection(Resource):
         }
     )
     def get(self):
-        try:
-            result = SemanticRelationshipService().list_relationships(
-                vertical=request.args.get("vertical") or None,
-                parent_id=_optional_int(request.args.get("parent_id"), "parent_id"),
-                child_id=_optional_int(request.args.get("child_id"), "child_id"),
-                relationship_type=request.args.get("relationship_type") or None,
-                page=int_arg("page", 1),
-                page_size=int_arg("page_size", 25),
-            )
-            return result, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("semantic relationships list failed")
-            return {"error": "semantic relationships list failed"}, 500
+        result = SemanticRelationshipService().list_relationships(
+            vertical=request.args.get("vertical") or None,
+            parent_id=_optional_int(request.args.get("parent_id"), "parent_id"),
+            child_id=_optional_int(request.args.get("child_id"), "child_id"),
+            relationship_type=request.args.get("relationship_type") or None,
+            page=int_arg("page", 1),
+            page_size=int_arg("page_size", 25),
+        )
+        return result, 200
 
     @token_required
     @require_access("semantic", role="admin")
     @semantic_relationships_ns.expect(semantic_relationship_model, validate=False)
     def post(self):
-        try:
-            body: Dict[str, Any] = request.get_json(silent=True) or {}
-            row = SemanticRelationshipService().create_relationship(body)
-            return {"row": row}, 201
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("semantic relationship create failed")
-            return {"error": "semantic relationship create failed"}, 500
+        body: Dict[str, Any] = request.get_json(silent=True) or {}
+        row = SemanticRelationshipService().create_relationship(body)
+        return {"row": row}, 201
 
 
 @semantic_relationships_ns.route("/concepts")
@@ -105,19 +93,13 @@ class SemanticRelationshipConceptLookup(Resource):
         }
     )
     def get(self):
-        try:
-            result = SemanticRelationshipService().list_concept_lookup(
-                vertical=request.args.get("vertical") or None,
-                q=request.args.get("q") or None,
-                page=int_arg("page", 1),
-                page_size=int_arg("page_size", 100),
-            )
-            return result, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("semantic relationship concept lookup failed")
-            return {"error": "semantic relationship concept lookup failed"}, 500
+        result = SemanticRelationshipService().list_concept_lookup(
+            vertical=request.args.get("vertical") or None,
+            q=request.args.get("q") or None,
+            page=int_arg("page", 1),
+            page_size=int_arg("page_size", 100),
+        )
+        return result, 200
 
 
 @semantic_relationships_ns.route("/<int:relationship_id>")
@@ -125,40 +107,22 @@ class SemanticRelationshipsById(Resource):
     @token_required
     @require_access("semantic")
     def get(self, relationship_id: int):
-        try:
-            row = SemanticRelationshipService().get_relationship(relationship_id)
-            return {"row": row}, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("semantic relationship get failed")
-            return {"error": "semantic relationship get failed"}, 500
+        row = SemanticRelationshipService().get_relationship(relationship_id)
+        return {"row": row}, 200
 
     @token_required
     @require_access("semantic", role="admin")
     @semantic_relationships_ns.expect(semantic_relationship_patch_model, validate=False)
     def patch(self, relationship_id: int):
-        try:
-            body: Dict[str, Any] = request.get_json(silent=True) or {}
-            row = SemanticRelationshipService().patch_relationship(relationship_id, body)
-            return {"row": row}, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("semantic relationship patch failed")
-            return {"error": "semantic relationship patch failed"}, 500
+        body: Dict[str, Any] = request.get_json(silent=True) or {}
+        row = SemanticRelationshipService().patch_relationship(relationship_id, body)
+        return {"row": row}, 200
 
     @token_required
     @require_access("semantic", role="admin")
     def delete(self, relationship_id: int):
-        try:
-            SemanticRelationshipService().delete_relationship(relationship_id)
-            return {"deleted": True, "id": relationship_id}, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("semantic relationship delete failed")
-            return {"error": "semantic relationship delete failed"}, 500
+        SemanticRelationshipService().delete_relationship(relationship_id)
+        return {"deleted": True, "id": relationship_id}, 200
 
 
 def _optional_int(value: Optional[str], field: str) -> Optional[int]:
@@ -166,5 +130,5 @@ def _optional_int(value: Optional[str], field: str) -> Optional[int]:
         return None
     try:
         return int(value)
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         raise ForgeError(f"{field} must be an integer", status_code=400) from exc

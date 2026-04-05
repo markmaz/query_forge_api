@@ -32,28 +32,22 @@ class WorkspaceTableColumns(Resource):
     @token_required
     @require_access("workspaces")
     def get(self, workspace_table_id: int):
-        try:
-            workspace_id = _workspace_id_from_header()
-            query = """
-                SELECT
-                    wc.id,
-                    wc.workspace_table_id,
-                    wc.column_name,
-                    wc.data_type,
-                    wc.ordinal_position
-                FROM workspace_column wc
-                JOIN workspace_table wt
-                  ON wt.id = wc.workspace_table_id
-                WHERE wc.workspace_table_id = :wtid
-                  AND wt.workspace_id = :ws
-                ORDER BY wc.ordinal_position, wc.column_name
-            """
-            with engine.connect() as conn:
-                result = conn.execute(text(query), {"wtid": int(workspace_table_id), "ws": workspace_id})
-                rows = result.mappings().all()
-            return {"rows": [dict(row) for row in rows]}, 200
-        except ForgeError as exc:
-            return _handle_error(exc)
-        except Exception:
-            logger.exception("Workspace table columns fetch failed")
-            return {"error": "Workspace table columns fetch failed"}, 500
+        workspace_id = _workspace_id_from_header()
+        query = """
+            SELECT
+                wc.id,
+                wc.workspace_table_id,
+                wc.column_name,
+                wc.data_type,
+                wc.ordinal_position
+            FROM workspace_column wc
+            JOIN workspace_table wt
+              ON wt.id = wc.workspace_table_id
+            WHERE wc.workspace_table_id = :wtid
+              AND wt.workspace_id = :ws
+            ORDER BY wc.ordinal_position, wc.column_name
+        """
+        with engine.connect() as conn:
+            result = conn.execute(text(query), {"wtid": int(workspace_table_id), "ws": workspace_id})
+            rows = result.mappings().all()
+        return {"rows": [dict(row) for row in rows]}, 200

@@ -104,7 +104,7 @@ def _parse_json_obj(value: Any) -> Optional[Dict[str, Any]]:
     if isinstance(value, (bytes, bytearray)):
         try:
             value = bytes(value).decode("utf-8", errors="ignore")
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             return None
     if isinstance(value, str):
         text = value.strip()
@@ -112,7 +112,7 @@ def _parse_json_obj(value: Any) -> Optional[Dict[str, Any]]:
             return None
         try:
             parsed = json.loads(text)
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             return None
         if isinstance(parsed, dict):
             return parsed

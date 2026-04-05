@@ -27,21 +27,15 @@ class WorkspaceInventorySync(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def post(self):
-        try:
-            workspace_id = extract_workspace_id()
-            context = WorkspaceSqlContextBuilder().build(workspace_id)
+        workspace_id = extract_workspace_id()
+        context = WorkspaceSqlContextBuilder().build(workspace_id)
 
-            schema_name = (request.args.get("schema") or "asset").strip()
-            catalog_name = (request.args.get("catalog") or "").strip() or None
+        schema_name = (request.args.get("schema") or "asset").strip()
+        catalog_name = (request.args.get("catalog") or "").strip() or None
 
-            snapshot_result = WorkspacePipelineService(sql=context.sql_exec).sync_snapshot(
-                workspace_id=workspace_id,
-                schema_name=schema_name,
-                catalog_name=catalog_name,
-            )
-            return {"ok": True, "workspaceSnapshot": snapshot_result}
-        except ForgeError as exc:
-            return _handle_service_error(exc)
-        except Exception:
-            logger.exception("Workspace inventory sync failed")
-            return {"error": "Workspace inventory sync failed"}, 500
+        snapshot_result = WorkspacePipelineService(sql=context.sql_exec).sync_snapshot(
+            workspace_id=workspace_id,
+            schema_name=schema_name,
+            catalog_name=catalog_name,
+        )
+        return {"ok": True, "workspaceSnapshot": snapshot_result}

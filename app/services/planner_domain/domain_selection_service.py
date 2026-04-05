@@ -1,26 +1,8 @@
-"""Domain selection logic extracted from PlannerDomainService.
-
-This module owns:
-- Module-level pure helper functions used during domain selection.
-- DomainSelectionService: encapsulates vector candidate retrieval, domain
-  scoring, column shortlisting, and capabilities formatting for the LLM.
-
-It intentionally does NOT import from app.services.planner_domain.service to
-avoid a circular dependency.
-"""
+"""Domain selection orchestration extracted from PlannerDomainService."""
 from __future__ import annotations
 
-import re
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from qdrant_client.http import models as qdrant_models
-
-from app.config import (
-    QF_PLAN_DOMAIN_FAST_MODE_MAX_DIMENSIONS,
-    QF_PLAN_DOMAIN_FAST_MODE_MAX_FILTER_COLUMNS,
-    QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED,
-)
-from app.exceptions.forge_error import ForgeError
 from app.infra.embedding_model import EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
 from app.services.domain.planner_capability_packing_policy_service import PlannerCapabilityPackingPolicyService
@@ -28,518 +10,28 @@ from app.services.domain.planner_domain_selection_policy_service import PlannerD
 from app.services.domain.planner_projection_policy_service import PlannerProjectionPolicyService
 from app.services.domain.planner_retrieval_policy_service import PlannerRetrievalPolicyService
 from app.services.domains.capabilities_service import DomainCapabilitiesService
+from app.services.planner_domain.capability_compactor import (
+    _collect_domain_selection_capability_features,
+    _collect_domain_selection_shortlist_features,
+    compact_capabilities_for_llm as build_compact_capabilities_for_llm,
+    full_capabilities_for_execution as build_full_capabilities_for_execution,
+)
+from app.services.planner_domain.column_shortlister import (
+    shortlist_columns_for_domain as build_shortlisted_columns_for_domain,
+)
+from app.services.planner_domain.domain_candidate_retriever import (
+    get_domain_candidates as load_domain_candidates,
+)
+from app.services.planner_domain.domain_selection_ranking import (
+    select_domain_and_shortlist_columns as choose_domain_and_shortlist_columns,
+)
 from app.services.planner_domain.prompt_signal_service import PromptSignalService
-from app.services.planner_domain.column_scoring import (
-    _cap_columns_per_table,
-    _column_heuristic_boost,
-    _extract_group_entities_for_shortlist,
-    _has_adm_metric,
-    _has_adm_signal_columns,
-    _has_age_columns,
-    _has_birth_date_columns,
-    _has_calendar_day_columns,
-    _has_canonical_name_columns,
-    _has_group_entity,
-    _has_preferred_state_column,
-    _has_school_day_flag_columns,
-    _has_staff_identity_column,
-    _has_student_identity_column,
-    _has_subgroup_column,
-    _is_canonical_name_column_name,
-    _is_name_column_needed_for_prompt,
-    _is_preferred_name_column_name,
-    _prompt_explicitly_requests_school_key,
-    _prompt_prefers_staff_role_title_filter,
-    _required_column_keys,
-    _select_keys_with_table_cap,
-)
-from app.services.planner_domain.prompt_intents import (
-    _dedupe_text_items,
-    _extract_time_phrases,
-    _looks_like_list_schools_prompt,
-    _looks_like_list_students_prompt,
-    _prompt_has_adm_intent,
-    _prompt_has_age_extreme,
-    _prompt_has_birth_month_constraint,
-    _prompt_has_subgroup,
-    _prompt_implies_staff_work_context,
-    _prompt_implies_student_school_context,
-)
+from app.services.planner_domain.prompt_intents import _extract_time_phrases
 from app.services.planner_domain.rerank_policy_engine import PlannerDomainRerankPolicyEngine
 from app.services.planner_domain.pipeline_definition import build_planner_domain_selection_pipeline_definition
 from app.services.planner.semantic_grounding_service import SemanticGroundingService
-from app.services.shared_ai.adapters.candidates import candidate_from_domain_row
-from app.services.shared_ai.artifacts import CandidateSetArtifact, PromptSignalsArtifact, RerankedCandidatesArtifact
 from app.services.shared_ai.context import PipelineContext
 from app.services.shared_ai.executor import PipelineExecutor
-
-# ---------------------------------------------------------------------------
-# Module-level constants
-# ---------------------------------------------------------------------------
-
-_DISCIPLINE_HINT_RE = re.compile(
-    r"\b(discipline|incident|suspension|expulsion|referral|behavior|behaviour)\b",
-    re.IGNORECASE,
-)
-
-# ---------------------------------------------------------------------------
-# Inline utility helpers (local copies to avoid circular import)
-# ---------------------------------------------------------------------------
-
-
-def _to_int(value: Any) -> Optional[int]:
-    try:
-        return int(value)
-    except Exception:
-        return None
-
-
-def _norm_key(value: Any) -> str:
-    return str(value or "").strip().lower()
-
-
-# ---------------------------------------------------------------------------
-# Copied helper (also still in service.py for _semantic_value_alias_constraints)
-# ---------------------------------------------------------------------------
-
-
-def _dedupe_constraints(values: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    seen: set[tuple[str, str, str, str, str]] = set()
-    for item in values:
-        if not isinstance(item, Mapping):
-            continue
-        kind = str(item.get("kind") or "unknown").strip().lower() or "unknown"
-        text = " ".join(str(item.get("text") or "").strip().split())
-        op = str(item.get("op") or "unknown").strip().lower() or "unknown"
-        value_hint = " ".join(str(item.get("value_hint") or "").strip().split()) if item.get("value_hint") not in (None, "") else ""
-        notes = " ".join(str(item.get("notes") or "").strip().split()) if item.get("notes") not in (None, "") else ""
-        if text == "" and value_hint == "":
-            continue
-        key = (kind, text.lower(), op, value_hint.lower(), notes.lower())
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(
-            {
-                "kind": kind,
-                "text": text or value_hint,
-                "op": op,
-                "value_hint": value_hint or None,
-                "notes": notes or None,
-            }
-        )
-    return out
-
-
-# ---------------------------------------------------------------------------
-# Moved module-level functions
-# ---------------------------------------------------------------------------
-
-
-def _semantic_alias_concept_key(constraint: Mapping[str, Any]) -> str:
-    notes = str(constraint.get("notes") or "").strip()
-    if ":" not in notes:
-        return ""
-    prefix, concept_key = notes.split(":", 1)
-    if prefix.strip().lower() != "semantic_alias":
-        return ""
-    return str(concept_key or "").strip().upper()
-
-
-def _replace_prompt_phrase(*, text: str, needle: str, replacement: str) -> str:
-    base = str(text or "").strip()
-    source = str(needle or "").strip()
-    target = str(replacement or "").strip()
-    if base == "" or source == "" or target == "":
-        return base
-    pattern = re.compile(rf"\b{re.escape(source)}\b", flags=re.IGNORECASE)
-    rewritten = pattern.sub(target, base, count=1)
-    return " ".join(rewritten.split())
-
-
-def _merge_dimension_rows(*, dimensions: Sequence[Mapping[str, Any]], time_columns: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    seen: set[str] = set()
-    for row in list(dimensions) + list(time_columns):
-        if not isinstance(row, Mapping):
-            continue
-        key = _norm_key(row.get("column_key"))
-        if key == "" or key in seen:
-            continue
-        seen.add(key)
-        out.append(dict(row))
-    return out
-
-
-def _collect_domain_selection_shortlist_features(*, shortlisted_columns: Sequence[Mapping[str, Any]]) -> List[str]:
-    features: List[str] = []
-    if _has_subgroup_column(shortlisted_columns):
-        features.append("SUBGROUP_COLUMN")
-    if _has_student_identity_column(shortlisted_columns):
-        features.append("STUDENT_IDENTITY_COLUMN")
-    if _has_staff_identity_column(shortlisted_columns):
-        features.append("STAFF_IDENTITY_COLUMN")
-    if _has_adm_signal_columns(shortlisted_columns):
-        features.append("ADM_SIGNAL_COLUMN")
-    if _has_birth_date_columns(shortlisted_columns):
-        features.append("BIRTH_DATE_COLUMN")
-    if _has_age_columns(shortlisted_columns):
-        features.append("AGE_COLUMN")
-    if _has_calendar_day_columns(shortlisted_columns):
-        features.append("CALENDAR_DAY_COLUMN")
-    if _has_school_day_flag_columns(shortlisted_columns):
-        features.append("SCHOOL_DAY_FLAG_COLUMN")
-    return features
-
-
-def _collect_domain_selection_capability_features(*, capabilities: Mapping[str, Any]) -> List[str]:
-    features: List[str] = []
-    if _has_adm_metric(capabilities):
-        features.append("ADM_METRIC")
-    return features
-
-
-def _collect_capability_packing_features(*, full_dims: Sequence[Mapping[str, Any]]) -> List[str]:
-    features: List[str] = []
-    if _has_preferred_state_column(rows=full_dims):
-        features.append("HAS_PREFERRED_STATE_COLUMN")
-    if _has_canonical_name_columns(rows=full_dims):
-        features.append("HAS_CANONICAL_NAME_COLUMNS")
-    return features
-
-
-def _build_column_query_texts(prompt: str) -> List[str]:
-    text = str(prompt or "").strip()
-    out = [text]
-    text_l = text.lower()
-    group_entities = _extract_group_entities_for_shortlist(text_l)
-    if _has_group_entity(group_entities, "account"):
-        out.extend(["account name", "customer account"])
-    if _has_group_entity(group_entities, "territory"):
-        out.extend(["territory name", "sales territory"])
-    if _has_group_entity(group_entities, "region"):
-        out.extend(["region name"])
-    if _prompt_has_subgroup(text):
-        out.extend(["student race ethnicity", "student subgroup"])
-    if _looks_like_list_students_prompt(text):
-        out.extend(["student list", "student roster", "student demographics"])
-    if _prompt_has_age_extreme(text):
-        out.extend(["student birth date", "student date of birth", "student age"])
-    if _prompt_has_birth_month_constraint(text):
-        out.extend(["student birthday month", "student birth date month"])
-    if _prompt_implies_staff_work_context(text):
-        out.extend(["staff roster", "staff assignments", "teacher workplace", "employee school"])
-    if _prompt_prefers_staff_role_title_filter(text):
-        out.extend(["staff position title", "staff role title", "principal position"])
-    if _prompt_implies_student_school_context(text):
-        out.extend(["student enrollment", "student attends school", "student school"])
-    if "county" in text_l:
-        out.append("county district")
-    if "district" in text_l:
-        out.append("district lea")
-    if "school year" in text_l or "this year" in text_l or "last year" in text_l:
-        out.append("school year date")
-    if _prompt_has_adm_intent(text):
-        out.extend(
-            [
-                "average daily membership adm base adm",
-                "normalized_adm report_period school_year",
-                "is_primary_school grade_level_adm",
-            ]
-        )
-    return _dedupe_text_items(out)
-
-
-def _semantic_constraint_concept_keys(semantic_constraints: Sequence[Mapping[str, Any]]) -> List[str]:
-    constraints = _dedupe_constraints(semantic_constraints)
-    out: List[str] = []
-    for concept_key in (_semantic_alias_concept_key(item) for item in constraints):
-        if concept_key and concept_key not in out:
-            out.append(concept_key)
-    return out
-
-
-def _build_semantic_alias_domain_query_specs(
-    *,
-    prompt: str,
-    semantic_constraints: Sequence[Mapping[str, Any]],
-) -> List[Dict[str, Any]]:
-    text = str(prompt or "").strip()
-    if text == "":
-        return []
-    constraints = _dedupe_constraints(semantic_constraints)
-    if not constraints:
-        return []
-
-    specs: List[Dict[str, Any]] = []
-
-    for constraint in constraints:
-        raw_text = str(constraint.get("text") or "").strip()
-        canonical = str(constraint.get("value_hint") or "").strip()
-        if raw_text == "" or canonical == "" or raw_text.lower() == canonical.lower():
-            continue
-        rewritten_prompt = _replace_prompt_phrase(text=text, needle=raw_text, replacement=canonical)
-        if rewritten_prompt and rewritten_prompt != text:
-            concept_key = _semantic_alias_concept_key(constraint)
-            reason = f"semantic_alias:{concept_key}" if concept_key else "semantic_alias"
-            specs.append(
-                {
-                    "query": rewritten_prompt,
-                    "score_boost": 0.02,
-                    "reasons": [reason],
-                    "source": "semantic_vector",
-                }
-            )
-
-    return specs
-
-
-def _merge_domain_query_specs(
-    *,
-    specs: Sequence[Mapping[str, Any]],
-) -> List[Dict[str, Any]]:
-    merged: Dict[str, Dict[str, Any]] = {}
-    for raw_spec in specs:
-        query_text = " ".join(str(raw_spec.get("query") or "").strip().split())
-        if query_text == "":
-            continue
-        key = query_text.lower()
-        reasons = _dedupe_text_items(list(raw_spec.get("reasons") or []))
-        score_boost = float(raw_spec.get("score_boost") or 0.0)
-        source = str(raw_spec.get("source") or "vector")
-        existing = merged.get(key)
-        if existing is None:
-            merged[key] = {
-                "query": query_text,
-                "score_boost": score_boost,
-                "reasons": reasons,
-                "source": source,
-            }
-            continue
-        existing["score_boost"] = max(float(existing.get("score_boost") or 0.0), score_boost)
-        existing["reasons"] = _dedupe_text_items(list(existing.get("reasons") or []) + reasons)
-        if source != "vector":
-            existing["source"] = source
-    return list(merged.values())
-
-
-def _slot_implies_student_listing(slot_hints: Optional[Mapping[str, Any]]) -> bool:
-    if not isinstance(slot_hints, Mapping):
-        return False
-    intent = str(slot_hints.get("intent") or "").strip().lower()
-    entity = str(slot_hints.get("entity") or "").strip().lower()
-    return intent == "list" and entity in {"student", "students"}
-
-
-def _slot_implies_school_listing(slot_hints: Optional[Mapping[str, Any]]) -> bool:
-    if not isinstance(slot_hints, Mapping):
-        return False
-    intent = str(slot_hints.get("intent") or "").strip().lower()
-    entity = str(slot_hints.get("entity") or "").strip().lower()
-    return intent == "list" and entity in {"school", "schools"}
-
-
-def _find_dimension_by_column_name(*, full_dims: Sequence[Mapping[str, Any]], target: str) -> Optional[Dict[str, Any]]:
-    needle = str(target or "").strip().lower()
-    if needle == "":
-        return None
-    for row in full_dims:
-        col_name = str(row.get("column_name") or "").strip().lower()
-        if col_name == needle:
-            return dict(row)
-    return None
-
-
-def _find_dimension_by_column_name_candidates(
-    *,
-    full_dims: Sequence[Mapping[str, Any]],
-    targets: Sequence[str],
-) -> Optional[Dict[str, Any]]:
-    normalized_targets = [str(target or "").strip().lower() for target in targets if str(target or "").strip()]
-    if not normalized_targets:
-        return None
-    for target in normalized_targets:
-        matched = _find_dimension_by_column_name(full_dims=full_dims, target=target)
-        if matched is not None:
-            return matched
-    for row in full_dims:
-        col_name = str(row.get("column_name") or "").strip().lower()
-        if col_name == "":
-            continue
-        if any(target in col_name for target in normalized_targets):
-            return dict(row)
-    return None
-
-
-def _concept_keys_for_row(row: Mapping[str, Any]) -> List[str]:
-    out: List[str] = []
-    for field_name in ("concept_key", "semantic_concept_key"):
-        token = str(row.get(field_name) or "").strip().upper()
-        if token and token not in out:
-            out.append(token)
-    return out
-
-
-def _prepend_required_concept_dimensions(
-    *,
-    selected_dims: Sequence[Mapping[str, Any]],
-    full_dims: Sequence[Mapping[str, Any]],
-    required_concept_keys: Sequence[str],
-) -> List[Dict[str, Any]]:
-    by_concept: Dict[str, Dict[str, Any]] = {}
-    for row in full_dims:
-        if not isinstance(row, Mapping):
-            continue
-        for concept_key in _concept_keys_for_row(row):
-            by_concept.setdefault(concept_key, dict(row))
-
-    prefix: List[Dict[str, Any]] = []
-    prefix_seen: set[str] = set()
-    for concept_key in required_concept_keys:
-        matched = by_concept.get(str(concept_key or "").strip().upper())
-        if matched is None:
-            continue
-        key = _norm_key(matched.get("column_key"))
-        if key == "" or key in prefix_seen:
-            continue
-        prefix.append(dict(matched))
-        prefix_seen.add(key)
-
-    out: List[Dict[str, Any]] = list(prefix)
-    for row in selected_dims:
-        if not isinstance(row, Mapping):
-            continue
-        key = _norm_key(row.get("column_key"))
-        if key == "" or key in prefix_seen:
-            continue
-        out.append(dict(row))
-        prefix_seen.add(key)
-    return out
-
-
-def _row_has_excluded_concepts(
-    row: Mapping[str, Any],
-    *,
-    excluded_concept_keys: Sequence[str],
-) -> bool:
-    excluded = {str(item or "").strip().upper() for item in excluded_concept_keys if str(item or "").strip()}
-    if not excluded:
-        return False
-    row_concepts = set(_concept_keys_for_row(row))
-    return bool(row_concepts & excluded)
-
-
-def _drop_excluded_concept_dimensions(
-    *,
-    selected_dims: Sequence[Mapping[str, Any]],
-    excluded_concept_keys: Sequence[str],
-) -> List[Dict[str, Any]]:
-    if not excluded_concept_keys:
-        return [dict(row) for row in selected_dims if isinstance(row, Mapping)]
-    return [
-        dict(row)
-        for row in selected_dims
-        if isinstance(row, Mapping) and not _row_has_excluded_concepts(row, excluded_concept_keys=excluded_concept_keys)
-    ]
-
-
-def _prepend_required_named_dimensions(
-    *,
-    selected_dims: Sequence[Mapping[str, Any]],
-    full_dims: Sequence[Mapping[str, Any]],
-    required_column_names: Sequence[str],
-) -> List[Dict[str, Any]]:
-    normalized_names = [str(item or "").strip().lower() for item in required_column_names if str(item or "").strip()]
-    if not normalized_names:
-        return [dict(row) for row in selected_dims if isinstance(row, Mapping)]
-
-    by_name: Dict[str, Dict[str, Any]] = {}
-    for row in full_dims:
-        if not isinstance(row, Mapping):
-            continue
-        col_name = str(row.get("column_name") or "").strip().lower()
-        if col_name and col_name not in by_name:
-            by_name[col_name] = dict(row)
-
-    prefix: List[Dict[str, Any]] = []
-    prefix_seen: set[str] = set()
-    for column_name in normalized_names:
-        matched = by_name.get(column_name)
-        if matched is None:
-            continue
-        key = _norm_key(matched.get("column_key"))
-        if key == "" or key in prefix_seen:
-            continue
-        prefix.append(dict(matched))
-        prefix_seen.add(key)
-
-    out: List[Dict[str, Any]] = list(prefix)
-    for row in selected_dims:
-        if not isinstance(row, Mapping):
-            continue
-        key = _norm_key(row.get("column_key"))
-        if key == "" or key in prefix_seen:
-            continue
-        out.append(dict(row))
-        prefix_seen.add(key)
-    return out
-
-
-def _row_has_excluded_column_names(
-    row: Mapping[str, Any],
-    *,
-    excluded_column_names: Sequence[str],
-) -> bool:
-    excluded = {str(item or "").strip().lower() for item in excluded_column_names if str(item or "").strip()}
-    if not excluded:
-        return False
-    col_name = str(row.get("column_name") or "").strip().lower()
-    return bool(col_name) and col_name in excluded
-
-
-def _drop_excluded_named_dimensions(
-    *,
-    selected_dims: Sequence[Mapping[str, Any]],
-    excluded_column_names: Sequence[str],
-) -> List[Dict[str, Any]]:
-    if not excluded_column_names:
-        return [dict(row) for row in selected_dims if isinstance(row, Mapping)]
-    return [
-        dict(row)
-        for row in selected_dims
-        if isinstance(row, Mapping) and not _row_has_excluded_column_names(row, excluded_column_names=excluded_column_names)
-    ]
-
-
-def _prepend_school_name_for_filter_context(
-    *,
-    selected_dims: Sequence[Mapping[str, Any]],
-    full_dims: Sequence[Mapping[str, Any]],
-) -> List[Dict[str, Any]]:
-    school_name = _find_dimension_by_column_name(full_dims=full_dims, target="school_name")
-    if school_name is None:
-        return [dict(row) for row in selected_dims if isinstance(row, Mapping)]
-
-    school_key = _norm_key(school_name.get("column_key"))
-    out: List[Dict[str, Any]] = [dict(school_name)]
-    seen: set[str] = {school_key}
-
-    by_key: Dict[str, Dict[str, Any]] = {}
-    for row in full_dims:
-        key = _norm_key(row.get("column_key"))
-        if key:
-            by_key[key] = dict(row)
-
-    for row in selected_dims:
-        if not isinstance(row, Mapping):
-            continue
-        key = _norm_key(row.get("column_key"))
-        if key == "" or key in seen:
-            continue
-        out.append(dict(by_key.get(key) or dict(row)))
-        seen.add(key)
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -639,243 +131,22 @@ class DomainSelectionService:
         capability_packing_policy_service: Optional[PlannerCapabilityPackingPolicyService] = None,
         include_projection_policy_debug: bool = False,
     ) -> Dict[str, Any]:
-        full_dims = [dict(row) for row in list(capabilities.get("dimensions") or []) if isinstance(row, dict)]
-        full_time = [dict(row) for row in list(capabilities.get("time_columns") or []) if isinstance(row, dict)]
-        full_filter_candidates = _merge_dimension_rows(dimensions=full_dims, time_columns=full_time)
-        dim_by_key = {_norm_key(row.get("column_key")): row for row in full_dims if _norm_key(row.get("column_key"))}
-        is_school_listing = _looks_like_list_schools_prompt(prompt) or _slot_implies_school_listing(slot_hints)
-        prompt_signals = set(PromptSignalService().extract_signals(prompt=prompt))
-        if is_school_listing:
-            prompt_signals.update({"school_listing", "listing_intent"})
-        if _slot_implies_student_listing(slot_hints):
-            prompt_signals.update({"student_listing", "listing_intent", "needs_student_identity"})
-        if _prompt_explicitly_requests_school_key(prompt):
-            prompt_signals.add("explicit_school_key_request")
-        policy_result = (projection_policy_service or PlannerProjectionPolicyService()).get_projection_requirements(
+        return build_compact_capabilities_for_llm(
+            capabilities=capabilities,
+            shortlisted_columns=shortlisted_columns,
+            prompt=prompt,
+            slot_hints=slot_hints,
+            fast_mode=fast_mode,
             workspace_id=workspace_id,
             vertical_norm=vertical_norm,
-            base_domain_id=_to_int(capabilities.get("domain_id")),
-            prompt_signals=sorted(prompt_signals),
+            projection_policy_service=projection_policy_service,
+            capability_packing_policy_service=capability_packing_policy_service,
+            include_projection_policy_debug=include_projection_policy_debug,
         )
-        packing_policy_result = (
-            capability_packing_policy_service or PlannerCapabilityPackingPolicyService()
-        ).get_packing_requirements(
-            workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
-            prompt_signals=sorted(prompt_signals),
-            capability_features=_collect_capability_packing_features(full_dims=full_dims),
-        )
-        prefer_canonical_name_columns = bool(packing_policy_result.get("prefer_canonical_name_columns"))
-        include_name_constraint_columns = bool(packing_policy_result.get("include_name_constraint_columns"))
-        excluded_concept_keys = policy_result.get("excluded_concept_keys") or []
-        required_column_names = policy_result.get("required_column_names") or []
-        excluded_column_names = [
-            *list(policy_result.get("excluded_column_names") or []),
-            *list(packing_policy_result.get("excluded_column_names") or []),
-        ]
-
-        selected_dims: List[Dict[str, Any]] = []
-        seen: set[str] = set()
-        for row in shortlisted_columns:
-            key = _norm_key(row.get("column_key"))
-            if key == "" or key in seen:
-                continue
-            base = dim_by_key.get(key) or dict(row)
-            selected_dims.append(base)
-            seen.add(key)
-
-        if not selected_dims:
-            selected_dims = full_dims[:40]
-            seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
-
-        if _prompt_has_subgroup(prompt):
-            for row in full_dims:
-                key = _norm_key(row.get("column_key"))
-                if key in seen:
-                    continue
-                col_name = str(row.get("column_name") or key).lower()
-                if any(token in col_name for token in ("race", "ethnicity", "hispanic", "latino")):
-                    selected_dims.append(row)
-                    seen.add(key)
-
-        if policy_result.get("required_concept_keys"):
-            selected_dims = _prepend_required_concept_dimensions(
-                selected_dims=selected_dims,
-                full_dims=full_dims,
-                required_concept_keys=policy_result.get("required_concept_keys") or [],
-            )
-            seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
-        if required_column_names:
-            selected_dims = _prepend_required_named_dimensions(
-                selected_dims=selected_dims,
-                full_dims=full_dims,
-                required_column_names=required_column_names,
-            )
-            seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
-        prepend_column_names = packing_policy_result.get("prepend_column_names") or []
-        if prepend_column_names:
-            selected_dims = _prepend_required_named_dimensions(
-                selected_dims=selected_dims,
-                full_dims=full_dims,
-                required_column_names=prepend_column_names,
-            )
-            seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
-        append_first_match_column_name_groups = packing_policy_result.get("append_first_match_column_name_groups") or []
-        for target_group in append_first_match_column_name_groups:
-            matched_dim = _find_dimension_by_column_name_candidates(
-                full_dims=full_dims,
-                targets=tuple(str(item) for item in list(target_group or [])),
-            )
-            if matched_dim is None:
-                continue
-            matched_key = _norm_key(matched_dim.get("column_key"))
-            if matched_key and matched_key not in seen:
-                selected_dims.append(dict(matched_dim))
-                seen.add(matched_key)
-        append_column_names = {
-            str(item).strip().lower()
-            for item in list(packing_policy_result.get("append_column_names") or [])
-            if str(item).strip()
-        }
-        if append_column_names:
-            for row in full_dims:
-                key = _norm_key(row.get("column_key"))
-                if key in seen:
-                    continue
-                col_name = str(row.get("column_name") or key).lower()
-                if col_name in append_column_names:
-                    selected_dims.append(dict(row))
-                    seen.add(key)
-
-        if prefer_canonical_name_columns:
-            selected_dims = [
-                dict(row)
-                for row in selected_dims
-                if not _is_preferred_name_column_name(str(row.get("column_name") or "").strip().lower())
-            ]
-            seen = {_norm_key(row.get("column_key")) for row in selected_dims if _norm_key(row.get("column_key"))}
-            for row in full_dims:
-                key = _norm_key(row.get("column_key"))
-                if key in seen:
-                    continue
-                col_name = str(row.get("column_name") or key).lower()
-                if _is_canonical_name_column_name(col_name):
-                    selected_dims.append(row)
-                    seen.add(key)
-
-        if include_name_constraint_columns:
-            for row in full_dims:
-                key = _norm_key(row.get("column_key"))
-                if key in seen:
-                    continue
-                col_name = str(row.get("column_name") or key).lower()
-                if _is_name_column_needed_for_prompt(prompt=prompt, column_name=col_name):
-                    selected_dims.append(row)
-                    seen.add(key)
-
-        selected_dims = _drop_excluded_concept_dimensions(
-            selected_dims=selected_dims,
-            excluded_concept_keys=excluded_concept_keys,
-        )
-        selected_dims = _drop_excluded_named_dimensions(
-            selected_dims=selected_dims,
-            excluded_column_names=excluded_column_names,
-        )
-        max_columns = max(12, int(QF_PLAN_DOMAIN_FAST_MODE_MAX_DIMENSIONS)) if fast_mode else 70
-        per_table_cap = 8 if fast_mode else 14
-        selected_dims = _cap_columns_per_table(selected_dims, max_columns=max_columns, per_table_cap=per_table_cap)
-        selected_time = [dict(row) for row in full_time[: (8 if fast_mode else 12)]]
-
-        filter_columns: List[Dict[str, Any]] = []
-        filter_seen: set[str] = set()
-
-        def _add_filter_row(row: Mapping[str, Any]) -> None:
-            key = _norm_key(row.get("column_key"))
-            if key == "" or key in filter_seen:
-                return
-            if row.get("filterable") is False:
-                return
-            if _row_has_excluded_concepts(row, excluded_concept_keys=excluded_concept_keys):
-                return
-            if _row_has_excluded_column_names(row, excluded_column_names=excluded_column_names):
-                return
-            col_name = str(row.get("column_name") or "").strip().lower()
-            if prefer_canonical_name_columns and _is_preferred_name_column_name(col_name):
-                return
-            filter_columns.append(dict(row))
-            filter_seen.add(key)
-
-        for row in selected_dims:
-            _add_filter_row(row)
-        for row in selected_time:
-            _add_filter_row(row)
-
-        required_filter_column_names = {
-            str(item).strip().lower()
-            for item in list(packing_policy_result.get("required_filter_column_names") or [])
-            if str(item).strip()
-        }
-        if required_filter_column_names:
-            for row in full_filter_candidates:
-                col_name = str(row.get("column_name") or "").strip().lower()
-                if col_name in required_filter_column_names:
-                    _add_filter_row(row)
-
-        if include_name_constraint_columns:
-            for row in full_filter_candidates:
-                col_name = str(row.get("column_name") or "").strip().lower()
-                if _is_name_column_needed_for_prompt(prompt=prompt, column_name=col_name):
-                    _add_filter_row(row)
-
-        max_filter_columns = max(12, int(QF_PLAN_DOMAIN_FAST_MODE_MAX_FILTER_COLUMNS)) if fast_mode else len(filter_columns)
-        if len(filter_columns) > max_filter_columns:
-            filter_columns = filter_columns[:max_filter_columns]
-
-        result = {
-            "domain_id": _to_int(capabilities.get("domain_id")) or 0,
-            "domain_version": _to_int(capabilities.get("domain_version")) or 0,
-            "dimensions": selected_dims,
-            "time_columns": selected_time,
-            "filter_columns": filter_columns,
-            "domain_metrics": [dict(row) for row in list(capabilities.get("domain_metrics") or []) if isinstance(row, dict)],
-            "user_metrics": [dict(row) for row in list(capabilities.get("user_metrics") or []) if isinstance(row, dict)],
-            "overlay_metrics": [dict(row) for row in list(capabilities.get("overlay_metrics") or []) if isinstance(row, dict)],
-        }
-        if include_projection_policy_debug:
-            result["projection_policy_debug"] = {
-                "prompt_signals": sorted(prompt_signals),
-                "matched_policies": [str(item) for item in list(policy_result.get("matched_policies") or []) if str(item or "").strip()],
-                "projection_mode": str(policy_result.get("projection_mode") or "prepend"),
-                "required_concept_keys": [str(item) for item in list(policy_result.get("required_concept_keys") or []) if str(item or "").strip()],
-                "excluded_concept_keys": [str(item) for item in list(policy_result.get("excluded_concept_keys") or []) if str(item or "").strip()],
-                "required_column_names": [str(item) for item in list(policy_result.get("required_column_names") or []) if str(item or "").strip()],
-                "excluded_column_names": [str(item) for item in list(policy_result.get("excluded_column_names") or []) if str(item or "").strip()],
-                "required_filter_concept_keys": [
-                    str(item) for item in list(policy_result.get("required_filter_concept_keys") or []) if str(item or "").strip()
-                ],
-                "required_join_tables": [str(item) for item in list(policy_result.get("required_join_tables") or []) if str(item or "").strip()],
-            }
-        return result
 
     @staticmethod
     def full_capabilities_for_execution(capabilities: Mapping[str, Any]) -> Dict[str, Any]:
-        dimensions = [dict(row) for row in list(capabilities.get("dimensions") or []) if isinstance(row, dict)]
-        time_columns = [dict(row) for row in list(capabilities.get("time_columns") or []) if isinstance(row, dict)]
-        filter_columns = [
-            dict(row)
-            for row in _merge_dimension_rows(dimensions=dimensions, time_columns=time_columns)
-            if row.get("filterable") is not False
-        ]
-        return {
-            "domain_id": _to_int(capabilities.get("domain_id")) or 0,
-            "domain_version": _to_int(capabilities.get("domain_version")) or 0,
-            "dimensions": dimensions,
-            "time_columns": time_columns,
-            "filter_columns": filter_columns,
-            "domain_metrics": [dict(row) for row in list(capabilities.get("domain_metrics") or []) if isinstance(row, dict)],
-            "user_metrics": [dict(row) for row in list(capabilities.get("user_metrics") or []) if isinstance(row, dict)],
-            "overlay_metrics": [dict(row) for row in list(capabilities.get("overlay_metrics") or []) if isinstance(row, dict)],
-        }
+        return build_full_capabilities_for_execution(capabilities)
 
     @staticmethod
     def _score_domain_candidate(
@@ -947,98 +218,16 @@ class DomainSelectionService:
         prompt: str,
         provided_domain_id: Optional[int],
     ) -> List[Dict[str, Any]]:
-        provided = _to_int(provided_domain_id)
-        if provided is not None and provided > 0:
-            return [{"domain_id": provided, "name": f"domain_{provided}", "score": 1.0, "source": "provided"}]
-
-        semantic_constraints = self._semantic_alias_constraints_fn(prompt=prompt, vertical_norm=vertical_norm)
-        prompt_signals = self._rerank_policy_engine.extract_prompt_signals(prompt=prompt)
-        semantic_concept_keys = _semantic_constraint_concept_keys(semantic_constraints)
-        query_specs = _merge_domain_query_specs(
-            specs=[
-                {
-                    "query": prompt,
-                    "score_boost": 0.0,
-                    "reasons": [],
-                    "source": "vector",
-                },
-                *self._retrieval_policy_service.build_query_specs(
-                    workspace_id=workspace_id,
-                    vertical_norm=vertical_norm,
-                    prompt_signals=prompt_signals,
-                    semantic_concept_keys=semantic_concept_keys,
-                ),
-                *_build_semantic_alias_domain_query_specs(
-                    prompt=prompt,
-                    semantic_constraints=semantic_constraints,
-                ),
-            ],
+        return load_domain_candidates(
+            workspace_id=workspace_id,
+            vertical_norm=vertical_norm,
+            prompt=prompt,
+            provided_domain_id=provided_domain_id,
+            search_domains_fn=self._domain_vector.search_domains,
+            semantic_alias_constraints_fn=self._semantic_alias_constraints_fn,
+            extract_prompt_signals_fn=self._rerank_policy_engine.extract_prompt_signals,
+            retrieval_policy_service=self._retrieval_policy_service,
         )
-        rows: List[Dict[str, Any]] = []
-        for query_spec in query_specs:
-            query_text = str(query_spec.get("query") or "").strip()
-            if query_text == "":
-                continue
-            result = self._domain_vector.search_domains(
-                workspace_id=workspace_id,
-                query=query_text,
-                limit=6,
-                score_threshold=0.0,
-                include_payload=False,
-            )
-            semantic_boost = float(query_spec.get("score_boost") or 0.0)
-            semantic_reasons = list(query_spec.get("reasons") or [])
-            query_source = str(query_spec.get("source") or "vector")
-            for row in list(result.get("results") or []):
-                if not isinstance(row, dict):
-                    continue
-                merged_row = dict(row)
-                merged_row["_semantic_boost"] = semantic_boost
-                merged_row["_semantic_reasons"] = semantic_reasons
-                merged_row["_query_source"] = query_source
-                rows.append(merged_row)
-        out: List[Dict[str, Any]] = []
-        by_domain: Dict[int, Dict[str, Any]] = {}
-        seen: set[int] = set()
-        for row in rows:
-            domain_id = _to_int(row.get("domain_id"))
-            if domain_id is None:
-                continue
-            current_score = float(row.get("score") or 0.0) + float(row.get("_semantic_boost") or 0.0)
-            query_reasons = _dedupe_text_items(
-                [
-                    *list(row.get("reason") or []),
-                    *list(row.get("_semantic_reasons") or []),
-                ]
-            )
-            query_source = str(row.get("_query_source") or "vector")
-            existing = by_domain.get(domain_id)
-            if existing is None:
-                by_domain[domain_id] = {
-                    "domain_id": domain_id,
-                    "name": str(row.get("name") or f"domain_{domain_id}"),
-                    "score": current_score,
-                    "reason": query_reasons,
-                    "source": query_source,
-                }
-                continue
-            existing_reasons = list(existing.get("reason") or [])
-            new_reasons = query_reasons
-            existing["reason"] = _dedupe_text_items(existing_reasons + new_reasons)
-            if current_score > float(existing.get("score") or 0.0):
-                existing["score"] = current_score
-                existing["name"] = str(row.get("name") or existing.get("name") or f"domain_{domain_id}")
-                existing["source"] = query_source
-        for domain_id, row in by_domain.items():
-            if domain_id in seen:
-                continue
-            seen.add(domain_id)
-            out.append(dict(row))
-        out.sort(key=lambda item: (-float(item.get("score") or 0.0), int(item.get("domain_id") or 0)))
-        out = out[:6]
-        if not out:
-            raise ForgeError("No candidate domain found for prompt", status_code=404)
-        return out
 
     def _select_domain_and_shortlist_columns(
         self,
@@ -1049,179 +238,39 @@ class DomainSelectionService:
         prompt: str,
         domain_candidates: Sequence[Mapping[str, Any]],
     ) -> Tuple[int, Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
-        ranking_seed_rows: List[Dict[str, Any]] = []
-        first_error: Optional[ForgeError] = None
-
-        for candidate in list(domain_candidates or [])[:3]:
-            domain_id = _to_int(candidate.get("domain_id"))
-            if domain_id is None:
-                continue
-            try:
-                capabilities = self._capabilities.get_domain_capabilities(
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                    domain_id=domain_id,
-                    vertical_norm=vertical_norm,
-                )
-            except ForgeError as exc:
-                if first_error is None:
-                    first_error = exc
-                ranking_seed_rows.append({"domain_id": domain_id, "status": "error", "error": str(exc), "score": 0.0})
-                continue
-
-            shortlist = self._shortlist_columns_for_domain(
-                prompt=prompt,
-                workspace_id=workspace_id,
-                capabilities=capabilities,
-            )
-            semantic_score = 0.0
-            if QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED:
-                semantic_capabilities = self.compact_capabilities_for_llm(
-                    capabilities,
-                    shortlist,
-                    prompt,
-                    slot_hints=None,
-                    fast_mode=False,
-                    workspace_id=workspace_id,
-                    vertical_norm=vertical_norm,
-                    projection_policy_service=self._projection_policy_service,
-                )
-                grounding_bundle = self._semantic_grounding_factory().build_grounding_bundle(
-                    prompt=prompt,
-                    workspace_id=workspace_id,
-                    vertical_norm=vertical_norm,
-                    base_domain_id=int(domain_id),
-                    base_domain_name=str(candidate.get("name") or f"domain_{domain_id}"),
-                    capabilities_compact=semantic_capabilities,
-                    include_candidates=True,
-                    include_alias_constraints=True,
-                )
-                semantic_score = self._score_semantic_grounding_bundle(
-                    prompt=prompt,
-                    grounding_bundle=grounding_bundle,
-                )
-            score = self._score_domain_candidate(
-                prompt=prompt,
-                candidate=candidate,
-                capabilities=capabilities,
-                shortlisted_columns=shortlist,
-                selection_policy_service=self._domain_selection_policy_service,
-            )
-            base_score = round(score + semantic_score, 5)
-            ranking_seed_rows.append(
-                {
-                    "domain_id": domain_id,
-                    "name": str(candidate.get("name") or f"domain_{domain_id}"),
-                    "score": base_score,
-                    "base_score": base_score,
-                    "semantic_score": semantic_score,
-                    "vector_score": float(candidate.get("score") or 0.0),
-                    "source": str(candidate.get("source") or "vector"),
-                    "capabilities_payload": capabilities,
-                    "shortlisted_columns": shortlist,
-                    "column_shortlist_count": len(shortlist),
-                    "dimension_count": len(list(capabilities.get("dimensions") or [])),
-                }
-            )
-
-        successful_seed_rows = [row for row in ranking_seed_rows if str(row.get("status") or "") != "error"]
-        if not successful_seed_rows:
-            if first_error is not None:
-                raise first_error
-            raise ForgeError("No accessible domain candidates found", status_code=404)
-
-        pipeline_context = PipelineContext(
-            pipeline_name="planner_domain_selection_pipeline",
-            trace_id=f"planner_domain_selection:{workspace_id}:{vertical_norm}",
+        (
+            pipeline_context,
+            selected_domain_id,
+            capabilities,
+            shortlisted_columns,
+            ranking,
+            rerank_signals,
+        ) = choose_domain_and_shortlist_columns(
             workspace_id=workspace_id,
             user_id=user_id,
             vertical_norm=vertical_norm,
-            request={"prompt": prompt},
+            prompt=prompt,
+            domain_candidates=domain_candidates,
+            get_domain_capabilities_fn=self._capabilities.get_domain_capabilities,
+            shortlist_columns_fn=lambda **kwargs: self._shortlist_columns_for_domain(**kwargs),
+            compact_capabilities_fn=self.compact_capabilities_for_llm,
+            semantic_grounding_factory=self._semantic_grounding_factory,
+            score_semantic_grounding_bundle_fn=self._score_semantic_grounding_bundle,
+            score_domain_candidate_fn=lambda **kwargs: self._score_domain_candidate(**kwargs),
+            domain_selection_policy_service=self._domain_selection_policy_service,
+            projection_policy_service=self._projection_policy_service,
+            planner_capability_adapter=self._planner_capability_adapter,
+            planner_policy_adapter=self._planner_policy_adapter,
+            pipeline_executor=self._pipeline_executor,
+            pipeline_definition_factory=build_planner_domain_selection_pipeline_definition,
         )
-        pipeline_context.set_artifact(
-            "candidate_set",
-            CandidateSetArtifact(
-                candidates=[candidate_from_domain_row(row) for row in successful_seed_rows],
-                retrieval_debug={"candidate_count": len(successful_seed_rows)},
-            ),
-        )
-        pipeline_definition = build_planner_domain_selection_pipeline_definition(
-            capability_adapter=self._planner_capability_adapter,
-            policy_adapter=self._planner_policy_adapter,
-        )
-        pipeline_context = self._pipeline_executor.execute(pipeline_definition, pipeline_context)
         self._last_pipeline_context = pipeline_context
-
-        prompt_signals_artifact = pipeline_context.get_artifact(
-            "prompt_signals",
-            node_name="planner_domain_selection_pipeline",
-        )
-        reranked_artifact = pipeline_context.get_artifact(
-            "reranked_candidates",
-            node_name="planner_domain_selection_pipeline",
-        )
-        if not isinstance(prompt_signals_artifact, PromptSignalsArtifact):
-            raise TypeError("planner_domain_selection_pipeline expected PromptSignalsArtifact.")
-        if not isinstance(reranked_artifact, RerankedCandidatesArtifact):
-            raise TypeError("planner_domain_selection_pipeline expected RerankedCandidatesArtifact.")
-
-        effects_by_candidate: Dict[str, List[Dict[str, Any]]] = {}
-        for effect in list(reranked_artifact.policy_effects or []):
-            candidate_id = str(effect.get("candidate_id") or "").strip()
-            if candidate_id == "":
-                continue
-            effects_by_candidate.setdefault(candidate_id, []).append(dict(effect))
-
-        ranking: List[Dict[str, Any]] = []
-        best_row: Optional[Dict[str, Any]] = None
-        for candidate_artifact in reranked_artifact.candidates:
-            attrs = dict(candidate_artifact.attributes)
-            domain_id = int(attrs.get("domain_id") or 0)
-            candidate_effects = list(effects_by_candidate.get(candidate_artifact.candidate_id) or [])
-            present_capabilities = list(candidate_artifact.capabilities or [])
-            row = {
-                "domain_id": domain_id,
-                "score": float(candidate_artifact.scores.get("final_score") or candidate_artifact.scores.get("base_score") or 0.0),
-                "base_score": float(candidate_artifact.scores.get("base_score") or 0.0),
-                "semantic_score": float(attrs.get("semantic_score") or 0.0),
-                "vector_score": float(attrs.get("vector_score") or 0.0),
-                "policy_adjustment": float(candidate_artifact.scores.get("policy_adjustment") or 0.0),
-                "rerank_signals": list(prompt_signals_artifact.signals),
-                "domain_capabilities": {
-                    "present": present_capabilities,
-                    "missing": sorted(
-                        {
-                            capability
-                            for effect in candidate_effects
-                            for capability in list(effect.get("capabilities_missing") or [])
-                        }
-                    ),
-                },
-                "policy_effects": candidate_effects,
-                "rerank_summary": {
-                    "base_score": round(float(candidate_artifact.scores.get("base_score") or 0.0), 5),
-                    "policy_adjustment": round(float(candidate_artifact.scores.get("policy_adjustment") or 0.0), 5),
-                    "final_score": round(
-                        float(candidate_artifact.scores.get("final_score") or candidate_artifact.scores.get("base_score") or 0.0),
-                        5,
-                    ),
-                },
-                "column_shortlist_count": int(attrs.get("column_shortlist_count") or 0),
-                "dimension_count": int(attrs.get("dimension_count") or 0),
-                "source": str(attrs.get("source") or "vector"),
-                "capabilities": dict(attrs.get("capabilities_payload") or {}),
-                "shortlisted_columns": list(attrs.get("shortlisted_columns") or []),
-            }
-            ranking.append({k: v for k, v in row.items() if k not in {"capabilities", "shortlisted_columns"}})
-            if best_row is None or float(row["score"]) > float(best_row["score"]):
-                best_row = row
-
         return (
-            int(best_row["domain_id"]),
-            dict(best_row["capabilities"]),
-            list(best_row["shortlisted_columns"]),
+            selected_domain_id,
+            capabilities,
+            shortlisted_columns,
             ranking,
-            list(prompt_signals_artifact.signals),
+            rerank_signals,
         )
 
     @property
@@ -1235,88 +284,10 @@ class DomainSelectionService:
         workspace_id: str,
         capabilities: Mapping[str, Any],
     ) -> List[Dict[str, Any]]:
-        all_rows = _merge_dimension_rows(
-            dimensions=list(capabilities.get("dimensions") or []),
-            time_columns=list(capabilities.get("time_columns") or []),
+        return build_shortlisted_columns_for_domain(
+            prompt=prompt,
+            workspace_id=workspace_id,
+            capabilities=capabilities,
+            embedding_model_factory=self._embedding_model_factory,
+            column_vector_factory=self._column_vector_factory,
         )
-        if not all_rows:
-            return []
-
-        by_key = {_norm_key(row.get("column_key")): row for row in all_rows if _norm_key(row.get("column_key"))}
-        table_ids = sorted(
-            {
-                int(wtid)
-                for wtid in (_to_int(row.get("workspace_table_id")) for row in all_rows)
-                if wtid is not None
-            }
-        )
-        if not table_ids:
-            return all_rows[:40]
-
-        query_texts = _build_column_query_texts(prompt)
-        try:
-            vectors = self._embedding_model_factory().encode(query_texts, normalize=True)
-        except Exception:
-            return _cap_columns_per_table(all_rows, max_columns=50, per_table_cap=12)
-        query_filter = qdrant_models.Filter(
-            must=[
-                qdrant_models.FieldCondition(
-                    key="kind",
-                    match=qdrant_models.MatchValue(value="column"),
-                ),
-                qdrant_models.FieldCondition(
-                    key="workspace_id",
-                    match=qdrant_models.MatchValue(value=str(workspace_id)),
-                ),
-                qdrant_models.FieldCondition(
-                    key="workspace_table_id",
-                    match=qdrant_models.MatchAny(any=table_ids),
-                ),
-            ]
-        )
-
-        by_score: Dict[str, float] = {}
-        limit = min(max(len(all_rows), 80), 220)
-        try:
-            for vector in vectors:
-                hits = self._column_vector_factory().search(
-                    vector=vector,
-                    limit=limit,
-                    query_filter=query_filter,
-                    with_payload=True,
-                )
-                for hit in hits:
-                    payload = hit.payload or {}
-                    wtid = _to_int(payload.get("workspace_table_id"))
-                    col = str(payload.get("column_name") or "").strip().lower()
-                    if wtid is None or col == "":
-                        continue
-                    key = f"wt{wtid}.{col}"
-                    if key not in by_key:
-                        continue
-                    score = float(hit.score or 0.0)
-                    if score > float(by_score.get(key) or 0.0):
-                        by_score[key] = score
-        except Exception:
-            return _cap_columns_per_table(all_rows, max_columns=50, per_table_cap=12)
-
-        if not by_score:
-            return _cap_columns_per_table(all_rows, max_columns=50, per_table_cap=12)
-
-        for key, row in by_key.items():
-            score = float(by_score.get(key) or 0.0)
-            by_score[key] = score + _column_heuristic_boost(prompt=prompt, row=row)
-
-        required_keys = _required_column_keys(prompt=prompt, rows=all_rows)
-        ordered = sorted(by_score.items(), key=lambda item: item[1], reverse=True)
-        selected_keys = _select_keys_with_table_cap(
-            ordered_keys=[key for key, _ in ordered],
-            row_by_key=by_key,
-            max_columns=min(max(35, len(required_keys) + 25), 70),
-            per_table_cap=12,
-        )
-        for key in required_keys:
-            if key not in selected_keys and key in by_key:
-                selected_keys.append(key)
-        selected_keys = selected_keys[:70]
-        return [dict(by_key[key]) for key in selected_keys if key in by_key]

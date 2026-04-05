@@ -276,7 +276,7 @@ class AISuggestService:
                                     col=SqlColumnKey.model_validate(col),
                                     alias=str(col.get("columnName") or "").strip() or None,
                                 )
-                            except Exception:
+                            except ValidationError:
                                 continue
                             injected_selects.append(select_edit)
                             existing_select_keys.add(identity)
@@ -322,7 +322,7 @@ class AISuggestService:
                             edits_dicts = [edit.model_dump(mode="json", exclude_none=False) for edit in grounded.edits]
                             aggregation_fallback_injected = True
                             logger.info("Aggregation fallback triggered — injecting addAggregate.")
-                        except Exception as exc:
+                        except ValidationError as exc:
                             logger.warning("Aggregation fallback failed to inject addAggregate: %s", exc)
                     else:
                         logger.warning("Aggregation implied but no column available for fallback.")
@@ -380,7 +380,7 @@ class AISuggestService:
                                     op="addGroupBy",
                                     col=SqlColumnKey.model_validate(col),
                                 )
-                            except Exception:
+                            except ValidationError:
                                 continue
                             injected_groupby.append(group_edit)
                             existing_group_keys.add(identity)
@@ -422,7 +422,7 @@ class AISuggestService:
                             edits_dicts = [edit.model_dump(mode="json", exclude_none=False) for edit in grounded.edits]
                             sorting_injected = True
                             logger.info("Sorting fallback triggered — injecting addSort edit.")
-                        except Exception as exc:
+                        except ValidationError as exc:
                             logger.warning("Sorting fallback failed: %s", exc)
                     else:
                         logger.warning("Sorting implied but no column available for fallback.")
@@ -494,7 +494,7 @@ class AISuggestService:
                                 col=SqlColumnKey.model_validate(col_dict),
                                 alias=str(col_dict.get("columnName") or "").strip() or None,
                             )
-                        except Exception:
+                        except ValidationError:
                             continue
                         injected_selects.append(select_edit)
                         selected_identities.add(identity)

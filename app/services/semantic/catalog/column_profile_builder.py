@@ -160,7 +160,7 @@ def _parse_json_obj(value: Any) -> Dict[str, Any]:
             parsed = json.loads(text)
             if isinstance(parsed, dict):
                 return dict(parsed)
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             return {}
     return {}
 
@@ -176,7 +176,7 @@ def _parse_json_list(value: Any) -> List[Any]:
             parsed = json.loads(text)
             if isinstance(parsed, list):
                 return list(parsed)[:25]
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             return []
     return []
 
@@ -194,7 +194,7 @@ def _to_int_first(data: Mapping[str, Any], *, keys: Iterable[str]) -> Optional[i
         return None
     try:
         return int(raw)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -262,12 +262,12 @@ def _looks_like_date(value: str) -> bool:
         try:
             parser(token.replace("Z", "+00:00"))
             return True
-        except Exception:
+        except ValueError:
             pass
     for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%Y/%m/%d", "%Y%m%d"):
         try:
             datetime.strptime(token, fmt)
             return True
-        except Exception:
+        except ValueError:
             continue
     return False

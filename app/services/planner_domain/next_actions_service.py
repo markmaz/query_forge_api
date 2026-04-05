@@ -8,6 +8,7 @@ from app.config import (
     QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_MAX_ITEMS,
     QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_MAX_TOKENS,
 )
+from app.exceptions.forge_error import ForgeError
 from app.services.llm.prompts_plan_v2 import (
     NEXT_ACTIONS_JSON_SCHEMA,
     build_next_actions_developer_prompt,
@@ -16,6 +17,8 @@ from app.services.llm.prompts_plan_v2 import (
 )
 
 logger = logging.getLogger(__name__)
+
+NEXT_ACTION_LLM_ERRORS = (ForgeError,)
 
 # ---------------------------------------------------------------------------
 # Allowed filter ops (copy of _NEXT_ACTION_ALLOWED_FILTER_OPS from service.py)
@@ -50,7 +53,7 @@ _NEXT_ACTION_ALLOWED_FILTER_OPS = {
 def _to_int(value: Any) -> Optional[int]:
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -251,7 +254,7 @@ def _normalize_next_action_intent(value: Any) -> str:
 def _normalize_next_action_confidence(value: Any) -> float:
     try:
         number = float(value)
-    except Exception:
+    except (TypeError, ValueError):
         number = 0.7
     if number < 0.0:
         number = 0.0
@@ -478,7 +481,7 @@ class NextActionsService:
                 response_format=True,
                 max_tokens=QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_MAX_TOKENS,
             )
-        except Exception as exc:
+        except NEXT_ACTION_LLM_ERRORS as exc:
             logger.warning("planner_domain next actions generation failed err=%s", exc)
             return [], {"enabled": True, "used": False, "error": str(exc)}
 
@@ -516,7 +519,7 @@ class NextActionsService:
                 )
                 if retry_raw_actions:
                     raw_actions = retry_raw_actions
-            except Exception as exc:
+            except NEXT_ACTION_LLM_ERRORS as exc:
                 logger.warning("planner_domain next actions retry failed err=%s", exc)
 
         return normalized, {

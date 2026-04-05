@@ -322,7 +322,7 @@ def _extract_json_payload(trace: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         payload = json.loads(content)
         if isinstance(payload, dict):
             return payload
-    except Exception:
+    except (TypeError, ValueError, json.JSONDecodeError):
         pass
 
     # Best effort: extract first object.
@@ -332,7 +332,7 @@ def _extract_json_payload(trace: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             continue
         try:
             obj, _ = decoder.raw_decode(content[idx:])
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             continue
         if isinstance(obj, dict):
             return obj

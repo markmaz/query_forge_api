@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from app.config.llm_resolver import build_llm_client_for_role
 from app.constants.llm_roles import LLMRole
+from app.exceptions.forge_error import ForgeError
 from app.services.llm.llm_client import LLMClient
 from app.services.semantic.semantic_llm_schema import BatchOutput, normalize_concept_key
 
@@ -295,7 +296,7 @@ class SemanticLLMLabeler:
                 "content": json.dumps(parsed, ensure_ascii=True),
                 "error": None,
             }
-        except Exception as exc:
+        except ForgeError as exc:
             return {
                 "raw_text": "",
                 "parsed": None,
@@ -312,11 +313,14 @@ class SemanticLLMLabeler:
     ) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
         parsed = trace.get("parsed")
         if not isinstance(parsed, dict):
+            trace_error = trace.get("error")
+            if isinstance(trace_error, str) and trace_error.strip():
+                return None, trace_error
             content = trace.get("content")
             if isinstance(content, str):
                 try:
                     parsed = json.loads(content)
-                except Exception:
+                except (TypeError, ValueError, json.JSONDecodeError):
                     return None, "schema_validation_error:json_parse_error"
         if not isinstance(parsed, dict):
             return None, "schema_validation_error:missing"
@@ -334,8 +338,6 @@ class SemanticLLMLabeler:
         except ValidationError as exc:
             detail = exc.errors()[0]
             return None, f"schema_validation_error:{detail.get('type', 'unknown')}"
-        except Exception as exc:
-            return None, f"schema_validation_error:{str(exc)}"
 
         items = [item.model_dump(mode="json") for item in model.items]
         if len(items) != expected_len:

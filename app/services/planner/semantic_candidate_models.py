@@ -57,7 +57,7 @@ class SemanticConceptCandidate(BaseModel):
     def _clamp_score(cls, value: Any) -> float:
         try:
             number = float(value)
-        except Exception:
+        except (TypeError, ValueError):
             return 0.0
         return max(0.0, min(1.0, number))
 
@@ -80,7 +80,7 @@ class SemanticValueCandidate(BaseModel):
     def _clamp_score(cls, value: Any) -> float:
         try:
             number = float(value)
-        except Exception:
+        except (TypeError, ValueError):
             return 0.0
         return max(0.0, min(1.0, number))
 
@@ -252,6 +252,6 @@ class CompactSemanticPlan(BaseModel):
     def _clamp_confidence(cls, value: Any) -> float:
         try:
             number = float(value)
-        except Exception:
+        except (TypeError, ValueError):
             return 0.0
         return max(0.0, min(1.0, number))

@@ -9,7 +9,6 @@ from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
-from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import extract_workspace_id
 from app.services.semantic.plan import PlanService
 
@@ -38,16 +37,10 @@ class SemanticPlan(Resource):
     @require_access("semantic")
     @semantic_ns.expect(plan_request_model, validate=False)
     def post(self):
-        try:
-            body: Dict[str, Any] = request.get_json(silent=True) or {}
-            body["workspace_id"] = extract_workspace_id()
-            result = PlanService().plan(body, include_llm=True)
-            return _shape_plan_response(result), 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("semantic plan failed")
-            return {"error": "semantic plan failed"}, 500
+        body: Dict[str, Any] = request.get_json(silent=True) or {}
+        body["workspace_id"] = extract_workspace_id()
+        result = PlanService().plan(body, include_llm=True)
+        return _shape_plan_response(result), 200
 
 
 @semantic_ns.route("/suggest-columns")
@@ -56,16 +49,10 @@ class SemanticSuggestColumns(Resource):
     @require_access("semantic")
     @semantic_ns.expect(plan_request_model, validate=False)
     def post(self):
-        try:
-            body: Dict[str, Any] = request.get_json(silent=True) or {}
-            body["workspace_id"] = extract_workspace_id()
-            result = PlanService().plan(body, include_llm=False)
-            return result, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("semantic suggest-columns failed")
-            return {"error": "semantic suggest-columns failed"}, 500
+        body: Dict[str, Any] = request.get_json(silent=True) or {}
+        body["workspace_id"] = extract_workspace_id()
+        result = PlanService().plan(body, include_llm=False)
+        return result, 200
 
 
 def _shape_plan_response(payload: Dict[str, Any]) -> Dict[str, Any]:

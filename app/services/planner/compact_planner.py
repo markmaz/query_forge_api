@@ -341,7 +341,7 @@ def _extract_first_json_obj(raw: str) -> Optional[Dict[str, Any]]:
         parsed = json.loads(text)
         if isinstance(parsed, Mapping):
             return dict(parsed)
-    except Exception:
+    except (TypeError, ValueError, json.JSONDecodeError):
         pass
     decoder = json.JSONDecoder()
     for idx, token in enumerate(text):
@@ -349,7 +349,7 @@ def _extract_first_json_obj(raw: str) -> Optional[Dict[str, Any]]:
             continue
         try:
             parsed, _ = decoder.raw_decode(text[idx:])
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             continue
         if isinstance(parsed, Mapping):
             return dict(parsed)

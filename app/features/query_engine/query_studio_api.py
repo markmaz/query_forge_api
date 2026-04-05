@@ -7,7 +7,6 @@ from flask_restx import Namespace, Resource
 
 from app.decorators.rbac import require_access
 from app.decorators.security import token_required
-from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import extract_workspace_id, require_user_id
 from app.services.query_studio import QueryStudioDomainExplorerService
 
@@ -17,13 +16,7 @@ query_studio_ns = Namespace("query-studio", description="Query Studio metadata e
 
 
 def _run(handler: Callable[[], Tuple[Any, int]], *, log_message: str, client_error: str):
-    try:
-        return handler()
-    except ForgeError as error:
-        return {"error": str(error)}, getattr(error, "status_code", 400) or 400
-    except Exception:
-        logger.exception(log_message)
-        return {"error": client_error}, 500
+    return handler()
 
 
 @query_studio_ns.route("/domains")

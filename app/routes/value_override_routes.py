@@ -179,17 +179,9 @@ class ValueOverrideIndex(Resource):
         Optional: qf_include_expired=1
         """
         qf_include_expired = _bool_arg("qf_include_expired", default=False)
-
-        try:
-            ctx = _build_context()
-            index = ctx.qf_list_reader.get_index(qf_include_expired=qf_include_expired)
-            return _qf_camelize(_to_dict(index)), 200
-
-        except ForgeError as e:
-            return _handle_service_error(e)
-        except Exception:
-            logger.exception("Failed to fetch value_override index")
-            return {"error": "Failed to fetch value_overrides"}, 500
+        ctx = _build_context()
+        index = ctx.qf_list_reader.get_index(qf_include_expired=qf_include_expired)
+        return _qf_camelize(_to_dict(index)), 200
 
 
 @value_override_ns.route("/<string:value_override_type>/<string:list_id>/preview")
@@ -204,25 +196,17 @@ class ValueOverridePreview(Resource):
         qf_include_expired = _bool_arg("qf_include_expired", default=False)
         limit = _int_arg("limit", default=100)
         offset = _int_arg("offset", default=0)
+        value_override_type = _validate_value_override_type(value_override_type)
+        ctx = _build_context()
 
-        try:
-            value_override_type = _validate_value_override_type(value_override_type)
-            ctx = _build_context()
-
-            details = ctx.qf_list_reader.get_preview_by_id(
-                list_type=value_override_type,
-                list_id=list_id,
-                limit=limit,
-                offset=offset,
-                qf_include_expired=qf_include_expired,
-            )
-            return _qf_camelize(_to_dict(details), qf_skip_keys={"rows"}), 200
-
-        except ForgeError as e:
-            return _handle_service_error(e)
-        except Exception:
-            logger.exception("Preview failed type=%s list_id=%s", value_override_type, list_id)
-            return {"error": "Preview failed"}, 500
+        details = ctx.qf_list_reader.get_preview_by_id(
+            list_type=value_override_type,
+            list_id=list_id,
+            limit=limit,
+            offset=offset,
+            qf_include_expired=qf_include_expired,
+        )
+        return _qf_camelize(_to_dict(details), qf_skip_keys={"rows"}), 200
 
 
 @value_override_ns.route("/visibility")
@@ -234,28 +218,22 @@ class ValueOverrideVisibility(Resource):
         GET /value_overrides/visibility?qf_include_expired=1
         """
         qf_include_expired = _bool_arg("qf_include_expired", default=False)
-        try:
-            workspace_id = _extract_workspace_id()
-            user_id = getattr(g, "user_id", None)
-            if not user_id:
-                raise ForgeError("Missing user context", status_code=401)
+        workspace_id = _extract_workspace_id()
+        user_id = getattr(g, "user_id", None)
+        if not user_id:
+            raise ForgeError("Missing user context", status_code=401)
 
-            svc = ValueOverrideVisibilityService(workspace_id=workspace_id, user_id=user_id)
-            result = svc.get_index(qf_include_expired=qf_include_expired)
-            index = _to_dict(result.index)
-            for list_type, items in (index or {}).items():
-                if not isinstance(items, list):
-                    continue
-                for item in items:
-                    if isinstance(item, dict):
-                        item["list_type"] = list_type
-            payload = {"index": index, "has_shared": result.has_shared}
-            return _qf_camelize(payload), 200
-        except ForgeError as e:
-            return _handle_service_error(e)
-        except Exception:
-            logger.exception("ValueOverride visibility fetch failed")
-            return {"error": "ValueOverride visibility fetch failed"}, 500
+        svc = ValueOverrideVisibilityService(workspace_id=workspace_id, user_id=user_id)
+        result = svc.get_index(qf_include_expired=qf_include_expired)
+        index = _to_dict(result.index)
+        for list_type, items in (index or {}).items():
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if isinstance(item, dict):
+                    item["list_type"] = list_type
+        payload = {"index": index, "has_shared": result.has_shared}
+        return _qf_camelize(payload), 200
 
 
 @value_override_ns.route("/<string:value_override_type>/uploads")
@@ -271,40 +249,33 @@ class ValueOverrideUpload(Resource):
         headers:
           - X-Workspace-Id
         """
-        try:
-            value_override_type = _validate_value_override_type(value_override_type)
+        value_override_type = _validate_value_override_type(value_override_type)
 
-            f = request.files.get("file")
-            list_name = (request.form.get("list_name") or "").strip()
-            is_shared = (request.form.get("is_shared") or "").strip().lower() in ("1", "true", "yes", "y", "on")
+        f = request.files.get("file")
+        list_name = (request.form.get("list_name") or "").strip()
+        is_shared = (request.form.get("is_shared") or "").strip().lower() in ("1", "true", "yes", "y", "on")
 
-            if not f or not f.filename:
-                raise ForgeError("file is required", status_code=400)
-            if not list_name:
-                raise ForgeError("list_name is required", status_code=400)
+        if not f or not f.filename:
+            raise ForgeError("file is required", status_code=400)
+        if not list_name:
+            raise ForgeError("list_name is required", status_code=400)
 
-            ctx = _build_context()
+        ctx = _build_context()
 
-            svc = ForgeListUploadService(db_writer=ctx.list_writer, meta_writer=ctx.meta_writer)
+        svc = ForgeListUploadService(db_writer=ctx.list_writer, meta_writer=ctx.meta_writer)
 
-            result = svc.handle_upload(
-                file_bytes=f.read(),
-                filename=f.filename,
-                list_name=list_name,
-                user_name=ctx.user_name,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                is_shared=is_shared,
-                expected_type=value_override_type,
-            )
+        result = svc.handle_upload(
+            file_bytes=f.read(),
+            filename=f.filename,
+            list_name=list_name,
+            user_name=ctx.user_name,
+            workspace_id=ctx.workspace_id,
+            user_id=ctx.user_id,
+            is_shared=is_shared,
+            expected_type=value_override_type,
+        )
 
-            return result.__dict__, 200
-
-        except ForgeError as e:
-            return _handle_service_error(e)
-        except Exception:
-            logger.exception("Upload failed type=%s", value_override_type)
-            return {"error": "Upload failed"}, 500
+        return result.__dict__, 200
     
 @value_override_ns.route("/<string:value_override_type>/<string:list_id>")
 class ValueOverrideDetail(Resource):
@@ -315,58 +286,44 @@ class ValueOverrideDetail(Resource):
         PATCH /value_overrides/<type>/<list_id>
         body: { "isShared": true/false }
         """
-        try:
-            value_override_type = _validate_value_override_type(value_override_type)
-            payload = request.get_json(silent=True) or {}
-            if "isShared" not in payload:
-                raise ForgeError("isShared is required", status_code=400)
+        value_override_type = _validate_value_override_type(value_override_type)
+        payload = request.get_json(silent=True) or {}
+        if "isShared" not in payload:
+            raise ForgeError("isShared is required", status_code=400)
 
-            is_shared = _coerce_bool(payload.get("isShared"), field_name="isShared")
+        is_shared = _coerce_bool(payload.get("isShared"), field_name="isShared")
 
-            ctx = _build_context()
-            ctx.qf_list_reader.assert_owner(list_type=value_override_type, list_id=list_id)
+        ctx = _build_context()
+        ctx.qf_list_reader.assert_owner(list_type=value_override_type, list_id=list_id)
 
-            ctx.meta_writer.set_shared(
-                workspace_id=ctx.workspace_id,
-                list_type=value_override_type,
-                list_id=list_id,
-                is_shared=is_shared,
-            )
+        ctx.meta_writer.set_shared(
+            workspace_id=ctx.workspace_id,
+            list_type=value_override_type,
+            list_id=list_id,
+            is_shared=is_shared,
+        )
 
-            return {"listId": list_id, "type": value_override_type, "isShared": is_shared}, 200
-        except ForgeError as e:
-            return _handle_service_error(e)
-        except Exception:
-            logger.exception("ValueOverride share update failed type=%s list_id=%s", value_override_type, list_id)
-            return {"error": "ValueOverride share update failed"}, 500
+        return {"listId": list_id, "type": value_override_type, "isShared": is_shared}, 200
 
     @token_required
     @require_access("catalog")
     def delete(self, value_override_type: str, list_id: str):
         if value_override_type not in ("regions", "npiCategories", "serviceLines"):
             return {"error": "Invalid value_override_type"}, 400
+        ctx = _build_context()
+        ctx.qf_list_reader.assert_owner(
+            list_type=value_override_type,  # type: ignore[arg-type]
+            list_id=list_id,
+        )
 
-        try:
-            ctx = _build_context()
-            ctx.qf_list_reader.assert_owner(
-                list_type=value_override_type,  # type: ignore[arg-type]
-                list_id=list_id,
-            )
+        ctx.qf_list_reader.delete_list(
+            list_type=value_override_type,  # type: ignore[arg-type]
+            list_id=list_id,
+        )
+        ctx.meta_writer.delete_meta(
+            workspace_id=ctx.workspace_id,
+            list_type=value_override_type,
+            list_id=list_id,
+        )
 
-            ctx.qf_list_reader.delete_list(
-                list_type=value_override_type,  # type: ignore[arg-type]
-                list_id=list_id,
-            )
-            ctx.meta_writer.delete_meta(
-                workspace_id=ctx.workspace_id,
-                list_type=value_override_type,
-                list_id=list_id,
-            )
-
-            return "", 204
-
-        except ForgeError as e:
-            return {"error": str(e)}, getattr(e, "status_code", 400)
-        except Exception:
-            logger.exception("Delete failed")
-            return {"error": "Delete failed"}, 500
+        return "", 204

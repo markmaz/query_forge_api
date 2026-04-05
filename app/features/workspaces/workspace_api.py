@@ -79,21 +79,15 @@ class WorkspaceUsers(Resource):
     @token_required
     @require_admin()
     def get(self, workspace_id: str):
-        try:
-            rows = WorkspaceUserReadService().list_workspace_users(
-                workspace_id=workspace_id,
-                q=(request.args.get("q") or "").strip() or None,
-                limit=_int_arg("limit", default=5000),
-                offset=_int_arg("offset", default=0),
-                include_inactive=str(request.args.get("include_inactive") or "").strip().lower()
-                in {"1", "true", "yes", "y", "on"},
-            )
-            return {"rows": rows}, 200
-        except ForgeError as exc:
-            return {"error": str(exc)}, getattr(exc, "status_code", 400) or 400
-        except Exception:
-            logger.exception("Workspace users fetch failed")
-            return {"error": "Workspace users fetch failed"}, 500
+        rows = WorkspaceUserReadService().list_workspace_users(
+            workspace_id=workspace_id,
+            q=(request.args.get("q") or "").strip() or None,
+            limit=_int_arg("limit", default=5000),
+            offset=_int_arg("offset", default=0),
+            include_inactive=str(request.args.get("include_inactive") or "").strip().lower()
+            in {"1", "true", "yes", "y", "on"},
+        )
+        return {"rows": rows}, 200
 
 
 @workspace_ns.route("/<string:workspace_id>/namespaces")
@@ -101,58 +95,52 @@ class WorkspaceNamespaces(Resource):
     @token_required
     @require_access("workspaces")
     def get(self, workspace_id: str):
+        catalog_name = (request.args.get("catalog_name") or "").strip() or None
+        if catalog_name and not re.match(r"^[A-Za-z0-9_]+$", catalog_name):
+            raise ForgeError("Invalid catalog_name", status_code=400)
+
+        sql_exec = WorkspaceSqlContextBuilder().build(workspace_id).sql_exec
+
+        catalogs: list[str] = []
         try:
-            catalog_name = (request.args.get("catalog_name") or "").strip() or None
-            if catalog_name and not re.match(r"^[A-Za-z0-9_]+$", catalog_name):
-                raise ForgeError("Invalid catalog_name", status_code=400)
-
-            sql_exec = WorkspaceSqlContextBuilder().build(workspace_id).sql_exec
-
-            catalogs: list[str] = []
-            try:
-                catalog_rows = (sql_exec.submit_statement("SHOW CATALOGS", qf_result_fmt="ARROW_STREAM") or {}).get("rows") or []
-                for row in catalog_rows:
-                    if not isinstance(row, dict):
-                        continue
-                    value = row.get("catalog") or row.get("catalog_name") or row.get("name")
-                    if value:
-                        catalogs.append(str(value))
-            except Exception:
-                logger.exception("Failed to fetch catalogs from Databricks")
-
-            schema_sql = f"SHOW SCHEMAS IN `{catalog_name}`" if catalog_name else "SHOW SCHEMAS"
-            schema_rows = (sql_exec.submit_statement(schema_sql, qf_result_fmt="ARROW_STREAM") or {}).get("rows") or []
-            schemas: list[str] = []
-            for row in schema_rows:
+            catalog_rows = (sql_exec.submit_statement("SHOW CATALOGS", qf_result_fmt="ARROW_STREAM") or {}).get("rows") or []
+            for row in catalog_rows:
                 if not isinstance(row, dict):
                     continue
-                value = row.get("databaseName") or row.get("schema_name") or row.get("schema") or row.get("name")
+                value = row.get("catalog") or row.get("catalog_name") or row.get("name")
                 if value:
-                    schemas.append(str(value))
+                    catalogs.append(str(value))
+        except (ForgeError, RuntimeError, TypeError, ValueError):
+            logger.exception("Failed to fetch catalogs from Databricks")
 
-            schemas = sorted({name for name in schemas if name})
-            catalogs = sorted({name for name in catalogs if name})
+        schema_sql = f"SHOW SCHEMAS IN `{catalog_name}`" if catalog_name else "SHOW SCHEMAS"
+        schema_rows = (sql_exec.submit_statement(schema_sql, qf_result_fmt="ARROW_STREAM") or {}).get("rows") or []
+        schemas: list[str] = []
+        for row in schema_rows:
+            if not isinstance(row, dict):
+                continue
+            value = row.get("databaseName") or row.get("schema_name") or row.get("schema") or row.get("name")
+            if value:
+                schemas.append(str(value))
 
-            if not schemas:
-                fallback_sql = """
-                    SELECT DISTINCT wt.schema_name, wt.catalog_name
-                    FROM workspace_table wt
-                    WHERE wt.workspace_id = :ws
-                      AND wt.exists_in_dbx = 1
-                """
-                with engine.connect() as conn:
-                    rows = conn.execute(text(fallback_sql), {"ws": workspace_id}).mappings().all()
+        schemas = sorted({name for name in schemas if name})
+        catalogs = sorted({name for name in catalogs if name})
 
-                schemas = sorted({row["schema_name"] for row in rows if row.get("schema_name")})
-                if not catalogs:
-                    catalogs = sorted({row["catalog_name"] for row in rows if row.get("catalog_name")})
+        if not schemas:
+            fallback_sql = """
+                SELECT DISTINCT wt.schema_name, wt.catalog_name
+                FROM workspace_table wt
+                WHERE wt.workspace_id = :ws
+                  AND wt.exists_in_dbx = 1
+            """
+            with engine.connect() as conn:
+                rows = conn.execute(text(fallback_sql), {"ws": workspace_id}).mappings().all()
 
-            return {"schemas": schemas, "catalogs": catalogs}, 200
-        except ForgeError as exc:
-            return {"error": str(exc)}, getattr(exc, "status_code", 400) or 400
-        except Exception:
-            logger.exception("Workspace namespaces fetch failed")
-            return {"error": "Workspace namespaces fetch failed"}, 500
+            schemas = sorted({row["schema_name"] for row in rows if row.get("schema_name")})
+            if not catalogs:
+                catalogs = sorted({row["catalog_name"] for row in rows if row.get("catalog_name")})
+
+        return {"schemas": schemas, "catalogs": catalogs}, 200
 
 
 @workspace_ns.route("/users")
@@ -160,20 +148,14 @@ class GetWorkspaceUsersFromSystem(Resource):
     @token_required
     @require_admin()
     def get(self):
-        try:
-            rows = WorkspaceUserReadService().list_workspace_users(
-                workspace_id=_workspace_id_header(),
-                q=(request.args.get("q") or "").strip() or None,
-                limit=_int_arg("limit", default=5000),
-                offset=_int_arg("offset", default=0),
-                include_inactive=False,
-            )
-            return {"rows": rows}, 200
-        except ForgeError as exc:
-            return {"error": str(exc)}, getattr(exc, "status_code", 400) or 400
-        except Exception:
-            logger.exception("Workspace users fetch failed")
-            return {"error": "Workspace users fetch failed"}, 500
+        rows = WorkspaceUserReadService().list_workspace_users(
+            workspace_id=_workspace_id_header(),
+            q=(request.args.get("q") or "").strip() or None,
+            limit=_int_arg("limit", default=5000),
+            offset=_int_arg("offset", default=0),
+            include_inactive=False,
+        )
+        return {"rows": rows}, 200
 
 
 @workspace_ns.route("/<string:workspace_id>/external-links")
@@ -181,25 +163,19 @@ class WorkspaceExternalLinks(Resource):
     @token_required
     @require_access("workspaces")
     def get(self, workspace_id: str):
-        try:
-            user_id = str(getattr(g, "user_id", "") or "").strip()
-            if user_id:
-                WorkspaceAccessService().assert_workspace_access(user_id=user_id, workspace_id=workspace_id)
-            allow_legacy_fallback = str(request.args.get("legacy_fallback") or "").strip().lower() in {
-                "",
-                "1",
-                "true",
-                "yes",
-                "y",
-                "on",
-            }
-            result = WorkspaceExternalLinkService().list_links(
-                workspace_id=workspace_id,
-                allow_legacy_fallback=allow_legacy_fallback,
-            )
-            return result, 200
-        except ForgeError as exc:
-            return exc.to_dict(), exc.status_code
-        except Exception:
-            logger.exception("workspace external links fetch failed")
-            return {"error": "workspace external links fetch failed"}, 500
+        user_id = str(getattr(g, "user_id", "") or "").strip()
+        if user_id:
+            WorkspaceAccessService().assert_workspace_access(user_id=user_id, workspace_id=workspace_id)
+        allow_legacy_fallback = str(request.args.get("legacy_fallback") or "").strip().lower() in {
+            "",
+            "1",
+            "true",
+            "yes",
+            "y",
+            "on",
+        }
+        result = WorkspaceExternalLinkService().list_links(
+            workspace_id=workspace_id,
+            allow_legacy_fallback=allow_legacy_fallback,
+        )
+        return result, 200

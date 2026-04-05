@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from app.exceptions.forge_error import ForgeError
 from app.models.domain.domain_profile import compute_content_hash
 from app.services.admin.domain_profile_embedding_service import (
     DomainProfileEmbeddingService,
     _build_user_prompt,
+    _as_list,
+    _normalize_domain_ids,
 )
 
 
@@ -228,6 +232,41 @@ def test_generate_all_loads_domain_ids_and_processes_batch():
     out = svc.generate_all(workspace_id="ws-1")
 
     assert out["total"] == 2
+
+
+def test_generate_many_surfaces_unexpected_domain_generation_errors():
+    class _BrokenBuilder(_FakeBuilder):
+        def build_domain_context(self, *, workspace_id: str, domain_id: int):
+            if int(domain_id) == 99:
+                raise RuntimeError("broken domain context")
+            return super().build_domain_context(workspace_id=workspace_id, domain_id=domain_id)
+
+    payload = _payload("batch text")
+    llm = _FakeLLM([{"parsed": payload, "content": json.dumps(payload), "raw_text": json.dumps(payload)}])
+    sql = _FakeSQL(existing_row=None)
+
+    svc = DomainProfileEmbeddingService(
+        sql=sql,
+        builder=_BrokenBuilder(),
+        llm_client=llm,
+        embedding_model=_FakeEmbeddingModel(),
+    )
+
+    with pytest.raises(RuntimeError, match="broken domain context"):
+        svc.generate_many(workspace_id="ws-1", domain_ids=[15, 99])
+
+
+def test_as_list_returns_text_for_invalid_json_string():
+    assert _as_list("{not-json}") == ["{not-json}"]
+
+
+def test_normalize_domain_ids_surfaces_unexpected_int_errors():
+    class _BadInt:
+        def __int__(self) -> int:
+            raise RuntimeError("bad domain id")
+
+    with pytest.raises(RuntimeError, match="bad domain id"):
+        _normalize_domain_ids([_BadInt()])
 
 
 def test_build_user_prompt_compacts_large_domain_context():

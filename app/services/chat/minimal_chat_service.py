@@ -45,8 +45,15 @@ _valkey_client: Any = None
 
 try:
     import valkey  # type: ignore
-except Exception:  # pragma: no cover
+    from valkey.exceptions import ValkeyError
+except ImportError:  # pragma: no cover
     valkey = None
+    ValkeyError = None  # type: ignore[assignment]
+
+
+JSON_PARSE_ERRORS = (TypeError, ValueError, json.JSONDecodeError)
+VALKEY_BACKEND_ERRORS = ((OSError, ValkeyError) if ValkeyError is not None else (OSError,))
+STORE_FALLBACK_ERRORS = ((ForgeError,) + VALKEY_BACKEND_ERRORS + (RuntimeError, ValueError))
 
 
 class ChatMessage(BaseModel):
@@ -89,7 +96,7 @@ class MinimalChatRequest(BaseModel):
     def _validate_max_tokens(cls, value: int) -> int:
         try:
             parsed = int(value)
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             raise ValueError("max_tokens must be an integer") from exc
         if parsed <= 0:
             raise ValueError("max_tokens must be > 0")
@@ -100,7 +107,7 @@ class MinimalChatRequest(BaseModel):
     def _validate_temperature(cls, value: float) -> float:
         try:
             parsed = float(value)
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             raise ValueError("temperature must be numeric") from exc
         if parsed < 0 or parsed > 2:
             raise ValueError("temperature must be between 0 and 2")
@@ -197,7 +204,7 @@ class HybridConversationStore:
             return None
         try:
             raw = json.loads(payload)
-        except Exception:
+        except JSON_PARSE_ERRORS:
             logger.debug("forge insights conversation payload parse failed key=%s", key)
             return None
         if isinstance(raw, list):
@@ -282,7 +289,7 @@ class HybridConversationStore:
                         token = str(item or "")
                     if token:
                         keys.append(token)
-            except Exception:
+            except VALKEY_BACKEND_ERRORS:
                 logger.debug("forge insights valkey scan failed", exc_info=True)
         if not keys:
             keys.extend([k for k in _IN_MEMORY_CONV_STORE.keys() if str(k).startswith(prefix)])
@@ -297,7 +304,7 @@ class HybridConversationStore:
                     return value.decode("utf-8", errors="ignore")
                 if isinstance(value, str):
                     return value
-            except Exception:
+            except VALKEY_BACKEND_ERRORS:
                 logger.debug("forge insights valkey read failed", exc_info=True)
         return _IN_MEMORY_CONV_STORE.get(key)
 
@@ -307,7 +314,7 @@ class HybridConversationStore:
             try:
                 client.setex(key, int(qf_ttl_seconds), value)
                 return
-            except Exception:
+            except VALKEY_BACKEND_ERRORS:
                 logger.debug("forge insights valkey write failed", exc_info=True)
         _IN_MEMORY_CONV_STORE[key] = value
 
@@ -317,7 +324,7 @@ class HybridConversationStore:
         if client is not None:
             try:
                 deleted = bool(int(client.delete(key) or 0))
-            except Exception:
+            except VALKEY_BACKEND_ERRORS:
                 logger.debug("forge insights valkey delete failed", exc_info=True)
         if key in _IN_MEMORY_CONV_STORE:
             _IN_MEMORY_CONV_STORE.pop(key, None)
@@ -509,7 +516,7 @@ class MinimalChatService:
         try:
             with httpx.Client(timeout=self._timeout_seconds) as client:
                 resp = client.post(chat_url, json=dict(payload))
-        except Exception as exc:
+        except httpx.HTTPError as exc:
             log_llm_exception(
                 logger,
                 client_name=client_name,
@@ -541,7 +548,7 @@ class MinimalChatService:
 
         try:
             body = resp.json()
-        except Exception as exc:
+        except JSON_PARSE_ERRORS as exc:
             raise ForgeError(
                 "Malformed provider response",
                 status_code=502,
@@ -610,7 +617,7 @@ class MinimalChatService:
             return []
         try:
             rows = list_fn(workspace_id=workspace_id, user_id=user_id, limit=limit)
-        except Exception:
+        except STORE_FALLBACK_ERRORS:
             logger.exception("forge insights list conversations failed")
             return []
         out: List[Dict[str, Any]] = []
@@ -624,7 +631,7 @@ class MinimalChatService:
         if callable(delete_fn):
             try:
                 return bool(delete_fn(workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id))
-            except Exception:
+            except STORE_FALLBACK_ERRORS:
                 logger.exception("forge insights delete conversation failed")
                 return False
         return False
@@ -706,7 +713,7 @@ def _normalize_usage(usage: Any) -> Dict[str, int]:
 def _to_nonneg_int(value: Any) -> int:
     try:
         parsed = int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return 0
     return parsed if parsed >= 0 else 0
 
@@ -923,7 +930,7 @@ def _get_valkey_client() -> Any:
         return None
     try:
         _valkey_client = valkey.StrictValkey(host=host, port=port, decode_responses=True)
-    except Exception:
+    except VALKEY_BACKEND_ERRORS:
         logger.debug("forge insights valkey init failed", exc_info=True)
         _valkey_client = None
     return _valkey_client

@@ -99,7 +99,7 @@ class ColumnEnrichment(BaseModel):
     def _clamp_confidence(cls, value: Any) -> float:
         try:
             number = float(value)
-        except Exception:
+        except (TypeError, ValueError):
             return 0.0
         return max(0.0, min(1.0, number))
 
