@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
+import app.services.domain.planner_domain_selection_policy_service as selection_policy_service
 from app.models.domain.planner_domain_selection_policy import PlannerDomainSelectionPolicyUpsertRequest
 from app.services.domain.planner_domain_selection_policy_service import PlannerDomainSelectionPolicyService
 
@@ -102,3 +104,38 @@ def test_domain_selection_policy_upsert_request_rejects_legacy_scope_types() -> 
                 },
             }
         )
+
+
+def test_domain_selection_policy_service_falls_back_on_expected_db_lookup_errors() -> None:
+    class _FakeSQL:
+        def execute_query_mappings(self, sql, params):
+            del sql, params
+            raise SQLAlchemyError("db unavailable")
+
+    svc = PlannerDomainSelectionPolicyService(sql=_FakeSQL(), enable_db_lookup=True)
+
+    adjustment = svc.score_adjustment(
+        workspace_id="ws-1",
+        vertical_norm="education",
+        prompt_signals=["staff_work_context_prompt"],
+        shortlist_features=["STAFF_IDENTITY_COLUMN"],
+        capability_features=[],
+    )
+
+    assert adjustment == 0.14
+
+
+def test_domain_selection_policy_service_surfaces_unexpected_policy_parse_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeSQL:
+        def execute_query_mappings(self, sql, params):
+            del sql, params
+            return []
+
+    def _boom(_value):
+        raise AssertionError("unexpected policy parse bug")
+
+    svc = PlannerDomainSelectionPolicyService(sql=_FakeSQL(), enable_db_lookup=True)
+    monkeypatch.setattr(selection_policy_service, "_parse_policy_rule", _boom)
+
+    with pytest.raises(AssertionError, match="unexpected policy parse bug"):
+        svc.get_applicable_policies(workspace_id="ws-1", vertical_norm="education")

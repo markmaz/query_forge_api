@@ -6,6 +6,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
 
@@ -71,7 +73,7 @@ class PlannerLLMCache:
                 """,
                 {"cache_key": cache_key, "registry_version": registry_version},
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             if _is_missing_planner_cache_table(exc):
                 logger.warning("planner_llm cache disabled: planner_cache table missing")
                 return None
@@ -158,7 +160,7 @@ class PlannerLLMCache:
                     "expires_at": expires_at.strftime("%Y-%m-%d %H:%M:%S"),
                 },
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             if _is_missing_planner_cache_table(exc):
                 logger.warning("planner_llm cache write skipped: planner_cache table missing")
                 return
@@ -173,7 +175,7 @@ def _loads_json(value: Any) -> Optional[Dict[str, Any]]:
         return None
     try:
         parsed = json.loads(text)
-    except Exception:
+    except (TypeError, ValueError, json.JSONDecodeError):
         return None
     return parsed if isinstance(parsed, dict) else None
 

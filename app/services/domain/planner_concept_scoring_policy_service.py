@@ -4,11 +4,14 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.models.domain.planner_concept_scoring_policy import PlannerConceptScoringPolicyRule
 from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
+POLICY_LOOKUP_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
 
 _SEED_POLICIES: tuple[dict[str, Any], ...] = (
     {
@@ -336,7 +339,7 @@ class PlannerConceptScoringPolicyService:
                 """,
                 {},
             )
-        except Exception:
+        except POLICY_LOOKUP_FALLBACK_ERRORS:
             logger.exception("Failed to load planner concept scoring policies from db")
             return rows
         for db_row in db_rows:

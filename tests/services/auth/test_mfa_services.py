@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import builtins
 
 import pyotp
 import pytest
@@ -132,6 +133,18 @@ def test_rate_limit_enforce() -> None:
     assert exc.value.status_code == 429
 
 
+def test_rate_limit_enforce_surfaces_unexpected_errors() -> None:
+    class _BrokenRedis(_FakeRedis):
+        def incr(self, key: str) -> int:
+            del key
+            raise AssertionError("unexpected rate limit bug")
+
+    svc = RateLimitService(redis_client=_BrokenRedis())
+
+    with pytest.raises(AssertionError, match="unexpected rate limit bug"):
+        svc.enforce(scope="mfa:test", identifier="u1", max_attempts=2, window_s=60)
+
+
 def test_totp_start_and_confirm(monkeypatch: pytest.MonkeyPatch) -> None:
     user_row = {
         "user_id": "u1",
@@ -188,3 +201,31 @@ def test_totp_verify_and_disable(monkeypatch: pytest.MonkeyPatch) -> None:
     assert disabled["enabled"] is False
     assert user_row["otp_totp_enabled"] == 0
     assert user_row["otp_totp_secret"] is None
+
+
+def test_totp_qr_svg_wraps_expected_import_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_import = builtins.__import__
+
+    def _fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.startswith("qrcode"):
+            raise ImportError("missing qrcode")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+
+    with pytest.raises(ForgeError, match="QR code generation is unavailable"):
+        TotpService._to_qr_svg("otpauth://totp/test")
+
+
+def test_totp_qr_svg_surfaces_unexpected_import_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_import = builtins.__import__
+
+    def _fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.startswith("qrcode"):
+            raise AssertionError("unexpected qr import bug")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+
+    with pytest.raises(AssertionError, match="unexpected qr import bug"):
+        TotpService._to_qr_svg("otpauth://totp/test")

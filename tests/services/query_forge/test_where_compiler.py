@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+import app.services.query_forge.where_compiler as where_compiler_module
 
 from app.exceptions.forge_error import ForgeError
 
@@ -188,6 +189,43 @@ class TestWhereCompilerFilters:
         )
         assert " IN " in sql
         assert len(params) == 2
+
+    def test_in_filter_bracket_string_falls_back_to_literal_eval(self):
+        compiler, ctx, new_param, params = self._make_compiler_and_params()
+        node = {"type": "condition", "field": {"columnName": "status"}, "op": "in", "value": "['A', 'B']"}
+        sql, _ = compiler.compile(
+            node=node,
+            context=ctx,
+            qf_using_prep=False,
+            qf_base_alias="t1",
+            alias_by_wt={1: "t1"},
+            plan=None,
+            new_param=new_param,
+            filter_mode_fn=lambda plan, tid: "WHERE",
+        )
+        assert " IN " in sql
+        assert params == {"p1": "A", "p2": "B"}
+
+    def test_in_filter_surfaces_unexpected_json_parse_failures(self, monkeypatch: pytest.MonkeyPatch):
+        compiler, ctx, new_param, _ = self._make_compiler_and_params()
+        node = {"type": "condition", "field": {"columnName": "status"}, "op": "in", "value": "['A', 'B']"}
+        monkeypatch.setattr(
+            where_compiler_module.json,
+            "loads",
+            lambda value: (_ for _ in ()).throw(AssertionError("json bug")),
+        )
+
+        with pytest.raises(AssertionError, match="json bug"):
+            compiler.compile(
+                node=node,
+                context=ctx,
+                qf_using_prep=False,
+                qf_base_alias="t1",
+                alias_by_wt={1: "t1"},
+                plan=None,
+                new_param=new_param,
+                filter_mode_fn=lambda plan, tid: "WHERE",
+            )
 
     def test_gt_produces_greater_than_clause(self):
         compiler, ctx, new_param, _ = self._make_compiler_and_params()

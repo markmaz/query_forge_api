@@ -35,6 +35,12 @@ class _FailingLLM:
         raise RuntimeError("llm unavailable")
 
 
+class _AssertionFailingLLM:
+    def enrich_batch(self, **kwargs):
+        del kwargs
+        raise AssertionError("unexpected llm enrichment bug")
+
+
 def test_column_profile_builder_infers_flags_and_stats() -> None:
     stats = {
         "row_count": 1000,
@@ -98,6 +104,37 @@ def test_semantic_enrichment_service_falls_back_to_heuristics_when_llm_fails() -
     assert len(enriched) == 1
     assert enriched[0].enrichment.semantic_type in {"measure", "metric"}
     assert "sum" in enriched[0].enrichment.default_aggregations
+
+
+def test_semantic_enrichment_service_surfaces_unexpected_llm_errors() -> None:
+    profiles = [
+        ColumnProfile(
+            workspace_table_id=1,
+            workspace_column_id=1,
+            table_name="fct_sales",
+            column_name="sales_amount",
+            data_type="DECIMAL(18,2)",
+            nullable=False,
+            distinct_count=300,
+            row_count=1000,
+            sample_values=["100.0", "200.0"],
+            is_identifier=False,
+            is_numeric=True,
+            is_date_like=False,
+            is_enum_like=False,
+            is_dimension_candidate=False,
+            is_measure_candidate=True,
+        )
+    ]
+    svc = SemanticEnrichmentService(llm_adapter=_AssertionFailingLLM(), enable_llm=True, batch_size=5)
+
+    with pytest.raises(AssertionError, match="unexpected llm enrichment bug"):
+        svc.enrich_profiles(
+            profiles=profiles,
+            workspace_id="ws-test",
+            vertical_norm="generic",
+            domain_name="Sales Performance",
+        )
 
 
 def test_semantic_catalog_builder_sales_example_generates_expected_derived_metrics_dry_run() -> None:

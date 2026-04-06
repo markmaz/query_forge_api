@@ -10,6 +10,7 @@ from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.metadata_provider_abc import MetadataProvider
 
 logger = logging.getLogger(__name__)
+TABLE_PROFILE_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 _DEFAULT_OPTIONS: dict[str, Any] = {
     "sample_percent": 0.10,
@@ -110,7 +111,7 @@ class ProfilingService:
                     current_table=table_name,
                     current_column=str(table_cols[-1].get("column_name") or "") if table_cols else None,
                 )
-            except Exception:
+            except TABLE_PROFILE_FALLBACK_ERRORS:
                 logger.exception(
                     "ProfilingService: failed to profile table %s",
                     table_name,

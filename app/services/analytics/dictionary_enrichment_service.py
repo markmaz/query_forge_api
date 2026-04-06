@@ -6,8 +6,14 @@ import logging
 from typing import Any, Callable
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
+from sqlalchemy.exc import SQLAlchemyError
 
 logger = logging.getLogger(__name__)
+
+TABLE_ENRICHMENT_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+COLUMN_ENRICHMENT_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+CONFIDENCE_PARSE_ERRORS = (TypeError, ValueError)
 
 
 class DictionaryEnrichmentService:
@@ -235,7 +241,7 @@ WHERE table_name = :table_name
                                 },
                             )
                         tables_enriched += 1
-                except Exception as exc:
+                except TABLE_ENRICHMENT_FALLBACK_ERRORS as exc:
                     logger.warning(
                         "DictionaryEnrichmentService: table LLM failed for %s: %s",
                         table_name, exc,
@@ -359,7 +365,7 @@ WHERE wt.table_name = :table_name
                                 },
                             )
                             columns_enriched += 1
-                    except Exception as exc:
+                    except COLUMN_ENRICHMENT_FALLBACK_ERRORS as exc:
                         logger.warning(
                             "DictionaryEnrichmentService: LLM failed for %s.%s: %s",
                             table_name, cn, exc,
@@ -393,7 +399,7 @@ def _coerce_confidence(value: Any) -> float | None:
         return None
     try:
         parsed = float(value)
-    except Exception:
+    except CONFIDENCE_PARSE_ERRORS:
         return None
     if parsed < 0.0:
         return 0.0

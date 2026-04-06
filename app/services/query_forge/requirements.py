@@ -4,6 +4,8 @@ from typing import Any, Callable, Dict, List
 
 from app.services.domain_resolver import DomainPlan
 
+INT_PARSE_ERRORS = (TypeError, ValueError)
+
 
 class QueryForgeRequirementAnalyzer:
     def __init__(
@@ -23,7 +25,7 @@ class QueryForgeRequirementAnalyzer:
                 return
             try:
                 needed.add(int(v))
-            except Exception:
+            except INT_PARSE_ERRORS:
                 return
 
         for c in (q.get("columns") or []):
@@ -117,7 +119,7 @@ class QueryForgeRequirementAnalyzer:
                 wt_id = primary_id
             try:
                 wt_id_int = int(wt_id)
-            except Exception:
+            except INT_PARSE_ERRORS:
                 return
             if required_table_ids and wt_id_int not in required_table_ids:
                 return

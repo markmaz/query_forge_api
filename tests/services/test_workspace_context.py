@@ -298,3 +298,49 @@ def test_build_context_injects_secret_for_mysql_datasource(monkeypatch: pytest.M
     assert ctx.workspace_id == "ws-1"
     assert captured["type"] == "mysql"
     assert captured["cfg"]["password"] == "pw-123"
+
+
+def test_build_context_falls_back_to_legacy_on_expected_datasource_resolution_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.resolve_request_username",
+        lambda: "user-1",
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.WorkspaceDatasourceResolverService.resolve_for_workspace",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("resolver unavailable")),
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.WorkspaceService.get_workspace",
+        lambda *_args, **_kwargs: {"server": "https://dbx"},
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.WarehouseService.get_warehouse_by_name",
+        lambda *_args, **_kwargs: {"warehouse_id": "wh-1"},
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.DatabricksWorkspaceTokenProvider",
+        _DummyForgeTokenPort,
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.DatabricksForgeQueryPort",
+        _DummyExecutor,
+    )
+
+    ctx = WorkspaceSqlContextBuilder().build("ws-1")
+
+    assert ctx.workspace_url == "https://dbx"
+    assert ctx.warehouse_id == "wh-1"
+
+
+def test_build_context_surfaces_unexpected_datasource_resolution_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.resolve_request_username",
+        lambda: "user-1",
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_inventory.workspace_context.WorkspaceDatasourceResolverService.resolve_for_workspace",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("resolver bug")),
+    )
+
+    with pytest.raises(AssertionError, match="resolver bug"):
+        WorkspaceSqlContextBuilder().build("ws-1")

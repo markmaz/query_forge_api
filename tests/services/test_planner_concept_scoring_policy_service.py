@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+import pytest
+from sqlalchemy.exc import SQLAlchemyError
+
+import app.services.domain.planner_concept_scoring_policy_service as concept_scoring_policy_service
 from app.services.domain.planner_concept_scoring_policy_service import PlannerConceptScoringPolicyService
 
 
@@ -35,3 +41,40 @@ def test_concept_scoring_policy_resolves_student_cross_entity_name_penalty() -> 
     )
 
     assert out == 0.5
+
+
+def test_concept_scoring_policy_service_falls_back_on_expected_db_lookup_errors() -> None:
+    class _FakeSQL:
+        def execute_query_mappings(self, sql, params):
+            del sql, params
+            raise SQLAlchemyError("db unavailable")
+
+    service = PlannerConceptScoringPolicyService(sql=_FakeSQL(), enable_db_lookup=True)
+
+    out = service.resolve_factor(
+        action_key="entity_exact_match_multiplier",
+        context_tokens=["entity_exact_match"],
+        default=1.0,
+    )
+
+    assert out == 1.4
+
+
+def test_concept_scoring_policy_service_surfaces_unexpected_policy_parse_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeSQL:
+        def execute_query_mappings(self, sql, params):
+            del sql, params
+            return []
+
+    def _boom(_value):
+        raise AssertionError("unexpected policy parse bug")
+
+    service = PlannerConceptScoringPolicyService(sql=_FakeSQL(), enable_db_lookup=True)
+    monkeypatch.setattr(concept_scoring_policy_service, "_parse_policy_rule", _boom)
+
+    with pytest.raises(AssertionError, match="unexpected policy parse bug"):
+        service.resolve_factor(
+            action_key="entity_exact_match_multiplier",
+            context_tokens=["entity_exact_match"],
+            default=1.0,
+        )

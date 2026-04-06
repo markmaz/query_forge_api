@@ -4,6 +4,8 @@ from typing import Any
 
 from app.exceptions.forge_error import ForgeError
 
+INT_PARSE_ERRORS = (TypeError, ValueError)
+
 
 def validate_workspace_user_list_args(
     *,
@@ -18,7 +20,7 @@ def validate_workspace_user_list_args(
     try:
         limit_value = int(limit)
         offset_value = int(offset)
-    except Exception as exc:
+    except INT_PARSE_ERRORS as exc:
         raise ForgeError("limit/offset must be integers", status_code=400) from exc
 
     if limit_value <= 0 or limit_value > 20000:

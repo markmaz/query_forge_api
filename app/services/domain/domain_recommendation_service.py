@@ -16,6 +16,8 @@ from app.services.domain.domain_join_service import DomainJoinService
 from app.services.domain.domain_table_write_service import DomainTableWriteService
 from app.services.llm.llm_client import LLMClient
 
+INT_PARSE_ERRORS = (TypeError, ValueError)
+
 
 class DomainRecommendationService:
     def __init__(
@@ -409,7 +411,7 @@ class DomainRecommendationService:
     def _normalize_limit(value: Any, *, field: str, minimum: int, maximum: int) -> int:
         try:
             parsed = int(value)
-        except Exception as exc:
+        except INT_PARSE_ERRORS as exc:
             raise ForgeError(f"{field} must be an integer", status_code=400) from exc
         if parsed < minimum or parsed > maximum:
             raise ForgeError(

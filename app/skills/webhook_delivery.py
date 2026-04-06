@@ -18,11 +18,18 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.exceptions.forge_error import ForgeError
 from app.skills.base import BaseSkill, SkillContext, SkillResult
 from app.skills.delivery import DeliveryPayload, get_channel
 from app.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
+
+WEBHOOK_EXECUTION_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+EMAIL_HTML_FALLBACK_ERRORS = (ImportError, RuntimeError, TypeError, ValueError)
+HIGHLIGHT_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError)
 
 
 @SkillRegistry.register
@@ -179,7 +186,7 @@ class WebhookDeliverySkill(BaseSkill):
             channel_config = self._channel_config(cfg)
             channel = get_channel(cfg["channel_type"])
             success, message = channel.send(payload, channel_config)
-        except Exception as exc:
+        except WEBHOOK_EXECUTION_FALLBACK_ERRORS as exc:
             logger.exception("Webhook delivery failed")
             return SkillResult(success=False, message="Webhook delivery failed.", error=str(exc))
 
@@ -207,7 +214,7 @@ class WebhookDeliverySkill(BaseSkill):
                 context.columns,
                 base_url,
             )
-        except Exception:
+        except EMAIL_HTML_FALLBACK_ERRORS:
             logger.exception("Failed to build email HTML for webhook delivery")
             return ""
 
@@ -315,7 +322,7 @@ class WebhookDeliverySkill(BaseSkill):
             )
             lines = "\n".join(f"• {h}" for h in result.get("highlights", []))
             return f"*{context.metadata.query_name}*\n{lines}"
-        except Exception as exc:
+        except HIGHLIGHT_FALLBACK_ERRORS as exc:
             logger.warning("LLM highlights failed, using summary: %s", exc)
             return self._format_summary(context)
 

@@ -5,6 +5,8 @@ from typing import Any, Dict, List
 
 import srsly
 
+SPACY_OVERWRITE_ENTS_COMPAT_ERRORS = (AttributeError, TypeError, ValueError)
+
 
 def add_school_district_ruler(nlp: Any, patterns_path: str | Path) -> Any:
     """Attach a school/district EntityRuler and load JSONL patterns.
@@ -38,9 +40,8 @@ def add_school_district_ruler(nlp: Any, patterns_path: str | Path) -> Any:
         if hasattr(ner, "overwrite_ents"):
             try:
                 ner.overwrite_ents = False
-            except Exception:
+            except SPACY_OVERWRITE_ENTS_COMPAT_ERRORS:
                 pass
         if hasattr(ner, "cfg") and isinstance(getattr(ner, "cfg"), dict):
             ner.cfg["overwrite_ents"] = False
     return nlp
-

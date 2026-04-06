@@ -4,6 +4,8 @@ from typing import Any, Mapping
 
 from app.services.shared_ai.artifacts import Candidate
 
+FLOAT_PARSE_ERRORS = (TypeError, ValueError)
+
 
 def candidate_from_column_row(row: Mapping[str, Any]) -> Candidate:
     payload = dict(row)
@@ -61,7 +63,7 @@ def _candidate_scores(payload: Mapping[str, Any]) -> dict[str, float]:
         try:
             if raw is not None:
                 out[key] = float(raw)
-        except Exception:
+        except FLOAT_PARSE_ERRORS:
             continue
     return out
 

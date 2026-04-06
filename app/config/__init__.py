@@ -8,14 +8,14 @@ load_dotenv()
 def _env_int(name: str, default: int) -> int:
     try:
         return int(os.getenv(name, str(default)))
-    except Exception:
+    except (TypeError, ValueError):
         return int(default)
 
 
 def _env_float(name: str, default: float) -> float:
     try:
         return float(os.getenv(name, str(default)))
-    except Exception:
+    except (TypeError, ValueError):
         return float(default)
 
 DB_HOST =  os.getenv("DB_HOST")

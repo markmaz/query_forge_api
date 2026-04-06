@@ -10,6 +10,7 @@ from typing import Any, Dict
 from app.exceptions.forge_error import ForgeError
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+INT_PARSE_ERRORS = (TypeError, ValueError)
 
 
 def literal_sql(v: Any) -> str:
@@ -140,7 +141,7 @@ def col_expr(
         if wt_id is not None:
             try:
                 wt_id_int = int(wt_id)
-            except Exception:
+            except INT_PARSE_ERRORS:
                 wt_id_int = None
             if wt_id_int is not None:
                 mapped = rewrite_by_wt_col.get((wt_id_int, cn))
@@ -153,7 +154,7 @@ def col_expr(
     if wt_id is not None:
         try:
             wt_id_int = int(wt_id)
-        except Exception:
+        except INT_PARSE_ERRORS:
             raise ForgeError("Invalid workspaceTableId", status_code=400)
         wt_alias = alias_by_wt.get(wt_id_int)
         if not wt_alias:

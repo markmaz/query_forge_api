@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.exceptions.forge_error import ForgeError
+from app.services.user import workspace_user_query
 from app.services.user.workspace_user_query import (
     build_workspace_user_list_query,
     validate_workspace_user_list_args,
@@ -34,3 +35,12 @@ def test_build_workspace_user_list_query_populates_search_params() -> None:
     assert params["include_inactive"] == 0
     assert params["q_is_null"] == 0
     assert params["q_like"] == "%alice%"
+
+
+def test_validate_workspace_user_list_args_surfaces_unexpected_int_errors() -> None:
+    class _BadInt:
+        def __int__(self):
+            raise AssertionError("unexpected int parse bug")
+
+    with pytest.raises(AssertionError, match="unexpected int parse bug"):
+        validate_workspace_user_list_args(workspace_id="ws", limit=_BadInt(), offset=0)

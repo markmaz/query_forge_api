@@ -136,3 +136,24 @@ def test_executor_wraps_node_errors_with_node_name() -> None:
         executor.execute(definition, _context())
 
     assert exc.value.node_name == "start"
+
+
+def test_executor_surfaces_unexpected_node_errors() -> None:
+    class _AssertionFailNode(BasePipelineNode):
+        def __init__(self, *, name: str) -> None:
+            self.name = name
+
+        def run(self, context: PipelineContext) -> PipelineContext:
+            del context
+            raise AssertionError("unexpected node bug")
+
+    executor = PipelineExecutor()
+    definition = PipelineDefinition(
+        name="failing_assertion",
+        nodes={"start": _AssertionFailNode(name="start")},
+        edges=[],
+        start_nodes=["start"],
+    )
+
+    with pytest.raises(AssertionError, match="unexpected node bug"):
+        executor.execute(definition, _context())

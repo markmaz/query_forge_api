@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+from json import JSONDecodeError
 import logging
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Mapping, Optional
+
+from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
@@ -16,6 +20,10 @@ from app.models.domain.planner_rerank_policy import (
 from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
+
+POLICY_LOOKUP_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+POLICY_JSON_PARSE_ERRORS = (TypeError, ValueError, JSONDecodeError)
+POLICY_RULE_VALIDATION_ERRORS = (ValidationError, ValueError, TypeError)
 
 
 class PlannerRerankPolicyService:
@@ -160,7 +168,7 @@ class PlannerRerankPolicyService:
                     "base_domain_id": int(base_domain_id),
                 },
             )
-        except Exception as exc:  # pragma: no cover - defensive runtime fallback
+        except POLICY_LOOKUP_FALLBACK_ERRORS as exc:  # pragma: no cover - defensive runtime fallback
             logger.warning(
                 "planner rerank policy lookup failed workspace_id=%s vertical_norm=%s base_domain_id=%s err=%s",
                 workspace_id,
@@ -467,11 +475,11 @@ def _parse_policy_rule(value: Any) -> PlannerRerankPolicyRule:
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
-        except Exception as exc:  # pragma: no cover - defensive
+        except POLICY_JSON_PARSE_ERRORS as exc:  # pragma: no cover - defensive
             raise ForgeError(f"Invalid planner rerank policy JSON: {exc}", status_code=500)
     try:
         return PlannerRerankPolicyRule.model_validate(raw or {})
-    except Exception as exc:
+    except POLICY_RULE_VALIDATION_ERRORS as exc:
         raise ForgeError(f"Invalid planner rerank policy JSON: {exc}", status_code=500)
 
 

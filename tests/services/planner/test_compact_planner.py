@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+import app.services.planner.compact_planner as compact_planner
 from app.exceptions.forge_error import ForgeError
 from app.services.planner.compact_planner import build_compact_plan_and_project
 from app.services.planner.semantic_candidate_models import (
@@ -425,3 +426,26 @@ def test_compact_planner_coerces_relative_time_when_time_key_not_candidate() -> 
     assert out["compact_plan"]["time"]["time_range"] == "this_quarter"
     assert out["compact_plan"]["time"]["time_grain"] == "quarter"
     assert out["compact_plan"]["time"].get("time_concept_key") in {None, ""}
+
+
+def test_extract_provider_model_and_tokens_ignores_invalid_provider_json() -> None:
+    model, usage = compact_planner._extract_provider_model_and_tokens(
+        trace={"raw_text": "{not-json}"},
+        fallback_model="gpt-5",
+    )
+
+    assert model == "gpt-5"
+    assert usage == {}
+
+
+def test_extract_provider_model_and_tokens_surfaces_unexpected_parser_errors(monkeypatch) -> None:
+    def _broken_loads(_raw_text: str):
+        raise AssertionError("unexpected provider parse failure")
+
+    monkeypatch.setattr(compact_planner.json, "loads", _broken_loads)
+
+    with pytest.raises(AssertionError, match="unexpected provider parse failure"):
+        compact_planner._extract_provider_model_and_tokens(
+            trace={"raw_text": '{"model":"gpt-5"}'},
+            fallback_model="gpt-5",
+        )

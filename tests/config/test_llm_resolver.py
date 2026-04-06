@@ -57,6 +57,14 @@ def test_resolve_llm_config_handles_service_exception() -> None:
     assert result is None
 
 
+def test_resolve_llm_config_surfaces_unexpected_service_errors() -> None:
+    mock_service = MagicMock()
+    mock_service.get_llm_for_role.side_effect = AssertionError("unexpected service bug")
+    with patch("app.config.llm_resolver.WorkspaceLLMService", return_value=mock_service):
+        with pytest.raises(AssertionError, match="unexpected service bug"):
+            resolver.resolve_llm_config("ws1", "planner")
+
+
 def test_build_llm_client_for_role_uses_override_id() -> None:
     mock_service = MagicMock()
     mock_service.get_internal_by_id.return_value = {
@@ -115,3 +123,17 @@ def test_build_llm_client_for_role_requires_api_key_for_openai() -> None:
         with pytest.raises(ForgeError) as exc:
             resolver.build_llm_client_for_role(workspace_id="ws1", role="planner")
     assert exc.value.status_code == 400
+
+
+def test_to_int_or_none_returns_none_for_invalid_values() -> None:
+    assert resolver._to_int_or_none("abc") is None
+    assert resolver._to_int_or_none(None) is None
+
+
+def test_to_int_or_none_surfaces_unexpected_int_conversion_errors() -> None:
+    class _BrokenInt:
+        def __int__(self) -> int:
+            raise AssertionError("unexpected int conversion bug")
+
+    with pytest.raises(AssertionError, match="unexpected int conversion bug"):
+        resolver._to_int_or_none(_BrokenInt())

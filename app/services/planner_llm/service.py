@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from qdrant_client.http import models as qdrant_models
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config.llm_resolver import build_llm_client_for_role
@@ -522,7 +523,7 @@ class PlannerLLMService:
                 validation=validation_payload,
                 candidates={k: list(v) for k, v in candidates.items() if k in {"domains", "concepts", "columns"}},
             )
-        except Exception:
+        except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError):
             logger.exception("planner_llm cache write failed trace_id=%s", trace_id)
         timings["cache_write"] = _elapsed_ms(t_cache_write)
 

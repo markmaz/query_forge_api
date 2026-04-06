@@ -17,6 +17,7 @@ from app.services.tenancy.datasource_resolver_service import WorkspaceDatasource
 from app.services.tenancy.secret_resolver import SecretResolver
 
 logger = logging.getLogger(__name__)
+INVENTORY_SYNC_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError)
 
 
 class DomainTableReadService:
@@ -113,7 +114,7 @@ class DomainTableReadService:
                     schema_name=schema,
                     catalog_name=catalog,
                 )
-            except Exception:
+            except INVENTORY_SYNC_FALLBACK_ERRORS:
                 logger.exception(
                     "Workspace inventory sync skipped ws=%s schema=%s catalog=%s",
                     workspace_id,

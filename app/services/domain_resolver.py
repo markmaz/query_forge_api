@@ -25,6 +25,8 @@ __all__ = [
     "_safe_fqn",
 ]
 
+INT_PARSE_ERRORS = (TypeError, ValueError)
+
 def _safe_fqn(full_name: str) -> str:
     return safe_fqn(full_name)
 
@@ -97,5 +99,5 @@ class DomainResolver:
             raise ForgeError("workspace_id is required", status_code=400)
         try:
             return int(domain_id)
-        except Exception:
+        except INT_PARSE_ERRORS:
             raise ForgeError("Invalid domainId", status_code=400)

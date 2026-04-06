@@ -22,6 +22,7 @@ _NON_NUMERIC_DATA_TYPE_MARKERS = (
     "binary",
 )
 _NON_NUMERIC_NAME_MARKERS = ("_id", "id_", " id", "code", "_code")
+INT_PARSE_ERRORS = (TypeError, ValueError)
 
 
 @dataclass(frozen=True)
@@ -543,7 +544,7 @@ def _parse_column_key(
         if wt_id is not None:
             try:
                 wt_id = int(wt_id)
-            except Exception:
+            except INT_PARSE_ERRORS:
                 issues.append(
                     DerivedValidationIssue(
                         code="unknown_column_key",
@@ -555,7 +556,7 @@ def _parse_column_key(
         if mid is not None:
             try:
                 mid = int(mid)
-            except Exception:
+            except INT_PARSE_ERRORS:
                 mid = None
         normalized = {
             "workspaceTableId": wt_id,

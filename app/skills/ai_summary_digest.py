@@ -30,7 +30,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from html import escape as _escape
+from sqlalchemy.exc import SQLAlchemyError
 
+from app.exceptions.forge_error import ForgeError
 from app.skills.analysis_utils import (
     build_analysis_system_prompt,
     build_analysis_user_prompt,
@@ -40,6 +42,11 @@ from app.skills.base import BaseSkill, SkillContext, SkillResult
 from app.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
+
+SKILL_EXECUTION_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+DESTINATION_RESOLUTION_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+LLM_DIGEST_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError)
+SNAPSHOT_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
 
 
 @SkillRegistry.register
@@ -144,7 +151,7 @@ class AISummaryDigestSkill(BaseSkill):
         # Generate AI digest
         try:
             digest = self._generate_digest(context, cfg, previous_snapshot)
-        except Exception as exc:
+        except SKILL_EXECUTION_FALLBACK_ERRORS as exc:
             logger.exception("AI digest generation failed for query %s", context.query_id)
             return SkillResult(success=False, message="AI digest generation failed.", error=str(exc))
 
@@ -154,7 +161,7 @@ class AISummaryDigestSkill(BaseSkill):
 
         try:
             self._send(recipients, subject, html_body)
-        except Exception as exc:
+        except SKILL_EXECUTION_FALLBACK_ERRORS as exc:
             logger.exception("Digest email delivery failed")
             return SkillResult(success=False, message="Email delivery failed.", error=str(exc))
 
@@ -183,7 +190,7 @@ class AISummaryDigestSkill(BaseSkill):
                 {"type": "email", "destination_id": destination_id},
                 workspace_id,
             )
-        except Exception:
+        except DESTINATION_RESOLUTION_FALLBACK_ERRORS:
             logger.exception("AISummaryDigestSkill: failed to resolve destination_id=%s", destination_id)
             return {}
 
@@ -228,7 +235,7 @@ class AISummaryDigestSkill(BaseSkill):
                 user_prompt=user_prompt,
                 max_tokens=800,
             )
-        except Exception as exc:
+        except LLM_DIGEST_FALLBACK_ERRORS as exc:
             logger.warning("LLM digest failed, using fallback: %s", exc)
             return self._fallback_digest(context)
 
@@ -333,7 +340,7 @@ class AISummaryDigestSkill(BaseSkill):
                 skill_type=self.skill_type,
             ).first()
             return skill.last_alert_state if skill and skill.last_alert_state else None
-        except Exception as exc:
+        except SNAPSHOT_FALLBACK_ERRORS as exc:
             logger.warning("Could not load digest snapshot: %s", exc)
             return None
 
@@ -355,7 +362,7 @@ class AISummaryDigestSkill(BaseSkill):
                 }
                 db.session.add(skill)
                 db.session.commit()
-        except Exception as exc:
+        except SNAPSHOT_FALLBACK_ERRORS as exc:
             logger.warning("Could not save digest snapshot: %s", exc)
 
     # ------------------------------------------------------------------

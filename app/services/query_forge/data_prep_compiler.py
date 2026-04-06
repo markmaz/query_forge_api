@@ -371,7 +371,7 @@ class DataPrepCompiler:
                 wt_id = primary_id
             try:
                 wt_id_int = int(wt_id)
-            except Exception:
+            except (TypeError, ValueError):
                 continue
 
             alias = alias_by_wt.get(wt_id_int) or (qf_base_alias if wt_id_int == primary_id else None)

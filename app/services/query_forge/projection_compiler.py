@@ -7,6 +7,8 @@ from typing import Any, Callable, Dict, List, Optional
 from app.exceptions.forge_error import ForgeError
 from app.services.domain_resolver import DomainPlan
 
+INT_PARSE_ERRORS = (TypeError, ValueError)
+
 
 @dataclass(frozen=True)
 class QueryForgeProjectionResult:
@@ -95,7 +97,7 @@ class QueryForgeProjectionCompiler:
                     if wt_id is not None:
                         try:
                             alias_hint = alias_by_wt.get(int(wt_id))
-                        except Exception:
+                        except INT_PARSE_ERRORS:
                             alias_hint = None
                 alias_hint = alias_hint or self._alias_hint_from_expr(group_expr)
                 output_name = self._reserve_output_name(output_names, user_alias or raw_name, alias_hint)
@@ -158,7 +160,7 @@ class QueryForgeProjectionCompiler:
                 if wt_id is not None:
                     try:
                         alias_hint = alias_by_wt_table.get(int(wt_id))
-                    except Exception:
+                    except INT_PARSE_ERRORS:
                         alias_hint = None
                 if expr_id and not alias_hint:
                     alias_hint = self._alias_hint_from_expr(expr_sql)

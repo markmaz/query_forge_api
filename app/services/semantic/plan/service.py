@@ -46,6 +46,9 @@ from app.services.semantic.plan.utils import (
 )
 from app.services.semantic.plan.value_alias_applier import ValueAliasApplier
 
+SEMANTIC_EXTRACT_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError)
+TIER2_RUNNER_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError)
+
 
 class PlanService:
     def __init__(
@@ -168,7 +171,7 @@ class PlanService:
             if normalized:
                 prompt = normalized
                 semantic_extract_payload["normalized_text"] = prompt
-        except Exception:
+        except SEMANTIC_EXTRACT_FALLBACK_ERRORS:
             warnings.append("semantic_extract_failed")
             semantic_extract_payload = {
                 "normalized_text": prompt, "slots": {}, "ents": [], "model": {},
@@ -199,7 +202,7 @@ class PlanService:
             t_tier2 = time.perf_counter()
             try:
                 tier2_payload = self._tier2_runner(prompt)
-            except Exception:
+            except TIER2_RUNNER_FALLBACK_ERRORS:
                 warnings.append("tier2_runner_failed")
                 tier2_payload = {"plan_ir": {}, "model": {"enabled": True, "version": "error"}, "timings_ms": {}}
             timings_ms["tier2"] = int((time.perf_counter() - t_tier2) * 1000)
@@ -528,7 +531,7 @@ class PlanService:
         for row in list(column_hits) + list(mapped_columns):
             try:
                 mid = int(row.get("model_column_id"))
-            except Exception:
+            except (TypeError, ValueError):
                 continue
             if allowed_model_column_ids and mid not in allowed_model_column_ids:
                 continue

@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Keep this conservative; if you have weird identifiers, we still support them via backticks escaping.
 SAFE_IDENT_RE = re.compile(r"^[A-Za-z0-9_]+$")
+SAMPLE_WRITE_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
 def _quote_uc_ident(ident: str) -> str:
@@ -289,7 +290,7 @@ TABLESAMPLE (1 PERCENT)
                         )
                         cols_updated += 1
 
-                    except Exception as e:
+                    except SAMPLE_WRITE_FALLBACK_ERRORS as e:
                         logger.exception(
                             "Column sample failed workspace_table_id=%s col_id=%s col=%s full_name=%s",
                             workspace_table_id,

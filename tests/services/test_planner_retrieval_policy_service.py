@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
+import app.services.domain.planner_retrieval_policy_service as retrieval_policy_service
 from app.models.domain.planner_retrieval_policy import PlannerRetrievalPolicyUpsertRequest
 from app.services.domain.planner_retrieval_policy_service import PlannerRetrievalPolicyService
 
@@ -149,3 +151,37 @@ def test_retrieval_policy_upsert_request_rejects_legacy_scope_types() -> None:
                 },
             }
         )
+
+
+def test_retrieval_policy_service_falls_back_on_expected_db_lookup_errors() -> None:
+    class _FakeSQL:
+        def execute_query_mappings(self, sql, params):
+            del sql, params
+            raise SQLAlchemyError("db unavailable")
+
+    svc = PlannerRetrievalPolicyService(sql=_FakeSQL(), enable_db_lookup=True)
+
+    specs = svc.build_query_specs(
+        workspace_id="ws-1",
+        vertical_norm="education",
+        prompt_signals=["staff_work_context_prompt"],
+        semantic_concept_keys=[],
+    )
+
+    assert any(str(item.get("query") or "").lower() == "staff assignments" for item in specs)
+
+
+def test_retrieval_policy_service_surfaces_unexpected_policy_parse_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeSQL:
+        def execute_query_mappings(self, sql, params):
+            del sql, params
+            return []
+
+    def _boom(_value):
+        raise AssertionError("unexpected policy parse bug")
+
+    svc = PlannerRetrievalPolicyService(sql=_FakeSQL(), enable_db_lookup=True)
+    monkeypatch.setattr(retrieval_policy_service, "_parse_policy_rule", _boom)
+
+    with pytest.raises(AssertionError, match="unexpected policy parse bug"):
+        svc.get_applicable_policies(workspace_id="ws-1", vertical_norm="education")

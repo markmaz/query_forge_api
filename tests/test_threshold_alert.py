@@ -11,11 +11,17 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
+from valkey.exceptions import ValkeyError
 
 from app.skills.base import QueryMetadata, SkillContext
 from app.skills.delivery import DeliveryPayload, SlackDeliveryChannel, TeamsDeliveryChannel
 from app.skills.registry import SkillRegistry
-from app.skills.schedule_utils import next_n_runs, validate_cron
+from app.skills.schedule_utils import (
+    get_scheduler_health,
+    next_n_runs,
+    record_dispatch_heartbeat,
+    validate_cron,
+)
 from app.skills.threshold_alert import ThresholdAlertSkill
 
 
@@ -360,3 +366,152 @@ def test_next_n_runs_are_in_future():
     now = datetime.now(timezone.utc).isoformat()
     for run in runs:
         assert run > now
+
+
+def test_validate_cron_returns_error_on_expected_runtime_failure():
+    class _BrokenCroniter:
+        @staticmethod
+        def is_valid(expression):
+            return True
+
+        def __init__(self, expression, base):
+            raise RuntimeError("cron runtime unavailable")
+
+    with patch("app.skills.schedule_utils.croniter", _BrokenCroniter):
+        errors = validate_cron("0 9 * * *", "UTC")
+
+    assert any("could not evaluate cron interval" in error.lower() for error in errors)
+
+
+def test_validate_cron_surfaces_unexpected_runtime_failure():
+    class _BrokenCroniter:
+        @staticmethod
+        def is_valid(expression):
+            return True
+
+        def __init__(self, expression, base):
+            raise AssertionError("cron bug")
+
+    with patch("app.skills.schedule_utils.croniter", _BrokenCroniter):
+        with pytest.raises(AssertionError, match="cron bug"):
+            validate_cron("0 9 * * *", "UTC")
+
+
+def test_next_n_runs_returns_empty_on_expected_runtime_failure():
+    with patch("app.skills.schedule_utils.pytz.timezone", side_effect=RuntimeError("timezone unavailable")):
+        assert next_n_runs("0 9 * * *", "UTC", n=2) == []
+
+
+def test_next_n_runs_surfaces_unexpected_runtime_failure():
+    with patch("app.skills.schedule_utils.pytz.timezone", side_effect=AssertionError("timezone bug")):
+        with pytest.raises(AssertionError, match="timezone bug"):
+            next_n_runs("0 9 * * *", "UTC", n=2)
+
+
+def test_get_scheduler_health_returns_error_payload_on_expected_valkey_failure():
+    with patch("app.skills.schedule_utils._valkey_client", side_effect=ValkeyError("valkey unavailable")):
+        result = get_scheduler_health()
+
+    assert result["healthy"] is False
+    assert "valkey unavailable" in result["reason"]
+
+
+def test_get_scheduler_health_surfaces_unexpected_failures():
+    with patch("app.skills.schedule_utils._valkey_client", side_effect=AssertionError("health bug")):
+        with pytest.raises(AssertionError, match="health bug"):
+            get_scheduler_health()
+
+
+def test_record_dispatch_heartbeat_ignores_expected_valkey_failure():
+    fake_client = MagicMock()
+    fake_client.setex.side_effect = ValkeyError("valkey unavailable")
+
+    with patch("app.skills.schedule_utils._valkey_client", return_value=fake_client):
+        record_dispatch_heartbeat()
+
+
+def test_record_dispatch_heartbeat_surfaces_unexpected_failures():
+    fake_client = MagicMock()
+    fake_client.setex.side_effect = AssertionError("heartbeat bug")
+
+    with patch("app.skills.schedule_utils._valkey_client", return_value=fake_client):
+        with pytest.raises(AssertionError, match="heartbeat bug"):
+            record_dispatch_heartbeat()
+
+
+def test_ai_expectation_fail_open_on_expected_runtime_error(skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {"conditions": [], "channels": []})
+
+    with patch("app.tasks.skill_runner._get_workspace_config", return_value={"llm": {"provider": "openai"}}), \
+         patch.object(skill, "_call_llm_for_verdict", side_effect=RuntimeError("llm unavailable")):
+        result = skill._eval_ai_expectation(ctx, {"type": "ai_expectation", "prompt": "Rows should be valid"})
+
+    assert result["passed"] is True
+    assert "unavailable" in result["message"]
+
+
+def test_ai_expectation_surfaces_unexpected_failures(skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {"conditions": [], "channels": []})
+
+    with patch("app.tasks.skill_runner._get_workspace_config", return_value={"llm": {"provider": "openai"}}), \
+         patch.object(skill, "_call_llm_for_verdict", side_effect=AssertionError("bad llm state")):
+        with pytest.raises(AssertionError, match="bad llm state"):
+            skill._eval_ai_expectation(ctx, {"type": "ai_expectation", "prompt": "Rows should be valid"})
+
+
+def test_load_last_state_returns_empty_on_expected_runtime_error(skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {"conditions": [], "channels": []})
+    fake_sql = MagicMock()
+    fake_sql.execute_query_mappings.side_effect = RuntimeError("db unavailable")
+
+    with patch("app.adapters.mysql_sql_executor.ForgeMetaSQL", return_value=fake_sql):
+        assert skill._load_last_state(ctx) == {}
+
+
+def test_load_last_state_surfaces_unexpected_failures(skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {"conditions": [], "channels": []})
+    fake_sql = MagicMock()
+    fake_sql.execute_query_mappings.side_effect = AssertionError("bad db state")
+
+    with patch("app.adapters.mysql_sql_executor.ForgeMetaSQL", return_value=fake_sql):
+        with pytest.raises(AssertionError, match="bad db state"):
+            skill._load_last_state(ctx)
+
+
+def test_deliver_converts_expected_channel_failures_to_results(skill):
+    payload = DeliveryPayload(
+        subject="Alert",
+        summary="Alert",
+        detail_html="",
+        detail_text="Alert",
+        query_name="Orders",
+        workspace_id=1,
+        query_id=1,
+        conditions_failed=[],
+    )
+    fake_channel = MagicMock()
+    fake_channel.send.side_effect = RuntimeError("slack offline")
+
+    with patch("app.skills.threshold_alert.get_channel", return_value=fake_channel):
+        result = skill._deliver(payload, [{"type": "slack", "webhook_url": "https://hooks.slack.com/x"}])
+
+    assert result == [{"channel": "slack", "success": False, "message": "slack offline"}]
+
+
+def test_deliver_surfaces_unexpected_channel_failures(skill):
+    payload = DeliveryPayload(
+        subject="Alert",
+        summary="Alert",
+        detail_html="",
+        detail_text="Alert",
+        query_name="Orders",
+        workspace_id=1,
+        query_id=1,
+        conditions_failed=[],
+    )
+    fake_channel = MagicMock()
+    fake_channel.send.side_effect = AssertionError("programmer bug")
+
+    with patch("app.skills.threshold_alert.get_channel", return_value=fake_channel):
+        with pytest.raises(AssertionError, match="programmer bug"):
+            skill._deliver(payload, [{"type": "slack", "webhook_url": "https://hooks.slack.com/x"}])

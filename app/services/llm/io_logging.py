@@ -70,5 +70,5 @@ def _to_log_text(value: Any) -> str:
         return value
     try:
         return json.dumps(value, ensure_ascii=True, default=str, separators=(",", ":"))
-    except Exception:
+    except (TypeError, ValueError):
         return str(value)

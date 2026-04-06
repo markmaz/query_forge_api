@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+import pytest
+
+import app.services.semantic.semantic_concept_matcher as semantic_concept_matcher
 from app.services.semantic.semantic_concept_matcher import SemanticConceptMatcher
 from app.services.semantic.semantic_suggestion_service import SemanticSuggestionService
 from tests._support.fakes import FakeForgeQueryPort
@@ -264,6 +267,61 @@ def test_alias_and_heuristic_mapping() -> None:
     assert out_alias["concept_source"] == "deterministic"
     assert out_heuristic["concept_key"] == "STATE_COURSE_CODE"
     assert out_heuristic["concept_source"] == "deterministic"
+
+
+def test_match_by_alias_ignores_expected_weight_parse_errors() -> None:
+    matcher = SemanticConceptMatcher(sql=FakeForgeQueryPort())
+    candidate, notes = matcher.match_by_alias(
+        {"columnName": "student_identifier"},
+        vertical_norm="education",
+        alias_rules=[
+            {
+                "alias_key": "student_identifier",
+                "concept_key": "STUDENT_ID",
+                "match_kind": "exact",
+                "weight": "not-a-number",
+            }
+        ],
+    )
+
+    assert candidate is not None
+    assert candidate["concept_key"] == "STUDENT_ID"
+    assert notes == ["alias_match:exact:student_identifier"]
+
+
+def test_match_by_alias_surfaces_unexpected_weight_parse_errors() -> None:
+    class _BadFloat:
+        def __float__(self):
+            raise AssertionError("weight bug")
+
+    matcher = SemanticConceptMatcher(sql=FakeForgeQueryPort())
+
+    with pytest.raises(AssertionError, match="weight bug"):
+        matcher.match_by_alias(
+            {"columnName": "student_identifier"},
+            vertical_norm="education",
+            alias_rules=[
+                {
+                    "alias_key": "student_identifier",
+                    "concept_key": "STUDENT_ID",
+                    "match_kind": "exact",
+                    "weight": _BadFloat(),
+                }
+            ],
+        )
+
+
+def test_clamp_float_ignores_expected_parse_errors() -> None:
+    assert semantic_concept_matcher._clamp_float("not-a-number") == 0.0
+
+
+def test_clamp_float_surfaces_unexpected_parse_errors() -> None:
+    class _BadFloat:
+        def __float__(self):
+            raise AssertionError("float bug")
+
+    with pytest.raises(AssertionError, match="float bug"):
+        semantic_concept_matcher._clamp_float(_BadFloat())
 
 
 def test_execute_run_stores_canonical_concept_fields() -> None:

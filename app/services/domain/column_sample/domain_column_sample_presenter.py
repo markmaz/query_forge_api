@@ -3,13 +3,15 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
+JSON_LOAD_FALLBACK_ERRORS = (TypeError, ValueError, json.JSONDecodeError)
+
 
 def safe_json_load(value: Optional[str]) -> Any:
     if not value:
         return None
     try:
         return json.loads(value)
-    except Exception:
+    except JSON_LOAD_FALLBACK_ERRORS:
         return None
 
 

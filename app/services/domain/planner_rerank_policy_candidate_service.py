@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+from json import JSONDecodeError
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
+
+from pydantic import ValidationError
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
@@ -289,11 +292,11 @@ def _parse_candidate_policy(value: Any) -> PlannerRerankPolicyRule:
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
-        except Exception as exc:  # pragma: no cover - defensive
+        except JSONDecodeError as exc:  # pragma: no cover - defensive
             raise ForgeError(f"Invalid planner rerank policy candidate JSON: {exc}", status_code=500)
     try:
         return PlannerRerankPolicyRule.model_validate(raw or {})
-    except Exception as exc:
+    except (ValidationError, TypeError, ValueError) as exc:
         raise ForgeError(f"Invalid planner rerank policy candidate JSON: {exc}", status_code=500)
 
 

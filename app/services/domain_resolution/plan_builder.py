@@ -9,6 +9,7 @@ from app.services.domain_resolution.models import DomainPlanJoin, DomainPlanTabl
 ALLOWED_POLICIES = frozenset({"DEDUP_PRIMARY_FIRST", "SHOW_ALL_QUALIFIED"})
 ALLOWED_FILTER_MODES = frozenset({"AUTO", "WHERE", "EXISTS"})
 ALLOWED_CARDINALITY = frozenset({"ONE", "MANY"})
+JOIN_SPEC_PARSE_ERRORS = (json.JSONDecodeError,)
 
 
 def normalize_alias(alias: Optional[str]) -> Optional[str]:
@@ -83,7 +84,7 @@ def to_plan_join(row: Dict[str, Any]) -> DomainPlanJoin:
     if isinstance(raw_spec, str):
         try:
             parsed_spec = json.loads(raw_spec)
-        except Exception as exc:
+        except JOIN_SPEC_PARSE_ERRORS as exc:
             raise ForgeError("Invalid join_spec_json", status_code=400) from exc
     elif isinstance(raw_spec, dict):
         parsed_spec = raw_spec

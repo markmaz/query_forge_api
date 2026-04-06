@@ -391,7 +391,7 @@ def _extract_provider_model_and_tokens(*, trace: Mapping[str, Any], fallback_mod
     if raw_text:
         try:
             provider_body = json.loads(raw_text)
-        except Exception:
+        except json.JSONDecodeError:
             provider_body = None
         if isinstance(provider_body, Mapping):
             provider_model = provider_body.get("model")

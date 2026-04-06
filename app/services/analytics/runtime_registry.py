@@ -10,6 +10,7 @@ from app.services.tenancy.datasource_catalog_service import DatasourceCatalogSer
 from app.services.tenancy.secret_resolver import SecretResolver
 
 logger = logging.getLogger(__name__)
+RUNTIME_REGISTRY_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, KeyError)
 
 
 def build_runtime_registry(
@@ -28,7 +29,7 @@ def build_runtime_registry(
         try:
             cfg = _inject_runtime_secret(cfg, ds_type=ds_type, secrets=secrets)
             executors[name] = ExecutorFactory.create(ds_type, cfg)
-        except Exception:
+        except RUNTIME_REGISTRY_FALLBACK_ERRORS:
             logger.exception("Skipping datasource '%s' while building runtime analytics registry", name)
 
     if executors:

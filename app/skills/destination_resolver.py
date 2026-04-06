@@ -19,10 +19,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.extensions import db
 from app.models.domain.destinations import WorkspaceDestination
 
 logger = logging.getLogger(__name__)
+DESTINATION_USAGE_RECORD_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
 
 
 def _query_destination(*, destination_id: int, workspace_id: int, active_only: bool) -> WorkspaceDestination | None:
@@ -67,7 +70,7 @@ def resolve_destination(destination_id: int, workspace_id: int) -> dict[str, Any
     try:
         dest.record_usage()
         db.session.commit()
-    except Exception as exc:
+    except DESTINATION_USAGE_RECORD_ERRORS as exc:
         logger.warning("Failed to record destination usage for id=%s: %s", destination_id, exc)
 
     return config

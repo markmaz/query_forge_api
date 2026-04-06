@@ -340,3 +340,31 @@ def test_poll_status_logs_only_state(caplog: pytest.LogCaptureFixture) -> None:
     assert any("Polled status for s1: state=RUNNING" in msg for msg in messages)
     assert not any("secret-token" in msg for msg in messages)
     assert not any("SELECT secret" in msg for msg in messages)
+
+
+def test_post_json_wraps_non_json_responses() -> None:
+    session = _Session()
+    session.set_post(_Resp(status_code=200, json_exc=ValueError("not json")))
+    exec = DatabricksForgeQueryPort(
+        base_url="https://dbx",
+        token_provider=_TokenProvider("tok"),
+        http=session,
+        default_warehouse_id="wh",
+    )
+
+    with pytest.raises(RuntimeError, match="Databricks returned a non-JSON response"):
+        exec._post_json("/api/2.0/sql/statements", {})
+
+
+def test_post_json_surfaces_unexpected_json_parser_errors() -> None:
+    session = _Session()
+    session.set_post(_Resp(status_code=200, json_exc=AssertionError("unexpected json parser bug")))
+    exec = DatabricksForgeQueryPort(
+        base_url="https://dbx",
+        token_provider=_TokenProvider("tok"),
+        http=session,
+        default_warehouse_id="wh",
+    )
+
+    with pytest.raises(AssertionError, match="unexpected json parser bug"):
+        exec._post_json("/api/2.0/sql/statements", {})

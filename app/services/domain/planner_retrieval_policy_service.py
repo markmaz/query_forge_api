@@ -6,6 +6,9 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.models.domain.planner_retrieval_policy import (
@@ -21,6 +24,9 @@ from app.services.domain.policy_scope_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+POLICY_LOOKUP_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+POLICY_RULE_VALIDATION_ERRORS = (ValidationError, ValueError, TypeError)
 
 _SEED_POLICIES: tuple[dict[str, Any], ...] = (
     {
@@ -394,7 +400,7 @@ class PlannerRetrievalPolicyService:
                     },
                 )
                 rows.extend(dict(item) for item in db_rows)
-            except Exception as exc:  # pragma: no cover - defensive runtime fallback
+            except POLICY_LOOKUP_FALLBACK_ERRORS as exc:  # pragma: no cover - defensive runtime fallback
                 logger.warning(
                     "planner retrieval policy lookup failed workspace_id=%s err=%s",
                     workspace_id,
@@ -406,7 +412,7 @@ class PlannerRetrievalPolicyService:
             payload = dict(row)
             try:
                 payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
-            except Exception:
+            except POLICY_RULE_VALIDATION_ERRORS:
                 continue
             policies.append(payload)
         policies.sort(

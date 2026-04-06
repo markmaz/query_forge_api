@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.skills.ai_summary_digest import AISummaryDigestSkill
 from app.skills.base import QueryMetadata, SkillContext
@@ -413,6 +414,83 @@ def test_webhook_fans_out_to_all_configured_channels(webhook_skill, metadata, sa
     ]
 
 
+def test_webhook_execute_returns_failed_result_on_expected_channel_error(webhook_skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {
+        "channel_type": "slack",
+        "webhook_url": "https://hooks.slack.com/x",
+        "format": "summary",
+    })
+
+    with patch("app.skills.webhook_delivery.get_channel", side_effect=RuntimeError("channel unavailable")):
+        result = webhook_skill.execute(ctx)
+
+    assert result.success is False
+    assert result.message == "Webhook delivery failed."
+    assert "channel unavailable" in (result.error or "")
+
+
+def test_webhook_execute_surfaces_unexpected_channel_errors(webhook_skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {
+        "channel_type": "slack",
+        "webhook_url": "https://hooks.slack.com/x",
+        "format": "summary",
+    })
+
+    with patch("app.skills.webhook_delivery.get_channel", side_effect=AssertionError("channel bug")):
+        with pytest.raises(AssertionError, match="channel bug"):
+            webhook_skill.execute(ctx)
+
+
+def test_webhook_build_email_html_returns_empty_on_expected_runtime_error(webhook_skill, metadata, sample_rows, app):
+    ctx = make_context(metadata, sample_rows, {
+        "channel_type": "slack",
+        "webhook_url": "https://hooks.slack.com/x",
+        "format": "summary",
+    })
+
+    with app.app_context():
+        with patch("app.skills.email_delivery.EmailDeliverySkill._build_html", side_effect=RuntimeError("html unavailable")):
+            assert webhook_skill._build_email_html(ctx, "Subject") == ""
+
+
+def test_webhook_build_email_html_surfaces_unexpected_errors(webhook_skill, metadata, sample_rows, app):
+    ctx = make_context(metadata, sample_rows, {
+        "channel_type": "slack",
+        "webhook_url": "https://hooks.slack.com/x",
+        "format": "summary",
+    })
+
+    with app.app_context():
+        with patch("app.skills.email_delivery.EmailDeliverySkill._build_html", side_effect=AssertionError("html bug")):
+            with pytest.raises(AssertionError, match="html bug"):
+                webhook_skill._build_email_html(ctx, "Subject")
+
+
+def test_webhook_highlights_falls_back_on_expected_llm_error(webhook_skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {
+        "channel_type": "slack",
+        "webhook_url": "https://hooks.slack.com/x",
+        "format": "highlights",
+    }, workspace_config={"llm": {"provider": "openai"}})
+
+    with patch("app.config.llm_resolver.build_llm_client_for_role", side_effect=RuntimeError("llm unavailable")):
+        text = webhook_skill._format_highlights(ctx, ctx.config)
+
+    assert "Monthly Sales" in text
+
+
+def test_webhook_highlights_surfaces_unexpected_llm_errors(webhook_skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {
+        "channel_type": "slack",
+        "webhook_url": "https://hooks.slack.com/x",
+        "format": "highlights",
+    }, workspace_config={"llm": {"provider": "openai"}})
+
+    with patch("app.config.llm_resolver.build_llm_client_for_role", side_effect=AssertionError("llm bug")):
+        with pytest.raises(AssertionError, match="llm bug"):
+            webhook_skill._format_highlights(ctx, ctx.config)
+
+
 def test_digest_resolves_recipients_from_destination(digest_skill, metadata, sample_rows):
     ctx = make_context(metadata, sample_rows, {
         "destination_id": 7,
@@ -430,3 +508,127 @@ def test_digest_resolves_recipients_from_destination(digest_skill, metadata, sam
 
     assert result.success is True
     assert mock_send.call_args[0][0] == ["ops@example.com"]
+
+
+def test_digest_ignores_expected_destination_resolution_failures(digest_skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {
+        "destination_id": 7,
+        "recipients": ["fallback@example.com"],
+        "subject": "Digest",
+        "include_comparison": False,
+        "include_appendix": False,
+        "include_query_link": False,
+    }, workspace_config={})
+
+    with patch("app.skills.destination_resolver.resolve_channel_config", side_effect=RuntimeError("destination unavailable")), \
+         patch.object(digest_skill, "_send") as mock_send, \
+         patch.object(digest_skill, "_load_snapshot", return_value=None), \
+         patch.object(digest_skill, "_save_snapshot"):
+        result = digest_skill.execute(ctx)
+
+    assert result.success is True
+    assert mock_send.call_args[0][0] == ["fallback@example.com"]
+
+
+def test_digest_surfaces_unexpected_destination_resolution_failures(digest_skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {
+        "destination_id": 7,
+        "recipients": ["fallback@example.com"],
+        "subject": "Digest",
+        "include_comparison": False,
+        "include_appendix": False,
+        "include_query_link": False,
+    }, workspace_config={})
+
+    with patch("app.skills.destination_resolver.resolve_channel_config", side_effect=AssertionError("destination bug")):
+        with pytest.raises(AssertionError, match="destination bug"):
+            digest_skill.execute(ctx)
+
+
+def test_digest_generate_digest_falls_back_on_expected_llm_error(digest_skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {
+        "recipients": ["a@b.com"],
+        "subject": "Digest",
+    }, workspace_config={"llm": {"provider": "openai"}})
+
+    with patch("app.skills.ai_summary_digest.call_analysis_llm", side_effect=RuntimeError("llm unavailable")):
+        digest = digest_skill._generate_digest(ctx, ctx.config, None)
+
+    assert "Configure a workspace LLM" in digest["narrative"]
+
+
+def test_digest_generate_digest_surfaces_unexpected_llm_errors(digest_skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {
+        "recipients": ["a@b.com"],
+        "subject": "Digest",
+    }, workspace_config={"llm": {"provider": "openai"}})
+
+    with patch("app.skills.ai_summary_digest.call_analysis_llm", side_effect=AssertionError("llm bug")):
+        with pytest.raises(AssertionError, match="llm bug"):
+            digest_skill._generate_digest(ctx, ctx.config, None)
+
+
+def test_digest_execute_returns_failed_result_on_expected_send_error(digest_skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {
+        "recipients": ["a@b.com"],
+        "subject": "Digest",
+        "include_comparison": False,
+        "include_appendix": False,
+        "include_query_link": False,
+    }, workspace_config={})
+
+    with patch.object(digest_skill, "_load_snapshot", return_value=None), \
+         patch.object(digest_skill, "_save_snapshot"), \
+         patch.object(digest_skill, "_send", side_effect=RuntimeError("smtp unavailable")):
+        result = digest_skill.execute(ctx)
+
+    assert result.success is False
+    assert result.message == "Email delivery failed."
+    assert "smtp unavailable" in (result.error or "")
+
+
+def test_digest_execute_surfaces_unexpected_send_errors(digest_skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {
+        "recipients": ["a@b.com"],
+        "subject": "Digest",
+        "include_comparison": False,
+        "include_appendix": False,
+        "include_query_link": False,
+    }, workspace_config={})
+
+    with patch.object(digest_skill, "_load_snapshot", return_value=None), \
+         patch.object(digest_skill, "_save_snapshot"), \
+         patch.object(digest_skill, "_send", side_effect=AssertionError("mailer bug")):
+        with pytest.raises(AssertionError, match="mailer bug"):
+            digest_skill.execute(ctx)
+
+
+def test_digest_load_snapshot_returns_none_on_expected_db_error(digest_skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {
+        "recipients": ["a@b.com"],
+        "subject": "Digest",
+    })
+
+    class _Query:
+        def filter_by(self, **kwargs):
+            del kwargs
+            raise SQLAlchemyError("db down")
+
+    with patch("app.models.query.skills.QuerySkill.query", _Query()):
+        assert digest_skill._load_snapshot(ctx) is None
+
+
+def test_digest_load_snapshot_surfaces_unexpected_errors(digest_skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {
+        "recipients": ["a@b.com"],
+        "subject": "Digest",
+    })
+
+    class _Query:
+        def filter_by(self, **kwargs):
+            del kwargs
+            raise AssertionError("snapshot bug")
+
+    with patch("app.models.query.skills.QuerySkill.query", _Query()):
+        with pytest.raises(AssertionError, match="snapshot bug"):
+            digest_skill._load_snapshot(ctx)

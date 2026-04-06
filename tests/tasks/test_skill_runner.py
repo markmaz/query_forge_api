@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from app.tasks import skill_runner
 
 
@@ -109,6 +111,92 @@ def test_run_execute_builds_full_skill_context(app, monkeypatch):
     assert context.metadata.executed_at == fixed_now
     assert context.workspace_config == {"llm": {"provider": "openai"}}
     assert context.frontend_base_url == "https://app.queryforge.local"
+
+
+def test_run_execute_marks_failed_on_expected_runtime_error(app, monkeypatch):
+    sql = _FakeForgeMetaSQL(
+        rows={
+            "query_skills": [
+                {
+                    "id": "skill-1",
+                    "workspace_id": "ws-1",
+                    "name": "Weekly digest",
+                    "skill_type": "ai_summary_digest",
+                    "query_id": None,
+                    "config_json": {},
+                    "is_active": 1,
+                }
+            ]
+        }
+    )
+
+    class _FailingSkill:
+        def execute(self, context):
+            del context
+            raise RuntimeError("expected runtime failure")
+
+    monkeypatch.setattr("app.adapters.mysql_sql_executor.ForgeMetaSQL", lambda: sql)
+    monkeypatch.setattr(skill_runner, "_get_workspace_config", lambda workspace_id: {})
+    monkeypatch.setattr("app.skills.registry.SkillRegistry.get", lambda skill_type: _FailingSkill)
+
+    with app.app_context():
+        with pytest.raises(RuntimeError, match="expected runtime failure"):
+            skill_runner._run_execute(
+                skill_id="skill-1",
+                workspace_id="ws-1",
+                execution_id="exec-1",
+                triggered_by="schedule",
+            )
+
+    failed_update = next(
+        (
+            params
+            for query, params in sql.write_calls
+            if "UPDATE skill_executions SET status = 'failed'" in query
+        ),
+        None,
+    )
+    assert failed_update is not None
+    assert failed_update["id"] == "exec-1"
+    assert "expected runtime failure" in failed_update["err"]
+
+
+def test_run_execute_surfaces_unexpected_errors(app, monkeypatch):
+    sql = _FakeForgeMetaSQL(
+        rows={
+            "query_skills": [
+                {
+                    "id": "skill-1",
+                    "workspace_id": "ws-1",
+                    "name": "Weekly digest",
+                    "skill_type": "ai_summary_digest",
+                    "query_id": None,
+                    "config_json": {},
+                    "is_active": 1,
+                }
+            ]
+        }
+    )
+
+    class _BuggySkill:
+        def execute(self, context):
+            del context
+            raise AssertionError("unexpected skill bug")
+
+    monkeypatch.setattr("app.adapters.mysql_sql_executor.ForgeMetaSQL", lambda: sql)
+    monkeypatch.setattr(skill_runner, "_get_workspace_config", lambda workspace_id: {})
+    monkeypatch.setattr("app.skills.registry.SkillRegistry.get", lambda skill_type: _BuggySkill)
+
+    with app.app_context():
+        with pytest.raises(AssertionError, match="unexpected skill bug"):
+            skill_runner._run_execute(
+                skill_id="skill-1",
+                workspace_id="ws-1",
+                execution_id="exec-1",
+                triggered_by="schedule",
+            )
+
+    assert not any("UPDATE skill_executions SET status = 'failed'" in query for query, _ in sql.write_calls)
 
 
 def test_execute_skill_query_returns_query_metadata_bundle(monkeypatch):
@@ -302,3 +390,102 @@ def test_dispatch_due_advances_next_run_at_after_dispatch(app, monkeypatch):
     )
     assert update_call is not None
     assert update_call["next_run_at"] == datetime(2026, 3, 21, 15, 0, 0)
+
+
+def test_dispatch_due_skips_expected_dispatch_runtime_failures(app, monkeypatch):
+    due_now = datetime(2026, 3, 21, 14, 0, 0)
+    sql = _FakeForgeMetaSQL(
+        rows={
+            "due_schedules": [
+                {
+                    "schedule_id": "sched-1",
+                    "skill_id": "skill-1",
+                    "workspace_id": "ws-1",
+                    "cron_expr": "0 * * * *",
+                    "timezone": "UTC",
+                    "next_run_at": due_now,
+                    "catch_up": 0,
+                }
+            ]
+        }
+    )
+
+    class _FailingTask:
+        def apply_async(self, *, kwargs):
+            del kwargs
+            raise RuntimeError("queue unavailable")
+
+    monkeypatch.setattr("app.adapters.mysql_sql_executor.ForgeMetaSQL", lambda: sql)
+    monkeypatch.setattr("app.tasks.skill_runner.execute_skill", _FailingTask())
+    monkeypatch.setattr("app.skills.schedule_utils.record_dispatch_heartbeat", lambda: None)
+    monkeypatch.setattr("app.skills.schedule_utils.next_n_runs", lambda *args, **kwargs: ["2026-03-21T15:00:00+00:00"])
+    monkeypatch.setattr(skill_runner, "_is_overdue_by_more_than_one_interval", lambda *args, **kwargs: False)
+
+    with app.app_context():
+        result = skill_runner._run_dispatch_due()
+
+    assert result["dispatched"] == 0
+    assert result["items"] == []
+
+
+def test_dispatch_due_surfaces_unexpected_dispatch_errors(app, monkeypatch):
+    due_now = datetime(2026, 3, 21, 14, 0, 0)
+    sql = _FakeForgeMetaSQL(
+        rows={
+            "due_schedules": [
+                {
+                    "schedule_id": "sched-1",
+                    "skill_id": "skill-1",
+                    "workspace_id": "ws-1",
+                    "cron_expr": "0 * * * *",
+                    "timezone": "UTC",
+                    "next_run_at": due_now,
+                    "catch_up": 0,
+                }
+            ]
+        }
+    )
+
+    class _BuggyTask:
+        def apply_async(self, *, kwargs):
+            del kwargs
+            raise AssertionError("unexpected queue bug")
+
+    monkeypatch.setattr("app.adapters.mysql_sql_executor.ForgeMetaSQL", lambda: sql)
+    monkeypatch.setattr("app.tasks.skill_runner.execute_skill", _BuggyTask())
+    monkeypatch.setattr("app.skills.schedule_utils.record_dispatch_heartbeat", lambda: None)
+    monkeypatch.setattr("app.skills.schedule_utils.next_n_runs", lambda *args, **kwargs: ["2026-03-21T15:00:00+00:00"])
+    monkeypatch.setattr(skill_runner, "_is_overdue_by_more_than_one_interval", lambda *args, **kwargs: False)
+
+    with app.app_context():
+        with pytest.raises(AssertionError, match="unexpected queue bug"):
+            skill_runner._run_dispatch_due()
+
+
+def test_get_workspace_config_returns_empty_on_expected_runtime_failure(monkeypatch):
+    class _WorkspaceLLMService:
+        def get_llm_for_role(self, workspace_id, role):
+            del workspace_id, role
+            raise RuntimeError("llm config unavailable")
+
+    monkeypatch.setattr(
+        "app.services.tenancy.workspace_llm_service.WorkspaceLLMService",
+        _WorkspaceLLMService,
+    )
+
+    assert skill_runner._get_workspace_config("ws-1") == {}
+
+
+def test_get_workspace_config_surfaces_unexpected_failures(monkeypatch):
+    class _WorkspaceLLMService:
+        def get_llm_for_role(self, workspace_id, role):
+            del workspace_id, role
+            raise AssertionError("workspace config bug")
+
+    monkeypatch.setattr(
+        "app.services.tenancy.workspace_llm_service.WorkspaceLLMService",
+        _WorkspaceLLMService,
+    )
+
+    with pytest.raises(AssertionError, match="workspace config bug"):
+        skill_runner._get_workspace_config("ws-1")

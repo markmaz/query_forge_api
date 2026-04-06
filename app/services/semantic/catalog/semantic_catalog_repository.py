@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Iterable, List, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort, ForgeQueryTx
 from app.services.semantic.catalog.catalog_models import (
@@ -13,6 +15,7 @@ from app.services.semantic.catalog.catalog_models import (
 )
 
 logger = logging.getLogger(__name__)
+RELATIONSHIP_FK_TARGET_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
 
 
 class SemanticCatalogRepository:
@@ -478,7 +481,7 @@ class SemanticCatalogRepository:
             if target in {"semantic_registry", "semantic_concept"}:
                 self._relationship_fk_target_cache = target
                 return target
-        except Exception:
+        except RELATIONSHIP_FK_TARGET_FALLBACK_ERRORS:
             pass
         self._relationship_fk_target_cache = "semantic_concept"
         return self._relationship_fk_target_cache

@@ -11,6 +11,7 @@ from app.services.shared.jsonify import serialize_record
 ALLOWED_RELATION_KINDS = frozenset({"JOIN", "UNION"})
 ALLOWED_FILTER_MODES = frozenset({"AUTO", "WHERE", "EXISTS"})
 ALLOWED_CARDINALITY = frozenset({"ONE", "MANY"})
+INT_PARSE_ERRORS = (TypeError, ValueError)
 
 
 @dataclass(frozen=True)
@@ -202,7 +203,7 @@ class DomainTableCommandService:
         for value in vals:
             try:
                 parsed = int(value)
-            except Exception as exc:
+            except INT_PARSE_ERRORS as exc:
                 raise ForgeError(f"'{field}' must contain integers", status_code=400) from exc
             if parsed <= 0:
                 raise ForgeError(f"'{field}' must contain positive integers", status_code=400)

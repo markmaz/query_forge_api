@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from app.services.planner.value_normalizers.country import normalize_country_values
+import pytest
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.services.planner.value_normalizers.country import normalize_country_values, resolve_country_from_db
+from tests._support.fakes import FakeForgeQueryPort
 
 
 def test_country_normalize_iso2_direct() -> None:
@@ -26,3 +30,18 @@ def test_country_normalize_list_dedupe() -> None:
 
 def test_country_normalize_unknown() -> None:
     assert normalize_country_values("Wakanda") == []
+
+
+def test_resolve_country_from_db_returns_none_when_reference_tables_are_unavailable() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_exceptions = [SQLAlchemyError("missing country_reference"), SQLAlchemyError("missing ref_country")]
+
+    assert resolve_country_from_db(sql, "United States") is None
+
+
+def test_resolve_country_from_db_surfaces_unexpected_query_errors() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_exceptions = [AssertionError("unexpected country lookup failure")]
+
+    with pytest.raises(AssertionError, match="unexpected country lookup failure"):
+        resolve_country_from_db(sql, "United States")

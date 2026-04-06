@@ -148,7 +148,7 @@ class ExecutionService:
                 if state == "SUCCEEDED":
                     try:
                         inline_rows = ctx.sql_exec.fetch_all_json(str(statement_id))
-                    except Exception:
+                    except (OSError, RuntimeError, TypeError, ValueError):
                         inline_rows = None
 
         job_id = self._job_service.create_job(

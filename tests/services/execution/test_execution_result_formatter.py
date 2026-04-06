@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.services.execution.execution_result_formatter import (
     build_assistant_result_message,
     columns_from_manifest,
@@ -54,3 +56,30 @@ def test_build_assistant_result_message_renders_markdown() -> None:
     content = str(msg["content"])
     assert "Query complete." in content
     assert "| school_name | students |" in content
+
+
+def test_build_assistant_result_message_ignores_invalid_total_values() -> None:
+    msg = build_assistant_result_message(
+        rows=[],
+        columns=[],
+        total="not-a-number",
+        limit=None,
+        offset=None,
+    )
+
+    assert "(total" not in str(msg["content"])
+
+
+def test_build_assistant_result_message_surfaces_unexpected_total_errors() -> None:
+    class _BrokenTotal:
+        def __int__(self) -> int:
+            raise AssertionError("unexpected total coercion failure")
+
+    with pytest.raises(AssertionError, match="unexpected total coercion failure"):
+        build_assistant_result_message(
+            rows=[],
+            columns=[],
+            total=_BrokenTotal(),
+            limit=None,
+            offset=None,
+        )

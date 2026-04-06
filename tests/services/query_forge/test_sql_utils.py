@@ -114,3 +114,52 @@ class TestDpIdent:
     def test_empty_fallback(self):
         from app.services.query_forge.sql_utils import dp_ident
         assert dp_ident("") == "__dp_col"
+
+
+class TestColExpr:
+    def test_invalid_workspace_table_id_maps_to_forge_error(self):
+        from app.services.query_forge.sql_utils import col_expr
+        with pytest.raises(ForgeError, match="Invalid workspaceTableId"):
+            col_expr(
+                {"columnName": "age", "workspaceTableId": "bad"},
+                {},
+                {},
+                {},
+                {},
+                False,
+                "t1",
+                {},
+            )
+
+    def test_invalid_rewrite_workspace_table_id_is_ignored(self):
+        from app.services.query_forge.sql_utils import col_expr
+        result = col_expr(
+            {"columnName": "age", "workspaceTableId": "bad"},
+            {},
+            {},
+            {"age": "__dp_age"},
+            {},
+            True,
+            "t1",
+            {},
+        )
+        assert result == "__dp_age"
+
+    def test_unexpected_rewrite_workspace_table_id_error_propagates(self):
+        from app.services.query_forge.sql_utils import col_expr
+
+        class _BadInt:
+            def __int__(self):
+                raise AssertionError("int bug")
+
+        with pytest.raises(AssertionError, match="int bug"):
+            col_expr(
+                {"columnName": "age", "workspaceTableId": _BadInt()},
+                {},
+                {},
+                {"age": "__dp_age"},
+                {},
+                True,
+                "t1",
+                {},
+            )

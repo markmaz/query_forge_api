@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import json
+from json import JSONDecodeError
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from app.exceptions.forge_error import ForgeError
@@ -15,6 +16,8 @@ from app.services.query_forge.types import CompilationContext
 from app.services.value_overrides.list_schema import TABLE_BY_TYPE
 
 QF_MAX_MANUAL_IN = 150
+JSON_LIST_PARSE_ERRORS = (JSONDecodeError,)
+LITERAL_LIST_PARSE_ERRORS = (SyntaxError, ValueError)
 VALUE_OVERRIDE_IN_COLUMN_BY_TYPE = {
     "regions": "zipcode",
     "npiCategories": "npi",
@@ -135,10 +138,10 @@ class WhereCompiler:
                     parsed = None
                     try:
                         parsed = json.loads(s)
-                    except Exception:
+                    except JSON_LIST_PARSE_ERRORS:
                         try:
                             parsed = ast.literal_eval(s)
-                        except Exception:
+                        except LITERAL_LIST_PARSE_ERRORS:
                             parsed = None
                     if isinstance(parsed, (list, tuple)):
                         raw = list(parsed)

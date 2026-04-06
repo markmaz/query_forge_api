@@ -8,6 +8,8 @@ from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.forge_match.field_extractor import SourceFieldRecord
 
+JSON_DICT_PARSE_ERRORS = (TypeError, ValueError, json.JSONDecodeError)
+
 
 class ForgeMatchSessionReader:
     def __init__(
@@ -313,7 +315,7 @@ def _parse_json_dict(value: Any) -> Optional[Dict[str, Any]]:
             return None
         try:
             parsed = json.loads(text)
-        except Exception:
+        except JSON_DICT_PARSE_ERRORS:
             return None
         return parsed if isinstance(parsed, dict) else None
     return None

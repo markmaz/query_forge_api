@@ -20,11 +20,14 @@ from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import Boolean, DateTime, Enum, Index, Integer, String, Text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.extensions import db
 
 logger = logging.getLogger(__name__)
+DESTINATION_CONFIG_ACCESS_ERRORS = (RuntimeError, ValueError)
+DESTINATION_USAGE_SUMMARY_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
 
 DESTINATION_TYPES = ("slack", "teams", "webhook", "email_group")
 TEST_STATUSES = ("success", "failed")
@@ -168,7 +171,7 @@ class WorkspaceDestination(db.Model):
         try:
             config = self.get_config()
             return mask_config(config, self.destination_type)
-        except Exception:
+        except DESTINATION_CONFIG_ACCESS_ERRORS:
             return {}
 
     # ------------------------------------------------------------------
@@ -186,7 +189,7 @@ class WorkspaceDestination(db.Model):
         try:
             # Count distinct skills referencing this destination
             skills_using = _count_skills_using_destination(self.id, self.workspace_id)
-        except Exception:
+        except DESTINATION_USAGE_SUMMARY_ERRORS:
             skills_using = None
         return {
             "usage_count": self.usage_count,
@@ -254,5 +257,5 @@ def _count_skills_using_destination(destination_id: int, workspace_id: int) -> i
             {"ws": workspace_id, "dest_id": str(destination_id)},
         ).scalar()
         return int(result or 0)
-    except Exception:
+    except DESTINATION_USAGE_SUMMARY_ERRORS:
         return 0

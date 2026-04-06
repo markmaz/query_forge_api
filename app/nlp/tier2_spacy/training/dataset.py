@@ -57,7 +57,7 @@ def load_jsonl(path: str) -> List[DatasetExample]:
             continue
         try:
             rows.append(parse_jsonl_line(stripped))
-        except Exception as exc:
+        except DATASET_PARSE_ERRORS as exc:
             raise ValueError(f"invalid JSONL at line {idx}: {exc}") from exc
     return rows
 
@@ -88,7 +88,7 @@ def to_docbin(*, jsonl_path: str, output_path: str, lang: str = "en") -> int:
     try:
         import spacy
         from spacy.tokens import DocBin
-    except Exception as exc:
+    except ImportError as exc:
         raise RuntimeError("spaCy is required to create DocBin") from exc
 
     nlp = spacy.blank(lang)
@@ -122,3 +122,4 @@ def try_extract_text_span(text: str, phrase: str) -> Optional[DatasetEntity]:
     if start < 0:
         return None
     return DatasetEntity(start=start, end=start + len(token), label="VALUE_LITERAL")
+DATASET_PARSE_ERRORS = (json.JSONDecodeError, TypeError, ValueError)

@@ -17,6 +17,7 @@ from app.services.semantic.catalog.catalog_models import (
 )
 
 logger = logging.getLogger(__name__)
+LLM_ENRICHMENT_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
 class _LLMBatchResponse(BaseModel):
@@ -253,7 +254,7 @@ class SemanticEnrichmentService:
                 for idx, profile in enumerate(batch_profiles):
                     merged_item = _merge_with_heuristic(llm_items[idx], batch_heuristics[idx], profile=profile)
                     merged.append(EnrichedColumnProfile(profile=profile, enrichment=merged_item))
-            except Exception as exc:
+            except LLM_ENRICHMENT_FALLBACK_ERRORS as exc:
                 logger.warning(
                     "semantic_catalog enrichment fallback used for batch start=%s size=%s err=%s",
                     start,

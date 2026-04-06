@@ -9,6 +9,8 @@ from app.ports.sql_executor import ForgeQueryPort
 from app.services.semantic.value_alias_service import canonicalize_value
 from app.services.semantic.plan.utils import _in_clause
 
+JSON_ROUNDTRIP_FALLBACK_ERRORS = (TypeError, ValueError)
+
 
 class ValueAliasApplier:
     def __init__(
@@ -193,7 +195,7 @@ class ValueAliasApplier:
             return sql_json
         try:
             out = json.loads(json.dumps(sql_json))
-        except Exception:
+        except JSON_ROUNDTRIP_FALLBACK_ERRORS:
             out = dict(sql_json)
 
         where_node = out.get("where")

@@ -15,6 +15,7 @@ from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
+QR_IMPORT_FALLBACK_ERRORS = (ImportError,)
 
 TOTP_PENDING_TTL_S = int(os.getenv("TOTP_PENDING_TTL_SECONDS", "600"))
 TOTP_ISSUER_NAME = (os.getenv("TOTP_ISSUER_NAME", "Query Forge") or "Query Forge").strip() or "Query Forge"
@@ -172,7 +173,7 @@ class TotpService:
         try:
             import qrcode  # type: ignore
             from qrcode.image.svg import SvgPathImage  # type: ignore
-        except Exception as exc:
+        except QR_IMPORT_FALLBACK_ERRORS as exc:
             raise ForgeError("QR code generation is unavailable", status_code=500) from exc
 
         image = qrcode.make(content, image_factory=SvgPathImage)

@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 _LOCK = threading.Lock()
 _NLP_CACHE: Optional[Any] = None
+SPACY_MODEL_LOAD_ERRORS = (ImportError, OSError, ValueError)
 
 
 def get_nlp() -> Optional[Any]:
@@ -30,7 +31,7 @@ def get_nlp() -> Optional[Any]:
 
             nlp = spacy.load(model_path)
             logger.info("Loaded spaCy pipeline from model path=%s", model_path)
-        except Exception:
+        except SPACY_MODEL_LOAD_ERRORS:
             logger.exception("Failed to load spaCy model path=%s", model_path)
             return None
 

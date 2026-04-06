@@ -6,12 +6,15 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.models.tenancy.workspace import Workspace
 from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
+WORKSPACE_LOOKUP_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
 
 
 @dataclass(frozen=True)
@@ -68,7 +71,7 @@ class WorkspaceService:
                 """,
                 params,
             )
-        except Exception:
+        except WORKSPACE_LOOKUP_FALLBACK_ERRORS:
             # Backward compatibility for environments without tenancy columns.
             legacy_rows = self._sql.execute_query_mappings(
                 """

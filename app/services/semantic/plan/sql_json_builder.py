@@ -160,7 +160,7 @@ class SqlJsonBuilder:
         if domain_id is not None:
             try:
                 edits.append(SetDomainEdit(op="setDomain", domainId=int(domain_id)))
-            except Exception:
+            except (TypeError, ValueError):
                 dropped += 1
 
         table_hint = SqlJsonBuilder.extract_from_table_hint(llm_sql_json)
@@ -196,7 +196,7 @@ class SqlJsonBuilder:
                         alias=None,
                     )
                 )
-            except Exception:
+            except (TypeError, ValueError):
                 dropped += 1
 
         for item in filters:

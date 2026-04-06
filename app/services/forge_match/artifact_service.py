@@ -13,6 +13,8 @@ from app.services.forge_match.view_draft_sql import (
     prepare_draft_execution_sql,
 )
 
+EXECUTION_WRAP_ERRORS = (OSError, RuntimeError, TypeError, ValueError, KeyError)
+
 
 class ForgeMatchArtifactService:
     def __init__(
@@ -101,7 +103,7 @@ class ForgeMatchArtifactService:
             )
         except ForgeError:
             raise
-        except Exception as exc:
+        except EXECUTION_WRAP_ERRORS as exc:
             raise ForgeError(f"Draft SQL execution failed: {str(exc)}", status_code=500) from exc
 
         status_payload = dict(result.get("status") or {})

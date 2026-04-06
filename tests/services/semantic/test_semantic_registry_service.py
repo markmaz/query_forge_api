@@ -69,13 +69,33 @@ def test_registry_invalid_semantic_type_rejected() -> None:
 
 def test_registry_duplicate_constraint_maps_to_conflict() -> None:
     sql = FakeForgeQueryPort()
-    sql.insert_exceptions = [Exception("Duplicate entry 'education-student.id' for key 'uq_semantic_registry_vertical_concept'")]
+    sql.insert_exceptions = [RuntimeError("Duplicate entry 'education-student.id' for key 'uq_semantic_registry_vertical_concept'")]
     svc = SemanticRegistryService(sql=sql)
 
     with pytest.raises(ForgeError) as exc:
         svc.create_entry({"vertical": "education", "concept_key": "student.id", "semantic_type": "identifier"})
 
     assert exc.value.status_code == 409
+
+
+def test_registry_create_maps_expected_write_error() -> None:
+    sql = FakeForgeQueryPort()
+    sql.insert_exceptions = [RuntimeError("database unavailable")]
+    svc = SemanticRegistryService(sql=sql)
+
+    with pytest.raises(ForgeError) as exc:
+        svc.create_entry({"vertical": "education", "concept_key": "student.id", "semantic_type": "identifier"})
+
+    assert exc.value.status_code == 500
+
+
+def test_registry_create_surfaces_unexpected_write_error() -> None:
+    sql = FakeForgeQueryPort()
+    sql.insert_exceptions = [AssertionError("insert bug")]
+    svc = SemanticRegistryService(sql=sql)
+
+    with pytest.raises(AssertionError, match="insert bug"):
+        svc.create_entry({"vertical": "education", "concept_key": "student.id", "semantic_type": "identifier"})
 
 
 def test_registry_list_filtering_uses_expected_predicates() -> None:
@@ -161,6 +181,15 @@ def test_registry_update_and_delete() -> None:
 
     svc.delete_entry(7)
     assert len(sql.write_calls) == 2
+
+
+def test_registry_update_surfaces_unexpected_write_error() -> None:
+    sql = FakeForgeQueryPort()
+    sql.write_exceptions = [AssertionError("update bug")]
+    svc = SemanticRegistryService(sql=sql)
+
+    with pytest.raises(AssertionError, match="update bug"):
+        svc.update_entry(7, {"granularity_rank": 1})
 
 
 def test_registry_list_normalizes_datetime_fields() -> None:

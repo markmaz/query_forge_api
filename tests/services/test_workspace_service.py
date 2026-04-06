@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.exceptions.forge_error import ForgeError
+import app.services.workspace_service as workspace_service
 from app.services.workspace_service import WorkspaceService
 
 
@@ -83,3 +85,15 @@ def test_get_workspace_legacy_fallback() -> None:
     ws = svc.get_workspace("ws-1")
     assert ws["workspace_id"] == "ws-1"
     assert ws["server"] == "https://legacy.example.com"
+
+
+def test_get_workspace_surfaces_unexpected_lookup_errors() -> None:
+    class _SQL:
+        def execute_query_mappings(self, query, _params=None):
+            del query, _params
+            raise AssertionError("unexpected workspace lookup bug")
+
+    svc = WorkspaceService(sql=_SQL())
+
+    with pytest.raises(AssertionError, match="unexpected workspace lookup bug"):
+        svc.get_workspace("ws-1")

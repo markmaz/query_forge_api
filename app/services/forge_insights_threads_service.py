@@ -5,11 +5,16 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
+
+LEGACY_THREAD_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+STALE_FILTER_FALLBACK_ERRORS = (ImportError, OSError, RuntimeError, TypeError, ValueError)
 
 
 class ForgeInsightsThreadsService:
@@ -279,7 +284,7 @@ class ForgeInsightsThreadsService:
                 """,
                 params,
             )
-        except Exception:
+        except LEGACY_THREAD_FALLBACK_ERRORS:
             # Backward-compatible fallback for environments that have not run V024 yet.
             logger.warning(
                 "forge insights conversation table unavailable; falling back to legacy thread listing",
@@ -337,7 +342,7 @@ class ForgeInsightsThreadsService:
                             continue
                         filtered_rows.append(row)
                     rows = filtered_rows
-                except Exception:
+                except STALE_FILTER_FALLBACK_ERRORS:
                     logger.warning(
                         "forge insights stale-thread cache filter failed; returning legacy thread rows",
                         exc_info=True,

@@ -283,7 +283,7 @@ class DatabricksForgeQueryPort:
         response.raise_for_status()
         try:
             return response.json()
-        except Exception as exc:
+        except ValueError as exc:
             raise RuntimeError("Databricks returned a non-JSON response") from exc
 
     @staticmethod

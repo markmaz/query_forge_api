@@ -167,3 +167,36 @@ class TestDataPrepCompilerValidation:
         # Should construct with no args
         compiler = DataPrepCompiler()
         assert compiler is not None
+
+    def test_compile_skips_invalid_workspace_table_ids(self):
+        from app.services.query_forge.data_prep_compiler import DataPrepCompiler
+
+        base_selects, by_colname, by_modelid, by_wt_col = DataPrepCompiler().build_prep_base_selects(
+            required_cols=[
+                {"workspaceTableId": 1, "columnName": "age"},
+                {"workspaceTableId": "bad", "columnName": "age"},
+            ],
+            primary_id=1,
+            qf_base_alias=_QF_BASE_ALIAS,
+            alias_by_wt=_ALIAS_BY_WT,
+        )
+
+        assert base_selects == ["t1.age AS age"]
+        assert by_colname == {"age": "age"}
+        assert by_modelid == {}
+        assert by_wt_col == {(1, "age"): "age"}
+
+    def test_compile_surfaces_unexpected_workspace_table_id_errors(self):
+        from app.services.query_forge.data_prep_compiler import DataPrepCompiler
+
+        class _BadInt:
+            def __int__(self) -> int:
+                raise AssertionError("unexpected workspace table conversion failure")
+
+        with pytest.raises(AssertionError, match="unexpected workspace table conversion failure"):
+            DataPrepCompiler().build_prep_base_selects(
+                required_cols=[{"workspaceTableId": _BadInt(), "columnName": "age"}],
+                primary_id=1,
+                qf_base_alias=_QF_BASE_ALIAS,
+                alias_by_wt=_ALIAS_BY_WT,
+            )

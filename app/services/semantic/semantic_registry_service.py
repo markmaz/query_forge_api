@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
+from sqlalchemy.exc import SQLAlchemyError
 
 ALLOWED_SEMANTIC_TYPES = {
     "entity",
@@ -44,6 +45,7 @@ WRITEABLE_FIELDS = {
     "display_priority",
     "sensitive",
 }
+WRITE_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
 
 
 class SemanticRegistryService:
@@ -206,7 +208,7 @@ class SemanticRegistryService:
                 """,
                 data,
             )
-        except Exception as exc:
+        except WRITE_FALLBACK_ERRORS as exc:
             _raise_write_error(exc)
 
         if result.lastrowid:
@@ -248,7 +250,7 @@ class SemanticRegistryService:
                 """,
                 data,
             )
-        except Exception as exc:
+        except WRITE_FALLBACK_ERRORS as exc:
             _raise_write_error(exc)
             return self.get_entry(row_id)
 

@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+import pytest
+from sqlalchemy.exc import SQLAlchemyError
+
+import app.services.domain.planner_capability_packing_policy_service as capability_packing_policy_service
 from app.services.domain.planner_capability_packing_policy_service import PlannerCapabilityPackingPolicyService
 
 
@@ -59,3 +65,42 @@ def test_packing_policy_returns_name_constraint_support() -> None:
 
     assert "name_constraint_support" in out["matched_policies"]
     assert out["include_name_constraint_columns"] is True
+
+
+def test_packing_policy_service_falls_back_on_expected_db_lookup_errors() -> None:
+    class _FakeSQL:
+        def execute_query_mappings(self, sql, params):
+            del sql, params
+            raise SQLAlchemyError("db unavailable")
+
+    service = PlannerCapabilityPackingPolicyService(sql=_FakeSQL(), enable_db_lookup=True)
+
+    out = service.get_packing_requirements(
+        workspace_id="ws_demo",
+        vertical_norm="k12",
+        prompt_signals=["school_listing", "city_state_prompt"],
+        capability_features=["HAS_PREFERRED_STATE_COLUMN"],
+    )
+
+    assert "school_listing_location_append" in out["matched_policies"]
+
+
+def test_packing_policy_service_surfaces_unexpected_policy_parse_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeSQL:
+        def execute_query_mappings(self, sql, params):
+            del sql, params
+            return []
+
+    def _boom(_value):
+        raise AssertionError("unexpected policy parse bug")
+
+    service = PlannerCapabilityPackingPolicyService(sql=_FakeSQL(), enable_db_lookup=True)
+    monkeypatch.setattr(capability_packing_policy_service, "_parse_policy_rule", _boom)
+
+    with pytest.raises(AssertionError, match="unexpected policy parse bug"):
+        service.get_packing_requirements(
+            workspace_id="ws_demo",
+            vertical_norm="k12",
+            prompt_signals=["school_listing"],
+            capability_features=[],
+        )

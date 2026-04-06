@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock
+import pytest
 
 from app.services.analytics.profiling_service import ProfilingService
 
@@ -66,6 +67,26 @@ def test_profile_table_failure_does_not_abort_run():
 
     assert result["tables_failed"] == 2
     assert result["profiled"] == 0
+
+
+def test_profile_table_failure_surfaces_unexpected_errors():
+    provider = MagicMock()
+    provider.profile_table_columns.side_effect = AssertionError("unexpected profiling bug")
+    mysql, tx = _make_mysql()
+    del tx
+    svc = ProfilingService(mysql=mysql)
+
+    with pytest.raises(AssertionError, match="unexpected profiling bug"):
+        svc.profile_and_persist(
+            provider=provider,
+            catalog=None,
+            schema="sales",
+            table_id_by_name={"orders": 1},
+            columns=[
+                {"table_name": "orders", "column_name": "id", "data_type": "BIGINT", "is_nullable": False},
+            ],
+            options={},
+        )
 
 
 def test_profile_persists_sample_stats_to_mysql():

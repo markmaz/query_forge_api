@@ -5,6 +5,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.forge_match.pipeline_adapters import (
@@ -23,6 +25,9 @@ from app.services.shared_ai.tracing import serialize_pipeline_context
 logger = logging.getLogger(__name__)
 
 _TERMINAL_SESSION_STATUSES = {"uploaded", "analyzed", "failed", "canceled", "cancelled"}
+ANALYZE_SESSION_FAILURE_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+SESSION_CANCEL_CHECK_FALLBACK_ERRORS = (SQLAlchemyError,)
+SESSION_PROGRESS_FALLBACK_ERRORS = (SQLAlchemyError,)
 
 
 class ForgeMatchSessionJobCoordinator:
@@ -159,7 +164,7 @@ class ForgeMatchSessionJobCoordinator:
         try:
             result = self._run_session_pipeline(context)
             return dict(result.payload)
-        except Exception as exc:
+        except ANALYZE_SESSION_FAILURE_ERRORS as exc:
             logger.exception("ForgeMatch analyze session failed session_id=%s", session_id)
             progress = context.metadata.get("session_progress") or {}
             analyzed = int(progress.get("analyzed_count") or 0)
@@ -280,7 +285,7 @@ class ForgeMatchSessionJobCoordinator:
                 """,
                 {"session_id": session_id},
             )
-        except Exception:
+        except SESSION_CANCEL_CHECK_FALLBACK_ERRORS:
             return False
         if not rows:
             return False
@@ -351,7 +356,7 @@ class ForgeMatchSessionJobCoordinator:
             try:
                 self._sql.execute_write(advanced_sql, params)
                 return
-            except Exception:
+            except SESSION_PROGRESS_FALLBACK_ERRORS:
                 self._extended_progress_columns_supported = False
                 logger.warning(
                     "forge_match_session extended progress columns missing; using fallback updates"

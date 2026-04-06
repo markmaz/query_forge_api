@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import pytest
+
 from app.services.query_tree.saved_query_tree_service import ForgeFolderRow, ForgeQueryRow, SavedQueryTreeService
 from tests._support.fakes import FakeForgeQueryPort
 
@@ -68,3 +70,20 @@ def test_build_trash_tree() -> None:
     ]
     nodes = service._build_trash_tree(folders, queries)
     assert nodes[0]["nodeType"] == "folder"
+
+
+def test_tool_from_sql_json_returns_none_for_invalid_json_string() -> None:
+    service = SavedQueryTreeService(workspace_id="ws1", user_id="u1", user_display_name="User", sql=FakeForgeQueryPort())
+    assert service._tool_from_sql_json("{not-json}") is None
+
+
+def test_tool_from_sql_json_surfaces_unexpected_json_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = SavedQueryTreeService(workspace_id="ws1", user_id="u1", user_display_name="User", sql=FakeForgeQueryPort())
+
+    def _boom(_payload):
+        raise AssertionError("unexpected json loader failure")
+
+    monkeypatch.setattr("app.services.query_tree.query_tree_read_model_service.json.loads", _boom)
+
+    with pytest.raises(AssertionError, match="unexpected json loader failure"):
+        service._tool_from_sql_json("{\"meta\": {\"tool\": \"builder\"}}")

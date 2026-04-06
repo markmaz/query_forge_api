@@ -11,6 +11,7 @@ from app.email.mailer import get_logo, send_email
 from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
+EMAIL_NOTIFICATION_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
 class SalesInquiryService:
@@ -47,7 +48,7 @@ class SalesInquiryService:
 
         try:
             send_email(get_logo(), subject, SALES_INQUIRY_EMAIL, html_body)
-        except Exception:
+        except EMAIL_NOTIFICATION_FALLBACK_ERRORS:
             logger.exception("Failed to send sales inquiry email notification.")
 
     def create_inquiry(self, payload: Dict[str, Any]) -> uuid.UUID:

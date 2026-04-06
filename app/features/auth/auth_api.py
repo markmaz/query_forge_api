@@ -3,6 +3,7 @@ import os
 from typing import Any, Dict
 from urllib.parse import unquote
 
+from itsdangerous import BadData
 from flask import g, jsonify, make_response, request
 from flask_restx import Namespace, Resource, fields
 
@@ -93,6 +94,13 @@ def _extract_invite_token(body: Dict[str, Any]) -> str:
     if body_token:
         return body_token
     return str(request.args.get("token") or "").strip()
+
+
+def _validate_invite_token(token: str) -> str:
+    try:
+        return str(validate_token(token)).strip()
+    except (BadData, TypeError, ValueError):
+        return ""
 
 
 def _clear_legacy_refresh_cookies(response) -> None:
@@ -472,9 +480,8 @@ class InviteValidationResource(Resource):
         if not token:
             return {"error": "Missing token"}, 400
 
-        try:
-            user_id = validate_token(token)
-        except Exception:
+        user_id = _validate_invite_token(token)
+        if not user_id:
             return {"error": "Invalid or expired token"}, 400
         try:
             user_service = UserService()
@@ -498,10 +505,7 @@ class InviteAcceptResource(Resource):
         if not token:
             return {"error": "Missing token"}, 400
 
-        try:
-            user_id = str(validate_token(token)).strip()
-        except Exception:
-            return {"error": "Invalid or expired token"}, 400
+        user_id = _validate_invite_token(token)
         if not user_id:
             return {"error": "Invalid or expired token"}, 400
 

@@ -4,11 +4,20 @@ import logging
 from typing import Optional
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import NullPool
 
 from app.ports.sql_executor_abc import SQLExecutor
 
 logger = logging.getLogger(__name__)
+
+MYSQL_EXECUTION_ERRORS = (
+    SQLAlchemyError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
 
 
 class MySQLAnalyticsSQLExecutor(SQLExecutor):
@@ -105,7 +114,7 @@ class MySQLAnalyticsSQLExecutor(SQLExecutor):
             with self._engine.connect() as conn:
                 result = conn.execute(text(sql), params or {})
                 return [dict(row._mapping) for row in result.fetchall()]
-        except Exception as exc:
+        except MYSQL_EXECUTION_ERRORS as exc:
             # FIND-021: log full driver exception internally; sanitize the raised
             # message so MySQL host/port are not returned to callers.
             logger.exception("MySQLAnalyticsSQLExecutor.execute failed")
@@ -116,7 +125,7 @@ class MySQLAnalyticsSQLExecutor(SQLExecutor):
         try:
             with self._engine.connect() as conn:
                 conn.execute(text("SELECT 1 AS _ping"))
-        except Exception as exc:
+        except MYSQL_EXECUTION_ERRORS as exc:
             # FIND-021: sanitized message — no host or port details.
             logger.exception("MySQLAnalyticsSQLExecutor.test_connection failed")
             raise RuntimeError("Analytics datasource connection test failed") from exc

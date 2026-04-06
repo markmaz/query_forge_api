@@ -146,6 +146,66 @@ def _edit_by_op(edits: List[Dict[str, Any]], op: str) -> Dict[str, Any]:
     raise AssertionError(f"Missing edit op={op}: {edits}")
 
 
+def test_vllm_client_call_preserves_expected_request_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = vllm_client.VllmClient(
+        base_url="http://localhost:8000",
+        model="qwen25-7b",
+        timeout=60,
+        temperature=0.2,
+        top_p=0.8,
+        max_tokens=800,
+    )
+
+    def _boom(*args, **kwargs):
+        del args, kwargs
+        raise vllm_client.requests.RequestException("connection refused")
+
+    monkeypatch.setattr(vllm_client.requests, "post", _boom)
+
+    with pytest.raises(vllm_client.requests.RequestException, match="connection refused"):
+        client.call([{"role": "user", "content": "hi"}])
+
+
+def test_vllm_client_call_surfaces_unexpected_post_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = vllm_client.VllmClient(
+        base_url="http://localhost:8000",
+        model="qwen25-7b",
+        timeout=60,
+        temperature=0.2,
+        top_p=0.8,
+        max_tokens=800,
+    )
+
+    def _boom(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("unexpected post bug")
+
+    monkeypatch.setattr(vllm_client.requests, "post", _boom)
+
+    with pytest.raises(AssertionError, match="unexpected post bug"):
+        client.call([{"role": "user", "content": "hi"}])
+
+
+def test_vllm_client_health_surfaces_unexpected_get_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = vllm_client.VllmClient(
+        base_url="http://localhost:8000",
+        model="qwen25-7b",
+        timeout=60,
+        temperature=0.2,
+        top_p=0.8,
+        max_tokens=800,
+    )
+
+    def _boom(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("unexpected get bug")
+
+    monkeypatch.setattr(vllm_client.requests, "get", _boom)
+
+    with pytest.raises(AssertionError, match="unexpected get bug"):
+        client.health()
+
+
 def test_suggest_valid_json_first_attempt(client, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: List[Dict[str, Any]] = []
 
@@ -654,6 +714,38 @@ def test_infer_domain_from_columns_ambiguous_returns_none() -> None:
         sql_executor=_SQL(),
     )
     assert qf_inferred is None
+
+
+def test_infer_domain_safely_returns_none_on_expected_runtime_errors() -> None:
+    class _SQL:
+        def execute_query_mappings(self, query: str, params: Dict[str, Any]):
+            _ = (query, params)
+            raise RuntimeError("db unavailable")
+
+    svc = domain_seeder.DomainSeeder(sql_executor=_SQL())
+
+    assert (
+        svc.infer_domain_safely(
+            workspace_id="ws-1",
+            edits=[{"op": "addSelect", "col": {"workspaceTableId": 24}}],
+        )
+        is None
+    )
+
+
+def test_infer_domain_safely_surfaces_unexpected_errors() -> None:
+    class _SQL:
+        def execute_query_mappings(self, query: str, params: Dict[str, Any]):
+            _ = (query, params)
+            raise AssertionError("unexpected domain inference bug")
+
+    svc = domain_seeder.DomainSeeder(sql_executor=_SQL())
+
+    with pytest.raises(AssertionError, match="unexpected domain inference bug"):
+        svc.infer_domain_safely(
+            workspace_id="ws-1",
+            edits=[{"op": "addSelect", "col": {"workspaceTableId": 24}}],
+        )
 
 
 def test_suggest_retries_when_literals_present_but_filters_missing(client, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -112,7 +112,7 @@ def build_assistant_result_message(
     total_int = None
     try:
         total_int = int(total)
-    except Exception:
+    except (TypeError, ValueError):
         total_int = None
     summary = f"Query complete. Returned {shown} row(s)"
     if total_int is not None:

@@ -56,7 +56,7 @@ class VllmClient:
         )
         try:
             response = requests.post(url, json=payload, timeout=self.timeout)
-        except Exception as exc:
+        except requests.RequestException as exc:
             log_llm_exception(
                 logger,
                 client_name="AISuggestService.chat",
@@ -112,7 +112,7 @@ class VllmClient:
         )
         try:
             response = requests.get(url, timeout=self.timeout)
-        except Exception as exc:
+        except requests.RequestException as exc:
             log_llm_exception(
                 logger,
                 client_name="AISuggestService.health",

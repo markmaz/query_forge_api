@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.tasks.ingestion_tasks import _run_sync_and_update_record
 
 
@@ -144,3 +146,118 @@ def test_run_sync_persists_profiling_and_enrichment_counts():
     assert final_params["columns_updated"] == 5
     assert final_params["tables_failed"] == 3
     assert "Completed with warnings" in str(final_params.get("error") or "")
+
+
+def test_run_sync_progress_falls_back_when_advanced_columns_missing():
+    mysql, tx = _make_mysql()
+    sync_svc = MagicMock()
+
+    def _run_with_progress(**kwargs):
+        kwargs["progress_callback"]({"tables_total": 1, "tables_done": 1})
+        return {
+            "tables_upserted": 1,
+            "columns_upserted": 2,
+            "tables_discovered": 1,
+        }
+
+    sync_svc.sync_workspace_source_metadata.side_effect = _run_with_progress
+    tx.execute_write.side_effect = [RuntimeError("missing advanced columns"), None, None]
+
+    _run_sync_and_update_record(
+        run_id="test-run-id",
+        datasource="primary",
+        catalog=None,
+        schema="sales",
+        workspace_id="ws-1",
+        table_names=None,
+        run_profiling=False,
+        run_enrichment=False,
+        overwrite_descriptions=False,
+        profiling_options=None,
+        sync_service=sync_svc,
+        mysql=mysql,
+    )
+
+    assert tx.execute_write.call_count == 3
+
+
+def test_run_sync_progress_surfaces_unexpected_write_errors():
+    mysql, tx = _make_mysql()
+    sync_svc = MagicMock()
+
+    def _run_with_progress(**kwargs):
+        kwargs["progress_callback"]({"tables_total": 1, "tables_done": 1})
+        return {
+            "tables_upserted": 1,
+            "columns_upserted": 2,
+            "tables_discovered": 1,
+        }
+
+    sync_svc.sync_workspace_source_metadata.side_effect = _run_with_progress
+    tx.execute_write.side_effect = AssertionError("unexpected progress write bug")
+
+    with pytest.raises(AssertionError, match="unexpected progress write bug"):
+        _run_sync_and_update_record(
+            run_id="test-run-id",
+            datasource="primary",
+            catalog=None,
+            schema="sales",
+            workspace_id="ws-1",
+            table_names=None,
+            run_profiling=False,
+            run_enrichment=False,
+            overwrite_descriptions=False,
+            profiling_options=None,
+            sync_service=sync_svc,
+            mysql=mysql,
+        )
+
+
+def test_run_sync_final_status_falls_back_when_advanced_columns_missing():
+    mysql, tx = _make_mysql()
+    sync_svc = MagicMock()
+    sync_svc.sync_workspace_source_metadata.return_value = {
+        "tables_upserted": 1,
+        "columns_upserted": 2,
+        "tables_discovered": 1,
+    }
+    tx.execute_write.side_effect = [RuntimeError("missing advanced columns"), None]
+
+    _run_sync_and_update_record(
+        run_id="test-run-id",
+        datasource="primary",
+        catalog=None,
+        schema="sales",
+        workspace_id="ws-1",
+        table_names=None,
+        run_profiling=False,
+        run_enrichment=False,
+        overwrite_descriptions=False,
+        profiling_options=None,
+        sync_service=sync_svc,
+        mysql=mysql,
+    )
+
+    assert tx.execute_write.call_count == 2
+
+
+def test_run_sync_surfaces_unexpected_service_failures():
+    mysql, tx = _make_mysql()
+    sync_svc = MagicMock()
+    sync_svc.sync_workspace_source_metadata.side_effect = AssertionError("unexpected sync bug")
+
+    with pytest.raises(AssertionError, match="unexpected sync bug"):
+        _run_sync_and_update_record(
+            run_id="test-run-id",
+            datasource="primary",
+            catalog=None,
+            schema="sales",
+            workspace_id="ws-1",
+            table_names=None,
+            run_profiling=False,
+            run_enrichment=False,
+            overwrite_descriptions=False,
+            profiling_options=None,
+            sync_service=sync_svc,
+            mysql=mysql,
+        )

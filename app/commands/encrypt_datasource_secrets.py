@@ -62,7 +62,7 @@ def _coerce_json_obj(value):
             return {}
         try:
             parsed = json.loads(text)
-        except Exception:
+        except json.JSONDecodeError:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}

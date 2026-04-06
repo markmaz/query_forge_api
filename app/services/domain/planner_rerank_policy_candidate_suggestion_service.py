@@ -4,6 +4,8 @@ import json
 import re
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
+from pydantic import ValidationError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config.llm_resolver import ResolvedLLMRuntime, build_llm_client_for_role
 from app.constants.llm_roles import LLMRole
@@ -23,6 +25,8 @@ from app.services.llm.llm_client import LLMClient
 from app.services.planner_domain.prompt_signal_service import PromptSignalService
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+LLM_SUGGESTION_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+LLM_SUGGESTION_VALIDATION_ERRORS = (ValidationError, TypeError, ValueError)
 
 
 class PlannerRerankPolicyCandidateSuggestionService:
@@ -102,7 +106,7 @@ class PlannerRerankPolicyCandidateSuggestionService:
                 observed_domain=observed_domain,
             )
             suggestion_source_type = "trace_review"
-        except Exception as exc:
+        except LLM_SUGGESTION_FALLBACK_ERRORS as exc:
             del exc
             suggestion = _build_fallback_suggestion(
                 prompt=req.prompt,
@@ -257,7 +261,7 @@ class PlannerRerankPolicyCandidateSuggestionService:
 def _is_valid_llm_payload(payload: Dict[str, Any]) -> bool:
     try:
         PlannerRerankPolicyCandidateSuggestionLLMResponse.model_validate(payload)
-    except Exception:
+    except LLM_SUGGESTION_VALIDATION_ERRORS:
         return False
     return True
 

@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Mapping, Optional
 from app.ports.sql_executor import ForgeExecResult, ForgeQueryPort
 from app.ports.sql_executor_abc import SQLExecutor
 
+ASYNC_STATEMENT_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+
 
 @dataclass
 class _StatementRecord:
@@ -57,7 +59,7 @@ class AnalyticsExecutorForgeAdapter(ForgeQueryPort):
         try:
             rows = self._executor.execute(sql, dict(parameters or {}))
             record = _StatementRecord(state="SUCCEEDED", rows=rows)
-        except Exception as exc:
+        except ASYNC_STATEMENT_FALLBACK_ERRORS as exc:
             record = _StatementRecord(state="FAILED", rows=[], error=str(exc))
 
         with self._lock:

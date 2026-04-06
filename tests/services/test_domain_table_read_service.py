@@ -106,6 +106,28 @@ def test_list_workspace_tables_tolerates_inventory_sync_failure(monkeypatch) -> 
     assert rows[0]["table_name"] == "orders"
 
 
+def test_list_workspace_tables_surfaces_unexpected_inventory_sync_failure(monkeypatch) -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[{"workspace_table_id": 1, "table_name": "orders"}]]
+    service = DomainTableReadService(sql=sql, metadata_mode="legacy")
+
+    def fake_sync(*_args, **_kwargs):
+        raise AssertionError("unexpected inventory sync bug")
+
+    monkeypatch.setattr(
+        service,
+        "_sync_workspace_inventory_from_registry",
+        fake_sync,
+    )
+
+    with pytest.raises(AssertionError, match="unexpected inventory sync bug"):
+        service.list_workspace_tables(
+            workspace_id="ws1",
+            schema_name="asset",
+            ensure_snapshot=True,
+        )
+
+
 def test_sync_workspace_inventory_uses_workspace_datasource_from_db(monkeypatch) -> None:
     app = Flask(__name__)
     sql = FakeForgeQueryPort()

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 import pyarrow as pa
+import pytest
 
 from app.services.workspace_inventory.column_sample_write_service import ColumnSampleWriteService, _quote_col, _quote_uc_ident
 from tests._support.fakes import FakeDatabricksForgeQueryPort, FakeForgeQueryPort
@@ -83,3 +84,20 @@ def test_refresh_model_samples_handles_failures() -> None:
     result = svc.refresh_model_samples(workspace_id="ws-1", schema_name="asset")
 
     assert result["columns_failed"] == 1
+
+
+class _AssertionFailingSampleService(_SampleService):
+    def _fetch_column_stats(self, *, full_name: str, column_name: str, timeout_s: Optional[int] = 120, qf_timeout_s: Optional[int] = None) -> Dict[str, Any]:
+        del full_name, column_name, timeout_s, qf_timeout_s
+        raise AssertionError("unexpected sampling bug")
+
+
+def test_refresh_model_samples_surfaces_unexpected_failures() -> None:
+    mysql = FakeForgeQueryPort()
+    mysql.query_mappings_responses.append([{"workspace_table_id": 1, "full_name": "main.asset.patients"}])
+    mysql.query_mappings_responses.append([{"id": 10, "column_name": "patient_id", "data_type": "STRING", "nullable": 1, "is_active": 1}])
+
+    svc = _AssertionFailingSampleService(sql=FakeDatabricksForgeQueryPort(), mysql=mysql)
+
+    with pytest.raises(AssertionError, match="unexpected sampling bug"):
+        svc.refresh_model_samples(workspace_id="ws-1", schema_name="asset")

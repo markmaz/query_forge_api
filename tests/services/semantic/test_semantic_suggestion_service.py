@@ -428,6 +428,40 @@ def test_execute_run_surfaces_unexpected_matcher_errors() -> None:
     assert "bad matcher wiring" in str((failed_status_updates[-1].params or {}).get("error_message"))
 
 
+def test_execute_run_surfaces_unexpected_assertion_errors() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [_run_row(status="created")],
+    ]
+
+    class _Matcher:
+        def load_known_concepts(self, vertical_norm: str) -> List[Dict[str, Any]]:
+            del vertical_norm
+            raise AssertionError("unexpected matcher bug")
+
+        def load_alias_rules(self, vertical_norm: str) -> List[Dict[str, Any]]:
+            del vertical_norm
+            return []
+
+    svc = SemanticSuggestionService(
+        sql=sql,
+        card_service=_StubCardService([]),
+        labeler=_StubLabeler([]),
+        matcher=_Matcher(),  # type: ignore[arg-type]
+        batch_size=10,
+    )
+
+    with pytest.raises(AssertionError, match="unexpected matcher bug"):
+        svc.execute_run(1)
+
+    failed_status_updates = [
+        call
+        for call in sql.write_calls
+        if "UPDATE semantic_suggestion_run" in call.query and (call.params or {}).get("status") == "failed"
+    ]
+    assert not failed_status_updates
+
+
 def test_apply_approved_marks_item_failed_for_expected_apply_errors() -> None:
     sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [

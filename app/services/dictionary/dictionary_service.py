@@ -10,6 +10,7 @@ from app.adapters.mysql_sql_executor import engine
 from app.services.shared.jsonify import serialize_record
 
 logger = logging.getLogger(__name__)
+JSON_FIELD_PARSE_ERRORS = (TypeError, ValueError, json.JSONDecodeError)
 
 
 def _parse_json_field(value: Any) -> Any:
@@ -20,7 +21,7 @@ def _parse_json_field(value: Any) -> Any:
         return value
     try:
         return json.loads(value)
-    except Exception:
+    except JSON_FIELD_PARSE_ERRORS:
         return None
 
 

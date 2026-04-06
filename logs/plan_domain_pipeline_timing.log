@@ -58499,3 +58499,33 @@ prompt=show me the top 10 schools by enrollment
 11. Optionally polish explanation summary with LLM: 0ms
 12. Defer next action generation (async): 0ms
 13. Persist conversation state for follow-up context: 64ms
+2026-04-04 19:42:12,885 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=7a6de635-7fa9-4207-bd49-68a95cbc5f03 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_8eef67dae7054f7b9f50 total_ms=24395
+prompt=show me students by county
+1. Load and prepare conversation context: 249ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 22101ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 744ms
+5. Compact capabilities payload for plan generation: 30ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 32ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 0ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 0ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 46ms
+2026-04-06 16:59:44,850 [INFO] planner_domain.pipeline_profile - plan_domain_pipeline trace_id=b11d45b1-50a7-4dd2-ac21-380ef4b11477 workspace_id=ws-1 user_id=user-1 conversation_id=pdc_e26c17bd4cb0473dbc2f total_ms=13187
+prompt=show me students by county
+1. Load and prepare conversation context: 91ms
+2. Normalize prompt and effective vertical: 0ms
+3. Select candidate domains from vector index: 12144ms
+4. Load capabilities, shortlist columns, resolve semester indicators: 212ms
+5. Compact capabilities payload for plan generation: 6ms
+6. Generate slots+plan with LLM (unified): 0ms
+7. Normalize plan and apply deterministic value/filter normalizers: 11ms
+8. Validate and repair plan against capabilities: 0ms
+9. Map validated plan to SQL JSON: 1ms
+10. Build deterministic explanation object: 0ms
+11. Optionally polish explanation summary with LLM: 0ms
+12. Defer next action generation (async): 0ms
+13. Persist conversation state for follow-up context: 5ms

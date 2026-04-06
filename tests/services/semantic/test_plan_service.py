@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+from app.services.semantic.plan import sql_json_builder
+import app.services.semantic.plan.value_alias_applier as value_alias_applier
 from app.services.semantic.plan import PlanService
 from app.services.semantic.plan.models import LLMFilter, LLMPlanPayload, LLMSelectedColumn
 from app.services.semantic.plan.sql_json_builder import SqlJsonBuilder
@@ -189,6 +193,104 @@ def test_ground_plan_drops_filters_without_mapped_columns() -> None:
     assert "grounding_removed=1" in out["notes"]
 
 
+def test_build_grounded_sql_json_drops_invalid_set_domain_edit(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _BrokenSetDomainEdit:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+            raise ValueError("bad setDomain edit")
+
+    monkeypatch.setattr(sql_json_builder, "SetDomainEdit", _BrokenSetDomainEdit)
+
+    sql_json, dropped = SqlJsonBuilder.build_grounded_sql_json(
+        prompt="show students",
+        domain_id=77,
+        selected_columns=[],
+        filters=[],
+        candidate_by_mid={},
+        candidate_by_concept={},
+        llm_sql_json={},
+    )
+
+    assert dropped == 1
+    assert sql_json["meta"]["tool"] == "semantic_plan"
+
+
+def test_build_grounded_sql_json_surfaces_unexpected_set_domain_edit_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _BrokenSetDomainEdit:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+            raise AssertionError("unexpected setDomain bug")
+
+    monkeypatch.setattr(sql_json_builder, "SetDomainEdit", _BrokenSetDomainEdit)
+
+    with pytest.raises(AssertionError, match="unexpected setDomain bug"):
+        SqlJsonBuilder.build_grounded_sql_json(
+            prompt="show students",
+            domain_id=77,
+            selected_columns=[],
+            filters=[],
+            candidate_by_mid={},
+            candidate_by_concept={},
+            llm_sql_json={},
+        )
+
+
+def test_build_grounded_sql_json_drops_invalid_add_select_edit(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _BrokenAddSelectEdit:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+            raise ValueError("bad addSelect edit")
+
+    monkeypatch.setattr(sql_json_builder, "AddSelectEdit", _BrokenAddSelectEdit)
+
+    sql_json, dropped = SqlJsonBuilder.build_grounded_sql_json(
+        prompt="show students",
+        domain_id=None,
+        selected_columns=[{"concept_key": "STUDENT_ID", "model_column_id": 1115}],
+        filters=[],
+        candidate_by_mid={
+            1115: {
+                "model_column_id": 1115,
+                "workspace_table_id": 501,
+                "column_name": "k_student",
+                "concept_key": "STUDENT_ID",
+            }
+        },
+        candidate_by_concept={},
+        llm_sql_json={},
+    )
+
+    assert dropped == 1
+    assert sql_json["columns"] == []
+
+
+def test_build_grounded_sql_json_surfaces_unexpected_add_select_edit_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _BrokenAddSelectEdit:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+            raise AssertionError("unexpected addSelect bug")
+
+    monkeypatch.setattr(sql_json_builder, "AddSelectEdit", _BrokenAddSelectEdit)
+
+    with pytest.raises(AssertionError, match="unexpected addSelect bug"):
+        SqlJsonBuilder.build_grounded_sql_json(
+            prompt="show students",
+            domain_id=None,
+            selected_columns=[{"concept_key": "STUDENT_ID", "model_column_id": 1115}],
+            filters=[],
+            candidate_by_mid={
+                1115: {
+                    "model_column_id": 1115,
+                    "workspace_table_id": 501,
+                    "column_name": "k_student",
+                    "concept_key": "STUDENT_ID",
+                }
+            },
+            candidate_by_concept={},
+            llm_sql_json={},
+        )
+
+
 def test_apply_value_aliases_to_llm_plan_rewrites_sql_json_filter_tree_values() -> None:
     sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
@@ -230,6 +332,39 @@ def test_apply_value_aliases_to_llm_plan_rewrites_sql_json_filter_tree_values() 
     out = applier.apply(vertical_norm="education", llm_plan=llm_plan)
 
     assert out["sql_json"]["filters"]["children"][0]["value"] == "Metro Schools District"
+
+
+def test_apply_value_aliases_to_llm_plan_surfaces_unexpected_json_roundtrip_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [
+            {
+                "concept_key": "DISTRICT_NAME",
+                "alias_value": "metro schools",
+                "canonical_value": "Metro Schools District",
+                "match_kind": "exact",
+                "weight": 1.0,
+                "vertical_norm": "education",
+            }
+        ]
+    ]
+    applier = ValueAliasApplier(sql=sql)
+    llm_plan = {
+        "sql_json": {"where": [{"value": "district_name", "op": "=", "param": {"value": "metro schools"}}]},
+        "selected_columns": [],
+        "filters": [{"concept_key": "DISTRICT_NAME", "op": "=", "value": "metro schools"}],
+        "join_plan": {},
+        "confidence": 0.8,
+        "notes": [],
+    }
+
+    def _boom(_value):
+        raise AssertionError("unexpected json roundtrip bug")
+
+    monkeypatch.setattr(value_alias_applier.json, "dumps", _boom)
+
+    with pytest.raises(AssertionError, match="unexpected json roundtrip bug"):
+        applier.apply(vertical_norm="education", llm_plan=llm_plan)
 
 
 def test_plan_flow_keeps_birth_country_mapping_and_filter_column() -> None:

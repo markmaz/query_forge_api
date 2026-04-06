@@ -229,3 +229,14 @@ def test_resolve_without_mapping_raises_not_found() -> None:
     resolver = DomainResolver(workspace_id="ws1", sql=sql)
     with pytest.raises(ForgeError, match="Unknown domainId"):
         resolver.resolve(1)
+
+
+def test_coerce_domain_id_surfaces_unexpected_int_errors() -> None:
+    class _BadInt:
+        def __int__(self) -> int:
+            raise AssertionError("unexpected domain id bug")
+
+    resolver = DomainResolver(workspace_id="ws1", sql=FakeForgeQueryPort())
+
+    with pytest.raises(AssertionError, match="unexpected domain id bug"):
+        resolver.resolve(_BadInt())

@@ -52,6 +52,7 @@ STOPWORDS = {
     "were",
     "was",
 }
+INT_PARSE_ERRORS = (TypeError, ValueError)
 
 
 def detect_semantic_intent(prompt: str) -> Dict[str, Any]:
@@ -459,12 +460,12 @@ def _compute_scope_boost_and_reasons(
         if result.get("kind") == "domain":
             try:
                 in_domain = int(result.get("domainId") or 0) == int(domain_id)
-            except Exception:
+            except INT_PARSE_ERRORS:
                 in_domain = False
         elif result.get("kind") == "column" and workspace_table_ids:
             try:
                 in_domain = int(result.get("workspaceTableId") or 0) in set(workspace_table_ids)
-            except Exception:
+            except INT_PARSE_ERRORS:
                 in_domain = False
         if in_domain:
             boost += 0.05

@@ -12,6 +12,7 @@ from app.services.shared_ai.artifacts import Candidate, CapabilityMapArtifact, P
 from app.services.shared_ai.context import PipelineContext
 
 FORGE_MATCH_PREFERRED_DOMAIN_BONUS = 0.08
+NUMERIC_PARSE_ERRORS = (TypeError, ValueError)
 
 
 class CandidatePolicyRerankAdapter(Protocol):
@@ -187,7 +188,7 @@ def _candidate_base_score(candidate: Candidate) -> float:
         try:
             if raw is not None:
                 return float(raw)
-        except Exception:
+        except NUMERIC_PARSE_ERRORS:
             continue
     return 0.0
 
@@ -226,7 +227,7 @@ def _preferred_domain_id(context: PipelineContext) -> int | None:
         return None
     try:
         parsed = int(raw)
-    except Exception:
+    except NUMERIC_PARSE_ERRORS:
         return None
     return parsed if parsed > 0 else None
 

@@ -158,6 +158,24 @@ def test_profile_falls_back_to_sample_values_for_high_cardinality_columns():
     assert result["name"]["top_values"] == ["A", "B"]
 
 
+def test_profile_surfaces_unexpected_top_value_sampling_errors():
+    ex = MagicMock(spec=SQLExecutor)
+    ex.execute.side_effect = [
+        [{"ROW_COUNT": 10}],
+        [{"NULL_NAME": 0, "DIST_NAME": 3}],
+        AssertionError("unexpected snowflake top value bug"),
+    ]
+    ex.get_dialect.return_value = "snowflake"
+    provider = SnowflakeMetadataProvider(executor=ex)
+
+    with pytest.raises(AssertionError, match="unexpected snowflake top value bug"):
+        provider.profile_table_columns(
+            table_ref="mydb.sales.people",
+            columns=[{"column_name": "name", "data_type": "VARCHAR", "is_nullable": True}],
+            options={**_DEFAULT_OPTIONS, "skip_top_values_for_id_like_cols": False},
+        )
+
+
 def test_profile_error_captured_per_column():
     ex = MagicMock(spec=SQLExecutor)
     ex.execute.side_effect = RuntimeError("snowflake boom")

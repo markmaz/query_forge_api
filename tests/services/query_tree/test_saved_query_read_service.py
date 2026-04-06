@@ -124,3 +124,23 @@ def test_fetch_recent_queries() -> None:
     res = svc.fetch_recent_queries(limit=-1)
     assert res["rows"][0]["queryType"] == "builder"
 
+
+def test_fetch_recent_queries_uses_default_limit_for_parse_errors() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[]]
+    svc = SavedQueryReadService(workspace_id="ws1", user_id="user1", sql=sql)
+
+    assert svc.fetch_recent_queries(limit="bad") == {"rows": []}
+    assert sql.query_mappings_calls[-1].params["lim"] == 20
+
+
+def test_fetch_recent_queries_surfaces_unexpected_limit_int_errors() -> None:
+    class ExplosiveInt:
+        def __int__(self) -> int:
+            raise AssertionError("unexpected int conversion failure")
+
+    sql = FakeForgeQueryPort()
+    svc = SavedQueryReadService(workspace_id="ws1", user_id="user1", sql=sql)
+
+    with pytest.raises(AssertionError, match="unexpected int conversion failure"):
+        svc.fetch_recent_queries(limit=ExplosiveInt())

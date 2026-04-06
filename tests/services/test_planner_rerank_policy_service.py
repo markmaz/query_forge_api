@@ -7,6 +7,7 @@ import pytest
 
 from app.adapters.query_port import ForgeExecResult
 from app.exceptions.forge_error import ForgeError
+import app.services.domain.planner_rerank_policy_service as planner_rerank_policy_service
 from app.services.domain.planner_rerank_policy_service import PlannerRerankPolicyService
 
 
@@ -239,3 +240,63 @@ def test_delete_policy_removes_existing_row() -> None:
     )
 
     assert out == {"deleted": True, "policy_id": 14}
+
+
+def test_get_applicable_policies_returns_empty_on_expected_lookup_error() -> None:
+    sql = _FakeSQL(rows_by_call=[])
+    sql.execute_query_mappings = lambda query, params=None: (_ for _ in ()).throw(RuntimeError("db unavailable"))  # type: ignore[method-assign]
+    svc = PlannerRerankPolicyService(sql=sql)
+
+    out = svc.get_applicable_policies(workspace_id="ws-1", vertical_norm="education", base_domain_id=9)
+
+    assert out == []
+
+
+def test_get_applicable_policies_surfaces_unexpected_lookup_error() -> None:
+    sql = _FakeSQL(rows_by_call=[])
+    sql.execute_query_mappings = lambda query, params=None: (_ for _ in ()).throw(AssertionError("lookup bug"))  # type: ignore[method-assign]
+    svc = PlannerRerankPolicyService(sql=sql)
+
+    with pytest.raises(AssertionError, match="lookup bug"):
+        svc.get_applicable_policies(workspace_id="ws-1", vertical_norm="education", base_domain_id=9)
+
+
+def test_parse_policy_rule_wraps_expected_json_parse_errors() -> None:
+    with pytest.raises(ForgeError, match="Invalid planner rerank policy JSON"):
+        planner_rerank_policy_service._parse_policy_rule("{not json}")
+
+
+def test_parse_policy_rule_surfaces_unexpected_json_parse_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        planner_rerank_policy_service.json,
+        "loads",
+        lambda value: (_ for _ in ()).throw(AssertionError("json bug")),
+    )
+
+    with pytest.raises(AssertionError, match="json bug"):
+        planner_rerank_policy_service._parse_policy_rule('{"version": 1}')
+
+
+def test_parse_policy_rule_wraps_expected_validation_errors() -> None:
+    with pytest.raises(ForgeError, match="Invalid planner rerank policy JSON"):
+        planner_rerank_policy_service._parse_policy_rule({"version": 1})
+
+
+def test_parse_policy_rule_surfaces_unexpected_validation_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        planner_rerank_policy_service.PlannerRerankPolicyRule,
+        "model_validate",
+        lambda value: (_ for _ in ()).throw(AssertionError("validation bug")),
+    )
+
+    with pytest.raises(AssertionError, match="validation bug"):
+        planner_rerank_policy_service._parse_policy_rule(
+            {
+                "version": 1,
+                "when_signals_all": ["student_listing"],
+                "prefer_capabilities": ["STUDENT_IDENTITY"],
+                "boost": 0.2,
+                "penalty": 0.0,
+                "max_effect": 0.2,
+            }
+        )

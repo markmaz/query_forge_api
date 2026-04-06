@@ -7,6 +7,8 @@ from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.semantic.semantic_llm_schema import normalize_concept_key
 
+NUMERIC_PARSE_ERRORS = (TypeError, ValueError)
+
 
 class SemanticConceptMatcher:
     def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
@@ -88,7 +90,7 @@ class SemanticConceptMatcher:
             match_kind = str(row.get("match_kind") or "exact").strip().lower()
             try:
                 weight = float(row.get("weight") or 0.0)
-            except Exception:
+            except NUMERIC_PARSE_ERRORS:
                 weight = 0.0
 
             matched = False
@@ -384,7 +386,7 @@ def _samples_are_year(samples: List[Any]) -> bool:
 def _clamp_float(value: Any) -> float:
     try:
         out = float(value)
-    except Exception:
+    except NUMERIC_PARSE_ERRORS:
         out = 0.0
     return max(0.0, min(1.0, out))
 

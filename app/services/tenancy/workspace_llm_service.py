@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 _VALID_ROLES = set(LLMRole.ALL)
 _VALID_PROVIDERS = set(LLMProvider.ALL)
+TEST_CONNECTION_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 _SELECT_COLS = """
     id, workspace_id, name, provider, model_name, role,
@@ -271,7 +272,7 @@ class WorkspaceLLMService:
                 return self._test_openai_compatible(endpoint, api_key)
             else:
                 return {"success": False, "message": f"Unknown provider: {provider}"}
-        except Exception as exc:
+        except TEST_CONNECTION_FALLBACK_ERRORS as exc:
             logger.exception("test_connection failed for llm_id=%s", llm_id)
             return {"success": False, "message": str(exc)}
 

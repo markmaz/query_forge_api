@@ -457,6 +457,34 @@ def test_filter_and_sorting_table_ids() -> None:
     assert svc._qf_sorting_table_ids(sorting, plan) == {1}
 
 
+def test_filter_and_sorting_table_ids_surfaces_unexpected_int_errors() -> None:
+    class ExplosiveInt:
+        def __int__(self) -> int:
+            raise AssertionError("unexpected int conversion failure")
+
+    plan = _single_table_plan()
+    svc = QueryForgeService(executor=FakeForgeQueryPort(), domain_resolver=FakeResolver(plan))
+
+    node = {
+        "type": "group",
+        "match": "and",
+        "children": [
+            {
+                "type": "condition",
+                "field": {"columnName": "x", "workspaceTableId": ExplosiveInt()},
+                "op": "equals",
+                "value": 1,
+            }
+        ],
+    }
+    with pytest.raises(AssertionError, match="unexpected int conversion failure"):
+        svc._qf_filter_table_ids(node, plan)
+
+    sorting = [{"col": {"columnName": "x", "workspaceTableId": ExplosiveInt()}, "dir": "asc"}]
+    with pytest.raises(AssertionError, match="unexpected int conversion failure"):
+        svc._qf_sorting_table_ids(sorting, plan)
+
+
 def test_compile_order_by_supports_metric_ref_alias() -> None:
     plan = _single_table_plan()
     svc = QueryForgeService(executor=FakeForgeQueryPort(), domain_resolver=FakeResolver(plan))

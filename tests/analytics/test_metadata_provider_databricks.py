@@ -124,6 +124,7 @@ def test_profile_returns_per_column_stats():
     ex.execute.side_effect = [
         [{"row_count": 1000}],
         [{"null_id": 0, "dist_id": 1000, "null_name": 10, "dist_name": 500}],
+        [],
     ]
     ex.get_dialect.return_value = "databricks"
     provider = DatabricksMetadataProvider(executor=ex)
@@ -246,6 +247,14 @@ def test_list_schemas_falls_back_to_show_schemas_when_information_schema_fails(e
     assert second_sql.strip().upper() == "SHOW SCHEMAS"
 
 
+def test_list_schemas_surfaces_unexpected_information_schema_errors(executor):
+    executor.execute.side_effect = AssertionError("unexpected schema lookup bug")
+    provider = DatabricksMetadataProvider(executor=executor)
+
+    with pytest.raises(AssertionError, match="unexpected schema lookup bug"):
+        provider.list_schemas(catalog=None)
+
+
 def test_list_schemas_falls_back_when_information_schema_returns_empty_rows(executor):
     executor.execute.side_effect = [
         [],
@@ -258,6 +267,24 @@ def test_list_schemas_falls_back_when_information_schema_returns_empty_rows(exec
     assert executor.execute.call_count == 2
     second_sql = executor.execute.call_args_list[1][0][0]
     assert second_sql.strip() == "SHOW SCHEMAS IN `main`"
+
+
+def test_profile_surfaces_unexpected_top_value_sampling_errors():
+    ex = MagicMock(spec=SQLExecutor)
+    ex.execute.side_effect = [
+        [{"row_count": 100}],
+        [{"null_name": 0, "dist_name": 2}],
+        AssertionError("unexpected top value bug"),
+    ]
+    ex.get_dialect.return_value = "databricks"
+    provider = DatabricksMetadataProvider(executor=ex)
+
+    with pytest.raises(AssertionError, match="unexpected top value bug"):
+        provider.profile_table_columns(
+            table_ref="main.sales.people",
+            columns=[{"column_name": "name", "data_type": "STRING", "is_nullable": True}],
+            options={**_DEFAULT_OPTIONS, "skip_top_values_for_id_like_cols": False},
+        )
 
 
 def test_list_schemas_rejects_unsafe_catalog(executor):

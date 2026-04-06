@@ -234,12 +234,12 @@ def _parse_unified_trace(trace: Mapping[str, Any]) -> tuple[Optional[Dict[str, A
         try:
             strict = parse_json_strict(json.dumps(dict(parsed_payload), ensure_ascii=True))
             return strict, raw_payload
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             pass
     try:
         strict = parse_json_strict(raw_payload)
         return strict, raw_payload
-    except Exception:
+    except (TypeError, ValueError, json.JSONDecodeError):
         return None, raw_payload
 
 
@@ -273,7 +273,7 @@ def _extract_provider_model_and_tokens(*, trace: Mapping[str, Any], fallback_mod
     if raw_text:
         try:
             provider_body = json.loads(raw_text)
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             provider_body = None
         if isinstance(provider_body, Mapping):
             provider_model = provider_body.get("model")

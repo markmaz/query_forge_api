@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
+import app.services.analytics.dictionary_enrichment_service as dictionary_enrichment_service
 from app.services.analytics.dictionary_enrichment_service import DictionaryEnrichmentService
 
 
@@ -100,3 +103,67 @@ def test_enrich_no_llm_returns_zero():
     )
 
     assert result == {"enriched": 0, "errors": 0}
+
+
+def test_enrich_table_ai_failure_does_not_raise():
+    mysql, tx = _make_mysql([
+        {"id": 10, "column_name": "id", "model_table_id": 1, "description": "Existing desc"}
+    ])
+
+    class _TableLLM:
+        def generate_table_description(self, **kwargs):
+            raise RuntimeError("table llm offline")
+
+        def generate(self, prompt, **kwargs):
+            del prompt, kwargs
+            return ""
+
+    svc = DictionaryEnrichmentService(mysql=mysql, llm=_TableLLM())
+
+    result = svc.enrich(
+        table_id_by_name={"orders": 1},
+        columns=[{"table_name": "orders", "column_name": "id", "data_type": "BIGINT", "comment": None}],
+        overwrite=True,
+    )
+
+    assert result["errors"] == 1
+    assert result["tables_failed"] == 1
+
+
+def test_enrich_table_ai_surfaces_unexpected_failure():
+    mysql, tx = _make_mysql([
+        {"id": 10, "column_name": "id", "model_table_id": 1, "description": "Existing desc"}
+    ])
+
+    class _TableLLM:
+        def generate_table_description(self, **kwargs):
+            raise AssertionError("table llm bug")
+
+    svc = DictionaryEnrichmentService(mysql=mysql, llm=_TableLLM())
+
+    with pytest.raises(AssertionError, match="table llm bug"):
+        svc.enrich(
+            table_id_by_name={"orders": 1},
+            columns=[{"table_name": "orders", "column_name": "id", "data_type": "BIGINT", "comment": None}],
+            overwrite=True,
+        )
+
+
+def test_enrich_column_ai_surfaces_unexpected_failure():
+    mysql, tx = _make_mysql([
+        {"id": 10, "column_name": "id", "model_table_id": 1, "description": None}
+    ])
+    llm = MagicMock()
+    llm.generate.side_effect = AssertionError("column llm bug")
+    svc = DictionaryEnrichmentService(mysql=mysql, llm=llm)
+
+    with pytest.raises(AssertionError, match="column llm bug"):
+        svc.enrich(
+            table_id_by_name={"orders": 1},
+            columns=[{"table_name": "orders", "column_name": "id",
+                      "data_type": "BIGINT", "is_nullable": False, "comment": None}],
+        )
+
+
+def test_coerce_confidence_returns_none_for_invalid_values():
+    assert dictionary_enrichment_service._coerce_confidence("not-a-number") is None

@@ -4,7 +4,9 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from flask import current_app
+from sqlalchemy.exc import SQLAlchemyError
 
+from app.exceptions.forge_error import ForgeError
 from app.skills.base import BaseSkill, SkillContext
 from app.skills.registry import SkillRegistry
 
@@ -15,6 +17,10 @@ _SYSTEM_PROMPT = (
     "Return a JSON object with a single key 'summary' containing 1-3 sentences that "
     "describe the key insights from the data."
 )
+
+EMAIL_SEND_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+DESTINATION_RESOLUTION_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+LLM_SUMMARY_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError)
 
 
 @SkillRegistry.register
@@ -51,7 +57,7 @@ class EmailDeliverySkill(BaseSkill):
                     reply_to=reply_to,
                 )
                 sent_count += 1
-            except Exception:
+            except EMAIL_SEND_FALLBACK_ERRORS:
                 logger.exception("EmailDeliverySkill: failed to send to %s", recipient)
                 failed.append(recipient)
 
@@ -72,7 +78,7 @@ class EmailDeliverySkill(BaseSkill):
                 {"type": "email", "destination_id": destination_id},
                 workspace_id,
             )
-        except Exception:
+        except DESTINATION_RESOLUTION_FALLBACK_ERRORS:
             logger.exception("EmailDeliverySkill: failed to resolve destination_id=%s", destination_id)
             return {}
 
@@ -99,7 +105,7 @@ class EmailDeliverySkill(BaseSkill):
                 max_tokens=300,
             )
             return payload["summary"].strip()
-        except Exception:
+        except LLM_SUMMARY_FALLBACK_ERRORS:
             logger.exception("EmailDeliverySkill: LLM summary generation failed")
             return ""
 

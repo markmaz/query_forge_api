@@ -4,11 +4,14 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.models.domain.planner_capability_packing_policy import PlannerCapabilityPackingPolicyRule
 from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
+POLICY_LOOKUP_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
 
 _SEED_POLICIES: tuple[dict[str, Any], ...] = (
     {
@@ -251,7 +254,7 @@ class PlannerCapabilityPackingPolicyService:
                     "vertical_norm": str(vertical_norm or "").strip().lower() or None,
                 },
             )
-        except Exception:
+        except POLICY_LOOKUP_FALLBACK_ERRORS:
             logger.exception("Failed to load planner capability packing policies from db")
             return rows
 

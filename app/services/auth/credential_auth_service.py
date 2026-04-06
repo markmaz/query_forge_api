@@ -10,6 +10,7 @@ from app.models.tenancy.user import User
 from app.utils.jwt_claims import claim_has_role
 
 logger = logging.getLogger(__name__)
+ROLE_LOAD_FALLBACK_ERRORS = (OperationalError, SQLAlchemyError, OSError, RuntimeError, TypeError, ValueError)
 
 
 class CredentialAuthenticationService:
@@ -100,7 +101,7 @@ class CredentialAuthenticationService:
         role_names: list[str] = []
         try:
             role_names = self._user_service_factory().get_user_effective_role_names(str(user_id))
-        except Exception as exc:
+        except ROLE_LOAD_FALLBACK_ERRORS as exc:
             logger.warning("Unable to load RBAC roles for user_id=%s: %s", user_id, exc)
 
         normalized_roles = self._normalize_role_names(role_names)

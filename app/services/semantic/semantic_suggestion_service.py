@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 SEMANTIC_MATCHER_FALLBACK_ERRORS = (ForgeError, SQLAlchemyError)
 SEMANTIC_APPLY_ITEM_FALLBACK_ERRORS = (ForgeError, SQLAlchemyError)
 JSON_PARSE_ERRORS = (json.JSONDecodeError,)
+RUN_EXECUTION_WRAP_ERRORS = (ForgeError, SQLAlchemyError, OSError, RuntimeError, TypeError, ValueError)
 
 
 class SemanticSuggestionService:
@@ -252,7 +253,7 @@ class SemanticSuggestionService:
                 current_card=None,
             )
             self._set_run_status(run_id, status="completed")
-        except Exception as exc:
+        except RUN_EXECUTION_WRAP_ERRORS as exc:
             self._update_run_progress(
                 run_id=int(run_id),
                 params=params,

@@ -4,6 +4,8 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
@@ -130,7 +132,7 @@ def resolve_country_from_db(sql: ForgeQueryPort, normalized_text: str) -> Option
     for query, params in queries:
         try:
             rows = sql.execute_query_mappings(query, params)
-        except Exception:
+        except SQLAlchemyError:
             continue
         for row in rows:
             code = str(row.get("country_iso2") or row.get("iso2") or "").strip().upper()

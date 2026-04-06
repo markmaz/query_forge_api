@@ -8,6 +8,8 @@ from app.services.domain_resolver import DomainPlan
 from app.services.query_forge.value_override_constants import VALUE_OVERRIDE_KEY_BY_TYPE
 from app.services.sqljson import validate_and_normalize_derived_sqljson
 
+INT_PARSE_ERRORS = (TypeError, ValueError)
+
 
 class QueryForgeQueryNormalizer:
     def normalize_filters(self, node: Any) -> Any:
@@ -466,7 +468,7 @@ class QueryForgeQueryNormalizer:
                 wt_id = plan.primary.workspace_table_id
             try:
                 wt_id_int = int(wt_id)
-            except Exception:
+            except INT_PARSE_ERRORS:
                 return
             if wt_id_int != 0:
                 ids.add(wt_id_int)
@@ -492,7 +494,7 @@ class QueryForgeQueryNormalizer:
                 wt_id = plan.primary.workspace_table_id
             try:
                 wt_id_int = int(wt_id)
-            except Exception:
+            except INT_PARSE_ERRORS:
                 continue
             if wt_id_int != 0:
                 ids.add(wt_id_int)

@@ -14,6 +14,8 @@ from app.config import (
 )
 from app.ports.sql_executor import ForgeQueryPort
 
+FEWSHOT_LOOKUP_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+
 
 class EducationFewshotService:
     def __init__(
@@ -84,7 +86,7 @@ class EducationFewshotService:
                 """,
                 {"workspace_id": workspace_id, "scan_limit": self._scan_limit},
             )
-        except Exception:
+        except FEWSHOT_LOOKUP_FALLBACK_ERRORS:
             return []
 
 

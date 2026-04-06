@@ -14,6 +14,7 @@ from typing import Any
 import pytz
 import valkey
 from croniter import croniter
+from valkey.exceptions import ValkeyError
 
 from app.config import VALKEY_ADDRESS, VALKEY_PORT
 
@@ -21,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 # Minimum allowed interval between scheduled runs (5 minutes = 300 seconds)
 MIN_INTERVAL_SECONDS = 300
+CRON_RUNTIME_FALLBACK_ERRORS = (RuntimeError, TypeError, ValueError)
+SCHEDULER_HEALTH_FALLBACK_ERRORS = (OSError, ValkeyError, TypeError, ValueError)
 
 
 def _valkey_client() -> valkey.Valkey:
@@ -71,7 +74,7 @@ def validate_cron(expression: str, timezone_name: str = "UTC") -> list[str]:
                 f"Schedule would run every {int(interval)}s — "
                 f"minimum allowed interval is {MIN_INTERVAL_SECONDS}s (5 minutes)."
             )
-    except Exception as exc:
+    except CRON_RUNTIME_FALLBACK_ERRORS as exc:
         errors.append(f"Could not evaluate cron interval: {exc}")
 
     return errors
@@ -103,7 +106,7 @@ def next_n_runs(
             cron.get_next(datetime).isoformat()
             for _ in range(n)
         ]
-    except Exception as exc:
+    except CRON_RUNTIME_FALLBACK_ERRORS as exc:
         logger.warning("next_n_runs failed for %r: %s", expression, exc)
         return []
 
@@ -143,7 +146,7 @@ def get_scheduler_health() -> dict[str, Any]:
             "last_dispatch_at": last_dispatch_at.isoformat(),
             "seconds_since_dispatch": int(seconds_ago),
         }
-    except Exception as exc:
+    except SCHEDULER_HEALTH_FALLBACK_ERRORS as exc:
         logger.error("Scheduler health check failed: %s", exc)
         return {
             "healthy": False,
@@ -167,5 +170,5 @@ def record_dispatch_heartbeat() -> None:
             600,  # 10 minute TTL
             datetime.now(timezone.utc).isoformat(),
         )
-    except Exception as exc:
+    except SCHEDULER_HEALTH_FALLBACK_ERRORS as exc:
         logger.warning("Failed to record dispatch heartbeat: %s", exc)

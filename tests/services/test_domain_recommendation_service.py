@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from app.exceptions.forge_error import ForgeError
 from app.services.domain.domain_recommendation_service import DomainRecommendationService
 
 
@@ -235,3 +238,17 @@ def test_apply_recommendations_rejects_duplicate_tables_across_domains():
     except Exception as exc:
         assert exc.__class__.__name__ == "ForgeError"
         assert "only be applied to one recommended domain" in str(exc)
+
+
+def test_normalize_limit_surfaces_unexpected_int_errors() -> None:
+    class _BadInt:
+        def __int__(self) -> int:
+            raise AssertionError("unexpected limit parse bug")
+
+    with pytest.raises(AssertionError, match="unexpected limit parse bug"):
+        DomainRecommendationService._normalize_limit(_BadInt(), field="max_tables", minimum=1, maximum=10)
+
+
+def test_normalize_limit_wraps_expected_int_errors() -> None:
+    with pytest.raises(ForgeError, match="max_tables must be an integer"):
+        DomainRecommendationService._normalize_limit("bad", field="max_tables", minimum=1, maximum=10)

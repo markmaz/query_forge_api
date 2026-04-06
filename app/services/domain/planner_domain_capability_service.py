@@ -5,6 +5,9 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
+from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.models.domain.planner_rerank_policy import (
@@ -15,6 +18,9 @@ from app.models.domain.planner_rerank_policy import (
 from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
+
+CAPABILITY_LOOKUP_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+CAPABILITY_RECORD_VALIDATION_ERRORS = (ValidationError, ValueError, TypeError)
 
 
 class PlannerDomainCapabilityService:
@@ -75,7 +81,7 @@ class PlannerDomainCapabilityService:
             payload = _json_safe_mapping(dict(row))
             try:
                 payload.update(PlannerDomainCapabilityRecord(**payload).model_dump())
-            except Exception:
+            except CAPABILITY_RECORD_VALIDATION_ERRORS:
                 pass
             payload["is_active"] = bool(payload.get("is_active"))
             payload["is_inherited"] = str(payload.get("scope_type") or "") not in {"workspace", "workspace_domain"}
@@ -343,7 +349,7 @@ class PlannerDomainCapabilityService:
                     "base_domain_id": int(base_domain_id),
                 },
             )
-        except Exception as exc:  # pragma: no cover - defensive runtime fallback
+        except CAPABILITY_LOOKUP_FALLBACK_ERRORS as exc:  # pragma: no cover - defensive runtime fallback
             logger.warning(
                 "planner domain capability lookup failed workspace_id=%s vertical_norm=%s base_domain_id=%s err=%s",
                 workspace_id,
@@ -356,7 +362,7 @@ class PlannerDomainCapabilityService:
         for row in rows:
             try:
                 record = PlannerDomainCapabilityRecord(**dict(row))
-            except Exception:
+            except CAPABILITY_RECORD_VALIDATION_ERRORS:
                 continue
             current = by_key.get(record.capability_key)
             record_payload = record.model_dump()

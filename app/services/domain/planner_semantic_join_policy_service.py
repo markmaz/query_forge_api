@@ -4,6 +4,8 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.models.domain.planner_semantic_join_policy import (
     PlannerSemanticJoinPolicyRule,
@@ -12,6 +14,7 @@ from app.models.domain.planner_semantic_join_policy import (
 from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
+POLICY_LOOKUP_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
 
 _SEED_POLICIES: tuple[dict[str, Any], ...] = (
     {
@@ -160,7 +163,7 @@ class PlannerSemanticJoinPolicyService:
                 """,
                 {},
             )
-        except Exception:
+        except POLICY_LOOKUP_FALLBACK_ERRORS:
             logger.exception("Failed to load planner semantic join policies from db")
             return rows
 

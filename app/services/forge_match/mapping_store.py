@@ -8,6 +8,8 @@ from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.forge_match.session_reader import ForgeMatchSessionReader
 
+INT_PARSE_ERRORS = (TypeError, ValueError)
+
 
 class ForgeMatchMappingStore:
     def __init__(
@@ -71,7 +73,7 @@ class ForgeMatchMappingStore:
             if manual_col is not None:
                 try:
                     manual_col_id = int(manual_col)
-                except Exception as exc:
+                except INT_PARSE_ERRORS as exc:
                     raise ForgeError("manually_selected_workspace_column_id must be integer", status_code=400) from exc
                 if manual_col_id <= 0:
                     raise ForgeError("manually_selected_workspace_column_id must be > 0", status_code=400)

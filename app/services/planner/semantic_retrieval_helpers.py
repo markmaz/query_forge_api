@@ -970,5 +970,5 @@ def to_float(value: Any) -> Optional[float]:
 def to_int(value: Any) -> Optional[int]:
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None

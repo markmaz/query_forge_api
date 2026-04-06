@@ -483,7 +483,7 @@ class QueryTreeReadModelService:
         if isinstance(payload, str):
             try:
                 payload = json.loads(payload)
-            except Exception:
+            except json.JSONDecodeError:
                 return None
         if not isinstance(payload, dict):
             return None
@@ -665,7 +665,7 @@ class QueryTreeReadModelService:
     def fetch_recent_queries(self, *, limit: int = 20) -> Dict[str, Any]:
         try:
             candidate = int(limit)
-        except Exception:
+        except (TypeError, ValueError):
             candidate = 20
         if candidate <= 0:
             candidate = 20

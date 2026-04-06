@@ -10,6 +10,7 @@ from app.utils.jwt_claims import claim_is_admin, get_roles_from_claim
 
 auth_service = AuthService()
 workspace_access_service = WorkspaceAccessService()
+RBAC_FALLBACK_ERRORS = (ImportError, OSError, RuntimeError, TypeError, ValueError)
 
 
 def _extract_user_context(payload: Dict[str, Any]) -> Tuple[str, str, bool, List[str]]:
@@ -94,7 +95,7 @@ def token_required(f):
         try:
             from app.services.rbac_service import get_effective_roles
             preloaded_effective_roles = get_effective_roles(user_id, workspace_id=workspace_id or None)
-        except Exception:
+        except RBAC_FALLBACK_ERRORS:
             preloaded_effective_roles = None
 
         if workspace_id:
@@ -125,7 +126,7 @@ def token_required(f):
                 "super_admin" in g.effective_roles
                 or "workspace_admin" in g.effective_roles
             )
-        except Exception:
+        except RBAC_FALLBACK_ERRORS:
             # DB unavailable — fall back gracefully, preserving token-level claim
             g.effective_roles = {"super_admin"} if _has_super_admin_access(is_admin, roles) else set()
             g.is_admin = _has_super_admin_access(is_admin, roles)

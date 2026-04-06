@@ -161,7 +161,7 @@ def test_execute_closes_connection_on_failure():
     conn = MagicMock()
     cursor = MagicMock()
     cursor.description = None
-    cursor.execute.side_effect = Exception("network error")
+    cursor.execute.side_effect = RuntimeError("network error")
     conn.cursor.return_value = cursor
 
     with patch("snowflake.connector.connect", return_value=conn):
@@ -175,7 +175,7 @@ def test_execute_closes_connection_on_failure():
 
 
 def test_execute_returns_auth_hint_for_saml_account_error():
-    class _Exc(Exception):
+    class _Exc(RuntimeError):
         errno = 390190
 
     conn = MagicMock()
@@ -193,7 +193,7 @@ def test_execute_returns_auth_hint_for_saml_account_error():
 
 
 def test_execute_returns_auth_hint_for_invalid_jwt():
-    class _Exc(Exception):
+    class _Exc(RuntimeError):
         errno = 250001
 
     conn = MagicMock()
@@ -233,7 +233,7 @@ def test_test_connection_executes_version_query():
 def test_test_connection_raises_on_failure():
     conn = MagicMock()
     cursor = MagicMock()
-    cursor.execute.side_effect = Exception("auth failed")
+    cursor.execute.side_effect = RuntimeError("auth failed")
     conn.cursor.return_value = cursor
 
     with patch("snowflake.connector.connect", return_value=conn):
@@ -242,6 +242,38 @@ def test_test_connection_raises_on_failure():
         )
         with pytest.raises(RuntimeError, match="connection test failed"):
             executor.test_connection()
+
+
+def test_execute_ignores_expected_cleanup_errors():
+    columns = ["val"]
+    rows = [(1,)]
+    cursor = _make_mock_cursor(rows, columns)
+    cursor.close.side_effect = RuntimeError("cursor close failed")
+    conn = _make_mock_conn(cursor)
+    conn.close.side_effect = RuntimeError("conn close failed")
+
+    with patch("snowflake.connector.connect", return_value=conn):
+        executor = SnowflakeSQLExecutor(
+            account="acc", user="u", database="db", warehouse="wh", password="p"
+        )
+        result = executor.execute("SELECT 1 AS val")
+
+    assert result == [{"val": 1}]
+
+
+def test_execute_surfaces_unexpected_cleanup_errors():
+    columns = ["val"]
+    rows = [(1,)]
+    cursor = _make_mock_cursor(rows, columns)
+    cursor.close.side_effect = AssertionError("unexpected cleanup bug")
+    conn = _make_mock_conn(cursor)
+
+    with patch("snowflake.connector.connect", return_value=conn):
+        executor = SnowflakeSQLExecutor(
+            account="acc", user="u", database="db", warehouse="wh", password="p"
+        )
+        with pytest.raises(AssertionError, match="unexpected cleanup bug"):
+            executor.execute("SELECT 1 AS val")
 
 
 # ---------------------------------------------------------------------------

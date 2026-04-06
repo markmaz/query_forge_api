@@ -16,6 +16,8 @@ from app.services.tenancy.workspace_llm_service import WorkspaceLLMService
 
 logger = logging.getLogger(__name__)
 
+LLM_CONFIG_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+
 
 @dataclass(frozen=True)
 class ResolvedLLMRuntime:
@@ -92,7 +94,7 @@ def resolve_llm_config(
         return None
     except ForgeError:
         raise
-    except Exception:
+    except LLM_CONFIG_FALLBACK_ERRORS:
         logger.exception(
             "resolve_llm_config failed ws=%s role=%s llm_id_override=%s",
             ws,
@@ -198,6 +200,6 @@ def _default_timeout_for_role(role: str) -> int:
 def _to_int_or_none(value: Any) -> Optional[int]:
     try:
         parsed = int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None

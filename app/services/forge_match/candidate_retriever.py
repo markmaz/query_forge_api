@@ -22,6 +22,7 @@ from app.services.shared_ai.context import PipelineContext
 from app.services.shared_ai.executor import PipelineExecutor
 
 logger = logging.getLogger(__name__)
+VECTOR_RETRIEVAL_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError)
 
 
 def _is_vector_enabled() -> bool:
@@ -395,7 +396,7 @@ class ForgeMatchCandidateRetriever:
                 domain_id=int(domain_id) if domain_id is not None else None,
                 limit=limit,
             )
-        except Exception as exc:
+        except VECTOR_RETRIEVAL_FALLBACK_ERRORS as exc:
             logger.warning("ForgeMatch vector retrieval failed: %s", exc)
             return {}
 

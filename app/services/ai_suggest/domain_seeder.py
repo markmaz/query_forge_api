@@ -10,6 +10,7 @@ from app.ports.sql_executor import ForgeQueryPort
 from app.services.ai_suggest.edit_inspector import _column_ref_identity
 
 logger = logging.getLogger(__name__)
+DOMAIN_INFERENCE_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, AttributeError)
 
 
 def _workspace_table_ids_from_edits(edits: list[dict]) -> list[int]:
@@ -89,7 +90,7 @@ class DomainSeeder:
                 inferred,
             )
             return inferred
-        except Exception as exc:
+        except DOMAIN_INFERENCE_FALLBACK_ERRORS as exc:
             logger.warning("AI suggest deterministic domain inference failed: %s", exc)
             return None
 

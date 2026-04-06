@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional
 from app.services.domain.join.domain_join_repository import DomainJoinRepository
 from app.services.domain.join.domain_join_validator import DomainJoinPayload, DomainJoinValidator
 
+INSERT_RESULT_FALLBACK_ERRORS = (AttributeError,)
+
 
 class DomainJoinCommandService:
     def __init__(self, *, repository: DomainJoinRepository, validator: DomainJoinValidator) -> None:
@@ -58,7 +60,7 @@ class DomainJoinCommandService:
             join_id: Optional[Any]
             try:
                 join_id = result.lastrowid
-            except Exception:
+            except INSERT_RESULT_FALLBACK_ERRORS:
                 join_id = None
         return {"ok": True, "id": str(join_id) if join_id else None}
 

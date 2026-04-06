@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+import app.services.domain_resolution.plan_builder as plan_builder
 from app.exceptions.forge_error import ForgeError
 from app.services.domain_resolution.plan_builder import build_plan_tables, normalize_policy, to_plan_join
 
@@ -72,3 +73,22 @@ def test_to_plan_join_parses_json_spec():
     assert join.join_id == "1"
     assert join.join_type == "LEFT"
     assert join.join_spec == {"on": []}
+
+
+def test_to_plan_join_surfaces_unexpected_json_parser_errors(monkeypatch: pytest.MonkeyPatch):
+    def _boom(_value):
+        raise AssertionError("unexpected join spec parser bug")
+
+    monkeypatch.setattr(plan_builder.json, "loads", _boom)
+
+    with pytest.raises(AssertionError, match="unexpected join spec parser bug"):
+        to_plan_join(
+            {
+                "id": 1,
+                "from_workspace_table_id": 10,
+                "to_workspace_table_id": 11,
+                "join_type": "left",
+                "join_spec_json": '{"on": []}',
+                "sort_order": 0,
+            }
+        )

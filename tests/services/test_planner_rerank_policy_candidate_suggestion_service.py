@@ -5,8 +5,10 @@ from typing import Any, Dict, List, Optional
 import pytest
 
 from app.exceptions.forge_error import ForgeError
+import app.services.domain.planner_rerank_policy_candidate_suggestion_service as suggestion_service
 from app.services.domain.planner_rerank_policy_candidate_suggestion_service import (
     PlannerRerankPolicyCandidateSuggestionService,
+    _is_valid_llm_payload,
 )
 
 
@@ -89,6 +91,18 @@ class _ExplodingLLM:
     def chat_json(self, **kwargs) -> Dict[str, Any]:
         del kwargs
         raise ForgeError("Invalid model response JSON", status_code=500)
+
+
+class _RuntimeErrorLLM:
+    def chat_json(self, **kwargs) -> Dict[str, Any]:
+        del kwargs
+        raise RuntimeError("temporary llm outage")
+
+
+class _AssertionErrorLLM:
+    def chat_json(self, **kwargs) -> Dict[str, Any]:
+        del kwargs
+        raise AssertionError("unexpected llm bug")
 
 
 class _FakeCandidateService:
@@ -253,3 +267,63 @@ def test_suggest_candidate_rejects_time_only_prompt_without_capability_grounding
 
     assert exc_info.value.status_code == 422
     assert "capability-grounded suggestion" in str(exc_info.value)
+
+
+def test_suggest_candidate_falls_back_on_expected_runtime_llm_errors() -> None:
+    svc = PlannerRerankPolicyCandidateSuggestionService(
+        sql=_FakeSQL(),
+        prompt_signal_service=_FakePromptSignals(),
+        capability_service=_FakePlannerCapabilities(),
+        domain_capabilities_service=_FakeDomainCapabilities(),
+        candidate_service=_FakeCandidateService(),
+        llm_client=_RuntimeErrorLLM(),
+    )
+
+    out = svc.suggest_candidate(
+        workspace_id="ws-1",
+        user_id="user-1",
+        payload={
+            "prompt": "Show me all the students enrolled at Barksdale Elementary",
+            "expected_base_domain_id": 9,
+            "observed_base_domain_id": 15,
+        },
+    )
+
+    assert out["candidate"]["source_type"] == "trace_review"
+    assert out["generation_mode"] == "fallback_heuristic"
+
+
+def test_suggest_candidate_surfaces_unexpected_llm_errors() -> None:
+    svc = PlannerRerankPolicyCandidateSuggestionService(
+        sql=_FakeSQL(),
+        prompt_signal_service=_FakePromptSignals(),
+        capability_service=_FakePlannerCapabilities(),
+        domain_capabilities_service=_FakeDomainCapabilities(),
+        candidate_service=_FakeCandidateService(),
+        llm_client=_AssertionErrorLLM(),
+    )
+
+    with pytest.raises(AssertionError, match="unexpected llm bug"):
+        svc.suggest_candidate(
+            workspace_id="ws-1",
+            user_id="user-1",
+            payload={
+                "prompt": "Show me all the students enrolled at Barksdale Elementary",
+                "expected_base_domain_id": 9,
+                "observed_base_domain_id": 15,
+            },
+        )
+
+
+def test_is_valid_llm_payload_surfaces_unexpected_validation_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(_payload):
+        raise AssertionError("unexpected validation bug")
+
+    monkeypatch.setattr(
+        suggestion_service.PlannerRerankPolicyCandidateSuggestionLLMResponse,
+        "model_validate",
+        _boom,
+    )
+
+    with pytest.raises(AssertionError, match="unexpected validation bug"):
+        _is_valid_llm_payload({})

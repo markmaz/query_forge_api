@@ -8,6 +8,7 @@ LABEL_BY_TYPE = {
     "school": "ORG_SCHOOL",
     "district": "ORG_DISTRICT",
 }
+SPACY_OVERWRITE_ENTS_COMPAT_ERRORS = (AttributeError, TypeError, ValueError)
 
 
 def load_school_district_patterns(csv_path: str) -> List[Dict[str, Any]]:
@@ -70,6 +71,6 @@ def build_entity_ruler(nlp: Any, patterns: List[Dict[str, Any]]) -> Any:
         if hasattr(ner, "overwrite_ents"):
             try:
                 ner.overwrite_ents = False
-            except Exception:
+            except SPACY_OVERWRITE_ENTS_COMPAT_ERRORS:
                 pass
     return ruler

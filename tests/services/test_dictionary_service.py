@@ -4,6 +4,7 @@ from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
+import app.services.dictionary.dictionary_service as dictionary_service
 
 # We patch the SQLAlchemy engine at module level so no real DB is needed.
 # The service uses: engine.connect() -> conn.execute(text(sql), params) -> .mappings().all()
@@ -371,3 +372,13 @@ def test_patch_table_accepts_null_description(svc):
     first_call_params = conn.execute.call_args_list[0][0][1]
     assert "description" in first_call_params
     assert first_call_params["description"] is None
+
+
+def test_parse_json_field_surfaces_unexpected_parser_errors(monkeypatch: pytest.MonkeyPatch):
+    def _boom(_value):
+        raise AssertionError("unexpected dictionary parser bug")
+
+    monkeypatch.setattr(dictionary_service.json, "loads", _boom)
+
+    with pytest.raises(AssertionError, match="unexpected dictionary parser bug"):
+        dictionary_service._parse_json_field("{\"a\":1}")
