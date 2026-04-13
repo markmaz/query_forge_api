@@ -20,6 +20,7 @@ from app.services.semantic.catalog.column_profile_builder import ColumnProfileBu
 from app.services.semantic.catalog.semantic_catalog_repository import SemanticCatalogRepository
 from app.services.semantic.catalog.semantic_enrichment_service import SemanticEnrichmentService
 from app.services.semantic.catalog.semantic_index_builder import SemanticIndexBuilder
+from app.services.semantic.vertical_norm import normalize_semantic_vertical
 
 logger = logging.getLogger(__name__)
 
@@ -634,8 +635,7 @@ def _humanize(value: str) -> str:
 
 
 def _normalize_vertical(value: str) -> str:
-    token = str(value or "generic").strip().lower()
-    return token or "generic"
+    return normalize_semantic_vertical(value)
 
 
 def _entity_hint_from_column(column_name: str) -> Optional[str]:

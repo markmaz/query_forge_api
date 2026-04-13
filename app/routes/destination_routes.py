@@ -160,14 +160,14 @@ class DestinationList(Resource):
 class DestinationDetail(Resource):
     @token_required
     @require_access("skills")
-    def get(self, workspace_id: str = "", destination_id: int = 0):
+    def get(self, destination_id: int = 0):
         """Get a single destination. Config is masked."""
         dest = _get_dest_or_404(destination_id)
         return {**dest.to_dict(), "usage": dest.get_usage_summary()}, 200
 
     @token_required
     @require_access("skills", role="admin")
-    def put(self, workspace_id: str = "", destination_id: int = 0):
+    def put(self, destination_id: int = 0):
         """Update a destination. Admin only."""
         _require_admin()
         dest = _get_dest_or_404(destination_id)
@@ -211,7 +211,7 @@ class DestinationDetail(Resource):
 
     @token_required
     @require_access("skills", role="admin")
-    def delete(self, workspace_id: str = "", destination_id: int = 0):
+    def delete(self, destination_id: int = 0):
         """
         Delete a destination. Admin only.
         Blocked if any active skills reference this destination.
@@ -242,7 +242,7 @@ class DestinationDetail(Resource):
 class DestinationTest(Resource):
     @token_required
     @require_access("skills", role="admin")
-    def post(self, workspace_id: str = "", destination_id: int = 0):
+    def post(self, destination_id: int = 0):
         """
         Send a test message to the destination. Admin only.
         Updates last_tested_at, last_test_status, last_test_message.

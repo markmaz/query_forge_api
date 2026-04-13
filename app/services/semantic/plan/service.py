@@ -26,6 +26,7 @@ from app.services.semantic.concept_to_column_service import ConceptToColumnServi
 from app.services.semantic.constrained_column_vector_service import ConstrainedColumnVectorService
 from app.services.semantic.deterministic_matcher import DeterministicMatcher
 from app.services.semantic.domain_selection_service import DomainSelectionService
+from app.services.semantic.vertical_norm import normalize_semantic_vertical
 from app.services.semantic.value_alias_resolution_service import ValueAliasResolutionService
 from app.nlp.tier2_spacy.pipeline import run_tier2_with_meta
 
@@ -147,7 +148,7 @@ class PlanService:
             raise ForgeError("Invalid planning request", status_code=400, details={"errors": exc.errors()}) from exc
 
         workspace_id = str(req.workspace_id or "").strip()
-        vertical_norm = str(req.vertical_norm or "generic").strip().lower() or "generic"
+        vertical_norm = normalize_semantic_vertical(req.vertical_norm)
         prompt = str(req.prompt or "").strip()
         if workspace_id == "" or prompt == "":
             raise ForgeError("workspace_id and prompt are required", status_code=400)

@@ -4,7 +4,6 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from app.exceptions.forge_error import ForgeError
-from app.services.domain_resolver import DomainPlan
 from app.services.query_forge.value_override_constants import (
     VALUE_OVERRIDE_FIELDS_BY_TYPE,
     VALUE_OVERRIDE_JOIN_ALIAS_BY_TYPE,
@@ -45,7 +44,6 @@ class QueryForgeAttachmentCompiler:
         qf_using_prep: bool,
         qf_base_alias: str,
         alias_by_wt: Dict[int, str],
-        plan: DomainPlan,
         workspace_id: Optional[str],
         new_param: Callable[[Any], str],
     ) -> Dict[str, Any]:

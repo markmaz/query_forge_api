@@ -4,6 +4,7 @@ import json
 from typing import Any, Dict, Mapping
 
 from app.services.planner.semantic_candidate_models import SemanticCandidatePayload
+from app.services.semantic.vertical_norm import normalize_semantic_vertical
 
 
 def build_compact_semantic_planner_developer_prompt() -> str:
@@ -38,7 +39,7 @@ def build_compact_semantic_planner_user_prompt(
         "prompt": str(prompt or "").strip(),
         "normalized_prompt": str(normalized_prompt or "").strip(),
         "workspace_id": str(workspace_id or "").strip(),
-        "vertical_norm": str(vertical_norm or "generic").strip().lower() or "generic",
+        "vertical_norm": normalize_semantic_vertical(vertical_norm),
         "base_domain_key": str(candidates.base_domain_key or "").strip() or None,
         "domain": domain_obj,
         "metric_candidates": [_candidate_for_prompt(row) for row in candidates.metric_candidates],

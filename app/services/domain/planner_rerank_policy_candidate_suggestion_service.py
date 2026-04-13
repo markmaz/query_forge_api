@@ -57,7 +57,7 @@ class PlannerRerankPolicyCandidateSuggestionService:
         payload: Any,
     ) -> Dict[str, Any]:
         req = PlannerRerankPolicyCandidateSuggestRequest.model_validate(payload)
-        vertical_norm = str(req.vertical_norm or "generic").strip().lower() or "generic"
+        vertical_norm = "generic"
         prompt_signals = self._signals.extract_signals(prompt=req.prompt)
 
         expected_domain = self._build_domain_snapshot(
@@ -151,7 +151,6 @@ class PlannerRerankPolicyCandidateSuggestionService:
                 "candidate_key": candidate_key,
                 "source_type": suggestion_source_type,
                 "workspace_id": workspace_id,
-                "vertical_norm": vertical_norm,
                 "candidate_policy": suggestion.candidate_policy.model_dump(),
                 "rationale_json": rationale,
                 "confidence": suggestion.confidence,

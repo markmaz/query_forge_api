@@ -85,7 +85,7 @@ def assign_slots(
     _assign_calendar(text, lowered, slots)
     _assign_attendance(lowered, slots)
     _assign_discipline(lowered, slots)
-    _assign_assessment_and_grades(text, lowered, slots)
+    _assign_assessment_and_grades(lowered, slots)
 
     _merge_doc_entities(doc_entities, slots)
 
@@ -200,7 +200,7 @@ def _assign_discipline(lowered: str, slots: Tier2Slots) -> None:
             slots.discipline.append(Tier2DisciplineSlot(incident_type=incident, confidence=0.8))
 
 
-def _assign_assessment_and_grades(text: str, lowered: str, slots: Tier2Slots) -> None:
+def _assign_assessment_and_grades(lowered: str, slots: Tier2Slots) -> None:
     for marker in ("assessment", "benchmark", "act", "sat", "test"):
         if marker in lowered:
             slots.assessments.append(Tier2AssessmentSlot(type=marker, confidence=0.74))

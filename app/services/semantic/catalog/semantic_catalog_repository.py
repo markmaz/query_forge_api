@@ -13,6 +13,7 @@ from app.services.semantic.catalog.catalog_models import (
     RelationshipUpsert,
     ValueAliasUpsert,
 )
+from app.services.semantic.vertical_norm import normalize_semantic_vertical
 
 logger = logging.getLogger(__name__)
 RELATIONSHIP_FK_TARGET_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
@@ -60,7 +61,7 @@ class SemanticCatalogRepository:
         if not keys:
             return []
 
-        params: Dict[str, Any] = {"vertical_norm": str(vertical_norm or "generic").strip().lower() or "generic"}
+        params: Dict[str, Any] = {"vertical_norm": normalize_semantic_vertical(vertical_norm)}
         placeholders: List[str] = []
         for idx, key in enumerate(keys):
             param_name = f"k_{idx}"
@@ -100,7 +101,7 @@ class SemanticCatalogRepository:
         keys = [str(k or "").strip() for k in concept_keys if str(k or "").strip()]
         if not keys:
             return {}
-        params: Dict[str, Any] = {"vertical_norm": str(vertical_norm or "generic").strip().lower() or "generic"}
+        params: Dict[str, Any] = {"vertical_norm": normalize_semantic_vertical(vertical_norm)}
         placeholders: List[str] = []
         for idx, key in enumerate(keys):
             name = f"k_{idx}"
@@ -342,7 +343,7 @@ class SemanticCatalogRepository:
             return {}
 
         for row in concept_rows:
-            vertical = str(row.get("vertical_norm") or "generic").strip().lower() or "generic"
+            vertical = normalize_semantic_vertical(row.get("vertical_norm"))
             tx.execute_write(
                 """
                 INSERT INTO semantic_registry (

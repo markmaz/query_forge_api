@@ -279,7 +279,7 @@ class WhereCompiler:
                 raise ForgeError("Invalid columnName for exists filter", status_code=400)
             return f"{safe_ident(sub_alias)}.{safe_ident(cn)}"
 
-        def render_exists(group_key: str, group_info: Dict[str, Any]) -> str:
+        def render_exists(group_info: Dict[str, Any]) -> str:
             nonlocal exists_counter
             exists_counter += 1
 
@@ -398,7 +398,7 @@ class WhereCompiler:
                 for c in children:
                     w_sql, ex = walk(c)
                     if ex:
-                        exists_parts_inner = [render_exists(k, v) for k, v in ex.items()]
+                        exists_parts_inner = [render_exists(v) for v in ex.values()]
                         expr_parts = [p for p in ([w_sql] if w_sql else []) + exists_parts_inner if p]
                         parts.append(" AND ".join(expr_parts))
                     elif w_sql:
@@ -480,5 +480,5 @@ class WhereCompiler:
             raise ForgeError("Invalid filter node type", status_code=400)
 
         where_sql, exists_groups = walk(node)
-        exists_parts_out = [render_exists(k, v) for k, v in exists_groups.items()]
+        exists_parts_out = [render_exists(v) for v in exists_groups.values()]
         return where_sql, exists_parts_out

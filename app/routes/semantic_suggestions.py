@@ -22,7 +22,6 @@ run_model = semantic_suggestions_ns.model(
     {
         "id": fields.Integer(readOnly=True),
         "workspace_id": fields.String,
-        "vertical": fields.String,
         "status": fields.String,
         "params_json": fields.Raw,
         "total_columns": fields.Integer,
@@ -58,7 +57,7 @@ class SuggestionRuns(Resource):
         body: Dict[str, Any] = request.get_json(silent=True) or {}
         created_by = str(getattr(g, "user_id", "") or "") or None
         run = SemanticSuggestionService().create_run(body, created_by=created_by)
-        return {"run": run}, 201
+        return {"run": _shape_run(run)}, 201
 
 
 @semantic_suggestions_ns.route("/runs/<int:run_id>/execute")
@@ -69,7 +68,7 @@ class SuggestionRunExecute(Resource):
     def post(self, run_id: int):
         llm_id = _optional_int(request.args.get("llm_id"), "llm_id")
         run = SemanticSuggestionService().execute_run(run_id, llm_id=llm_id)
-        return {"run": run}, 200
+        return {"run": _shape_run(run)}, 200
 
 
 @semantic_suggestions_ns.route("/runs/<int:run_id>")
@@ -78,7 +77,7 @@ class SuggestionRunById(Resource):
     @require_access("semantic")
     def get(self, run_id: int):
         run = SemanticSuggestionService().get_run(run_id)
-        return {"run": run}, 200
+        return {"run": _shape_run(run)}, 200
 
 
 @semantic_suggestions_ns.route("/items")
@@ -128,7 +127,14 @@ class SuggestionRunApply(Resource):
     @require_access("semantic", role="admin")
     def post(self, run_id: int):
         run = SemanticSuggestionService().apply_approved(run_id)
-        return {"run": run}, 200
+        return {"run": _shape_run(run)}, 200
+
+
+def _shape_run(run: Dict[str, Any]) -> Dict[str, Any]:
+    shaped = dict(run or {})
+    shaped.pop("vertical", None)
+    shaped.pop("vertical_norm", None)
+    return shaped
 
 
 def _optional_int(value: Optional[str], field: str) -> Optional[int]:

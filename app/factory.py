@@ -47,6 +47,46 @@ from app.services.auth_service import AuthService
 from app.services.semantic.concept_seed import ConceptSeedService
 
 auth_service = AuthService()
+_AUDIT_MASK = "*****"
+_AUDIT_SECRET_FIELDS = {
+    "password",
+    "token",
+    "access_token",
+    "refresh_token",
+    "api_key",
+    "apikey",
+    "client_secret",
+    "secret",
+    "webhook_url",
+    "authorization",
+}
+
+
+def _normalize_audit_key(key: object) -> str:
+    chars = [ch.lower() if str(ch).isalnum() else "_" for ch in str(key or "")]
+    return "".join(chars).strip("_")
+
+
+def _is_secret_audit_key(key: object) -> bool:
+    normalized = _normalize_audit_key(key)
+    if normalized in _AUDIT_SECRET_FIELDS:
+        return True
+    return normalized.endswith(("_password", "_token", "_secret", "_api_key", "_webhook_url"))
+
+
+def _scrub_audit_payload(value):
+    if isinstance(value, dict):
+        scrubbed = {}
+        for key, raw in value.items():
+            if _is_secret_audit_key(key):
+                scrubbed[key] = _AUDIT_MASK
+            else:
+                scrubbed[key] = _scrub_audit_payload(raw)
+        return scrubbed
+    if isinstance(value, list):
+        return [_scrub_audit_payload(item) for item in value]
+    return value
+
 
 def _register_analytics_registry(app: Flask) -> None:
     """Register an empty analytics registry.
@@ -62,11 +102,7 @@ def try_get_json_body(req):
     try:
         data = req.get_json(silent=True)
         if data:
-            masked = data.copy()
-            for key in ["password", "token"]:
-                if key in masked:
-                    masked[key] = "*****"
-            return masked
+            return _scrub_audit_payload(data)
     except BadRequest:
         pass
     return None

@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.services.semantic.vertical_norm import normalize_semantic_vertical
+
 
 PlannerRole = Literal["dimension", "measure", "metric", "filter", "time_field", "identifier", "other"]
 SemanticType = Literal[
@@ -110,7 +112,7 @@ class EnrichedColumnProfile(BaseModel):
 
 
 class ConceptUpsert(BaseModel):
-    vertical_norm: str
+    vertical_norm: str = "generic"
     concept_key: str
     name: str
     description: str
@@ -127,13 +129,23 @@ class ConceptUpsert(BaseModel):
     sensitive: bool = False
     status: str = "active"
 
+    @field_validator("vertical_norm", mode="before")
+    @classmethod
+    def _normalize_vertical_norm(cls, value: Any) -> str:
+        return normalize_semantic_vertical(value)
+
 
 class AliasUpsert(BaseModel):
-    vertical_norm: str
+    vertical_norm: str = "generic"
     alias_key: str
     concept_key: str
     match_kind: str = "exact"
     weight: float = 1.0
+
+    @field_validator("vertical_norm", mode="before")
+    @classmethod
+    def _normalize_vertical_norm(cls, value: Any) -> str:
+        return normalize_semantic_vertical(value)
 
 
 class RelationshipUpsert(BaseModel):
@@ -143,12 +155,17 @@ class RelationshipUpsert(BaseModel):
 
 
 class ValueAliasUpsert(BaseModel):
-    vertical_norm: str
+    vertical_norm: str = "generic"
     semantic_concept_id: int
     canonical_value: str
     alias_value: str
     match_kind: str = "exact"
     weight: float = 1.0
+
+    @field_validator("vertical_norm", mode="before")
+    @classmethod
+    def _normalize_vertical_norm(cls, value: Any) -> str:
+        return normalize_semantic_vertical(value)
 
 
 class SemanticIndexItem(BaseModel):
@@ -162,7 +179,7 @@ class SemanticCatalogBuildResult(BaseModel):
     workspace_id: str
     domain_id: Optional[int] = None
     domain_name: Optional[str] = None
-    vertical_norm: str
+    vertical_norm: str = "generic"
     profile_count: int = 0
     enriched_count: int = 0
     concepts_upserted: int = 0
@@ -176,6 +193,11 @@ class SemanticCatalogBuildResult(BaseModel):
     alias_preview: List[Dict[str, Any]] = Field(default_factory=list)
     relationship_preview: List[Dict[str, Any]] = Field(default_factory=list)
     index_preview: List[Dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("vertical_norm", mode="before")
+    @classmethod
+    def _normalize_vertical_norm(cls, value: Any) -> str:
+        return normalize_semantic_vertical(value)
 
 
 class SemanticEnrichmentBatchResponse(BaseModel):

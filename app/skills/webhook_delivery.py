@@ -293,6 +293,7 @@ class WebhookDeliverySkill(BaseSkill):
         Use workspace LLM to extract 3-5 highlights from the results.
         Falls back to summary format if no LLM is configured.
         """
+        del cfg
         llm_config = context.workspace_config.get("llm")
         if not llm_config:
             return self._format_summary(context)

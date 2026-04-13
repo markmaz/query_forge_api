@@ -115,7 +115,7 @@ class PlannerSignalPolicyRule(BaseModel):
 
 
 class PlannerSignalPolicyUpsertRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     id: Optional[int] = Field(default=None, ge=1)
     policy_key: str = Field(min_length=1, max_length=150)
@@ -123,13 +123,12 @@ class PlannerSignalPolicyUpsertRequest(BaseModel):
     description: Optional[str] = None
     scope_type: str = Field(min_length=1, max_length=32)
     scope_workspace_id: Optional[str] = Field(default=None, max_length=128)
-    scope_vertical_norm: Optional[str] = Field(default=None, max_length=64)
     priority: int = Field(default=100)
     is_active: bool = True
     stop_on_match: bool = False
     policy_json: PlannerSignalPolicyRule
 
-    @field_validator("policy_key", "name", "description", "scope_workspace_id", "scope_vertical_norm", mode="before")
+    @field_validator("policy_key", "name", "description", "scope_workspace_id", mode="before")
     @classmethod
     def _clean_text(cls, value: Any) -> Optional[str]:
         if value is None:
@@ -149,8 +148,8 @@ class PlannerSignalPolicyUpsertRequest(BaseModel):
 class PlannerSignalPolicy(SemanticBase):
     __tablename__ = "planner_signal_policy"
     __table_args__ = (
-        UniqueConstraint("policy_key", "scope_workspace_id", "scope_vertical_norm", name="uidx_signal_policy_scope"),
-        Index("idx_psp_scope", "scope_workspace_id", "scope_vertical_norm"),
+        UniqueConstraint("policy_key", "scope_workspace_id", name="uidx_signal_policy_scope"),
+        Index("idx_psp_scope", "scope_workspace_id"),
         Index("idx_psp_priority", "priority"),
         Index("idx_psp_active", "is_active"),
     )
@@ -161,7 +160,6 @@ class PlannerSignalPolicy(SemanticBase):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
     scope_workspace_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    scope_vertical_norm: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("100"))
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     stop_on_match: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))

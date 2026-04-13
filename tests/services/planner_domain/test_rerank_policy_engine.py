@@ -88,20 +88,20 @@ def test_prompt_signal_service_extracts_birth_month_signal_for_plural_birthdays(
     assert "student_listing" in signals
 
 
-def test_capability_service_prefers_explicit_workspace_scope_over_vertical_scope() -> None:
+def test_capability_service_prefers_explicit_workspace_scope_over_global_scope() -> None:
     class _SQL:
         def execute_query_mappings(self, query, params=None):
             del query, params
             return [
                 {
-                    "scope_type": "vertical",
+                    "scope_type": "global",
                     "scope_workspace_id": None,
-                    "scope_vertical_norm": "education",
+                    "scope_vertical_norm": None,
                     "base_domain_id": 9,
                     "capability_key": "SCHOOL_NAME",
                     "support_level": "partial",
                     "source_type": "semantic_concept",
-                    "source_ref": "vertical-row",
+                    "source_ref": "global-row",
                     "confidence": 0.6,
                 },
                 {

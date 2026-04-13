@@ -79,6 +79,8 @@ def test_concept_mapping_query_returns_columns() -> None:
     assert "wc.semantic_concept_key IN" in fallback_query
     assert "COLLATE utf8mb4_0900_ai_ci" in fallback_query
     assert "COLLATE utf8mb4_unicode_ci" in fallback_query
+    assert sql.query_mappings_calls[0].params["vertical_norm"] == "generic"
+    assert sql.query_mappings_calls[1].params["vertical_norm"] == "generic"
 
 
 def test_concept_mapping_rejects_race_ethnicity_to_city_with_warning() -> None:
@@ -196,6 +198,24 @@ def test_concept_mapping_entity_intent_ranks_student_name_over_staff_name() -> N
 
     assert out["mapped_columns"][0]["workspace_column_id"] == 202
     assert out["mapped_columns"][0]["effective_weight"] > out["mapped_columns"][1]["effective_weight"]
+
+
+def test_concept_mapping_defaults_missing_vertical_to_generic() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[], []]
+    svc = ConceptToColumnService(sql=sql)
+
+    out = svc.map_concepts_to_columns(
+        workspace_id="ws-1",
+        vertical_norm=None,
+        concept_hits=[{"concept_key": "GRADE_LEVEL"}],
+        max_columns=20,
+    )
+
+    assert out["concepts"] == ["GRADE_LEVEL"]
+    assert len(sql.query_mappings_calls) == 2
+    assert sql.query_mappings_calls[0].params["vertical_norm"] == "generic"
+    assert sql.query_mappings_calls[1].params["vertical_norm"] == "generic"
 
 
 def test_concept_mapping_student_name_intent_boosts_student_specific_and_downranks_generic_staff() -> None:

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.semantic.vertical_norm import normalize_semantic_vertical
 
 
 class ValueAliasResolutionService:
@@ -12,7 +13,7 @@ class ValueAliasResolutionService:
         self._sql = sql or ForgeMetaSQL()
 
     def resolve(self, *, prompt: str, vertical_norm: str) -> List[Dict[str, Any]]:
-        vertical = str(vertical_norm or "generic").strip().lower() or "generic"
+        vertical = normalize_semantic_vertical(vertical_norm)
         ngrams = _build_ngrams(prompt)
         if not ngrams:
             return []

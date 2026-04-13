@@ -14,10 +14,11 @@ from app.exceptions.forge_error import ForgeError
 from app.models.domain.planner_projection_policy import PlannerProjectionPolicyRule, PlannerProjectionPolicyUpsertRequest
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.domain.policy_scope_service import (
-    annotate_effective_rows,
-    global_workspace_query_predicate,
-    require_global_workspace_scope,
-    sort_and_dedupe_global_workspace_policies,
+    DOMAIN_POLICY_SCOPE_TYPES,
+    annotate_effective_scoped_rows,
+    require_supported_scope,
+    scoped_query_predicate,
+    sort_and_dedupe_scoped_policies,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Ensure student identity concepts appear first for student listing prompts.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "scope_base_domain_id": None,
         "priority": 100,
         "is_active": 1,
@@ -50,7 +50,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Require school filter and school join context for student listing prompts with a school literal.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "scope_base_domain_id": None,
         "priority": 110,
         "is_active": 1,
@@ -72,7 +71,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Prefer school-name semantics over technical school identifiers for school-filter prompts unless the prompt explicitly asks for a key or code.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "scope_base_domain_id": None,
         "priority": 120,
         "is_active": 1,
@@ -94,7 +92,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Prefer human-readable staff role/title columns over staff classification when the prompt asks for a staff role and does not explicitly ask for classification values.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "scope_base_domain_id": None,
         "priority": 130,
         "is_active": 1,
@@ -116,7 +113,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Ensure school listing prompts lead with human-readable school identity columns.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "scope_base_domain_id": None,
         "priority": 140,
         "is_active": 1,
@@ -237,6 +233,7 @@ class PlannerProjectionPolicyService:
         vertical_norm: Optional[str],
         base_domain_id: Optional[int],
     ) -> List[Dict[str, Any]]:
+        del vertical_norm
         rows: List[Dict[str, Any]] = [dict(item) for item in _SEED_POLICIES]
         try:
             db_rows = self._sql.execute_query_mappings(
@@ -248,7 +245,6 @@ class PlannerProjectionPolicyService:
                   description,
                   scope_type,
                   scope_workspace_id,
-                  scope_vertical_norm,
                   scope_base_domain_id,
                   priority,
                   is_active,
@@ -256,10 +252,11 @@ class PlannerProjectionPolicyService:
                   policy_json
                 FROM planner_projection_policy
                 WHERE is_active = 1
-                  AND {global_workspace_query_predicate()}
+                  AND {scoped_query_predicate(include_base_domain=True)}
                 """,
                 {
                     "workspace_id": str(workspace_id or "").strip() or None,
+                    "base_domain_id": int(base_domain_id) if base_domain_id is not None else None,
                 },
             )
         except (OSError, RuntimeError, ValueError, SQLAlchemyError) as exc:  # pragma: no cover - defensive runtime fallback
@@ -274,13 +271,14 @@ class PlannerProjectionPolicyService:
         normalized: List[Dict[str, Any]] = []
         for row in rows:
             payload = dict(row)
+            payload.pop("scope_vertical_norm", None)
             try:
                 payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             except (TypeError, ValueError, ValidationError):
                 continue
             normalized.append(payload)
 
-        return sort_and_dedupe_global_workspace_policies(normalized)
+        return sort_and_dedupe_scoped_policies(normalized)
 
     def list_policies(
         self,
@@ -303,7 +301,6 @@ class PlannerProjectionPolicyService:
               description,
               scope_type,
               scope_workspace_id,
-              scope_vertical_norm,
               scope_base_domain_id,
               priority,
               is_active,
@@ -312,11 +309,12 @@ class PlannerProjectionPolicyService:
               created_at,
               updated_at
             FROM planner_projection_policy
-            WHERE {global_workspace_query_predicate()}
+            WHERE {scoped_query_predicate(include_base_domain=True)}
             {"AND is_active = 1" if not include_inactive else ""}
             """,
             {
                 "workspace_id": str(workspace_id),
+                "base_domain_id": int(base_domain_id) if base_domain_id is not None else None,
             },
         )
         rows.extend({**dict(row), "_seeded": False} for row in db_rows)
@@ -324,13 +322,14 @@ class PlannerProjectionPolicyService:
         policies: List[Dict[str, Any]] = []
         for row in rows:
             payload = _json_safe_mapping(dict(row))
+            payload.pop("scope_vertical_norm", None)
             payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             payload["is_seeded"] = bool(payload.get("_seeded"))
             payload["can_edit"] = not payload["is_seeded"]
             payload["can_delete"] = not payload["is_seeded"]
             policies.append(payload)
 
-        policies = annotate_effective_rows(policies)
+        policies = annotate_effective_scoped_rows(policies)
 
         return {
             "workspace_id": str(workspace_id),
@@ -344,22 +343,25 @@ class PlannerProjectionPolicyService:
         self,
         *,
         workspace_id: str,
-        actor_user_id: str,
         payload: Any,
     ) -> Dict[str, Any]:
-        del actor_user_id
         req = PlannerProjectionPolicyUpsertRequest.model_validate(payload)
-        scope_type = require_global_workspace_scope(scope_type=req.scope_type)
-        if scope_type == "workspace" and (req.scope_workspace_id or workspace_id) != workspace_id:
+        scope_type = require_supported_scope(
+            scope_type=req.scope_type,
+            allowed_scope_types=DOMAIN_POLICY_SCOPE_TYPES,
+            family_label="planner projection policies",
+        )
+        if scope_type.startswith("workspace") and (req.scope_workspace_id or workspace_id) != workspace_id:
             raise ForgeError("workspace scope must match the active workspace", status_code=400)
+        if req.scope_base_domain_id is not None:
+            self._load_domain_row(workspace_id=workspace_id, domain_id=req.scope_base_domain_id)
         params = {
             "policy_key": req.policy_key,
             "name": req.name,
             "description": req.description,
             "scope_type": scope_type,
-            "scope_workspace_id": req.scope_workspace_id or (workspace_id if scope_type == "workspace" else None),
-            "scope_vertical_norm": None,
-            "scope_base_domain_id": None,
+            "scope_workspace_id": req.scope_workspace_id or (workspace_id if scope_type.startswith("workspace") else None),
+            "scope_base_domain_id": req.scope_base_domain_id if "domain" in scope_type else None,
             "priority": int(req.priority),
             "is_active": 1 if req.is_active else 0,
             "stop_on_match": 1 if req.stop_on_match else 0,
@@ -378,10 +380,6 @@ class PlannerProjectionPolicyService:
                   AND (
                     (scope_workspace_id IS NULL AND :scope_workspace_id IS NULL)
                     OR scope_workspace_id = :scope_workspace_id
-                  )
-                  AND (
-                    (scope_vertical_norm IS NULL AND :scope_vertical_norm IS NULL)
-                    OR scope_vertical_norm = :scope_vertical_norm
                   )
                   AND (
                     (scope_base_domain_id IS NULL AND :scope_base_domain_id IS NULL)
@@ -405,7 +403,6 @@ class PlannerProjectionPolicyService:
                         description = :description,
                         scope_type = :scope_type,
                         scope_workspace_id = :scope_workspace_id,
-                        scope_vertical_norm = :scope_vertical_norm,
                         scope_base_domain_id = :scope_base_domain_id,
                         priority = :priority,
                         is_active = :is_active,
@@ -425,7 +422,6 @@ class PlannerProjectionPolicyService:
                       description,
                       scope_type,
                       scope_workspace_id,
-                      scope_vertical_norm,
                       scope_base_domain_id,
                       priority,
                       is_active,
@@ -437,7 +433,6 @@ class PlannerProjectionPolicyService:
                       :description,
                       :scope_type,
                       :scope_workspace_id,
-                      :scope_vertical_norm,
                       :scope_base_domain_id,
                       :priority,
                       :is_active,
@@ -476,11 +471,12 @@ class PlannerProjectionPolicyService:
         self,
         *,
         workspace_id: str,
-        actor_user_id: str,
         policy_id: int,
     ) -> Dict[str, Any]:
-        del actor_user_id
         row = self._load_policy_row(policy_id=policy_id, workspace_id=workspace_id)
+        scope_base_domain_id = row.get("scope_base_domain_id")
+        if scope_base_domain_id is not None:
+            self._load_domain_row(workspace_id=workspace_id, domain_id=int(scope_base_domain_id))
         deleted = self._sql.execute_write(
             "DELETE FROM planner_projection_policy WHERE id = :policy_id",
             {"policy_id": int(policy_id)},
@@ -493,6 +489,27 @@ class PlannerProjectionPolicyService:
             "policy_key": str(row.get("policy_key") or ""),
         }
 
+    def _load_domain_row(self, *, workspace_id: str, domain_id: int) -> Dict[str, Any]:
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT
+              d.id AS domain_id,
+              d.name AS domain_name
+            FROM domain d
+            WHERE d.workspace_id = :workspace_id
+              AND d.id = :domain_id
+              AND d.is_active = 1
+            LIMIT 1
+            """,
+            {
+                "workspace_id": str(workspace_id),
+                "domain_id": int(domain_id),
+            },
+        )
+        if not rows:
+            raise ForgeError("Domain not found", status_code=404)
+        return dict(rows[0])
+
     def _load_policy_row(self, *, policy_id: int, workspace_id: str) -> Dict[str, Any]:
         rows = self._sql.execute_query_mappings(
             """
@@ -503,7 +520,6 @@ class PlannerProjectionPolicyService:
               description,
               scope_type,
               scope_workspace_id,
-              scope_vertical_norm,
               scope_base_domain_id,
               priority,
               is_active,
@@ -548,7 +564,6 @@ def _rule_matches(*, rule: PlannerProjectionPolicyRule, prompt_signals: Sequence
     if rule.exclude_signals_any and any(item in signal_set for item in rule.exclude_signals_any):
         return False
     return True
-
 
 def _json_safe_mapping(row: Mapping[str, Any]) -> Dict[str, Any]:
     return {str(key): _json_safe_value(value) for key, value in row.items()}

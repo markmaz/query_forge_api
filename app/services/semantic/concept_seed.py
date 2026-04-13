@@ -110,89 +110,91 @@ class ConceptSeedService:
 
 def _normalize_vertical(vertical_norm: str) -> str:
     value = str(vertical_norm or "generic").strip().lower()
+    if value in {"", "global", "__global__", "none", "null", "education"}:
+        return "generic"
     return value or "generic"
 
 
 def _seed_concepts(vertical: str) -> List[Dict[str, Any]]:
-    if vertical == "education":
-        return [
-            _concept(vertical, "STUDENT_ID", "Student ID", "Unique student identifier.", "identifier", None, "student", 0, True, True, False, True, False),
-            _concept(vertical, "SCHOOL_ID", "School ID", "Unique school identifier.", "identifier", None, "school", 0, True, True, False, True, False),
-            _concept(vertical, "LEA_ID", "LEA ID", "Unique local education agency identifier.", "identifier", None, "lea", 0, True, True, False, True, False),
-            _concept(vertical, "COURSE_ID", "Course ID", "Unique course identifier.", "identifier", None, "course", 0, True, True, False, True, False),
-            _concept(vertical, "SECTION_ID", "Section ID", "Unique section identifier.", "identifier", None, "section", 0, True, True, False, True, False),
-            _concept(vertical, "COURSE_CODE", "Course Code", "Assigned course code.", "reference", None, "course", 0, True, True, False, False, False),
-            _concept(vertical, "STATE_COURSE_CODE", "State Course Code", "State-assigned course code.", "reference", None, "course", 0, True, True, False, False, False),
-            _concept(vertical, "SCHOOL_YEAR", "School Year", "Academic school year.", "time", "time.year", None, 0, True, True, False, False, False),
-            _concept(vertical, "ENROLLMENT_COUNT", "Enrollment Count", "Count of enrolled students.", "metric", "measure.count", "student", 1, False, False, True, False, True),
-            _concept(vertical, "STUDENT_GRADE_LEVEL", "Student Grade Level", "Student grade level dimension.", "dimension", "group_by.grade", "student", 1, True, True, False, False, False),
-            _concept(vertical, "TERM", "Term", "Academic term.", "time", "time.term", None, 1, True, True, False, False, False),
-            _concept(
-                vertical,
-                "SEMESTER_SPRING_FLAG",
-                "Semester Spring Flag",
-                "Boolean indicator for spring semester rows.",
-                "flag",
-                "time.term.spring",
-                None,
-                1,
-                True,
-                True,
-                False,
-                False,
-                False,
-            ),
-            _concept(
-                vertical,
-                "SEMESTER_FALL_FLAG",
-                "Semester Fall Flag",
-                "Boolean indicator for fall semester rows.",
-                "flag",
-                "time.term.fall",
-                None,
-                1,
-                True,
-                True,
-                False,
-                False,
-                False,
-            ),
-            _concept(
-                vertical,
-                "SEMESTER_YEAR_ROUND_FLAG",
-                "Semester Year Round Flag",
-                "Boolean indicator for year-round semester rows.",
-                "flag",
-                "time.term.year_round",
-                None,
-                1,
-                True,
-                True,
-                False,
-                False,
-                False,
-            ),
-            _concept(vertical, "CITY", "City", "City geography.", "geography", "geography.city", None, 1, True, True, False, False, False),
-            _concept(vertical, "COUNTY", "County", "County geography.", "geography", "geography.county", None, 2, True, True, False, False, False),
-            _concept(vertical, "STATE", "State", "State geography.", "geography", "geography.state", None, 3, True, True, False, False, False),
-            _concept(vertical, "ZIP_CODE", "ZIP Code", "Zip/postal code geography.", "geography", "geography.zip", None, 0, True, True, False, False, False),
-            _concept(vertical, "COURSE_TITLE", "Course Title", "Course title attribute.", "attribute", None, "course", 0, True, True, False, False, False),
-            _concept(vertical, "COURSE_DESCRIPTION", "Course Description", "Course description attribute.", "attribute", None, "course", 0, True, True, False, False, False),
-            _concept(vertical, "SCHOOL_NAME", "School Name", "School name attribute.", "attribute", None, "school", 0, True, True, False, False, False),
-        ]
-
     if vertical == "generic":
-        return [
-            _concept(vertical, "CITY", "City", "City geography.", "geography", "geography.city", None, 1, True, True, False, False, False),
-            _concept(vertical, "STATE", "State", "State geography.", "geography", "geography.state", None, 3, True, True, False, False, False),
-            _concept(vertical, "DATE", "Date", "Calendar date.", "time", "time.date", None, 2, True, True, False, False, False),
-        ]
+        return _dedupe_concepts(
+            [
+                _concept(vertical, "STUDENT_ID", "Student ID", "Unique student identifier.", "identifier", None, "student", 0, True, True, False, True, False),
+                _concept(vertical, "SCHOOL_ID", "School ID", "Unique school identifier.", "identifier", None, "school", 0, True, True, False, True, False),
+                _concept(vertical, "LEA_ID", "LEA ID", "Unique local education agency identifier.", "identifier", None, "lea", 0, True, True, False, True, False),
+                _concept(vertical, "COURSE_ID", "Course ID", "Unique course identifier.", "identifier", None, "course", 0, True, True, False, True, False),
+                _concept(vertical, "SECTION_ID", "Section ID", "Unique section identifier.", "identifier", None, "section", 0, True, True, False, True, False),
+                _concept(vertical, "COURSE_CODE", "Course Code", "Assigned course code.", "reference", None, "course", 0, True, True, False, False, False),
+                _concept(vertical, "STATE_COURSE_CODE", "State Course Code", "State-assigned course code.", "reference", None, "course", 0, True, True, False, False, False),
+                _concept(vertical, "SCHOOL_YEAR", "School Year", "Academic school year.", "time", "time.year", None, 0, True, True, False, False, False),
+                _concept(vertical, "ENROLLMENT_COUNT", "Enrollment Count", "Count of enrolled students.", "metric", "measure.count", "student", 1, False, False, True, False, True),
+                _concept(vertical, "STUDENT_GRADE_LEVEL", "Student Grade Level", "Student grade level dimension.", "dimension", "group_by.grade", "student", 1, True, True, False, False, False),
+                _concept(vertical, "TERM", "Term", "Academic term.", "time", "time.term", None, 1, True, True, False, False, False),
+                _concept(
+                    vertical,
+                    "SEMESTER_SPRING_FLAG",
+                    "Semester Spring Flag",
+                    "Boolean indicator for spring semester rows.",
+                    "flag",
+                    "time.term.spring",
+                    None,
+                    1,
+                    True,
+                    True,
+                    False,
+                    False,
+                    False,
+                ),
+                _concept(
+                    vertical,
+                    "SEMESTER_FALL_FLAG",
+                    "Semester Fall Flag",
+                    "Boolean indicator for fall semester rows.",
+                    "flag",
+                    "time.term.fall",
+                    None,
+                    1,
+                    True,
+                    True,
+                    False,
+                    False,
+                    False,
+                ),
+                _concept(
+                    vertical,
+                    "SEMESTER_YEAR_ROUND_FLAG",
+                    "Semester Year Round Flag",
+                    "Boolean indicator for year-round semester rows.",
+                    "flag",
+                    "time.term.year_round",
+                    None,
+                    1,
+                    True,
+                    True,
+                    False,
+                    False,
+                    False,
+                ),
+                _concept(vertical, "CITY", "City", "City geography.", "geography", "geography.city", None, 1, True, True, False, False, False),
+                _concept(vertical, "COUNTY", "County", "County geography.", "geography", "geography.county", None, 2, True, True, False, False, False),
+                _concept(vertical, "STATE", "State", "State geography.", "geography", "geography.state", None, 3, True, True, False, False, False),
+                _concept(vertical, "ZIP_CODE", "ZIP Code", "Zip/postal code geography.", "geography", "geography.zip", None, 0, True, True, False, False, False),
+                _concept(vertical, "COURSE_TITLE", "Course Title", "Course title attribute.", "attribute", None, "course", 0, True, True, False, False, False),
+                _concept(vertical, "COURSE_DESCRIPTION", "Course Description", "Course description attribute.", "attribute", None, "course", 0, True, True, False, False, False),
+                _concept(vertical, "SCHOOL_NAME", "School Name", "School name attribute.", "attribute", None, "school", 0, True, True, False, False, False),
+            ]
+            + [
+                _concept(vertical, "CITY", "City", "City geography.", "geography", "geography.city", None, 1, True, True, False, False, False),
+                _concept(vertical, "STATE", "State", "State geography.", "geography", "geography.state", None, 3, True, True, False, False, False),
+                _concept(vertical, "DATE", "Date", "Calendar date.", "time", "time.date", None, 2, True, True, False, False, False),
+            ]
+        )
 
     return []
 
 
 def _seed_aliases(vertical: str) -> List[Dict[str, Any]]:
-    if vertical != "education":
+    if vertical != "generic":
         return []
 
     return [
@@ -286,3 +288,15 @@ def _alias(vertical: str, alias_key: str, concept_key: str, match_kind: str, wei
         "match_kind": str(match_kind).strip().lower(),
         "weight": float(weight),
     }
+
+
+def _dedupe_concepts(concepts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    seen: set[str] = set()
+    out: List[Dict[str, Any]] = []
+    for concept in concepts:
+        key = str(concept.get("concept_key") or "").strip().upper()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(concept)
+    return out

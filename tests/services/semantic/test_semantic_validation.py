@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-import app.services.semantic.semantic_validation as semantic_validation
 from app.services.semantic.semantic_llm_schema import BatchOutput
 from app.services.semantic.semantic_validation import validate_semantic_suggestion
 

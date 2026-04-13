@@ -469,6 +469,7 @@ class ThresholdAlertSkill(BaseSkill):
         last_state: Dict[str, Any],
         context: SkillContext,
     ) -> bool:
+        del conditions_failed
         alert_mode = cfg.get("alert_mode", "on_change")
 
         if all_passed:

@@ -104,5 +104,5 @@ def handle_service_error(error: ForgeError):
     return {"error": str(error)}, getattr(error, "status_code", 400) or 400
 
 
-def run(handler: Callable[[], Tuple[Any, int]], *, log_message: str, client_error: str):
+def run(handler: Callable[[], Tuple[Any, int]]):
     return handler()

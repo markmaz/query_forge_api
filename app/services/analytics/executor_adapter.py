@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Dict, List, Mapping, Optional
 
+from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeExecResult, ForgeQueryPort
 from app.ports.sql_executor_abc import SQLExecutor
 
@@ -30,6 +31,27 @@ class AnalyticsExecutorForgeAdapter(ForgeQueryPort):
         self._statements: Dict[str, _StatementRecord] = {}
         self._lock = Lock()
 
+    @staticmethod
+    def _assert_supported_statement_context(
+        *,
+        warehouse_id: Optional[str] = None,
+        catalog: Optional[str] = None,
+        schema: Optional[str] = None,
+    ) -> None:
+        unsupported = []
+        if str(warehouse_id or "").strip():
+            unsupported.append("warehouse_id")
+        if str(catalog or "").strip():
+            unsupported.append("catalog")
+        if str(schema or "").strip():
+            unsupported.append("schema")
+        if unsupported:
+            joined = ", ".join(unsupported)
+            raise ForgeError(
+                f"Unsupported execution context for non-Databricks datasource: {joined}",
+                status_code=400,
+            )
+
     def submit_statement(
         self,
         sql: str,
@@ -40,7 +62,8 @@ class AnalyticsExecutorForgeAdapter(ForgeQueryPort):
         qf_timeout_s: int = 120,
         qf_result_fmt: Optional[str] = None,
     ) -> Dict[str, Any]:
-        del warehouse_id, wait, qf_timeout_s, qf_result_fmt
+        del wait, qf_timeout_s, qf_result_fmt
+        self._assert_supported_statement_context(warehouse_id=warehouse_id)
         rows = self._executor.execute(sql, dict(parameters or {}))
         return {"status": {"state": "SUCCEEDED"}, "rows": rows}
 
@@ -54,7 +77,12 @@ class AnalyticsExecutorForgeAdapter(ForgeQueryPort):
         schema: Optional[str] = None,
         qf_result_fmt: str = "JSON_ARRAY",
     ) -> Dict[str, Any]:
-        del warehouse_id, catalog, schema, qf_result_fmt
+        del qf_result_fmt
+        self._assert_supported_statement_context(
+            warehouse_id=warehouse_id,
+            catalog=catalog,
+            schema=schema,
+        )
         statement_id = uuid.uuid4().hex
         try:
             rows = self._executor.execute(sql, dict(parameters or {}))

@@ -4,11 +4,10 @@ import logging
 from typing import Any, Dict
 
 from flask import g, request
-from flask_restx import Namespace, fields
-from flask_restx import Resource
+from flask_restx import Namespace, Resource, fields
 
-from app.decorators.security import token_required
 from app.decorators.rbac import require_access
+from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import int_arg
 from app.services.embedding.semantic_concept_embedding_service import SemanticConceptEmbeddingService
@@ -27,7 +26,6 @@ semantic_concept_column_maps_ns = Namespace(
 concept_create_model = semantic_concepts_ns.model(
     "SemanticConceptCreate",
     {
-        "vertical_norm": fields.String(required=True),
         "concept_key": fields.String(required=True),
         "name": fields.String(required=True),
         "description": fields.String(required=False),
@@ -47,24 +45,12 @@ concept_create_model = semantic_concepts_ns.model(
 )
 
 concept_patch_model = semantic_concepts_ns.clone("SemanticConceptPatch", concept_create_model)
-
-seed_model = semantic_concepts_ns.model(
-    "SemanticConceptSeed",
-    {
-        "vertical": fields.String(required=True),
-    },
-)
-rebuild_index_model = semantic_concepts_ns.model(
-    "SemanticConceptRebuildIndex",
-    {
-        "vertical_norm": fields.String(required=False, default="generic"),
-    },
-)
+seed_model = semantic_concepts_ns.model("SemanticConceptSeed", {})
+rebuild_index_model = semantic_concepts_ns.model("SemanticConceptRebuildIndex", {})
 backfill_primary_keys_model = semantic_concepts_ns.model(
     "SemanticConceptBackfillPrimaryKeys",
     {
         "workspace_id": fields.String(required=False),
-        "vertical_norm": fields.String(required=False),
         "dry_run": fields.Boolean(required=False, default=True),
     },
 )
@@ -72,7 +58,6 @@ backfill_primary_keys_model = semantic_concepts_ns.model(
 alias_create_model = semantic_concept_aliases_ns.model(
     "SemanticConceptAliasCreate",
     {
-        "vertical_norm": fields.String(required=True),
         "alias_key": fields.String(required=True),
         "concept_key": fields.String(required=True),
         "match_kind": fields.String(required=False),
@@ -84,7 +69,6 @@ alias_patch_model = semantic_concept_aliases_ns.clone("SemanticConceptAliasPatch
 value_alias_create_model = semantic_value_aliases_ns.model(
     "SemanticValueAliasCreate",
     {
-        "vertical_norm": fields.String(required=True),
         "semantic_concept_id": fields.Integer(required=True),
         "canonical_value": fields.String(required=True),
         "alias_value": fields.String(required=True),
@@ -97,7 +81,6 @@ value_alias_patch_model = semantic_value_aliases_ns.clone("SemanticValueAliasPat
 concept_column_map_create_model = semantic_concept_column_maps_ns.model(
     "SemanticConceptColumnMapCreate",
     {
-        "vertical_norm": fields.String(required=True),
         "semantic_concept_id": fields.Integer(required=True),
         "workspace_column_id": fields.Integer(required=False),
         "relationship_kind": fields.String(required=False),
@@ -110,13 +93,23 @@ concept_column_map_patch_model = semantic_concept_column_maps_ns.clone(
 )
 
 
+def _strip_semantic_vertical_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        cleaned = dict(value)
+        cleaned.pop("vertical", None)
+        cleaned.pop("vertical_norm", None)
+        if "rows" in cleaned and isinstance(cleaned["rows"], list):
+            cleaned["rows"] = [_strip_semantic_vertical_fields(row) for row in cleaned["rows"]]
+        return cleaned
+    return value
+
+
 @semantic_concepts_ns.route("")
 class SemanticConceptCollection(Resource):
     @token_required
     @require_access("semantic")
     @semantic_concepts_ns.doc(
         params={
-            "vertical": "Filter by vertical",
             "q": "Search concept_key/name/description",
             "semantic_type": "Filter by semantic_type",
             "page": "Page number",
@@ -124,16 +117,13 @@ class SemanticConceptCollection(Resource):
         }
     )
     def get(self):
-        return (
-            SemanticConceptService().list_concepts(
-                vertical=request.args.get("vertical") or None,
-                q=request.args.get("q") or None,
-                semantic_type=request.args.get("semantic_type") or None,
-                page=int_arg("page", 1),
-                page_size=int_arg("page_size", 25),
-            ),
-            200,
+        result = SemanticConceptService().list_concepts(
+            q=request.args.get("q") or None,
+            semantic_type=request.args.get("semantic_type") or None,
+            page=int_arg("page", 1),
+            page_size=int_arg("page_size", 25),
         )
+        return _strip_semantic_vertical_fields(result), 200
 
     @token_required
     @require_access("semantic", role="admin")
@@ -142,25 +132,15 @@ class SemanticConceptCollection(Resource):
         _require_admin()
         body: Dict[str, Any] = request.get_json(silent=True) or {}
         row = SemanticConceptService().create_concept(body)
-        return {"row": row}, 201
+        return {"row": _strip_semantic_vertical_fields(row)}, 201
 
 
 @semantic_concepts_ns.route("/keys")
 class SemanticConceptKeyCollection(Resource):
     @token_required
     @require_access("semantic")
-    @semantic_concepts_ns.doc(
-        params={
-            "vertical": "Filter by vertical",
-        }
-    )
     def get(self):
-        return (
-            SemanticConceptService().list_concept_keys(
-                vertical=request.args.get("vertical") or None,
-            ),
-            200,
-        )
+        return (SemanticConceptService().list_concept_keys(), 200)
 
 
 @semantic_concepts_ns.route("/<int:concept_id>")
@@ -172,7 +152,7 @@ class SemanticConceptById(Resource):
         _require_admin()
         body: Dict[str, Any] = request.get_json(silent=True) or {}
         row = SemanticConceptService().patch_concept(concept_id, body)
-        return {"row": row}, 200
+        return {"row": _strip_semantic_vertical_fields(row)}, 200
 
     @token_required
     @require_access("semantic", role="admin")
@@ -189,12 +169,8 @@ class SemanticConceptSeed(Resource):
     @semantic_concepts_ns.expect(seed_model, validate=False)
     def post(self):
         _require_admin()
-        body = request.get_json(silent=True) or {}
-        vertical = str(body.get("vertical") or "").strip().lower()
-        if vertical == "":
-            raise ForgeError("vertical is required", status_code=400)
-        result = SemanticConceptService().seed(vertical)
-        return {"result": result}, 200
+        result = SemanticConceptService().seed()
+        return {"result": _strip_semantic_vertical_fields(result)}, 200
 
 
 @semantic_concepts_ns.route("/rebuild-index")
@@ -204,10 +180,8 @@ class SemanticConceptRebuildIndex(Resource):
     @semantic_concepts_ns.expect(rebuild_index_model, validate=False)
     def post(self):
         _require_admin()
-        body = request.get_json(silent=True) or {}
-        vertical_norm = str(body.get("vertical_norm") or "generic").strip().lower() or "generic"
-        result = SemanticConceptEmbeddingService().rebuild_semantic_concept_index(vertical_norm=vertical_norm)
-        return {"result": result, "vertical_norm": vertical_norm}, 200
+        result = SemanticConceptEmbeddingService().rebuild_semantic_concept_index(vertical_norm="generic")
+        return {"result": _strip_semantic_vertical_fields(result)}, 200
 
 
 @semantic_concepts_ns.route("/backfill-primary-keys")
@@ -220,30 +194,22 @@ class SemanticConceptBackfillPrimaryKeys(Resource):
         body = request.get_json(silent=True) or {}
         result = SemanticConceptService().backfill_primary_semantic_keys(
             workspace_id=body.get("workspace_id"),
-            vertical_norm=body.get("vertical_norm"),
             dry_run=bool(body.get("dry_run", True)),
         )
-        return {"result": result}, 200
+        return {"result": _strip_semantic_vertical_fields(result)}, 200
 
 
 @semantic_concept_aliases_ns.route("")
 class SemanticConceptAliasCollection(Resource):
     @token_required
     @require_access("semantic")
-    @semantic_concept_aliases_ns.doc(
-        params={
-            "vertical": "Filter by vertical",
-            "concept_key": "Filter by concept_key",
-            "q": "Search aliases",
-        }
-    )
+    @semantic_concept_aliases_ns.doc(params={"concept_key": "Filter by concept_key", "q": "Search aliases"})
     def get(self):
         result = SemanticConceptService().list_aliases(
-            vertical=request.args.get("vertical") or None,
             concept_key=request.args.get("concept_key") or None,
             q=request.args.get("q") or None,
         )
-        return result, 200
+        return _strip_semantic_vertical_fields(result), 200
 
     @token_required
     @require_access("semantic", role="admin")
@@ -252,7 +218,7 @@ class SemanticConceptAliasCollection(Resource):
         _require_admin()
         body: Dict[str, Any] = request.get_json(silent=True) or {}
         row = SemanticConceptService().create_alias(body)
-        return {"row": row}, 201
+        return {"row": _strip_semantic_vertical_fields(row)}, 201
 
 
 @semantic_concept_aliases_ns.route("/<int:alias_id>")
@@ -264,7 +230,7 @@ class SemanticConceptAliasById(Resource):
         _require_admin()
         body: Dict[str, Any] = request.get_json(silent=True) or {}
         row = SemanticConceptService().patch_alias(alias_id, body)
-        return {"row": row}, 200
+        return {"row": _strip_semantic_vertical_fields(row)}, 200
 
     @token_required
     @require_access("semantic", role="admin")
@@ -280,7 +246,6 @@ class SemanticValueAliasCollection(Resource):
     @require_access("semantic")
     @semantic_value_aliases_ns.doc(
         params={
-            "vertical": "Filter by vertical",
             "semantic_concept_id": "Filter by semantic_concept_id",
             "q": "Search alias/canonical values",
             "page": "Page number",
@@ -289,13 +254,12 @@ class SemanticValueAliasCollection(Resource):
     )
     def get(self):
         result = SemanticConceptService().list_value_aliases(
-            vertical=request.args.get("vertical") or None,
             semantic_concept_id=_optional_int(request.args.get("semantic_concept_id"), "semantic_concept_id"),
             q=request.args.get("q") or None,
             page=int_arg("page", 1),
             page_size=int_arg("page_size", 25),
         )
-        return result, 200
+        return _strip_semantic_vertical_fields(result), 200
 
     @token_required
     @require_access("semantic", role="admin")
@@ -304,7 +268,7 @@ class SemanticValueAliasCollection(Resource):
         _require_admin()
         body: Dict[str, Any] = request.get_json(silent=True) or {}
         row = SemanticConceptService().create_value_alias(body)
-        return {"row": row}, 201
+        return {"row": _strip_semantic_vertical_fields(row)}, 201
 
 
 @semantic_value_aliases_ns.route("/<int:value_alias_id>")
@@ -316,7 +280,7 @@ class SemanticValueAliasById(Resource):
         _require_admin()
         body: Dict[str, Any] = request.get_json(silent=True) or {}
         row = SemanticConceptService().patch_value_alias(value_alias_id, body)
-        return {"row": row}, 200
+        return {"row": _strip_semantic_vertical_fields(row)}, 200
 
     @token_required
     @require_access("semantic", role="admin")
@@ -332,7 +296,6 @@ class SemanticConceptColumnMapCollection(Resource):
     @require_access("semantic")
     @semantic_concept_column_maps_ns.doc(
         params={
-            "vertical": "Filter by vertical",
             "semantic_concept_id": "Filter by semantic_concept_id",
             "concept_key": "Filter by concept_key (contains, case-insensitive)",
             "workspace_column_id": "Filter by workspace_column_id",
@@ -345,7 +308,6 @@ class SemanticConceptColumnMapCollection(Resource):
     )
     def get(self):
         result = SemanticConceptService().list_concept_column_maps(
-            vertical=request.args.get("vertical") or None,
             semantic_concept_id=_optional_int(request.args.get("semantic_concept_id"), "semantic_concept_id"),
             concept_key=request.args.get("concept_key") or None,
             workspace_column_id=_optional_int(request.args.get("workspace_column_id"), "workspace_column_id"),
@@ -355,7 +317,7 @@ class SemanticConceptColumnMapCollection(Resource):
             page=int_arg("page", 1),
             page_size=int_arg("page_size", 25),
         )
-        return result, 200
+        return _strip_semantic_vertical_fields(result), 200
 
     @token_required
     @require_access("semantic", role="admin")
@@ -364,7 +326,7 @@ class SemanticConceptColumnMapCollection(Resource):
         _require_admin()
         body: Dict[str, Any] = request.get_json(silent=True) or {}
         row = SemanticConceptService().create_concept_column_map(body)
-        return {"row": row}, 201
+        return {"row": _strip_semantic_vertical_fields(row)}, 201
 
 
 @semantic_concept_column_maps_ns.route("/<int:map_id>")
@@ -376,7 +338,7 @@ class SemanticConceptColumnMapById(Resource):
         _require_admin()
         body: Dict[str, Any] = request.get_json(silent=True) or {}
         row = SemanticConceptService().patch_concept_column_map(map_id, body)
-        return {"row": row}, 200
+        return {"row": _strip_semantic_vertical_fields(row)}, 200
 
     @token_required
     @require_access("semantic", role="admin")

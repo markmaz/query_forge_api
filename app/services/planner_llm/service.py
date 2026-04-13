@@ -53,7 +53,6 @@ class PlannerLLMRequest(BaseModel):
 
     workspace_id: str = Field(min_length=1)
     prompt: str = Field(min_length=1)
-    vertical: str = Field(default="generic")
     constraints: PlannerLLMConstraints = Field(default_factory=PlannerLLMConstraints)
     debug: bool = False
     llm_id: Optional[int] = None
@@ -429,7 +428,7 @@ class PlannerLLMService:
         t0 = perf_counter()
 
         normalized_prompt = normalize_prompt_for_planner(req.prompt)
-        vertical = _norm_vertical(req.vertical)
+        vertical = "generic"
         registry_version = self._cache.get_registry_version(vertical=vertical)
         cache_key = self._cache.build_cache_key(
             workspace_id=req.workspace_id,

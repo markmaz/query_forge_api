@@ -12,13 +12,11 @@ from app.models.semantic.semantic_registry import SemanticBase
 class SemanticConceptAlias(SemanticBase):
     __tablename__ = "semantic_concept_alias"
     __table_args__ = (
-        UniqueConstraint("vertical_norm", "alias_key", "match_kind", name="uq_alias"),
-        Index("idx_alias_vertical", "vertical_norm"),
-        Index("idx_alias_concept", "vertical_norm", "concept_key"),
+        UniqueConstraint("alias_key", "match_kind", name="uq_alias"),
+        Index("idx_alias_concept", "concept_key"),
     )
 
     id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
-    vertical_norm: Mapped[str] = mapped_column(String(50), nullable=False, server_default=text("'generic'"))
     alias_key: Mapped[str] = mapped_column(String(200), nullable=False)
     concept_key: Mapped[str] = mapped_column(String(150), nullable=False)
     match_kind: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'exact'"))

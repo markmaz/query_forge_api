@@ -5,7 +5,13 @@ import json
 import pytest
 
 import app.services.semantic.catalog.column_profile_builder as column_profile_builder
-from app.services.semantic.catalog.catalog_models import ColumnProfile
+from app.services.semantic.catalog.catalog_models import (
+    AliasUpsert,
+    ColumnProfile,
+    ConceptUpsert,
+    SemanticCatalogBuildResult,
+    ValueAliasUpsert,
+)
 from app.services.semantic.catalog.column_profile_builder import ColumnProfileBuilder
 from app.services.semantic.catalog.semantic_catalog_builder import SemanticCatalogBuilder
 from app.services.semantic.catalog.semantic_enrichment_service import SemanticEnrichmentService
@@ -226,6 +232,66 @@ def test_semantic_catalog_builder_sales_example_generates_expected_derived_metri
     assert "DISCOUNT_RATE" in keys
     assert result.derived_metrics_created >= 3
     assert result.relationships_upserted > 0
+
+
+def test_semantic_catalog_builder_normalizes_legacy_vertical_to_generic() -> None:
+    profiles = [
+        ColumnProfile(
+            workspace_table_id=10,
+            workspace_column_id=1,
+            table_name="fct_sales",
+            column_name="sales_amount",
+            data_type="DECIMAL",
+            nullable=False,
+            is_numeric=True,
+            is_measure_candidate=True,
+        )
+    ]
+
+    builder = SemanticCatalogBuilder(
+        profile_builder=_ProfileStub(profiles),
+        enrichment_service=SemanticEnrichmentService(enable_llm=False),
+    )
+    result = builder.build_catalog(
+        workspace_id="ws_1",
+        domain_id=3,
+        vertical_norm="education",
+        domain_name="Sales Performance",
+        dry_run=True,
+    )
+
+    assert result.vertical_norm == "generic"
+    assert all(str(row.get("vertical_norm") or "") == "generic" for row in result.concept_preview)
+
+
+def test_semantic_catalog_models_default_and_normalize_vertical_to_generic() -> None:
+    concept = ConceptUpsert(
+        concept_key="STUDENT_ID",
+        name="Student Id",
+        description="Student identifier.",
+        semantic_type="identifier",
+    )
+    legacy_alias = AliasUpsert(
+        vertical_norm="education",
+        alias_key="student id",
+        concept_key="STUDENT_ID",
+    )
+    legacy_value_alias = ValueAliasUpsert(
+        vertical_norm="global",
+        semantic_concept_id=42,
+        canonical_value="A",
+        alias_value="A",
+    )
+    result = SemanticCatalogBuildResult(
+        workspace_id="ws-1",
+        domain_id=3,
+        vertical_norm="education",
+    )
+
+    assert concept.vertical_norm == "generic"
+    assert legacy_alias.vertical_norm == "generic"
+    assert legacy_value_alias.vertical_norm == "generic"
+    assert result.vertical_norm == "generic"
 
 
 def test_to_int_first_ignores_invalid_numeric_values() -> None:

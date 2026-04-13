@@ -25,7 +25,7 @@ def _service_error(error: ForgeError):
     return {"error": str(error)}, getattr(error, "status_code", 400) or 400
 
 
-def _run(handler: Callable[[], Any], *, log_message: str, client_error: str):
+def _run(handler: Callable[[], Any]):
     return handler()
 
 
@@ -47,7 +47,7 @@ class ExecutionStart(Resource):
             query_params = dict(request.args)
             return _service().start(workspace_id, payload, query_params)
 
-        return _run(handler, log_message="Execution start failed", client_error="Execution start failed")
+        return _run(handler)
 
 
 @executions_ns.route("/<string:job_id>/status")
@@ -58,7 +58,7 @@ class ExecutionStatus(Resource):
         def handler():
             return _service().status(extract_workspace_id(), job_id)
 
-        return _run(handler, log_message="Execution status failed", client_error="Execution status failed")
+        return _run(handler)
 
 
 @executions_ns.route("/<string:job_id>/cancel")
@@ -69,7 +69,7 @@ class ExecutionCancel(Resource):
         def handler():
             return _service().cancel(extract_workspace_id(), job_id)
 
-        return _run(handler, log_message="Execution cancel failed", client_error="Execution cancel failed")
+        return _run(handler)
 
 
 @executions_ns.route("/<string:job_id>/results")
@@ -80,4 +80,4 @@ class ExecutionResults(Resource):
         def handler():
             return _service().results(extract_workspace_id(), job_id)
 
-        return _run(handler, log_message="Execution results failed", client_error="Execution results failed")
+        return _run(handler)

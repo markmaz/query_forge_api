@@ -4,6 +4,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.services.semantic.vertical_norm import normalize_semantic_vertical
+
 
 class SemanticCatalogBuildRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -27,8 +29,7 @@ class SemanticCatalogBuildRequest(BaseModel):
     @field_validator("vertical_norm", mode="before")
     @classmethod
     def _normalize_vertical_norm(cls, value: str) -> str:
-        text = str(value or "").strip().lower()
-        return text or "generic"
+        return normalize_semantic_vertical(value)
 
     @field_validator("domain_name", mode="before")
     @classmethod

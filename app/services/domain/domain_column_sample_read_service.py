@@ -11,6 +11,7 @@ from app.services.domain.column_sample.domain_column_sample_presenter import (
     safe_json_load,
 )
 from app.services.domain.column_sample.domain_column_sample_repository import load_workspace_column_sample
+from app.services.metadata.mode import effective_metadata_mode, normalize_metadata_mode
 
 
 class DomainColumnSampleReadService:
@@ -19,7 +20,8 @@ class DomainColumnSampleReadService:
     """
 
     def __init__(self, *, sql: Optional[ForgeQueryPort] = None, metadata_mode: Optional[str] = None) -> None:
-        del metadata_mode
+        self._configured_metadata_mode = normalize_metadata_mode(metadata_mode)
+        self._effective_metadata_mode = effective_metadata_mode(metadata_mode)
         self._sql = sql or ForgeMetaSQL()
 
     def sample_column_values(

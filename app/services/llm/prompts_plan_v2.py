@@ -157,9 +157,11 @@ def build_developer_prompt(
 ) -> str:
     feedback_line = f"- Validation feedback from previous attempt: {validation_feedback}\n" if validation_feedback else ""
     retry_hint_line = f"{retry_hint}\n" if retry_hint else ""
+    slot_hints_json = json.dumps(dict(slot_hints or {}), ensure_ascii=True, sort_keys=True)
     return (
         "You are a query planner that returns STRICT JSON only. Never return prose, markdown, comments, or code fences.\n"
         "You must produce a valid PlanV2 JSON object.\n"
+        f"Derived slot hints from the user prompt: {slot_hints_json}\n"
         "Hard rules:\n"
         "- Use exactly one base_domain_id (already provided).\n"
         "- Choose dimensions ONLY from allowed_dimensions column_key values.\n"

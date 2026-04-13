@@ -20,7 +20,6 @@ plan_request_model = semantic_ns.model(
     "SemanticPlanRequest",
     {
         "workspace_id": fields.String(required=False, description="Ignored when X-Workspace-Id header is provided"),
-        "vertical_norm": fields.String(required=False, default="generic"),
         "prompt": fields.String(required=True),
         "domain_id": fields.Integer(required=False),
         "max_concepts": fields.Integer(required=False, default=12),

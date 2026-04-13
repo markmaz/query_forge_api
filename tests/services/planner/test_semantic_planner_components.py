@@ -127,6 +127,19 @@ def _retrieve(prompt: str) -> object:
     )
 
 
+def test_retrieve_normalizes_legacy_education_vertical_to_generic() -> None:
+    svc = SemanticRetrievalService(repository=_Repo())
+    candidates = svc.retrieve(
+        prompt="Show total net amount by territory",
+        workspace_id="ws-1",
+        base_domain_id=3,
+        base_domain_name="Sales Performance",
+        vertical_norm="education",
+        capabilities_compact=_capabilities(),
+    )
+    assert candidates.vertical_norm == "generic"
+
+
 def test_a_clear_aggregate_case() -> None:
     candidates = _retrieve("Show total net amount by territory")
     plan = CompactSemanticPlan.model_validate(

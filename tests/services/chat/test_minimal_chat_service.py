@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import httpx
 import pytest
 
@@ -57,8 +59,7 @@ class _MemoryStore:
     def get_messages(self, *, workspace_id: str, user_id: str, conversation_id: str):
         return self.rows.get((workspace_id, user_id, conversation_id))
 
-    def save_messages(self, *, workspace_id: str, user_id: str, conversation_id: str, messages, qf_ttl_seconds: int):
-        del qf_ttl_seconds
+    def save_messages(self, *, workspace_id: str, user_id: str, conversation_id: str, messages):
         self.rows[(workspace_id, user_id, conversation_id)] = [dict(m) for m in messages]
 
 
@@ -79,9 +80,7 @@ class _ConversationStoreV2:
         user_id: str,
         conversation_id: str,
         conversation,
-        qf_ttl_seconds: int,
     ):
-        del qf_ttl_seconds
         self.rows[(workspace_id, user_id, conversation_id)] = dict(conversation)
 
     def list_conversations(self, *, workspace_id: str, user_id: str, limit: int):
@@ -517,6 +516,45 @@ def test_hybrid_conversation_store_falls_back_to_memory_on_valkey_read_failure(m
 
     assert out is not None
     assert out["messages"] == [{"role": "user", "content": "Hello"}]
+
+
+def test_hybrid_conversation_store_drops_expired_memory_entries(monkeypatch) -> None:
+    import app.services.chat.minimal_chat_service as mod
+
+    monkeypatch.setattr(mod, "_valkey_client", None)
+    monkeypatch.setattr(
+        mod,
+        "_IN_MEMORY_CONV_STORE",
+        {
+            "chat:minimal:ws-1:u1:conv_1": {
+                "value": '{"messages":[{"role":"user","content":"Hello"}]}',
+                "stored_at": (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat().replace("+00:00", "Z"),
+                "expires_at": (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
+            }
+        },
+    )
+
+    store = mod.HybridConversationStore(namespace="minimal")
+    out = store.get_conversation(workspace_id="ws-1", user_id="u1", conversation_id="conv_1")
+
+    assert out is None
+    assert mod._IN_MEMORY_CONV_STORE == {}
+
+
+def test_hybrid_conversation_store_trims_oldest_memory_entries(monkeypatch) -> None:
+    import app.services.chat.minimal_chat_service as mod
+
+    monkeypatch.setattr(mod, "_valkey_client", None)
+    monkeypatch.setattr(mod, "_IN_MEMORY_CONV_STORE", {})
+    monkeypatch.setattr(mod, "_MAX_IN_MEMORY_CONVERSATIONS", 2)
+
+    mod._write_in_memory_value("chat:minimal:ws-1:u1:conv_1", '{"messages":[]}', ttl_seconds=600)
+    mod._write_in_memory_value("chat:minimal:ws-1:u1:conv_2", '{"messages":[]}', ttl_seconds=600)
+    mod._write_in_memory_value("chat:minimal:ws-1:u1:conv_3", '{"messages":[]}', ttl_seconds=600)
+
+    assert "chat:minimal:ws-1:u1:conv_1" not in mod._IN_MEMORY_CONV_STORE
+    assert "chat:minimal:ws-1:u1:conv_2" in mod._IN_MEMORY_CONV_STORE
+    assert "chat:minimal:ws-1:u1:conv_3" in mod._IN_MEMORY_CONV_STORE
 
 
 def test_hybrid_conversation_store_surfaces_unexpected_valkey_read_errors(monkeypatch) -> None:

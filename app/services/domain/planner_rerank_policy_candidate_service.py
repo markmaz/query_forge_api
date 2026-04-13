@@ -35,7 +35,6 @@ class PlannerRerankPolicyCandidateService:
         *,
         workspace_id: str,
         review_status: Optional[str] = None,
-        vertical_norm: Optional[str] = None,
     ) -> Dict[str, Any]:
         status = self._normalize_review_status(review_status) if review_status else None
         rows = self._sql.execute_query_mappings(
@@ -45,7 +44,6 @@ class PlannerRerankPolicyCandidateService:
               candidate_key,
               source_type,
               workspace_id,
-              vertical_norm,
               candidate_json,
               rationale_json,
               confidence,
@@ -59,13 +57,11 @@ class PlannerRerankPolicyCandidateService:
               OR workspace_id = :workspace_id
             )
             {"AND review_status = :review_status" if status else ""}
-            {"AND vertical_norm = :vertical_norm" if vertical_norm else ""}
             ORDER BY created_at DESC, id DESC
             """,
             {
                 "workspace_id": str(workspace_id),
                 "review_status": status,
-                "vertical_norm": str(vertical_norm).strip().lower() if vertical_norm else None,
             },
         )
         candidates: List[Dict[str, Any]] = []
@@ -76,7 +72,6 @@ class PlannerRerankPolicyCandidateService:
         return {
             "workspace_id": str(workspace_id),
             "review_status": status,
-            "vertical_norm": str(vertical_norm).strip().lower() if vertical_norm else None,
             "candidates": candidates,
         }
 
@@ -96,7 +91,6 @@ class PlannerRerankPolicyCandidateService:
             "candidate_key": req.candidate_key,
             "source_type": req.source_type,
             "workspace_id": req.workspace_id or workspace_id,
-            "vertical_norm": req.vertical_norm,
             "candidate_json": json.dumps(req.candidate_policy.model_dump()),
             "rationale_json": json.dumps(req.rationale_json) if req.rationale_json is not None else None,
             "confidence": req.confidence,
@@ -109,7 +103,7 @@ class PlannerRerankPolicyCandidateService:
                     SET candidate_key = :candidate_key,
                         source_type = :source_type,
                         workspace_id = :workspace_id,
-                        vertical_norm = :vertical_norm,
+                        vertical_norm = NULL,
                         candidate_json = :candidate_json,
                         rationale_json = :rationale_json,
                         confidence = :confidence,
@@ -128,7 +122,6 @@ class PlannerRerankPolicyCandidateService:
                       candidate_key,
                       source_type,
                       workspace_id,
-                      vertical_norm,
                       candidate_json,
                       rationale_json,
                       confidence,
@@ -137,7 +130,7 @@ class PlannerRerankPolicyCandidateService:
                       :candidate_key,
                       :source_type,
                       :workspace_id,
-                      :vertical_norm,
+                      NULL,
                       :candidate_json,
                       :rationale_json,
                       :confidence,
@@ -169,7 +162,6 @@ class PlannerRerankPolicyCandidateService:
             "candidate_key": req.candidate_key,
             "source_type": req.source_type,
             "workspace_id": req.workspace_id or workspace_id,
-            "vertical_norm": req.vertical_norm,
             "candidate_json": req.candidate_policy.model_dump(),
             "rationale_json": req.rationale_json,
             "confidence": req.confidence,
@@ -215,7 +207,6 @@ class PlannerRerankPolicyCandidateService:
             "description": approval.description,
             "scope_type": approval.scope_type,
             "scope_workspace_id": approval.scope_workspace_id,
-            "scope_vertical_norm": approval.scope_vertical_norm or candidate.get("vertical_norm"),
             "scope_base_domain_id": approval.scope_base_domain_id,
             "priority": approval.priority,
             "is_active": approval.is_active,
@@ -256,7 +247,6 @@ class PlannerRerankPolicyCandidateService:
               candidate_key,
               source_type,
               workspace_id,
-              vertical_norm,
               candidate_json,
               rationale_json,
               confidence,

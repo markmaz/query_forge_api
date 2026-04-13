@@ -20,11 +20,7 @@ class DomainUsers(Resource):
             )
             return {"rows": rows}, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain users fetch failed domain_id={domain_id}",
-            client_error="Domain users fetch failed",
-        )
+        return domain_routes.run(handler)
 
     @domain_routes.token_required
     @domain_routes.require_admin()
@@ -59,11 +55,7 @@ class DomainUsers(Resource):
             )
             return result, 201
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain user upsert/apply failed domain_id={domain_id}",
-            client_error="Domain user upsert/apply failed",
-        )
+        return domain_routes.run(handler)
 
 
 @qf_domains_ns.route("/<int:domain_id>/users/<string:tarrequire_user_id>")
@@ -80,8 +72,4 @@ class DomainUserById(Resource):
             )
             return result, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain user delete failed domain_id={domain_id} tarrequire_user_id={tarrequire_user_id}",
-            client_error="Domain user delete failed",
-        )
+        return domain_routes.run(handler)

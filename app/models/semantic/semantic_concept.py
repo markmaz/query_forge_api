@@ -13,13 +13,12 @@ from app.models.semantic.semantic_registry import SemanticBase
 class SemanticConcept(SemanticBase):
     __tablename__ = "semantic_concept"
     __table_args__ = (
-        UniqueConstraint("vertical_norm", "concept_key", name="uq_concept_vertical_key"),
-        Index("idx_concept_vertical_type", "vertical_norm", "semantic_type"),
+        UniqueConstraint("concept_key", name="uq_concept_key"),
+        Index("idx_concept_type", "semantic_type"),
         Index("idx_concept_key", "concept_key"),
     )
 
     id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
-    vertical_norm: Mapped[str] = mapped_column(String(50), nullable=False, server_default=text("'generic'"))
     concept_key: Mapped[str] = mapped_column(String(150), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

@@ -133,7 +133,7 @@ def _library_service() -> SavedQueryLibraryService:
     )
 
 
-def _run_route(error_message: str, fn: Callable[[], Tuple[Dict[str, Any], int]]) -> Tuple[Dict[str, Any], int]:
+def _run_route(fn: Callable[[], Tuple[Dict[str, Any], int]]) -> Tuple[Dict[str, Any], int]:
     return fn()
 
 
@@ -151,7 +151,7 @@ class QueryTree(Resource):
             view = (request.args.get("view") or "my").strip().lower()
             return svc.get_tree(view=view), 200
 
-        return _run_route("Query tree fetch failed", _execute)
+        return _run_route(_execute)
 
 
 @qf_tree_ns.route("/folders")
@@ -186,7 +186,7 @@ class Folders(Resource):
                 200,
             )
 
-        return _run_route("Folder create failed", _execute)
+        return _run_route(_execute)
 
 
 @qf_tree_ns.route("/folders/<string:folder_id>/rename")
@@ -202,7 +202,7 @@ class FolderRename(Resource):
             svc = SavedQueryFolderWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return svc.rename_folder(folder_id=folder_id, name=payload.get("name")), 200
 
-        return _run_route("Folder rename failed", _execute)
+        return _run_route(_execute)
 
 
 @qf_tree_ns.route("/folders/<string:folder_id>/move")
@@ -232,7 +232,7 @@ class FolderMove(Resource):
                 200,
             )
 
-        return _run_route("Folder move failed", _execute)
+        return _run_route(_execute)
 
 
 @qf_tree_ns.route("/folders/<string:folder_id>")
@@ -247,7 +247,7 @@ class FolderDelete(Resource):
             svc = SavedQueryFolderWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return svc.delete_folder(folder_id=folder_id), 200
 
-        return _run_route("Folder delete failed", _execute)
+        return _run_route(_execute)
 
 
 @qf_tree_ns.route("/folders/<string:folder_id>/trash")
@@ -259,7 +259,7 @@ class FolderTrash(Resource):
             svc = SavedQueryFolderWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return svc.trash_folder(folder_id=folder_id), 200
 
-        return _run_route("Folder trash failed", _execute)
+        return _run_route(_execute)
 
 
 @qf_tree_ns.route("/folders/<string:folder_id>/restore")
@@ -271,7 +271,7 @@ class FolderRestore(Resource):
             svc = SavedQueryFolderWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return svc.restore_folder(folder_id=folder_id), 200
 
-        return _run_route("Folder restore failed", _execute)
+        return _run_route(_execute)
 
 
 @qf_tree_ns.route("/folders/<string:folder_id>/purge")
@@ -283,7 +283,7 @@ class FolderPurge(Resource):
             svc = SavedQueryFolderWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return svc.purge_folder(folder_id=folder_id), 200
 
-        return _run_route("Folder purge failed", _execute)
+        return _run_route(_execute)
 
 
 @qf_tree_ns.route("/recent")
@@ -299,7 +299,7 @@ class RecentQueries(Resource):
             )
             return svc.fetch_recent_queries(limit=int(request.args.get("limit", 20))), 200
 
-        return _run_route("Recent queries fetch failed", _execute)
+        return _run_route(_execute)
 
 
 @qf_saved_query_ns.route("/")
@@ -321,7 +321,7 @@ class SavedQueryCreate(Resource):
                 200,
             )
 
-        return _run_route("Saved query create failed", _execute)
+        return _run_route(_execute)
 
 
 @qf_saved_query_ns.route("/<string:query_id>")
@@ -337,7 +337,7 @@ class SavedQuery(Resource):
             )
             return svc.get_query(query_id), 200
 
-        return _run_route("Saved query read failed", _execute)
+        return _run_route(_execute)
 
     @token_required
     @require_access("query_studio")
@@ -368,7 +368,7 @@ class SavedQuery(Resource):
                 200,
             )
 
-        return _run_route("Saved query update failed", _execute)
+        return _run_route(_execute)
 
 
 @qf_saved_query_ns.route("/<string:query_id>/move")
@@ -384,7 +384,7 @@ class SavedQueryMove(Resource):
             svc = SavedQueryWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return svc.move_query(query_id=query_id, folder_id=payload.get("folderId")), 200
 
-        return _run_route("Saved query move failed", _execute)
+        return _run_route(_execute)
 
 
 @qf_saved_query_ns.route("/<string:query_id>/delete")
@@ -399,7 +399,7 @@ class SavedQueryDelete(Resource):
             svc = SavedQueryWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return svc.delete_query(query_id=query_id), 200
 
-        return _run_route("Saved query delete failed", _execute)
+        return _run_route(_execute)
 
 
 @qf_saved_query_ns.route("/<string:query_id>/save-to-library")
@@ -411,7 +411,7 @@ class SavedQuerySaveToLibrary(Resource):
             svc = _library_service()
             return svc.save_query_to_library(source_query_id=query_id), 200
 
-        return _run_route("Saved query save to library failed", _execute)
+        return _run_route(_execute)
 
 
 @qf_saved_query_ns.route("/<string:query_id>/restore")
@@ -423,7 +423,7 @@ class SavedQueryRestore(Resource):
             svc = SavedQueryWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return svc.restore_query(query_id=query_id), 200
 
-        return _run_route("Saved query restore failed", _execute)
+        return _run_route(_execute)
 
 
 @qf_saved_query_ns.route("/<string:query_id>/purge")
@@ -435,7 +435,7 @@ class SavedQueryPurge(Resource):
             svc = SavedQueryWriteService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return svc.purge_query(query_id=query_id), 200
 
-        return _run_route("Saved query purge failed", _execute)
+        return _run_route(_execute)
 
 
 @qf_saved_query_ns.route("/<string:query_id>/shares")
@@ -448,7 +448,7 @@ class SavedQueryShares(Resource):
             svc = SavedQueryShareService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return svc.list_shares(query_id=query_id), 200
 
-        return _run_route("Saved query shares fetch failed", _execute)
+        return _run_route(_execute)
 
     @token_required
     @require_access("query_studio")
@@ -465,7 +465,7 @@ class SavedQueryShares(Resource):
             svc = SavedQueryShareService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return svc.share_to_workspace(query_id=query_id, can_edit=can_edit), 200
 
-        return _run_route("Saved query share failed", _execute)
+        return _run_route(_execute)
 
     @token_required
     @require_access("query_studio")
@@ -481,4 +481,4 @@ class SavedQueryShares(Resource):
             svc = SavedQueryShareService(workspace_id=_workspace_id(), user_id=_current_user_id())
             return svc.unshare(query_id=query_id), 200
 
-        return _run_route("Saved query unshare failed", _execute)
+        return _run_route(_execute)

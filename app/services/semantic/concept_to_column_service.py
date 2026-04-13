@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.semantic.vertical_norm import normalize_semantic_vertical
 
 
 class ConceptToColumnService:
@@ -17,7 +18,7 @@ class ConceptToColumnService:
         self,
         *,
         workspace_id: str,
-        vertical_norm: str,
+        vertical_norm: Optional[str] = None,
         concept_hits: Sequence[Dict[str, Any]],
         max_columns: int,
         domain_id: Optional[int] = None,
@@ -689,8 +690,7 @@ def _in_clause(prefix: str, values: Sequence[str]) -> Tuple[str, Dict[str, Any]]
 
 
 def _norm_vertical(value: str) -> str:
-    text = str(value or "generic").strip().lower()
-    return text or "generic"
+    return normalize_semantic_vertical(value)
 
 
 def _norm_entity(value: Any) -> Optional[str]:

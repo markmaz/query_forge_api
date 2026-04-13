@@ -204,7 +204,6 @@ class WorkspaceMetadataRepository:
         tables: Sequence[Mapping[str, Any]],
         origin: str,
         overwrite_descriptions: bool = False,
-        table_id_by_name: Optional[Mapping[str, int]] = None,
     ) -> Dict[str, Any]:
         if not tables:
             return {"tables_upserted": 0}
@@ -285,7 +284,6 @@ class WorkspaceMetadataRepository:
     def upsert_columns(
         self,
         *,
-        table_id_by_name: Mapping[str, int],
         columns: Sequence[Mapping[str, Any]],
         origin: str,
         overwrite_descriptions: bool = False,

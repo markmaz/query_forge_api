@@ -35,6 +35,7 @@ def test_list_aliases_serializes_created_at_datetime() -> None:
 
     result = svc.list_aliases()
     assert result["rows"][0]["created_at"] == "2026-02-16T17:23:40"
+    assert sql.query_mappings_calls[0].params == {}
 
 
 def test_list_concepts_serializes_datetime_fields() -> None:
@@ -143,14 +144,67 @@ def test_list_concept_keys_returns_distinct_sorted_keys() -> None:
     ]
     svc = SemanticConceptService(sql=sql)
 
-    result = svc.list_concept_keys(vertical="Education")
+    result = svc.list_concept_keys()
 
     assert result == {"concept_keys": ["ATTENDANCE_RATE", "SCHOOL_YEAR"]}
     assert len(sql.query_mappings_calls) == 1
     query = sql.query_mappings_calls[0].query
     assert "SELECT DISTINCT concept_key" in query
     assert "ORDER BY concept_key ASC" in query
-    assert sql.query_mappings_calls[0].params == {"vertical_norm": "education"}
+    assert sql.query_mappings_calls[0].params == {}
+
+
+def test_list_concepts_reads_without_vertical_filter() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[], [{"total": 0}]]
+    svc = SemanticConceptService(sql=sql)
+
+    result = svc.list_concepts(page=1, page_size=25)
+
+    assert result["total"] == 0
+    assert len(sql.query_mappings_calls) == 2
+    assert sql.query_mappings_calls[0].params == {"limit": 25, "offset": 0}
+    assert sql.query_mappings_calls[1].params == {}
+
+
+def test_seed_uses_generic_compatibility_set() -> None:
+    sql = FakeForgeQueryPort()
+    svc = SemanticConceptService(sql=sql)
+
+    result = svc.seed()
+
+    concept_calls = [call for call in sql.write_calls if "INSERT INTO semantic_concept" in call.query]
+    alias_calls = [call for call in sql.write_calls if "INSERT INTO semantic_concept_alias" in call.query]
+    concept_keys = {str((call.params or {}).get("concept_key") or "") for call in concept_calls}
+    alias_keys = {str((call.params or {}).get("alias_key") or "") for call in alias_calls}
+
+    assert result["vertical_norm"] == "generic"
+    assert "STUDENT_ID" in concept_keys
+    assert "SCHOOL_YEAR" in concept_keys
+    assert "DATE" in concept_keys
+    assert "k_school" in alias_keys
+    assert all((call.params or {}).get("vertical_norm") == "generic" for call in concept_calls)
+    assert all((call.params or {}).get("vertical_norm") == "generic" for call in alias_calls)
+
+
+def test_seed_returns_generic_vertical_norm() -> None:
+    sql = FakeForgeQueryPort()
+    svc = SemanticConceptService(sql=sql)
+
+    result = svc.seed()
+
+    assert result["vertical_norm"] == "generic"
+
+
+def test_list_concept_keys_reads_without_vertical_filter() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[]]
+    svc = SemanticConceptService(sql=sql)
+
+    result = svc.list_concept_keys()
+
+    assert result == {"concept_keys": []}
+    assert sql.query_mappings_calls[0].params == {}
 
 
 def test_list_concept_column_maps_supports_typeahead_filters() -> None:
@@ -176,7 +230,6 @@ def test_list_concept_column_maps_supports_typeahead_filters() -> None:
     svc = SemanticConceptService(sql=sql)
 
     result = svc.list_concept_column_maps(
-        vertical="Education",
         concept_key="district",
         column_name="name",
         q="district",
@@ -197,11 +250,9 @@ def test_list_concept_column_maps_supports_typeahead_filters() -> None:
     assert "JOIN semantic_concept sc ON sc.id = m.semantic_concept_id" in count_query
     assert "JOIN workspace_column wc" in count_query
     assert "JOIN workspace_table wt" in count_query
-    assert list_params["vertical_norm"] == "education"
     assert list_params["concept_key"] == "%district%"
     assert list_params["column_name"] == "%name%"
     assert list_params["q"] == "%district%"
-    assert count_params["vertical_norm"] == "education"
     assert count_params["concept_key"] == "%district%"
     assert count_params["column_name"] == "%name%"
     assert count_params["q"] == "%district%"
@@ -214,7 +265,6 @@ def test_backfill_primary_semantic_keys_dry_run() -> None:
 
     result = svc.backfill_primary_semantic_keys(
         workspace_id="ws-1",
-        vertical_norm="education",
         dry_run=True,
     )
 
@@ -228,7 +278,6 @@ def test_backfill_primary_semantic_keys_dry_run() -> None:
     assert "wc.semantic_concept_key IS NULL" in query
     assert "JOIN workspace_table wt" in query
     assert params["workspace_id"] == "ws-1"
-    assert params["vertical_norm"] == "education"
 
 
 def test_backfill_primary_semantic_keys_execute() -> None:
@@ -239,7 +288,6 @@ def test_backfill_primary_semantic_keys_execute() -> None:
 
     result = svc.backfill_primary_semantic_keys(
         workspace_id=None,
-        vertical_norm=None,
         dry_run=False,
     )
 
@@ -262,7 +310,6 @@ def test_backfill_primary_semantic_keys_execute_updates_workspace_columns() -> N
 
     result = svc.backfill_primary_semantic_keys(
         workspace_id="ws-42",
-        vertical_norm=None,
         dry_run=False,
     )
 

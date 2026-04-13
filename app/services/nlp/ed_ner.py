@@ -156,7 +156,7 @@ def extract_signals(text: str) -> Dict[str, Any]:
             continue
 
         if column == "school_year":
-            year_value, value_span = _find_year_value(attr_ent, doc, by_label)
+            year_value, value_span = _find_year_value(attr_ent, by_label)
             if year_value:
                 _add_filter(filters, seen, column, year_value)
                 if value_span:
@@ -374,7 +374,6 @@ def _race_near(attr_ent: _Entity, by_label: Dict[str, List[_Entity]]) -> Optiona
 
 def _find_year_value(
     attr_ent: _Entity,
-    doc: Doc,
     by_label: Dict[str, List[_Entity]],
 ) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
     for year_ent in by_label.get(LABEL_SCHOOL_YEAR_LITERAL, []):

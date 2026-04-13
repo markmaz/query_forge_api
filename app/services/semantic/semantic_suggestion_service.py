@@ -90,7 +90,7 @@ class SemanticSuggestionService:
         if not isinstance(payload, dict):
             raise ForgeError("Invalid JSON body", status_code=400)
 
-        vertical = _normalize_optional_text(payload.get("vertical"), max_len=50) or SEMANTIC_VERTICAL_DEFAULT
+        vertical = _normalize_run_vertical(None)
         workspace_id = _normalize_optional_text(payload.get("workspace_id"), max_len=100)
         workspace_table_id = _normalize_optional_int(payload.get("workspace_table_id"), field="workspace_table_id")
         page_size = _normalize_optional_int(payload.get("page_size"), field="page_size") or 200
@@ -139,7 +139,7 @@ class SemanticSuggestionService:
         page_size = _normalize_optional_int(params.get("page_size"), field="page_size") or 200
         page_size = max(1, min(page_size, 1000))
         processed_columns = 0
-        vertical_norm = _normalize_vertical_norm(run.get("vertical"))
+        vertical_norm = _normalize_run_vertical(run.get("vertical"))
         workspace_id = str(run.get("workspace_id") or "").strip()
 
         self._set_run_status(run_id, status="running")
@@ -753,7 +753,7 @@ class SemanticSuggestionService:
         if not concept_key:
             raise ForgeError("Missing proposed_concept_key", status_code=400)
 
-        vertical_norm = _normalize_vertical_norm(run.get("vertical"))
+        vertical_norm = _normalize_run_vertical(run.get("vertical"))
         registry_source = self._resolve_registry_source(item=item, vertical_norm=vertical_norm)
 
         self._sql.execute_write(
@@ -804,11 +804,7 @@ class SemanticSuggestionService:
               `sensitive` = VALUES(`sensitive`)
             """,
             {
-                "vertical": (
-                    None
-                    if _normalize_vertical_norm(registry_source["vertical"]) == "__global__"
-                    else _normalize_vertical_norm(registry_source["vertical"])
-                ),
+                "vertical": _normalize_vertical_norm(registry_source["vertical"]),
                 "concept_key": concept_key,
                 "semantic_type": registry_source["semantic_type"],
                 "sub_type": registry_source["sub_type"],
@@ -906,9 +902,7 @@ class SemanticSuggestionService:
         )
 
         if concept_id is not None:
-            vertical_norm = _normalize_vertical_norm(run.get("vertical"))
-            if vertical_norm == "__global__":
-                vertical_norm = "generic"
+            vertical_norm = _normalize_run_vertical(run.get("vertical"))
             self._assignment.ensure_mapping(
                 workspace_column_id=int(item["workspace_column_id"]),
                 semantic_concept_id=concept_id,
@@ -945,7 +939,7 @@ class SemanticSuggestionService:
             if rows:
                 concept = rows[0]
                 return {
-                    "vertical": concept.get("vertical_norm") or vertical_norm,
+                    "vertical": _normalize_vertical_norm(concept.get("vertical_norm") or vertical_norm),
                     "semantic_type": concept.get("semantic_type") or item.get("proposed_semantic_type") or "attribute",
                     "sub_type": concept.get("sub_type"),
                     "entity": concept.get("entity"),
@@ -1160,8 +1154,12 @@ def _normalize_optional_text(value: Any, *, max_len: int) -> Optional[str]:
 def _normalize_vertical_norm(value: Any) -> str:
     text = str(value or "").strip().lower()
     if text in {"", "global", "__global__", "null", "none"}:
-        return "__global__"
+        return SEMANTIC_VERTICAL_DEFAULT
     return text
+
+
+def _normalize_run_vertical(value: Any) -> str:
+    return _normalize_vertical_norm(_normalize_optional_text(value, max_len=50))
 
 
 def _normalize_optional_int(value: Any, *, field: str) -> Optional[int]:

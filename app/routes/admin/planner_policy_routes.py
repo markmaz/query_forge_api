@@ -37,10 +37,6 @@ class AdminPlannerProjectionPolicies(Resource):
             if (base_domain_id_raw or "").strip()
             else None
         )
-        vertical_norm = (
-            (request.args.get("vertical_norm") or "generic").strip().lower()
-            or "generic"
-        )
         include_inactive = _as_bool(
             request.args.get("include_inactive"),
             default=False,
@@ -52,7 +48,6 @@ class AdminPlannerProjectionPolicies(Resource):
         result = planner_projection_policy_service().list_policies(
             workspace_id=workspace_id,
             base_domain_id=base_domain_id,
-            vertical_norm=vertical_norm,
             include_inactive=include_inactive,
             include_seeded=include_seeded,
         )
@@ -65,7 +60,6 @@ class AdminPlannerProjectionPolicies(Resource):
         workspace_id = extract_workspace_id()
         result = planner_projection_policy_service().upsert_policy(
             workspace_id=workspace_id,
-            actor_user_id=str(getattr(g, "user_id", "") or ""),
             payload=request.get_json(silent=True) or {},
         )
         return result, 200
@@ -79,7 +73,6 @@ class AdminPlannerProjectionPolicyDetail(Resource):
         workspace_id = extract_workspace_id()
         result = planner_projection_policy_service().delete_policy(
             workspace_id=workspace_id,
-            actor_user_id=str(getattr(g, "user_id", "") or ""),
             policy_id=policy_id,
         )
         return result, 200
@@ -161,7 +154,6 @@ class AdminPlannerPromptIntentPolicies(Resource):
         workspace_id = extract_workspace_id()
         result = planner_prompt_intent_policy_service().upsert_policy(
             workspace_id=workspace_id,
-            actor_user_id=str(getattr(g, "user_id", "") or ""),
             payload=request.get_json(silent=True) or {},
         )
         return result, 200
@@ -175,7 +167,6 @@ class AdminPlannerPromptIntentPolicyDetail(Resource):
         workspace_id = extract_workspace_id()
         result = planner_prompt_intent_policy_service().delete_policy(
             workspace_id=workspace_id,
-            actor_user_id=str(getattr(g, "user_id", "") or ""),
             policy_id=policy_id,
         )
         return result, 200
@@ -257,7 +248,6 @@ class AdminPlannerDomainSelectionPolicies(Resource):
         workspace_id = extract_workspace_id()
         result = planner_domain_selection_policy_service().upsert_policy(
             workspace_id=workspace_id,
-            actor_user_id=str(getattr(g, "user_id", "") or ""),
             payload=request.get_json(silent=True) or {},
         )
         return result, 200
@@ -271,7 +261,6 @@ class AdminPlannerDomainSelectionPolicyDetail(Resource):
         workspace_id = extract_workspace_id()
         result = planner_domain_selection_policy_service().delete_policy(
             workspace_id=workspace_id,
-            actor_user_id=str(getattr(g, "user_id", "") or ""),
             policy_id=policy_id,
         )
         return result, 200

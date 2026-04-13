@@ -141,7 +141,7 @@ class PlannerProjectionPolicyRule(BaseModel):
 
 
 class PlannerProjectionPolicyUpsertRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     id: Optional[int] = Field(default=None, ge=1)
     policy_key: str = Field(min_length=1, max_length=150)
@@ -149,14 +149,13 @@ class PlannerProjectionPolicyUpsertRequest(BaseModel):
     description: Optional[str] = None
     scope_type: str = Field(min_length=1, max_length=32)
     scope_workspace_id: Optional[str] = Field(default=None, max_length=128)
-    scope_vertical_norm: Optional[str] = Field(default=None, max_length=64)
     scope_base_domain_id: Optional[int] = Field(default=None, ge=1)
     priority: int = Field(default=100)
     is_active: bool = True
     stop_on_match: bool = False
     policy_json: PlannerProjectionPolicyRule
 
-    @field_validator("policy_key", "name", "description", "scope_workspace_id", "scope_vertical_norm", mode="before")
+    @field_validator("policy_key", "name", "description", "scope_workspace_id", mode="before")
     @classmethod
     def _clean_text(cls, value: Any) -> Optional[str]:
         if value is None:
@@ -172,6 +171,24 @@ class PlannerProjectionPolicyUpsertRequest(BaseModel):
             raise ValueError(f"Invalid scope_type: {value}")
         return token
 
+    @model_validator(mode="after")
+    def _validate_scope_shape(self) -> "PlannerProjectionPolicyUpsertRequest":
+        if self.scope_type == "global":
+            if any(value is not None for value in (self.scope_workspace_id, self.scope_base_domain_id)):
+                raise ValueError("Global planner projection policies cannot declare workspace or domain scope.")
+        elif self.scope_type == "workspace":
+            if self.scope_base_domain_id is not None:
+                raise ValueError("Workspace planner projection policies cannot declare domain scope.")
+        elif self.scope_type == "global_domain":
+            if self.scope_workspace_id is not None:
+                raise ValueError("Global-domain planner projection policies cannot declare workspace scope.")
+            if self.scope_base_domain_id is None:
+                raise ValueError("Global-domain planner projection policies require scope_base_domain_id.")
+        elif self.scope_type == "workspace_domain":
+            if self.scope_base_domain_id is None:
+                raise ValueError("Workspace-domain planner projection policies require scope_base_domain_id.")
+        return self
+
 
 class PlannerProjectionPolicy(SemanticBase):
     __tablename__ = "planner_projection_policy"
@@ -179,11 +196,10 @@ class PlannerProjectionPolicy(SemanticBase):
         UniqueConstraint(
             "policy_key",
             "scope_workspace_id",
-            "scope_vertical_norm",
             "scope_base_domain_id",
             name="uidx_projection_policy_scope",
         ),
-        Index("idx_ppp_scope", "scope_workspace_id", "scope_vertical_norm", "scope_base_domain_id"),
+        Index("idx_ppp_scope", "scope_workspace_id", "scope_base_domain_id"),
         Index("idx_ppp_priority", "priority"),
         Index("idx_ppp_active", "is_active"),
     )
@@ -194,7 +210,6 @@ class PlannerProjectionPolicy(SemanticBase):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
     scope_workspace_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    scope_vertical_norm: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     scope_base_domain_id: Mapped[Optional[int]] = mapped_column(BIGINT(unsigned=True), nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("100"))
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))

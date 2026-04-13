@@ -207,13 +207,11 @@ def test_admin_planner_projection_policy_list(client, monkeypatch):
     class _FakeSvc:
         def list_policies(self, **kwargs):
             assert kwargs["workspace_id"] == "ws-1"
-            assert kwargs["vertical_norm"] == "education"
             assert kwargs["base_domain_id"] == 9
             assert kwargs["include_inactive"] is True
             assert kwargs["include_seeded"] is True
             return {
                 "workspace_id": "ws-1",
-                "vertical_norm": "education",
                 "base_domain_id": 9,
                 "can_edit": True,
                 "policies": [
@@ -224,7 +222,7 @@ def test_admin_planner_projection_policy_list(client, monkeypatch):
 
     monkeypatch.setattr(admin_routes, "PlannerProjectionPolicyService", _FakeSvc)
     resp = client.get(
-        "/api/v1/admin/planner-projection-policies?base_domain_id=9&vertical_norm=education&include_inactive=true&include_seeded=true",
+        "/api/v1/admin/planner-projection-policies?base_domain_id=9&include_inactive=true&include_seeded=true",
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 200
@@ -235,7 +233,6 @@ def test_admin_planner_projection_policy_upsert(client, monkeypatch):
     class _FakeSvc:
         def upsert_policy(self, **kwargs):
             assert kwargs["workspace_id"] == "ws-1"
-            assert kwargs["actor_user_id"] == "user-1"
             assert kwargs["payload"]["policy_key"] == "custom_school_listing"
             return {
                 "id": 44,
@@ -269,7 +266,6 @@ def test_admin_planner_projection_policy_delete(client, monkeypatch):
     class _FakeSvc:
         def delete_policy(self, **kwargs):
             assert kwargs["workspace_id"] == "ws-1"
-            assert kwargs["actor_user_id"] == "user-1"
             assert kwargs["policy_id"] == 22
             return {"deleted": True, "policy_id": 22}
 
@@ -370,7 +366,6 @@ def test_admin_planner_prompt_intent_policy_upsert(client, monkeypatch):
     class _FakeSvc:
         def upsert_policy(self, **kwargs):
             assert kwargs["workspace_id"] == "ws-1"
-            assert kwargs["actor_user_id"] == "user-1"
             assert kwargs["payload"]["policy_key"] == "custom_list_students"
             return {"id": 13, "policy_key": "custom_list_students"}
 
@@ -397,7 +392,6 @@ def test_admin_planner_prompt_intent_policy_delete(client, monkeypatch):
     class _FakeSvc:
         def delete_policy(self, **kwargs):
             assert kwargs["workspace_id"] == "ws-1"
-            assert kwargs["actor_user_id"] == "user-1"
             assert kwargs["policy_id"] == 13
             return {"deleted": True, "policy_id": 13}
 
@@ -494,7 +488,6 @@ def test_admin_planner_domain_selection_policy_upsert(client, monkeypatch):
     class _FakeSvc:
         def upsert_policy(self, **kwargs):
             assert kwargs["workspace_id"] == "ws-1"
-            assert kwargs["actor_user_id"] == "user-1"
             assert kwargs["payload"]["policy_key"] == "custom_domain_selection"
             return {"id": 31, "policy_key": "custom_domain_selection"}
 
@@ -522,7 +515,6 @@ def test_admin_planner_domain_selection_policy_delete(client, monkeypatch):
     class _FakeSvc:
         def delete_policy(self, **kwargs):
             assert kwargs["workspace_id"] == "ws-1"
-            assert kwargs["actor_user_id"] == "user-1"
             assert kwargs["policy_id"] == 31
             return {"deleted": True, "policy_id": 31}
 
@@ -796,6 +788,29 @@ def test_semantic_catalog_build_write_mode(client, monkeypatch):
     assert resp.status_code == 200
     assert resp.json["result"]["dry_run"] is False
     assert resp.json["result"]["concepts_upserted"] == 24
+
+
+def test_semantic_catalog_build_normalizes_legacy_vertical_to_generic(client, monkeypatch):
+    class _FakeBuilder:
+        def build_catalog(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            assert kwargs["domain_id"] == 4
+            assert kwargs["vertical_norm"] == "generic"
+            return {
+                "workspace_id": "ws-1",
+                "domain_id": 4,
+                "vertical_norm": "generic",
+                "dry_run": True,
+            }
+
+    monkeypatch.setattr(admin_routes, "SemanticCatalogBuilder", _FakeBuilder)
+    resp = client.post(
+        "/api/v1/admin/semantic-catalog/build",
+        json={"domain_id": 4, "vertical_norm": "education"},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 200
+    assert resp.json["result"]["vertical_norm"] == "generic"
 
 
 def test_semantic_catalog_build_allows_workspace_admin(client, monkeypatch):

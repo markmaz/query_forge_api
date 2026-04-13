@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 
 
 def utc_now_iso() -> str:
-    return datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return datetime.datetime.now(datetime.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def normalize_status_dict(raw: Any) -> Optional[Dict[str, Any]]:

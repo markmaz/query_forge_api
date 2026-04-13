@@ -24,8 +24,6 @@ class DataPrepCompiler:
         self,
         *,
         query_json: Dict[str, Any],
-        domain_columns: Dict[Any, Any],
-        workspace_table_ids: List[int],
         alias_by_wt: Dict[int, str],
         qf_base_alias: str,
     ) -> Tuple[str, CompilationContext]:

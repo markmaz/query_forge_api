@@ -199,3 +199,36 @@ def test_check_broker_ok():
     assert result["celery"]["broker_connect_ok"] is True
     assert result["celery"]["worker_ping_ok"] is True
     assert result["celery"]["workers"] == ["celery@test"]
+
+
+class _NoWorkersInspector:
+    def ping(self):
+        return {}
+
+
+class _NoWorkersCeleryControl:
+    def inspect(self, timeout: float = 1.5):
+        assert timeout == 1.5
+        return _NoWorkersInspector()
+
+
+class _NoWorkersCelery:
+    control = _NoWorkersCeleryControl()
+
+    def connection_for_write(self):
+        return _FakeCeleryConnection()
+
+
+def test_check_broker_is_degraded_when_broker_connects_without_workers():
+    with patch("app.services.admin.health_service.valkey.Valkey") as mock_valkey:
+        with patch("app.services.admin.health_service.celery", new=_NoWorkersCelery()):
+            mock_valkey.return_value = _FakeValkeyClient()
+            svc = AdminHealthService(sql=_FakeSQL())
+            result = svc.check_broker()
+
+    assert result["ok"] is False
+    assert result["status"] == "degraded"
+    assert result["valkey"]["ping_ok"] is True
+    assert result["celery"]["broker_connect_ok"] is True
+    assert result["celery"]["worker_ping_ok"] is False
+    assert result["celery"]["workers"] == []

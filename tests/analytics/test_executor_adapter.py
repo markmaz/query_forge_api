@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.exceptions.forge_error import ForgeError
 from app.services.analytics.executor_adapter import AnalyticsExecutorForgeAdapter
 
 
@@ -37,3 +38,17 @@ def test_submit_statement_async_surfaces_unexpected_executor_errors() -> None:
 
     with pytest.raises(AssertionError, match="unexpected executor bug"):
         adapter.submit_statement_async("select 1")
+
+
+def test_submit_statement_rejects_unsupported_warehouse_context() -> None:
+    adapter = AnalyticsExecutorForgeAdapter(_Executor(rows=[{"ok": 1}]))
+
+    with pytest.raises(ForgeError, match="Unsupported execution context"):
+        adapter.submit_statement("select 1", warehouse_id="warehouse-123")
+
+
+def test_submit_statement_async_rejects_unsupported_catalog_or_schema_context() -> None:
+    adapter = AnalyticsExecutorForgeAdapter(_Executor(rows=[{"ok": 1}]))
+
+    with pytest.raises(ForgeError, match="warehouse_id, catalog, schema|catalog, schema|catalog|schema"):
+        adapter.submit_statement_async("select 1", catalog="main", schema="analytics")

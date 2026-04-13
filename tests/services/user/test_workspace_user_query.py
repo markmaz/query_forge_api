@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from app.exceptions.forge_error import ForgeError
-from app.services.user import workspace_user_query
 from app.services.user.workspace_user_query import (
     build_workspace_user_list_query,
     validate_workspace_user_list_args,

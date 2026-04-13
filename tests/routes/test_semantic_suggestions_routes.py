@@ -55,6 +55,33 @@ def test_items_filtering_endpoint(client, monkeypatch):
     assert captured["page_size"] == 10
 
 
+def test_create_run_route_omits_vertical_fields_from_response(client, monkeypatch):
+    class _Svc:
+        def create_run(self, payload, *, created_by=None):
+            assert payload == {"workspace_id": "ws-1"}
+            assert created_by == "user-1"
+            return {
+                "id": 7,
+                "workspace_id": "ws-1",
+                "vertical": "generic",
+                "vertical_norm": "generic",
+                "status": "created",
+                "params_json": {},
+            }
+
+    monkeypatch.setattr(semantic_suggestions, "SemanticSuggestionService", _Svc)
+
+    resp = client.post(
+        "/api/v1/semantic/suggestions/runs",
+        json={"workspace_id": "ws-1"},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 201
+    assert resp.json["run"]["id"] == 7
+    assert "vertical" not in resp.json["run"]
+    assert "vertical_norm" not in resp.json["run"]
+
+
 def test_patch_item_route_uses_service(client, monkeypatch):
     class _Svc:
         def update_item(self, item_id, payload):

@@ -149,6 +149,7 @@ class SemanticConceptMatcher:
         alias_rules: Optional[List[Dict[str, Any]]] = None,
         alias_conf_threshold: float = 0.75,
     ) -> Tuple[Optional[Dict[str, Any]], List[str]]:
+        del known_concepts
         # Priority order: deterministic > alias(weighted) > llm > fallback.
         deterministic, det_notes = self._deterministic_identifier_candidate(card=card)
         if deterministic is not None:
@@ -188,32 +189,31 @@ class SemanticConceptMatcher:
         return None, det_notes + alias_notes
 
     def match_by_heuristics(self, card: Dict[str, Any], *, vertical_norm: str) -> Tuple[Optional[str], List[str]]:
-        vertical = _norm_vertical(vertical_norm)
+        del vertical_norm
         col = str(card.get("columnName") or "").strip().lower()
         desc = str(card.get("description") or "").strip().lower()
         samples = card.get("samples") if isinstance(card.get("samples"), list) else []
 
-        if vertical == "education":
-            if col == "k_student" or (_contains(col, "student") and _has_any(col, ["id", "key"])):
-                return "STUDENT_ID", ["heuristic_match:student_id"]
-            if col == "k_school" or (_contains(col, "school") and _has_any(col, ["id", "key"])):
-                return "SCHOOL_ID", ["heuristic_match:school_id"]
-            if col == "k_lea" or ((_contains(col, "lea") or _contains(col, "district")) and _has_any(col, ["id", "key"])):
-                return "LEA_ID", ["heuristic_match:lea_id"]
-            if col == "k_course" or (_contains(col, "course") and _has_any(col, ["id", "key"])):
-                return "COURSE_ID", ["heuristic_match:course_id"]
-            if _contains(col, "section") and _has_any(col, ["id", "key"]):
-                return "SECTION_ID", ["heuristic_match:section_id"]
-            if _contains(col, "school_year") or (_samples_are_year(samples) and "academic year" in desc):
-                return "SCHOOL_YEAR", ["heuristic_match:school_year"]
-            if _contains(col, "county"):
-                return "COUNTY", ["heuristic_match:county"]
-            if _contains(col, "city"):
-                return "CITY", ["heuristic_match:city"]
-            if _contains(col, "zip") or _contains(col, "postal"):
-                return "ZIP_CODE", ["heuristic_match:zip_code"]
-            if _contains(col, "state_course_code"):
-                return "STATE_COURSE_CODE", ["heuristic_match:state_course_code"]
+        if col == "k_student" or (_contains(col, "student") and _has_any(col, ["id", "key"])):
+            return "STUDENT_ID", ["heuristic_match:student_id"]
+        if col == "k_school" or (_contains(col, "school") and _has_any(col, ["id", "key"])):
+            return "SCHOOL_ID", ["heuristic_match:school_id"]
+        if col == "k_lea" or ((_contains(col, "lea") or _contains(col, "district")) and _has_any(col, ["id", "key"])):
+            return "LEA_ID", ["heuristic_match:lea_id"]
+        if col == "k_course" or (_contains(col, "course") and _has_any(col, ["id", "key"])):
+            return "COURSE_ID", ["heuristic_match:course_id"]
+        if _contains(col, "section") and _has_any(col, ["id", "key"]):
+            return "SECTION_ID", ["heuristic_match:section_id"]
+        if _contains(col, "school_year") or (_samples_are_year(samples) and "academic year" in desc):
+            return "SCHOOL_YEAR", ["heuristic_match:school_year"]
+        if _contains(col, "county"):
+            return "COUNTY", ["heuristic_match:county"]
+        if _contains(col, "city"):
+            return "CITY", ["heuristic_match:city"]
+        if _contains(col, "zip") or _contains(col, "postal"):
+            return "ZIP_CODE", ["heuristic_match:zip_code"]
+        if _contains(col, "state_course_code"):
+            return "STATE_COURSE_CODE", ["heuristic_match:state_course_code"]
 
         return None, []
 
@@ -365,6 +365,8 @@ class SemanticConceptMatcher:
 
 def _norm_vertical(vertical_norm: str) -> str:
     value = str(vertical_norm or "generic").strip().lower()
+    if value in {"", "global", "__global__", "none", "null", "education"}:
+        return "generic"
     return value or "generic"
 
 

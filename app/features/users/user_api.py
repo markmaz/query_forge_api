@@ -181,6 +181,7 @@ class UserUpdates(Resource):
         return jsonify(_public_user_payload(result))
 
     def options(self, user_id):
+        del user_id
         return {}, 200
 
 
@@ -283,9 +284,11 @@ class UserWorkspaceDashboard(Resource):
         )
     )
     def get(self, user_id, workspace_id, dashboard_id):
+        del user_id, workspace_id, dashboard_id
         return {"status": "ok"}, 200
 
     def options(self, user_id, workspace_id, dashboard_id):
+        del user_id, workspace_id, dashboard_id
         return {}, 200
 
 

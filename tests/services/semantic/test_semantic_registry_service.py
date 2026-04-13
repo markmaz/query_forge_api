@@ -17,8 +17,8 @@ def test_registry_create_success() -> None:
         [
             {
                 "id": 5,
-                "vertical": "education",
-                "vertical_norm": "education",
+                "vertical": "generic",
+                "vertical_norm": "generic",
                 "concept_key": "student.first_name",
                 "semantic_type": "attribute",
                 "sub_type": None,
@@ -51,8 +51,10 @@ def test_registry_create_success() -> None:
     )
 
     assert row["id"] == 5
+    assert row["vertical"] == "generic"
     assert row["semantic_type"] == "attribute"
     assert row["aggregation_allowed"] is False
+    assert "vertical" not in (sql.insert_calls[0].params or {})
 
 
 def test_registry_invalid_semantic_type_rejected() -> None:
@@ -104,8 +106,8 @@ def test_registry_list_filtering_uses_expected_predicates() -> None:
         [
             {
                 "id": 2,
-                "vertical": "education",
-                "vertical_norm": "education",
+                "vertical": "generic",
+                "vertical_norm": "generic",
                 "concept_key": "student.id",
                 "semantic_type": "identifier",
                 "sub_type": None,
@@ -128,7 +130,6 @@ def test_registry_list_filtering_uses_expected_predicates() -> None:
 
     svc = SemanticRegistryService(sql=sql)
     result = svc.list_entries(
-        vertical="education",
         q="student",
         semantic_type="identifier",
         entity="student",
@@ -141,10 +142,59 @@ def test_registry_list_filtering_uses_expected_predicates() -> None:
     assert result["page_size"] == 10
 
     query = sql.query_mappings_calls[0].query
-    assert "sr.vertical_norm = :vertical_norm" in query
     assert "sr.semantic_type = :semantic_type" in query
     assert "LOWER(COALESCE(sr.entity, '')) = :entity" in query
     assert "LOWER(sr.concept_key) LIKE :q" in query
+    assert sql.query_mappings_calls[0].params["semantic_type"] == "identifier"
+    assert sql.query_mappings_calls[1].params["semantic_type"] == "identifier"
+
+
+def test_registry_list_reads_without_vertical_filter() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[], [{"total": 0}]]
+    svc = SemanticRegistryService(sql=sql)
+
+    result = svc.list_entries(page=1, page_size=25)
+
+    assert result["total"] == 0
+    assert len(sql.query_mappings_calls) == 2
+    assert sql.query_mappings_calls[0].params == {"limit": 25, "offset": 0}
+    assert sql.query_mappings_calls[1].params == {}
+
+
+def test_registry_create_defaults_new_entries_to_generic() -> None:
+    sql = FakeForgeQueryPort()
+    sql.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=8)]
+    sql.query_mappings_responses = [
+        [
+            {
+                "id": 8,
+                "vertical": "generic",
+                "vertical_norm": "generic",
+                "concept_key": "order_date",
+                "semantic_type": "time",
+                "sub_type": None,
+                "entity": None,
+                "description": None,
+                "granularity_rank": 0,
+                "filter_allowed": 1,
+                "group_by_allowed": 1,
+                "aggregation_allowed": 1,
+                "is_identifier": 0,
+                "is_metric": 0,
+                "display_priority": 0,
+                "sensitive": 0,
+                "created_at": "2026-01-01",
+                "updated_at": "2026-01-01",
+            }
+        ]
+    ]
+
+    svc = SemanticRegistryService(sql=sql)
+    row = svc.create_entry({"concept_key": "order_date", "semantic_type": "time"})
+
+    assert row["id"] == 8
+    assert "vertical" not in (sql.insert_calls[0].params or {})
 
 
 def test_registry_update_and_delete() -> None:

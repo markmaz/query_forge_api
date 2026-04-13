@@ -130,7 +130,6 @@ class MetadataSyncService:
                 _emit_progress()
 
             col_result = self._writer.upsert_columns(
-                table_id_by_name=batch_name_to_id,
                 columns=batch_columns,
                 origin=executor.get_dialect(),
                 overwrite_descriptions=overwrite_descriptions,

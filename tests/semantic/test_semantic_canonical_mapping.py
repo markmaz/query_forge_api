@@ -289,6 +289,40 @@ def test_match_by_alias_ignores_expected_weight_parse_errors() -> None:
     assert notes == ["alias_match:exact:student_identifier"]
 
 
+def test_matcher_load_known_concepts_normalizes_education_to_generic() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[]]
+    matcher = SemanticConceptMatcher(sql=sql)
+
+    matcher.load_known_concepts("education")
+
+    assert sql.query_mappings_calls
+    assert (sql.query_mappings_calls[0].params or {})["vertical"] == "generic"
+
+
+def test_matcher_load_alias_rules_normalizes_global_to_generic() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[]]
+    matcher = SemanticConceptMatcher(sql=sql)
+
+    matcher.load_alias_rules("global")
+
+    assert sql.query_mappings_calls
+    assert (sql.query_mappings_calls[0].params or {})["vertical"] == "generic"
+
+
+def test_match_by_heuristics_works_under_generic_vertical() -> None:
+    matcher = SemanticConceptMatcher(sql=FakeForgeQueryPort())
+
+    key, notes = matcher.match_by_heuristics(
+        {"columnName": "k_school", "description": "", "samples": []},
+        vertical_norm="generic",
+    )
+
+    assert key == "SCHOOL_ID"
+    assert notes == ["heuristic_match:school_id"]
+
+
 def test_match_by_alias_surfaces_unexpected_weight_parse_errors() -> None:
     class _BadFloat:
         def __float__(self):

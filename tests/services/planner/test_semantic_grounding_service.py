@@ -5,12 +5,15 @@ from app.services.planner.semantic_grounding_service import SemanticGroundingSer
 
 
 class _FakeRetrievalService:
+    def __init__(self) -> None:
+        self.calls = []
+
     def retrieve(self, **kwargs):
-        del kwargs
+        self.calls.append(dict(kwargs))
         return SemanticCandidatePayload(
             prompt="students by county",
             workspace_id="ws-1",
-            vertical_norm="education",
+            vertical_norm="generic",
             base_domain_id=6,
             base_domain_key="ENROLLMENT",
             metric_candidates=[
@@ -39,8 +42,11 @@ class _FakeRetrievalService:
 
 
 class _FakeValueAliasResolver:
+    def __init__(self) -> None:
+        self.calls = []
+
     def resolve(self, *, prompt: str, vertical_norm: str):
-        del prompt, vertical_norm
+        self.calls.append({"prompt": prompt, "vertical_norm": vertical_norm})
         return [
             {
                 "concept_key": "COUNTRY",
@@ -51,9 +57,11 @@ class _FakeValueAliasResolver:
 
 
 def test_build_grounding_bundle_combines_candidates_and_alias_constraints() -> None:
+    retrieval = _FakeRetrievalService()
+    resolver = _FakeValueAliasResolver()
     svc = SemanticGroundingService(
-        retrieval_service=_FakeRetrievalService(),
-        value_alias_resolver=_FakeValueAliasResolver(),
+        retrieval_service=retrieval,
+        value_alias_resolver=resolver,
     )
 
     out = svc.build_grounding_bundle(
@@ -71,6 +79,8 @@ def test_build_grounding_bundle_combines_candidates_and_alias_constraints() -> N
     assert debug["candidate_summary"]["metric_count"] == 1
     assert debug["candidate_summary"]["dimension_count"] == 1
     assert debug["candidate_summary"]["metrics"] == ["ENROLLMENT_COUNT"]
+    assert retrieval.calls[0]["vertical_norm"] == "generic"
+    assert resolver.calls[0]["vertical_norm"] == "generic"
 
 
 class _RaisingRetrievalService:

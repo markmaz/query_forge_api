@@ -14,18 +14,16 @@ class WorkspaceColumnSemanticConceptMap(SemanticBase):
     __tablename__ = "workspace_column_semantic_concept_map"
     __table_args__ = (
         UniqueConstraint(
-            "vertical_norm",
             "semantic_concept_id",
             "workspace_column_id",
             "relationship_kind",
             name="uq_ws_map",
         ),
-        Index("idx_ws_map_concept", "vertical_norm", "semantic_concept_id"),
+        Index("idx_ws_map_concept", "semantic_concept_id"),
         Index("idx_ws_map_column", "workspace_column_id"),
     )
 
     id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
-    vertical_norm: Mapped[str] = mapped_column(String(50), nullable=False, server_default=text("'generic'"))
     semantic_concept_id: Mapped[int] = mapped_column(
         BIGINT(unsigned=True),
         ForeignKey("semantic_concept.id", ondelete="CASCADE"),
@@ -40,12 +38,11 @@ class WorkspaceColumnSemanticConceptMap(SemanticBase):
 class SemanticValueAlias(SemanticBase):
     __tablename__ = "semantic_value_alias"
     __table_args__ = (
-        UniqueConstraint("vertical_norm", "semantic_concept_id", "alias_value", "match_kind", name="uq_val_alias"),
-        Index("idx_val_alias_concept", "vertical_norm", "semantic_concept_id"),
+        UniqueConstraint("semantic_concept_id", "alias_value", "match_kind", name="uq_val_alias"),
+        Index("idx_val_alias_concept", "semantic_concept_id"),
     )
 
     id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
-    vertical_norm: Mapped[str] = mapped_column(String(50), nullable=False, server_default=text("'generic'"))
     semantic_concept_id: Mapped[int] = mapped_column(
         BIGINT(unsigned=True),
         ForeignKey("semantic_concept.id", ondelete="CASCADE"),

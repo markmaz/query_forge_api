@@ -116,7 +116,6 @@ class _FakeCandidateService:
             "candidate_key": payload["candidate_key"],
             "source_type": payload["source_type"],
             "workspace_id": payload["workspace_id"],
-            "vertical_norm": payload["vertical_norm"],
             "candidate_json": dict(payload["candidate_policy"]),
             "rationale_json": dict(payload["rationale_json"]),
             "confidence": payload["confidence"],
@@ -163,7 +162,6 @@ def test_suggest_candidate_persists_ai_candidate() -> None:
         user_id="user-1",
         payload={
             "prompt": "Show me all the students enrolled at Barksdale Elementary",
-            "vertical_norm": "generic",
             "expected_base_domain_id": 9,
             "observed_base_domain_id": 15,
         },
@@ -180,7 +178,7 @@ def test_suggest_candidate_persists_ai_candidate() -> None:
     persisted = candidates.calls[0]["payload"]
     assert persisted["source_type"] == "ai_recommendation"
     assert persisted["workspace_id"] == "ws-1"
-    assert persisted["vertical_norm"] == "generic"
+    assert "vertical_norm" not in persisted
     assert persisted["candidate_policy"]["prefer_capabilities"] == [
         "SCHOOL_NAME",
         "STUDENT_IDENTITY",
@@ -261,7 +259,6 @@ def test_suggest_candidate_rejects_time_only_prompt_without_capability_grounding
             payload={
                 "prompt": "How many days off are there in December?",
                 "expected_base_domain_id": 9,
-                "vertical_norm": "education",
             },
         )
 

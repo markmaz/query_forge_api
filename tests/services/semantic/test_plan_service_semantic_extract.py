@@ -14,7 +14,11 @@ class _Deterministic:
 
 
 class _ConceptRetrieval:
+    def __init__(self) -> None:
+        self.calls = []
+
     def search(self, **kwargs):
+        self.calls.append(dict(kwargs))
         prompt = kwargs.get("prompt")
         return {"query_text": prompt, "hits": []}
 
@@ -38,10 +42,18 @@ class _ColumnVector:
 
 
 def _build_service(*, semantic_extractor, tier2_runner=None) -> PlanService:
+    return _build_service_with_retrieval(
+        semantic_extractor=semantic_extractor,
+        concept_retrieval=_ConceptRetrieval(),
+        tier2_runner=tier2_runner,
+    )
+
+
+def _build_service_with_retrieval(*, semantic_extractor, concept_retrieval, tier2_runner=None) -> PlanService:
     return PlanService(
         sql=FakeForgeQueryPort(),
         deterministic=_Deterministic(),
-        concept_retrieval=_ConceptRetrieval(),
+        concept_retrieval=concept_retrieval,
         concept_to_column=_ConceptToColumn(),
         column_vector=_ColumnVector(),
         domain_selector=_DomainSelection(),
@@ -113,6 +125,28 @@ def test_plan_surfaces_unexpected_semantic_extract_failures() -> None:
             },
             include_llm=False,
         )
+
+
+def test_plan_normalizes_legacy_vertical_before_concept_retrieval() -> None:
+    class _SemanticExtractor:
+        def extract(self, prompt):
+            return {"normalized_text": prompt, "slots": {}, "ents": [], "model": {}, "warnings": []}
+
+    concept_retrieval = _ConceptRetrieval()
+    svc = _build_service_with_retrieval(
+        semantic_extractor=_SemanticExtractor(),
+        concept_retrieval=concept_retrieval,
+    )
+    svc.plan(
+        {
+            "workspace_id": "ws-1",
+            "vertical_norm": "education",
+            "prompt": "How many chronically absent students?",
+        },
+        include_llm=False,
+    )
+
+    assert concept_retrieval.calls[0]["vertical_norm"] == "generic"
 
 
 def test_plan_degrades_when_tier2_runner_runtime_fails(monkeypatch) -> None:

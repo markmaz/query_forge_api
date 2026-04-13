@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy.exc import SQLAlchemyError
 
 from app.exceptions.forge_error import ForgeError
-import app.services.workspace_service as workspace_service
 from app.services.workspace_service import WorkspaceService
 
 

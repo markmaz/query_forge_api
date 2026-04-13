@@ -19,7 +19,6 @@ plan_llm_request_model = planner_ns.model(
     {
         "workspace_id": fields.String(required=False),
         "prompt": fields.String(required=True),
-        "vertical": fields.String(required=False, default="generic"),
         "constraints": fields.Raw(required=False),
         "debug": fields.Boolean(required=False, default=False),
         "llm_id": fields.Integer(required=False, description="Optional workspace LLM id override"),

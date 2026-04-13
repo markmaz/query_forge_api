@@ -23,11 +23,7 @@ class DomainCapabilities(Resource):
             )
             return payload, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain capabilities fetch failed domain_id={domain_id}",
-            client_error="Domain capabilities fetch failed",
-        )
+        return domain_routes.run(handler)
 
 
 @qf_domains_ns.route("/<int:domain_id>/overlay-metrics")
@@ -45,11 +41,7 @@ class DomainOverlayMetrics(Resource):
             )
             return {"domain_id": int(domain_id), "overlay_metrics": metrics}, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain overlay metrics fetch failed domain_id={domain_id}",
-            client_error="Domain overlay metrics fetch failed",
-        )
+        return domain_routes.run(handler)
 
 
 @qf_domains_ns.route("/<int:domain_id>/profile-metrics")
@@ -65,11 +57,7 @@ class DomainProfileMetrics(Resource):
             )
             return payload, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain profile metrics fetch failed domain_id={domain_id}",
-            client_error="Domain profile metrics fetch failed",
-        )
+        return domain_routes.run(handler)
 
     @domain_routes.token_required
     @domain_routes.require_access("catalog", role="admin")
@@ -84,11 +72,7 @@ class DomainProfileMetrics(Resource):
             )
             return payload, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain profile metrics update failed domain_id={domain_id}",
-            client_error="Domain profile metrics update failed",
-        )
+        return domain_routes.run(handler)
 
 
 @qf_domains_ns.route("/<int:domain_id>/time-policy")
@@ -104,11 +88,7 @@ class DomainTimePolicy(Resource):
             )
             return payload, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain time policy fetch failed domain_id={domain_id}",
-            client_error="Domain time policy fetch failed",
-        )
+        return domain_routes.run(handler)
 
     @domain_routes.token_required
     @domain_routes.require_access("catalog", role="admin")
@@ -124,8 +104,4 @@ class DomainTimePolicy(Resource):
             )
             return payload, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain time policy update failed domain_id={domain_id}",
-            client_error="Domain time policy update failed",
-        )
+        return domain_routes.run(handler)

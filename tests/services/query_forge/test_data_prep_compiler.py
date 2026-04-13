@@ -33,8 +33,6 @@ class TestDataPrepCompilerNoDataPrep:
 
         cte_sql, ctx = DataPrepCompiler().compile(
             query_json={"columns": []},
-            domain_columns=_DOMAIN_COLUMNS,
-            workspace_table_ids=_WS_TABLE_IDS,
             alias_by_wt=_ALIAS_BY_WT,
             qf_base_alias=_QF_BASE_ALIAS,
         )
@@ -51,8 +49,6 @@ class TestDataPrepCompilerNoDataPrep:
 
         cte_sql, ctx = DataPrepCompiler().compile(
             query_json={"dataPrep": {"rules": []}},
-            domain_columns=_DOMAIN_COLUMNS,
-            workspace_table_ids=_WS_TABLE_IDS,
             alias_by_wt=_ALIAS_BY_WT,
             qf_base_alias=_QF_BASE_ALIAS,
         )
@@ -66,8 +62,6 @@ class TestDataPrepCompilerCastRule:
 
         cte_sql, ctx = DataPrepCompiler().compile(
             query_json=_CAST_RULE_QUERY,
-            domain_columns=_DOMAIN_COLUMNS,
-            workspace_table_ids=_WS_TABLE_IDS,
             alias_by_wt=_ALIAS_BY_WT,
             qf_base_alias=_QF_BASE_ALIAS,
         )
@@ -80,8 +74,6 @@ class TestDataPrepCompilerCastRule:
 
         _, ctx = DataPrepCompiler().compile(
             query_json=_CAST_RULE_QUERY,
-            domain_columns=_DOMAIN_COLUMNS,
-            workspace_table_ids=_WS_TABLE_IDS,
             alias_by_wt=_ALIAS_BY_WT,
             qf_base_alias=_QF_BASE_ALIAS,
         )
@@ -93,8 +85,6 @@ class TestDataPrepCompilerCastRule:
 
         _, ctx = DataPrepCompiler().compile(
             query_json=_CAST_RULE_QUERY,
-            domain_columns=_DOMAIN_COLUMNS,
-            workspace_table_ids=_WS_TABLE_IDS,
             alias_by_wt=_ALIAS_BY_WT,
             qf_base_alias=_QF_BASE_ALIAS,
         )
@@ -105,8 +95,6 @@ class TestDataPrepCompilerCastRule:
 
         _, ctx = DataPrepCompiler().compile(
             query_json=_CAST_RULE_QUERY,
-            domain_columns=_DOMAIN_COLUMNS,
-            workspace_table_ids=_WS_TABLE_IDS,
             alias_by_wt=_ALIAS_BY_WT,
             qf_base_alias=_QF_BASE_ALIAS,
         )
@@ -132,8 +120,6 @@ class TestDataPrepCompilerValidation:
         with pytest.raises(ForgeError):
             DataPrepCompiler().compile(
                 query_json=q,
-                domain_columns=_DOMAIN_COLUMNS,
-                workspace_table_ids=_WS_TABLE_IDS,
                 alias_by_wt=_ALIAS_BY_WT,
                 qf_base_alias=_QF_BASE_ALIAS,
             )
@@ -156,8 +142,6 @@ class TestDataPrepCompilerValidation:
         with pytest.raises(ForgeError):
             DataPrepCompiler().compile(
                 query_json=q,
-                domain_columns=_DOMAIN_COLUMNS,
-                workspace_table_ids=_WS_TABLE_IDS,
                 alias_by_wt=_ALIAS_BY_WT,
                 qf_base_alias=_QF_BASE_ALIAS,
             )

@@ -20,6 +20,7 @@ from app.services.planner.semantic_candidate_models import (
 from app.services.planner.semantic_catalog_lookup_repository import (
     SemanticCatalogLookupRepository,
 )
+from app.services.semantic.vertical_norm import normalize_semantic_vertical
 from app.services.planner.semantic_retrieval_helpers import (
     AliasRule,
     ConceptRow,
@@ -70,7 +71,7 @@ class SemanticRetrievalService:
         max_per_type: int = 20,
     ) -> SemanticCandidatePayload:
         normalized_prompt = str(prompt or "").strip()
-        vertical = str(vertical_norm or "generic").strip().lower() or "generic"
+        vertical = normalize_semantic_vertical(vertical_norm)
         max_items = max(3, min(40, int(max_per_type or 20)))
 
         capability_index = build_capability_index(capabilities_compact=capabilities_compact)

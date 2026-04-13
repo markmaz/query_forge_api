@@ -234,7 +234,7 @@ WHERE id = :run_id
 
 @shared_task(bind=True, name="qf.ingestion.sync_metadata")
 def sync_metadata_task(
-    self,
+    _self,
     run_id: str,
     datasource: str,
     catalog: str | None,

@@ -24,7 +24,6 @@ def test_save_conversation_upserts_and_rewrites_messages() -> None:
                 {"role": "assistant", "content": "Here are staff"},
             ],
         },
-        qf_ttl_seconds=999,
     )
 
     assert len(sql.insert_calls) == 1

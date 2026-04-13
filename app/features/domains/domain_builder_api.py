@@ -32,4 +32,4 @@ class BuilderColumns(Resource):
             )
             return payload, 200
 
-        return domain_routes.run(handler, log_message="Builder columns fetch failed", client_error="Builder columns fetch failed")
+        return domain_routes.run(handler)

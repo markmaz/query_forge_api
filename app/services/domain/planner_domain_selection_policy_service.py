@@ -17,10 +17,11 @@ from app.models.domain.planner_domain_selection_policy import (
 )
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.domain.policy_scope_service import (
-    annotate_effective_rows,
-    global_workspace_query_predicate,
-    require_global_workspace_scope,
-    sort_and_dedupe_global_workspace_policies,
+    GLOBAL_WORKSPACE_SCOPE_TYPES,
+    annotate_effective_scoped_rows,
+    require_supported_scope,
+    scoped_query_predicate,
+    sort_and_dedupe_scoped_policies,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Boost domains whose shortlist already includes subgroup columns for subgroup prompts.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 100,
         "is_active": 1,
         "stop_on_match": 0,
@@ -55,7 +55,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Boost domains whose shortlist contains student identity columns for student listing prompts.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 110,
         "is_active": 1,
         "stop_on_match": 0,
@@ -74,7 +73,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Boost domains whose shortlist contains staff identity columns for staff work-context prompts.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 120,
         "is_active": 1,
         "stop_on_match": 0,
@@ -93,7 +91,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Boost domains whose shortlist contains student identity columns for student-school prompts.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 130,
         "is_active": 1,
         "stop_on_match": 0,
@@ -112,7 +109,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Boost domains whose shortlist contains ADM signal columns for ADM prompts.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 140,
         "is_active": 1,
         "stop_on_match": 0,
@@ -131,7 +127,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Boost domains whose capabilities include ADM metrics for ADM prompts.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 150,
         "is_active": 1,
         "stop_on_match": 0,
@@ -150,7 +145,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Boost domains whose shortlist contains birth-date columns for age-extreme prompts.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 160,
         "is_active": 1,
         "stop_on_match": 0,
@@ -169,7 +163,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Boost domains whose shortlist contains age columns for age-extreme prompts.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 170,
         "is_active": 1,
         "stop_on_match": 0,
@@ -188,7 +181,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Boost domains whose shortlist contains birth-date columns for birth-month prompts.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 180,
         "is_active": 1,
         "stop_on_match": 0,
@@ -207,7 +199,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Boost domains whose shortlist contains calendar-day columns for days-off prompts.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 190,
         "is_active": 1,
         "stop_on_match": 0,
@@ -226,7 +217,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Boost domains whose shortlist contains school-day flags for days-off prompts.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 200,
         "is_active": 1,
         "stop_on_match": 0,
@@ -297,14 +287,13 @@ class PlannerDomainSelectionPolicyService:
                       description,
                       scope_type,
                       scope_workspace_id,
-                      scope_vertical_norm,
                       priority,
                       is_active,
                       stop_on_match,
                       policy_json
                     FROM planner_domain_selection_policy
                     WHERE is_active = 1
-                      AND {global_workspace_query_predicate()}
+                      AND {scoped_query_predicate()}
                     """,
                     {
                         "workspace_id": str(workspace_id or "").strip(),
@@ -319,8 +308,9 @@ class PlannerDomainSelectionPolicyService:
                 )
 
         policies: List[Dict[str, Any]] = []
-        for row in sort_and_dedupe_global_workspace_policies(rows):
+        for row in sort_and_dedupe_scoped_policies(rows):
             payload = dict(row)
+            payload.pop("scope_vertical_norm", None)
             try:
                 payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             except POLICY_RULE_VALIDATION_ERRORS:
@@ -333,6 +323,7 @@ class PlannerDomainSelectionPolicyService:
         self,
         *,
         workspace_id: str,
+        vertical_norm: str = "generic",
         include_inactive: bool = False,
         include_seeded: bool = True,
     ) -> Dict[str, Any]:
@@ -348,7 +339,6 @@ class PlannerDomainSelectionPolicyService:
               description,
               scope_type,
               scope_workspace_id,
-              scope_vertical_norm,
               priority,
               is_active,
               stop_on_match,
@@ -356,16 +346,19 @@ class PlannerDomainSelectionPolicyService:
               created_at,
               updated_at
             FROM planner_domain_selection_policy
-            WHERE {global_workspace_query_predicate()}
+            WHERE {scoped_query_predicate()}
             {"AND is_active = 1" if not include_inactive else ""}
             """,
-            {"workspace_id": str(workspace_id)},
+            {
+                "workspace_id": str(workspace_id),
+            },
         )
         rows.extend({**dict(row), "_seeded": False} for row in db_rows)
 
         policies: list[dict[str, Any]] = []
         for row in rows:
             payload = _json_safe_mapping(dict(row))
+            payload.pop("scope_vertical_norm", None)
             payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             payload["is_seeded"] = bool(payload.get("_seeded"))
             payload["can_edit"] = not payload["is_seeded"]
@@ -374,20 +367,23 @@ class PlannerDomainSelectionPolicyService:
 
         return {
             "workspace_id": str(workspace_id),
+            "vertical_norm": str(vertical_norm or "generic").strip().lower() or "generic",
             "can_edit": True,
-            "policies": annotate_effective_rows(policies),
+            "policies": annotate_effective_scoped_rows(policies),
         }
 
     def upsert_policy(
         self,
         *,
         workspace_id: str,
-        actor_user_id: str,
         payload: Any,
     ) -> Dict[str, Any]:
-        del actor_user_id
         req = PlannerDomainSelectionPolicyUpsertRequest.model_validate(payload)
-        scope_type = require_global_workspace_scope(scope_type=req.scope_type)
+        scope_type = require_supported_scope(
+            scope_type=req.scope_type,
+            allowed_scope_types=GLOBAL_WORKSPACE_SCOPE_TYPES,
+            family_label="planner domain selection policies",
+        )
         if scope_type == "workspace" and (req.scope_workspace_id or workspace_id) != workspace_id:
             raise ForgeError("workspace scope must match the active workspace", status_code=400)
         params = {
@@ -396,7 +392,6 @@ class PlannerDomainSelectionPolicyService:
             "description": req.description,
             "scope_type": scope_type,
             "scope_workspace_id": req.scope_workspace_id or (workspace_id if scope_type == "workspace" else None),
-            "scope_vertical_norm": None,
             "priority": int(req.priority),
             "is_active": 1 if req.is_active else 0,
             "stop_on_match": 1 if req.stop_on_match else 0,
@@ -416,10 +411,6 @@ class PlannerDomainSelectionPolicyService:
                     (scope_workspace_id IS NULL AND :scope_workspace_id IS NULL)
                     OR scope_workspace_id = :scope_workspace_id
                   )
-                  AND (
-                    (scope_vertical_norm IS NULL AND :scope_vertical_norm IS NULL)
-                    OR scope_vertical_norm = :scope_vertical_norm
-                  )
                 LIMIT 1
                 """,
                 params,
@@ -438,7 +429,6 @@ class PlannerDomainSelectionPolicyService:
                         description = :description,
                         scope_type = :scope_type,
                         scope_workspace_id = :scope_workspace_id,
-                        scope_vertical_norm = :scope_vertical_norm,
                         priority = :priority,
                         is_active = :is_active,
                         stop_on_match = :stop_on_match,
@@ -457,7 +447,6 @@ class PlannerDomainSelectionPolicyService:
                       description,
                       scope_type,
                       scope_workspace_id,
-                      scope_vertical_norm,
                       priority,
                       is_active,
                       stop_on_match,
@@ -468,7 +457,6 @@ class PlannerDomainSelectionPolicyService:
                       :description,
                       :scope_type,
                       :scope_workspace_id,
-                      :scope_vertical_norm,
                       :priority,
                       :is_active,
                       :stop_on_match,
@@ -506,10 +494,8 @@ class PlannerDomainSelectionPolicyService:
         self,
         *,
         workspace_id: str,
-        actor_user_id: str,
         policy_id: int,
     ) -> Dict[str, Any]:
-        del actor_user_id
         row = self._load_policy_row(policy_id=policy_id, workspace_id=workspace_id)
         deleted = self._sql.execute_write(
             "DELETE FROM planner_domain_selection_policy WHERE id = :policy_id",
@@ -529,7 +515,6 @@ class PlannerDomainSelectionPolicyService:
               description,
               scope_type,
               scope_workspace_id,
-              scope_vertical_norm,
               priority,
               is_active,
               stop_on_match,
@@ -557,7 +542,6 @@ def _parse_policy_rule(value: Any) -> PlannerDomainSelectionPolicyRule:
     if isinstance(value, str):
         return PlannerDomainSelectionPolicyRule.model_validate_json(value)
     return PlannerDomainSelectionPolicyRule.model_validate(value or {})
-
 
 def _normalized_tokens(values: Sequence[str], *, upper: bool = False) -> list[str]:
     out: list[str] = []

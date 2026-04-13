@@ -4,7 +4,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.services.semantic.vertical_norm import normalize_semantic_vertical
 
 
 class PlanningRequest(BaseModel):
@@ -18,6 +20,11 @@ class PlanningRequest(BaseModel):
     max_columns: int = 60
     debug: bool = False
     llm_id: Optional[int] = None
+
+    @field_validator("vertical_norm", mode="before")
+    @classmethod
+    def _normalize_vertical_norm(cls, value: Any) -> str:
+        return normalize_semantic_vertical(value)
 
 
 class LLMSelectedColumn(BaseModel):

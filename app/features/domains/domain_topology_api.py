@@ -31,7 +31,7 @@ class ColumnSample(Resource):
             )
             return payload, 200
 
-        return domain_routes.run(handler, log_message="Column sample failed", client_error="Column sample failed")
+        return domain_routes.run(handler)
 
 
 @qf_domains_ns.route("/workspace-tables")
@@ -52,11 +52,7 @@ class WorkspaceTables(Resource):
             )
             return {"rows": rows}, 200
 
-        return domain_routes.run(
-            handler,
-            log_message="Workspace tables fetch failed",
-            client_error="Workspace tables fetch failed",
-        )
+        return domain_routes.run(handler)
 
 
 @qf_domains_ns.route("/<int:domain_id>/tables")
@@ -71,11 +67,7 @@ class DomainTables(Resource):
             )
             return {"rows": rows}, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain tables fetch failed domain_id={domain_id}",
-            client_error="Domain tables fetch failed",
-        )
+        return domain_routes.run(handler)
 
     @domain_routes.token_required
     @domain_routes.require_access("catalog", role="admin")
@@ -120,11 +112,7 @@ class DomainTables(Resource):
             )
             return res, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain tables update failed domain_id={domain_id}",
-            client_error="Domain tables update failed",
-        )
+        return domain_routes.run(handler)
 
 
 @qf_domains_ns.route("/<int:domain_id>/tables/<int:workspace_table_id>/primary")
@@ -144,11 +132,7 @@ class DomainPrimaryTable(Resource):
             )
             return {"rows": rows}, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain primary table update failed domain_id={domain_id}",
-            client_error="Domain primary table update failed",
-        )
+        return domain_routes.run(handler)
 
 
 @qf_domains_ns.route("/<int:domain_id>/joins")
@@ -163,11 +147,7 @@ class DomainJoins(Resource):
             )
             return {"rows": rows}, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain joins fetch failed domain_id={domain_id}",
-            client_error="Domain joins fetch failed",
-        )
+        return domain_routes.run(handler)
 
     @domain_routes.token_required
     @domain_routes.require_access("catalog", role="admin")
@@ -190,11 +170,7 @@ class DomainJoins(Resource):
             )
             return result, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain join create failed domain_id={domain_id}",
-            client_error="Domain join create failed",
-        )
+        return domain_routes.run(handler)
 
 
 @qf_domains_ns.route("/<int:domain_id>/joins/<string:join_id>")
@@ -221,11 +197,7 @@ class DomainJoin(Resource):
             )
             return result, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain join update failed domain_id={domain_id} join_id={join_id}",
-            client_error="Domain join update failed",
-        )
+        return domain_routes.run(handler)
 
     @domain_routes.token_required
     @domain_routes.require_access("catalog", role="admin")
@@ -238,8 +210,4 @@ class DomainJoin(Resource):
             )
             return result, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain join delete failed domain_id={domain_id} join_id={join_id}",
-            client_error="Domain join delete failed",
-        )
+        return domain_routes.run(handler)

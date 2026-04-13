@@ -284,6 +284,7 @@ def _short_reason(text: str) -> str:
 
 
 def _limit_reasons(reasons: Any, card: Dict[str, Any]) -> List[str]:
+    del card
     out: List[str] = []
     if isinstance(reasons, str):
         reasons = [reasons]

@@ -48,7 +48,7 @@ def test_relationship_create_success_with_same_vertical() -> None:
     assert row["relationship_type"] == "parent_of"
 
 
-def test_relationship_rejects_cross_vertical() -> None:
+def test_relationship_requires_existing_created_row() -> None:
     sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
@@ -56,9 +56,10 @@ def test_relationship_rejects_cross_vertical() -> None:
             {"id": 2, "vertical_norm": "healthcare"},
         ]
     ]
+    sql.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=1)]
 
     svc = SemanticRelationshipService(sql=sql)
-    with pytest.raises(ForgeError, match="Cross-vertical relationships"):
+    with pytest.raises(ForgeError, match="not found"):
         svc.create_relationship(
             {
                 "parent_concept_id": 1,
@@ -251,10 +252,36 @@ def test_list_concept_lookup_human_readable() -> None:
         [{"total": 1}],
     ]
     svc = SemanticRelationshipService(sql=sql)
-    out = svc.list_concept_lookup(vertical="generic", q="sales", page=1, page_size=100)
+    out = svc.list_concept_lookup(q="sales", page=1, page_size=100)
     assert out["total"] == 1
     assert out["rows"][0]["concept_name"] == "Total Net Amount"
     assert out["rows"][0]["display_label"] == "Total Net Amount (TOTAL_NET_AMOUNT)"
+
+
+def test_list_relationships_reads_without_vertical_filter() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[], [{"total": 0}]]
+    svc = SemanticRelationshipService(sql=sql)
+
+    out = svc.list_relationships(page=1, page_size=25)
+
+    assert out["total"] == 0
+    assert len(sql.query_mappings_calls) == 2
+    assert sql.query_mappings_calls[0].params == {"limit": 25, "offset": 0}
+    assert sql.query_mappings_calls[1].params == {}
+
+
+def test_list_concept_lookup_reads_without_vertical_filter() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[], [{"total": 0}]]
+    svc = SemanticRelationshipService(sql=sql)
+
+    out = svc.list_concept_lookup(q="sales", page=1, page_size=100)
+
+    assert out["total"] == 0
+    assert len(sql.query_mappings_calls) == 2
+    assert sql.query_mappings_calls[0].params == {"q": "%sales%", "limit": 100, "offset": 0}
+    assert sql.query_mappings_calls[1].params == {"q": "%sales%"}
 
 
 def test_get_relationship_serializes_datetime_fields() -> None:

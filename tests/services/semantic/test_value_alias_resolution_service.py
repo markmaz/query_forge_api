@@ -37,3 +37,4 @@ def test_value_alias_resolution_maps_metro_schools_to_district_name() -> None:
     ]
     assert len(sql.query_mappings_calls) == 3
     assert "FROM semantic_value_alias va" in sql.query_mappings_calls[0].query
+    assert sql.query_mappings_calls[0].params["vertical_norm"] == "generic"

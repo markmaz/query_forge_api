@@ -726,6 +726,7 @@ class QueryForgeService:
         plan: DomainPlan,
         new_param: Callable[[Any], str],
     ) -> Dict[str, Any]:
+        del plan
         return self._attachment_compiler.compile(
             value_override_attachments=value_override_attachments,
             cohort_attachment=cohort_attachment,
@@ -737,7 +738,6 @@ class QueryForgeService:
             qf_using_prep=qf_using_prep,
             qf_base_alias=qf_base_alias,
             alias_by_wt=alias_by_wt,
-            plan=plan,
             workspace_id=getattr(self._domains, "_workspace_id", None),
             new_param=new_param,
         )

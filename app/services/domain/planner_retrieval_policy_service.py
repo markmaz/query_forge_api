@@ -36,7 +36,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Expand staff prompts toward assignment and workforce domains and away from unrelated student or discipline domains.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 100,
         "is_active": 1,
         "stop_on_match": 0,
@@ -63,7 +62,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Expand student prompts toward enrollment and demographics domains and away from unrelated discipline domains.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 110,
         "is_active": 1,
         "stop_on_match": 0,
@@ -89,7 +87,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Expand ADM prompts toward membership and enrollment domains and away from calendar-only domains.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 115,
         "is_active": 1,
         "stop_on_match": 0,
@@ -115,7 +112,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Bias eldest or youngest prompts toward student demographic and birth-date domains.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 120,
         "is_active": 1,
         "stop_on_match": 0,
@@ -140,7 +136,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Bias birthday and birth-month prompts toward demographic and date-of-birth domains.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 130,
         "is_active": 1,
         "stop_on_match": 0,
@@ -165,7 +160,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Bias days-off prompts toward calendar and scheduling domains with additional semantic calendar queries.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 140,
         "is_active": 1,
         "stop_on_match": 0,
@@ -201,7 +195,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Expand subgroup prompts toward race, ethnicity, and language semantics.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 150,
         "is_active": 1,
         "stop_on_match": 0,
@@ -226,7 +219,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Expand semantic retrieval when concept grounding points at semester or term concepts.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 160,
         "is_active": 1,
         "stop_on_match": 0,
@@ -251,7 +243,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Expand semantic retrieval when concept grounding points at school-year concepts.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 170,
         "is_active": 1,
         "stop_on_match": 0,
@@ -276,7 +267,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Expand semantic retrieval when grounding points at country-of-birth style concepts.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 180,
         "is_active": 1,
         "stop_on_match": 0,
@@ -386,7 +376,6 @@ class PlannerRetrievalPolicyService:
                       description,
                       scope_type,
                       scope_workspace_id,
-                      scope_vertical_norm,
                       priority,
                       is_active,
                       stop_on_match,
@@ -410,6 +399,7 @@ class PlannerRetrievalPolicyService:
         policies: List[Dict[str, Any]] = []
         for row in sort_and_dedupe_global_workspace_policies(rows):
             payload = dict(row)
+            payload.pop("scope_vertical_norm", None)
             try:
                 payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             except POLICY_RULE_VALIDATION_ERRORS:
@@ -442,7 +432,6 @@ class PlannerRetrievalPolicyService:
               description,
               scope_type,
               scope_workspace_id,
-              scope_vertical_norm,
               priority,
               is_active,
               stop_on_match,
@@ -460,6 +449,7 @@ class PlannerRetrievalPolicyService:
         policies: list[dict[str, Any]] = []
         for row in rows:
             payload = _json_safe_mapping(dict(row))
+            payload.pop("scope_vertical_norm", None)
             payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             payload["is_seeded"] = bool(payload.get("_seeded"))
             payload["can_edit"] = not payload["is_seeded"]
@@ -490,7 +480,6 @@ class PlannerRetrievalPolicyService:
             "description": req.description,
             "scope_type": scope_type,
             "scope_workspace_id": req.scope_workspace_id or (workspace_id if scope_type == "workspace" else None),
-            "scope_vertical_norm": None,
             "priority": int(req.priority),
             "is_active": 1 if req.is_active else 0,
             "stop_on_match": 1 if req.stop_on_match else 0,
@@ -510,10 +499,6 @@ class PlannerRetrievalPolicyService:
                     (scope_workspace_id IS NULL AND :scope_workspace_id IS NULL)
                     OR scope_workspace_id = :scope_workspace_id
                   )
-                  AND (
-                    (scope_vertical_norm IS NULL AND :scope_vertical_norm IS NULL)
-                    OR scope_vertical_norm = :scope_vertical_norm
-                  )
                 LIMIT 1
                 """,
                 params,
@@ -532,7 +517,6 @@ class PlannerRetrievalPolicyService:
                         description = :description,
                         scope_type = :scope_type,
                         scope_workspace_id = :scope_workspace_id,
-                        scope_vertical_norm = :scope_vertical_norm,
                         priority = :priority,
                         is_active = :is_active,
                         stop_on_match = :stop_on_match,
@@ -551,7 +535,6 @@ class PlannerRetrievalPolicyService:
                       description,
                       scope_type,
                       scope_workspace_id,
-                      scope_vertical_norm,
                       priority,
                       is_active,
                       stop_on_match,
@@ -562,7 +545,6 @@ class PlannerRetrievalPolicyService:
                       :description,
                       :scope_type,
                       :scope_workspace_id,
-                      :scope_vertical_norm,
                       :priority,
                       :is_active,
                       :stop_on_match,
@@ -623,7 +605,6 @@ class PlannerRetrievalPolicyService:
               description,
               scope_type,
               scope_workspace_id,
-              scope_vertical_norm,
               priority,
               is_active,
               stop_on_match,

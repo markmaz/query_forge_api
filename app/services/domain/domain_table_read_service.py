@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -13,6 +14,7 @@ from app.services.domain.table_read.workspace_inventory_sync_service import (
     resolve_metadata_provider,
     sync_workspace_inventory_from_registry,
 )
+from app.services.metadata.mode import effective_metadata_mode, normalize_metadata_mode
 from app.services.tenancy.datasource_resolver_service import WorkspaceDatasourceResolverService
 from app.services.tenancy.secret_resolver import SecretResolver
 
@@ -24,7 +26,8 @@ class DomainTableReadService:
     """Read domain/workspace table mappings and workspace table inventory."""
 
     def __init__(self, *, sql: Optional[ForgeQueryPort] = None, metadata_mode: Optional[str] = None) -> None:
-        del metadata_mode
+        self._configured_metadata_mode = normalize_metadata_mode(metadata_mode)
+        self._effective_metadata_mode = effective_metadata_mode(metadata_mode)
         self._sql = sql or ForgeMetaSQL()
 
     def list_domain_tables(self, *, workspace_id: str, domain_id: int) -> List[Dict[str, Any]]:
@@ -107,7 +110,12 @@ class DomainTableReadService:
         schema = (schema_name or "").strip() or None
         catalog = (catalog_name or "").strip() or None
 
-        if ensure_snapshot and schema:
+        if ensure_snapshot and schema and self._should_refresh_snapshot(
+            workspace_id=workspace_id,
+            schema_name=schema,
+            catalog_name=catalog,
+            min_fresh_age_minutes=min_fresh_age_minutes,
+        ):
             try:
                 self._sync_workspace_inventory_from_registry(
                     workspace_id=workspace_id,
@@ -183,6 +191,42 @@ class DomainTableReadService:
         )
         return serialize_workspace_table_rows(rows)
 
+    def _should_refresh_snapshot(
+        self,
+        *,
+        workspace_id: str,
+        schema_name: str,
+        catalog_name: Optional[str],
+        min_fresh_age_minutes: int,
+    ) -> bool:
+        try:
+            freshness_minutes = int(min_fresh_age_minutes)
+        except (TypeError, ValueError):
+            freshness_minutes = 15
+        if freshness_minutes <= 0:
+            return True
+
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT MAX(last_seen_at) AS last_seen_at
+            FROM workspace_table
+            WHERE workspace_id = :ws
+              AND schema_name = :schema
+              AND (:catalog IS NULL OR catalog_name = :catalog)
+            """,
+            {
+                "ws": workspace_id,
+                "schema": schema_name,
+                "catalog": catalog_name,
+            },
+        )
+        latest_raw = ((rows[0] if rows else {}) or {}).get("last_seen_at")
+        latest_seen = _coerce_utc_datetime(latest_raw)
+        if latest_seen is None:
+            return True
+        age_limit = datetime.now(timezone.utc) - timedelta(minutes=freshness_minutes)
+        return latest_seen < age_limit
+
     def _sync_workspace_inventory_from_registry(
         self,
         *,
@@ -220,3 +264,22 @@ class DomainTableReadService:
             executor_factory=ExecutorFactory,
             metadata_provider_factory=MetadataProviderFactory,
         )
+
+
+def _coerce_utc_datetime(value: object) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

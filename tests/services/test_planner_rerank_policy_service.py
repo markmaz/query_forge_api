@@ -105,7 +105,7 @@ def test_get_applicable_policies_orders_by_scope_then_priority() -> None:
                 _policy_row(id=1, policy_key="global_rule", scope_type="global", priority=200),
                 _policy_row(id=2, policy_key="workspace_rule", scope_type="workspace", priority=200),
                 _policy_row(id=3, policy_key="workspace_domain_rule", scope_type="workspace_domain", priority=300),
-                _policy_row(id=4, policy_key="vertical_rule", scope_type="vertical", priority=100),
+                _policy_row(id=4, policy_key="global_domain_rule", scope_type="global_domain", priority=100),
             ]
         ]
     )
@@ -114,7 +114,7 @@ def test_get_applicable_policies_orders_by_scope_then_priority() -> None:
     assert [row["policy_key"] for row in out] == [
         "workspace_domain_rule",
         "workspace_rule",
-        "vertical_rule",
+        "global_domain_rule",
         "global_rule",
     ]
 

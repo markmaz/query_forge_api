@@ -156,7 +156,7 @@ def _normalize_country_filters_in_plan(
     *,
     plan_json: Mapping[str, Any],
     capabilities: Mapping[str, Any],
-    prompt: str = "",
+    _prompt: str = "",
     **_extra: Any,
 ) -> Tuple[Dict[str, Any], List[Dict[str, str]], List[Dict[str, Any]]]:
     plan = dict(plan_json or {})

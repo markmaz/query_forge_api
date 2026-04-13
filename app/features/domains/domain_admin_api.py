@@ -20,7 +20,7 @@ class DomainsRoot(Resource):
             )
             return {"rows": rows}, 200
 
-        return domain_routes.run(handler, log_message="Domains fetch failed", client_error="Domains fetch failed")
+        return domain_routes.run(handler)
 
     @domain_routes.token_required
     @domain_routes.require_access("catalog", role="admin")
@@ -38,7 +38,7 @@ class DomainsRoot(Resource):
             )
             return {"row": row}, 201
 
-        return domain_routes.run(handler, log_message="Domain create failed", client_error="Domain create failed")
+        return domain_routes.run(handler)
 
 
 @qf_domains_ns.route("/recommendations/generate")
@@ -68,11 +68,7 @@ class DomainRecommendationsGenerate(Resource):
             )
             return payload, 200
 
-        return domain_routes.run(
-            handler,
-            log_message="Domain recommendations generate failed",
-            client_error="Domain recommendations generate failed",
-        )
+        return domain_routes.run(handler)
 
 
 @qf_domains_ns.route("/recommendations/apply")
@@ -95,11 +91,7 @@ class DomainRecommendationsApply(Resource):
             )
             return payload, 200
 
-        return domain_routes.run(
-            handler,
-            log_message="Domain recommendations apply failed",
-            client_error="Domain recommendations apply failed",
-        )
+        return domain_routes.run(handler)
 
 
 @qf_domains_ns.route("/<int:domain_id>")
@@ -121,11 +113,7 @@ class DomainById(Resource):
             )
             return {"row": row}, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain patch failed id={domain_id}",
-            client_error="Domain patch failed",
-        )
+        return domain_routes.run(handler)
 
     @domain_routes.token_required
     @domain_routes.require_access("catalog", role="admin")
@@ -138,11 +126,7 @@ class DomainById(Resource):
             )
             return res, 200
 
-        return domain_routes.run(
-            handler,
-            log_message=f"Domain delete failed id={domain_id}",
-            client_error="Domain delete failed",
-        )
+        return domain_routes.run(handler)
 
 
 @qf_domains_ns.route("/summary")
@@ -163,8 +147,4 @@ class DomainSummary(Resource):
             )
             return {"rows": rows}, 200
 
-        return domain_routes.run(
-            handler,
-            log_message="Domain summary fetch failed",
-            client_error="Domain summary fetch failed",
-        )
+        return domain_routes.run(handler)

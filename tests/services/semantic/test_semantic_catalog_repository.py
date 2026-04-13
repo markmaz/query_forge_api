@@ -24,3 +24,25 @@ def test_get_relationship_fk_target_surfaces_unexpected_lookup_errors() -> None:
 
     with pytest.raises(AssertionError, match="unexpected fk target bug"):
         repo._get_relationship_fk_target()
+
+
+def test_get_concepts_normalizes_legacy_vertical_to_generic() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[]]
+    repo = SemanticCatalogRepository(sql=sql)
+
+    out = repo.get_concepts(vertical_norm="education", concept_keys=["STUDENT_ID"])
+
+    assert out == []
+    assert sql.query_mappings_calls[0].params["vertical_norm"] == "generic"
+
+
+def test_get_aliases_by_concept_keys_normalizes_global_vertical_to_generic() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[]]
+    repo = SemanticCatalogRepository(sql=sql)
+
+    out = repo.get_aliases_by_concept_keys(vertical_norm="global", concept_keys=["STUDENT_ID"])
+
+    assert out == {}
+    assert sql.query_mappings_calls[0].params["vertical_norm"] == "generic"

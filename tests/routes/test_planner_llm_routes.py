@@ -61,7 +61,7 @@ def test_plan_llm_route_returns_service_payload(client, monkeypatch):
     monkeypatch.setattr(planner_llm_route, "PlannerLLMService", _Svc)
     resp = client.post(
         "/api/v1/planner/plan_llm",
-        json={"workspace_id": "ws-1", "prompt": "students per teacher", "vertical": "education"},
+        json={"workspace_id": "ws-1", "prompt": "students per teacher"},
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 200

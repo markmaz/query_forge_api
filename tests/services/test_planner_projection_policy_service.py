@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
+import pytest
+
 from app.adapters.query_port import ForgeExecResult
+from app.exceptions.forge_error import ForgeError
 from app.services.domain.planner_projection_policy_service import PlannerProjectionPolicyService
 
 
@@ -159,29 +162,34 @@ def test_projection_policy_service_prefers_more_specific_db_policy_over_seed() -
     assert out["matched_policies"] == ["student_listing_identity_projection"]
 
 
-def test_projection_policy_service_rejects_legacy_scope_types_on_upsert() -> None:
-    svc = PlannerProjectionPolicyService(sql=_FakeSQL(rows_by_call=[[]]))
-
-    try:
-        svc.upsert_policy(
-            workspace_id="ws-1",
-            actor_user_id="user-1",
-            payload={
-                "policy_key": "legacy_scope_rule",
-                "name": "Legacy scope rule",
-                "scope_type": "workspace_domain",
-                "policy_json": {
-                    "version": 1,
-                    "when_signals_all": ["school_listing"],
-                    "projection_mode": "prepend",
-                    "required_column_names": ["school_name"],
-                },
-            },
+def test_projection_policy_service_prefers_domain_and_workspace_scope_over_less_specific_rules() -> None:
+    svc = PlannerProjectionPolicyService(
+        sql=_FakeSQL(
+            rows_by_call=[
+                [
+                    _policy_row(id=1, policy_key="student_listing_identity_projection", scope_type="global", priority=200),
+                    _policy_row(id=2, policy_key="student_listing_identity_projection", scope_type="workspace", priority=150, required_concepts=["STUDENT_ID"]),
+                    _policy_row(
+                        id=3,
+                        policy_key="student_listing_identity_projection",
+                        scope_type="workspace_domain",
+                        priority=120,
+                        required_concepts=["STUDENT_ID", "STUDENT_FIRST_NAME"],
+                    ),
+                ]
+            ]
         )
-    except Exception as exc:
-        assert "Only global and workspace policy scopes are supported" in str(exc)
-    else:  # pragma: no cover - defensive
-        raise AssertionError("Expected legacy scope type to be rejected")
+    )
+
+    out = svc.get_projection_requirements(
+        workspace_id="ws-1",
+        vertical_norm="education",
+        base_domain_id=9,
+        prompt_signals=["student_listing"],
+    )
+
+    assert out["required_concept_keys"] == ["STUDENT_ID", "STUDENT_FIRST_NAME"]
+    assert out["matched_policies"] == ["student_listing_identity_projection"]
 
 
 def test_projection_policy_service_lists_seeded_and_db_policies() -> None:
@@ -229,6 +237,7 @@ def test_projection_policy_service_lists_seeded_and_db_policies() -> None:
 def test_projection_policy_service_upserts_policy() -> None:
     sql = _FakeSQL(
         rows_by_call=[
+            [{"domain_id": 9, "domain_name": "Enrollment"}],
             [],
             [
                 {
@@ -236,10 +245,10 @@ def test_projection_policy_service_upserts_policy() -> None:
                     "policy_key": "custom_school_listing",
                     "name": "Custom school listing",
                     "description": "Workspace override",
-                    "scope_type": "workspace",
+                    "scope_type": "workspace_domain",
                     "scope_workspace_id": "ws-1",
                     "scope_vertical_norm": None,
-                    "scope_base_domain_id": None,
+                    "scope_base_domain_id": 9,
                     "priority": 90,
                     "is_active": 1,
                     "stop_on_match": 0,
@@ -261,11 +270,11 @@ def test_projection_policy_service_upserts_policy() -> None:
 
     out = svc.upsert_policy(
         workspace_id="ws-1",
-        actor_user_id="user-1",
         payload={
             "policy_key": "custom_school_listing",
             "name": "Custom school listing",
-            "scope_type": "workspace",
+            "scope_type": "workspace_domain",
+            "scope_base_domain_id": 9,
             "priority": 90,
             "policy_json": {
                 "version": 1,
@@ -279,7 +288,31 @@ def test_projection_policy_service_upserts_policy() -> None:
     assert sql.insert_calls
     assert out["id"] == 44
     assert out["policy_key"] == "custom_school_listing"
+    assert out["scope_type"] == "workspace_domain"
     assert out["policy_json"]["required_column_names"] == ["school_name"]
+    assert "scope_vertical_norm" not in sql.insert_calls[0][1]
+    assert sql.insert_calls[0][1]["scope_base_domain_id"] == 9
+
+
+def test_projection_policy_service_upsert_rejects_missing_domain_scope_row() -> None:
+    svc = PlannerProjectionPolicyService(sql=_FakeSQL(rows_by_call=[[]]))
+
+    with pytest.raises(ForgeError, match="Domain not found"):
+        svc.upsert_policy(
+            workspace_id="ws-1",
+            payload={
+                "policy_key": "custom_school_listing",
+                "name": "Custom school listing",
+                "scope_type": "workspace_domain",
+                "scope_base_domain_id": 9,
+                "policy_json": {
+                    "version": 1,
+                    "when_signals_all": ["school_listing"],
+                    "projection_mode": "prepend",
+                    "required_column_names": ["school_name"],
+                },
+            },
+        )
 
 
 def test_projection_policy_service_interpolates_scope_predicate() -> None:

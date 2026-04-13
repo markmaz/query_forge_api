@@ -7,6 +7,7 @@ from qdrant_client.http import models as qdrant_models
 from app.config import QDRANT_SEMANTIC_CONCEPT_COLLECTION
 from app.infra.embedding_model import EmbeddingModel
 from app.infra.qdrant_client import QdrantClientWrapper
+from app.services.semantic.vertical_norm import normalize_semantic_vertical
 
 COLLECTION_NAME = QDRANT_SEMANTIC_CONCEPT_COLLECTION or "semantic_concepts_v1"
 
@@ -97,8 +98,7 @@ class ConceptRetrievalService:
 
 
 def _norm_vertical(vertical_norm: str) -> str:
-    value = str(vertical_norm or "generic").strip().lower()
-    return value or "generic"
+    return normalize_semantic_vertical(vertical_norm)
 
 
 def _to_int_or_none(value: Any) -> Optional[int]:

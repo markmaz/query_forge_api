@@ -15,7 +15,7 @@ class DatabricksWorkspaceTokenProvider(BaseForgeTokenManager):
     def __init__(
         self,
         workspace_host: str,
-        workspace_id: str,
+        _workspace_id: str,
         *,
         client_id: Optional[str] = None,
         client_secret: Optional[str] = None,

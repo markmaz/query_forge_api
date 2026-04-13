@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from app.exceptions.forge_error import ForgeError
-from app.services.forge_match.field_extractor import SourceFieldRecord
 from app.services.forge_match.pipeline_adapters import (
     ForgeMatchPersistenceAdapter,
     ForgeMatchSessionExecutionAdapter,

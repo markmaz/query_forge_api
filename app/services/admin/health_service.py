@@ -146,8 +146,15 @@ class AdminHealthService:
         except (AttributeError, OSError, RuntimeError, ValueError) as exc:
             out["celery"]["worker_error"] = str(exc)
 
-        out["ok"] = bool(out["valkey"]["ping_ok"] and out["celery"]["broker_connect_ok"])
-        out["status"] = "ok" if out["ok"] else "error"
+        core_ok = bool(out["valkey"]["ping_ok"] and out["celery"]["broker_connect_ok"])
+        workers_ok = bool(out["celery"]["worker_ping_ok"])
+        out["ok"] = bool(core_ok and workers_ok)
+        if out["ok"]:
+            out["status"] = "ok"
+        elif core_ok:
+            out["status"] = "degraded"
+        else:
+            out["status"] = "error"
         return out
 
 

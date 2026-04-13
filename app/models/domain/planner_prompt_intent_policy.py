@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import DateTime, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.mysql import BIGINT, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.semantic.semantic_registry import SemanticBase
+from app.services.domain.policy_scope_service import GLOBAL_WORKSPACE_SCOPE_TYPES
 
 PLANNER_PROMPT_INTENT_ACTION_KEYS = frozenset(
     {
@@ -76,7 +77,7 @@ class PlannerPromptIntentPolicyRule(BaseModel):
 
 
 class PlannerPromptIntentPolicyUpsertRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     id: Optional[int] = Field(default=None, ge=1)
     policy_key: str = Field(min_length=1, max_length=150)
@@ -84,13 +85,12 @@ class PlannerPromptIntentPolicyUpsertRequest(BaseModel):
     description: Optional[str] = None
     scope_type: str = Field(min_length=1, max_length=32)
     scope_workspace_id: Optional[str] = Field(default=None, max_length=128)
-    scope_vertical_norm: Optional[str] = Field(default=None, max_length=64)
     priority: int = Field(default=100)
     is_active: bool = True
     stop_on_match: bool = False
     policy_json: PlannerPromptIntentPolicyRule
 
-    @field_validator("policy_key", "name", "description", "scope_workspace_id", "scope_vertical_norm", mode="before")
+    @field_validator("policy_key", "name", "description", "scope_workspace_id", mode="before")
     @classmethod
     def _clean_text(cls, value: Any) -> Optional[str]:
         if value is None:
@@ -102,16 +102,23 @@ class PlannerPromptIntentPolicyUpsertRequest(BaseModel):
     @classmethod
     def _normalize_scope_type(cls, value: Any) -> str:
         token = str(value or "").strip().lower()
-        if token not in {"global", "workspace"}:
+        if token not in GLOBAL_WORKSPACE_SCOPE_TYPES:
             raise ValueError(f"Invalid scope_type: {value}")
         return token
+
+    @model_validator(mode="after")
+    def _validate_scope_shape(self) -> "PlannerPromptIntentPolicyUpsertRequest":
+        if self.scope_type == "global":
+            if self.scope_workspace_id is not None:
+                raise ValueError("Global planner prompt intent policies cannot declare workspace scope.")
+        return self
 
 
 class PlannerPromptIntentPolicy(SemanticBase):
     __tablename__ = "planner_prompt_intent_policy"
     __table_args__ = (
-        UniqueConstraint("policy_key", "scope_workspace_id", "scope_vertical_norm", name="uidx_prompt_intent_policy_scope"),
-        Index("idx_ppip_scope", "scope_workspace_id", "scope_vertical_norm"),
+        UniqueConstraint("policy_key", "scope_workspace_id", name="uidx_prompt_intent_policy_scope"),
+        Index("idx_ppip_scope", "scope_workspace_id"),
         Index("idx_ppip_priority", "priority"),
         Index("idx_ppip_active", "is_active"),
     )
@@ -122,7 +129,6 @@ class PlannerPromptIntentPolicy(SemanticBase):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
     scope_workspace_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    scope_vertical_norm: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("100"))
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     stop_on_match: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))

@@ -106,6 +106,7 @@ def test_apply_value_aliases_to_llm_plan_rewrites_filter_and_sql_json() -> None:
     assert out["sql_json"]["where"][0]["param"]["value"] == "Metro Schools District"
     assert "value_aliases_applied=1" in out["notes"]
     assert len(sql.query_mappings_calls) == 1
+    assert sql.query_mappings_calls[0].params["vertical_norm"] == "generic"
     assert "FROM semantic_value_alias va" in sql.query_mappings_calls[0].query
 
 
@@ -332,6 +333,7 @@ def test_apply_value_aliases_to_llm_plan_rewrites_sql_json_filter_tree_values() 
     out = applier.apply(vertical_norm="education", llm_plan=llm_plan)
 
     assert out["sql_json"]["filters"]["children"][0]["value"] == "Metro Schools District"
+    assert sql.query_mappings_calls[0].params["vertical_norm"] == "generic"
 
 
 def test_apply_value_aliases_to_llm_plan_surfaces_unexpected_json_roundtrip_errors(monkeypatch: pytest.MonkeyPatch) -> None:

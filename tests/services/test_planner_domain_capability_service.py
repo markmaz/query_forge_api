@@ -79,14 +79,14 @@ def test_list_capabilities_returns_scope_sorted_rows() -> None:
             [
                 {
                     "id": 1,
-                    "scope_type": "vertical",
+                    "scope_type": "global",
                     "scope_workspace_id": None,
-                    "scope_vertical_norm": "education",
+                    "scope_vertical_norm": None,
                     "base_domain_id": 9,
                     "capability_key": "SCHOOL_NAME",
                     "support_level": "direct",
                     "source_type": "semantic_concept",
-                    "source_ref": "vertical-row",
+                    "source_ref": "global-row",
                     "confidence": 0.6,
                     "notes": None,
                     "is_active": 1,

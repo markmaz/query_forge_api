@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.semantic.value_alias_service import canonicalize_value
+from app.services.semantic.vertical_norm import normalize_semantic_vertical
 from app.services.semantic.plan.utils import _in_clause
 
 JSON_ROUNDTRIP_FALLBACK_ERRORS = (TypeError, ValueError)
@@ -23,6 +24,7 @@ class ValueAliasApplier:
     def apply(self, *, vertical_norm: str, llm_plan: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(llm_plan, dict):
             return llm_plan
+        vertical = normalize_semantic_vertical(vertical_norm)
         raw_filters = llm_plan.get("filters")
         if not isinstance(raw_filters, list) or not raw_filters:
             return llm_plan
@@ -37,11 +39,11 @@ class ValueAliasApplier:
         if not concept_keys:
             return llm_plan
 
-        rules_by_concept = self._load_value_alias_rules(vertical_norm=vertical_norm, concept_keys=concept_keys)
+        rules_by_concept = self._load_value_alias_rules(vertical_norm=vertical, concept_keys=concept_keys)
         normalized_filters, changed = ValueAliasApplier._normalize_filters_with_value_aliases(raw_filters, rules_by_concept)
         normalized_filters, canonical_changed = ValueAliasApplier._canonicalize_filters_with_static_aliases(
             filters=normalized_filters,
-            vertical_norm=vertical_norm,
+            vertical_norm=vertical,
         )
         total_changed = changed + canonical_changed
         if total_changed <= 0:
@@ -82,7 +84,7 @@ class ValueAliasApplier:
             """,
             {
                 **in_params,
-                "vertical_norm": str(vertical_norm or "generic").strip().lower() or "generic",
+                "vertical_norm": normalize_semantic_vertical(vertical_norm),
             },
         )
         out: Dict[str, List[Dict[str, Any]]] = {}

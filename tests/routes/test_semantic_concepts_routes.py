@@ -35,25 +35,30 @@ def _headers(monkeypatch, *, is_admin: bool = True):
 def test_list_concepts_route(client, monkeypatch):
     class _Svc:
         def list_concepts(self, **kwargs):
-            return {"rows": [{"id": 1, "concept_key": "SCHOOL_YEAR"}], "total": 1, "page": kwargs["page"], "page_size": kwargs["page_size"]}
+            return {
+                "rows": [{"id": 1, "concept_key": "SCHOOL_YEAR", "vertical_norm": "generic"}],
+                "total": 1,
+                "page": kwargs["page"],
+                "page_size": kwargs["page_size"],
+            }
 
     monkeypatch.setattr(semantic_concepts, "SemanticConceptService", _Svc)
 
-    resp = client.get("/api/v1/semantic/concepts?vertical=education&page=1&page_size=10", headers=_headers(monkeypatch))
+    resp = client.get("/api/v1/semantic/concepts?page=1&page_size=10", headers=_headers(monkeypatch))
     assert resp.status_code == 200
     assert resp.json["total"] == 1
     assert resp.json["rows"][0]["concept_key"] == "SCHOOL_YEAR"
+    assert "vertical_norm" not in resp.json["rows"][0]
 
 
 def test_list_concept_keys_route(client, monkeypatch):
     class _Svc:
         def list_concept_keys(self, **kwargs):
-            assert kwargs["vertical"] == "education"
             return {"concept_keys": ["ATTENDANCE_RATE", "SCHOOL_YEAR"]}
 
     monkeypatch.setattr(semantic_concepts, "SemanticConceptService", _Svc)
 
-    resp = client.get("/api/v1/semantic/concepts/keys?vertical=education", headers=_headers(monkeypatch))
+    resp = client.get("/api/v1/semantic/concepts/keys", headers=_headers(monkeypatch))
     assert resp.status_code == 200
     assert resp.json["concept_keys"] == ["ATTENDANCE_RATE", "SCHOOL_YEAR"]
 
@@ -96,18 +101,18 @@ def test_create_alias_route(client, monkeypatch):
 
 def test_seed_route(client, monkeypatch):
     class _Svc:
-        def seed(self, vertical):
-            return {"vertical_norm": vertical, "concepts_created": 1, "aliases_created": 1}
+        def seed(self):
+            return {"vertical_norm": "generic", "concepts_created": 1, "aliases_created": 1}
 
     monkeypatch.setattr(semantic_concepts, "SemanticConceptService", _Svc)
 
     resp = client.post(
         "/api/v1/semantic/concepts/seed",
-        json={"vertical": "education"},
+        json={},
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 200
-    assert resp.json["result"]["vertical_norm"] == "education"
+    assert "vertical_norm" not in resp.json["result"]
 
 
 def test_rebuild_index_route(client, monkeypatch):
@@ -119,23 +124,22 @@ def test_rebuild_index_route(client, monkeypatch):
 
     resp = client.post(
         "/api/v1/semantic/concepts/rebuild-index",
-        json={"vertical_norm": "education"},
+        json={},
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 200
-    assert resp.json["vertical_norm"] == "education"
+    assert "vertical_norm" not in resp.json["result"]
     assert resp.json["result"]["points_upserted"] == 10
 
 
 def test_backfill_primary_keys_route(client, monkeypatch):
     class _Svc:
-        def backfill_primary_semantic_keys(self, *, workspace_id, vertical_norm, dry_run):
+        def backfill_primary_semantic_keys(self, *, workspace_id, dry_run):
             assert workspace_id == "ws-1"
-            assert vertical_norm == "education"
             assert dry_run is True
             return {
                 "workspace_id": workspace_id,
-                "vertical_norm": vertical_norm,
+                "vertical_norm": "generic",
                 "dry_run": dry_run,
                 "candidates": 4,
                 "updated": 0,
@@ -145,7 +149,7 @@ def test_backfill_primary_keys_route(client, monkeypatch):
 
     resp = client.post(
         "/api/v1/semantic/concepts/backfill-primary-keys",
-        json={"workspace_id": "ws-1", "vertical_norm": "education", "dry_run": True},
+        json={"workspace_id": "ws-1", "dry_run": True},
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 200

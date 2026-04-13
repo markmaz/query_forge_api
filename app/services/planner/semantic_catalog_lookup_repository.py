@@ -10,6 +10,7 @@ from app.ports.sql_executor import ForgeQueryPort
 from app.services.planner.semantic_retrieval_helpers import (
     build_in_clause,
 )
+from app.services.semantic.vertical_norm import normalize_semantic_vertical
 
 
 class SemanticCatalogLookupRepository:
@@ -18,6 +19,7 @@ class SemanticCatalogLookupRepository:
         self._relationship_fk_target_cache: Optional[str] = None
 
     def load_concepts(self, *, vertical_norm: str) -> List[Dict[str, Any]]:
+        vertical = normalize_semantic_vertical(vertical_norm)
         return self._sql.execute_query_mappings(
             """
             SELECT
@@ -34,14 +36,11 @@ class SemanticCatalogLookupRepository:
               CASE WHEN LOWER(COALESCE(vertical_norm, 'generic')) = :vertical_norm THEN 0 ELSE 1 END,
               id ASC
             """,
-            {
-                "vertical_norm": str(vertical_norm or "generic").strip().lower()
-                or "generic"
-            },
+            {"vertical_norm": vertical},
         )
 
     def load_aliases(self, *, vertical_norm: str) -> List[Dict[str, Any]]:
-        params = {"vertical_norm": str(vertical_norm or "generic").strip().lower() or "generic"}
+        params = {"vertical_norm": normalize_semantic_vertical(vertical_norm)}
         try:
             return self._sql.execute_query_mappings(
                 """
@@ -74,7 +73,7 @@ class SemanticCatalogLookupRepository:
             )
 
     def load_relationships(self, *, vertical_norm: str) -> List[Dict[str, Any]]:
-        params = {"vertical_norm": str(vertical_norm or "generic").strip().lower() or "generic"}
+        params = {"vertical_norm": normalize_semantic_vertical(vertical_norm)}
         fk_target = self._get_relationship_fk_target()
         if fk_target == "semantic_registry":
             return self._sql.execute_query_mappings(
@@ -109,9 +108,7 @@ class SemanticCatalogLookupRepository:
         )
 
     def load_concept_column_maps(self, *, vertical_norm: str) -> List[Dict[str, Any]]:
-        params = {
-            "vertical_norm": str(vertical_norm or "generic").strip().lower() or "generic"
-        }
+        params = {"vertical_norm": normalize_semantic_vertical(vertical_norm)}
         try:
             return self._sql.execute_query_mappings(
                 """
@@ -167,10 +164,10 @@ class SemanticCatalogLookupRepository:
 
         rows: List[Dict[str, Any]] = []
         in_sql, in_params = build_in_clause("cid_", semantic_concept_ids)
+        vertical = normalize_semantic_vertical(vertical_norm)
         for ngram in ngrams:
             params = {
-                "vertical_norm": str(vertical_norm or "generic").strip().lower()
-                or "generic",
+                "vertical_norm": vertical,
                 "ngram": str(ngram or "").strip().lower(),
                 **in_params,
             }

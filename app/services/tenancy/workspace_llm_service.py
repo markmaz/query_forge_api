@@ -258,7 +258,6 @@ class WorkspaceLLMService:
         provider = config.get("provider")
         endpoint = config.get("endpoint_url") or ""
         api_key = config.get("api_key") or ""
-        model = config.get("model_name") or ""
         try:
             if provider == LLMProvider.OLLAMA:
                 return self._test_ollama(endpoint)
@@ -267,7 +266,7 @@ class WorkspaceLLMService:
             elif provider == LLMProvider.OPENAI:
                 return self._test_openai_compatible("https://api.openai.com/v1", api_key)
             elif provider == LLMProvider.ANTHROPIC:
-                return self._test_anthropic(api_key, model)
+                return self._test_anthropic(api_key)
             elif provider == LLMProvider.AZURE_OPENAI:
                 return self._test_openai_compatible(endpoint, api_key)
             else:
@@ -399,7 +398,7 @@ class WorkspaceLLMService:
             return normalized_base
         return f"{normalized_base}/{normalized_suffix}"
 
-    def _test_anthropic(self, api_key: str, model: str) -> Dict[str, Any]:
+    def _test_anthropic(self, api_key: str) -> Dict[str, Any]:
         import httpx
         try:
             r = httpx.get(
