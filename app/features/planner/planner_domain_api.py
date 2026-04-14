@@ -5,21 +5,34 @@ from contextlib import AbstractContextManager
 from typing import Any, Dict
 
 from flask import g, request
-from flask_restx import fields
 from flask_restx import Resource
 
 from app.decorators.rbac import require_access
 from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
-from app.features.planner.planner_extract_api import planner_ns
 from app.routes.request_helpers import extract_workspace_id, require_user_id
-from app.services.planner_domain import PlannerDomainService
+
+from .planner_extract_api import planner_ns
+from .schemas import register_planner_models
+from .service import PlannerFeatureService
 
 logger = logging.getLogger(__name__)
+_planner_models = register_planner_models(planner_ns)
+plan_domain_request_model = _planner_models["plan_domain_request_model"]
+next_actions_request_model = _planner_models["next_actions_request_model"]
+PlannerDomainService = None
+
+
+def _planner_domain_service_factory():
+    if PlannerDomainService is not None:
+        return PlannerDomainService
+    from app.services.planner_domain import PlannerDomainService as _PlannerDomainService
+
+    return _PlannerDomainService
 
 
 class _PlanFailureTraceContext(AbstractContextManager[None]):
-    def __init__(self, *, planner_service: PlannerDomainService, payload: Dict[str, Any]) -> None:
+    def __init__(self, *, planner_service: PlannerFeatureService, payload: Dict[str, Any]) -> None:
         self._planner_service = planner_service
         self._payload = payload
 
@@ -35,37 +48,6 @@ class _PlanFailureTraceContext(AbstractContextManager[None]):
         if trace_id:
             g.failed_trace_id = trace_id
         return False
-
-plan_domain_request_model = planner_ns.model(
-    "PlannerDomainRequest",
-    {
-        "workspace_id": fields.String(required=False),
-        "prompt": fields.String(required=True),
-        "conversation_id": fields.String(required=False),
-        "context_seed_plan_json_v2": fields.Raw(required=False),
-        "context_seed_last_prompt": fields.String(required=False),
-        "base_domain_id": fields.Integer(required=False),
-        "debug": fields.Boolean(required=False, default=False),
-        "profile_pipeline": fields.Boolean(required=False, default=False),
-        "profile_pipeline_data": fields.Boolean(required=False, default=False),
-        "fast_mode": fields.Boolean(required=False),
-        "next_actions_async": fields.Boolean(required=False),
-        "llm_id": fields.Integer(required=False, description="Optional workspace LLM override id"),
-    },
-)
-
-next_actions_request_model = planner_ns.model(
-    "PlannerDomainNextActionsRequest",
-    {
-        "workspace_id": fields.String(required=False),
-        "prompt": fields.String(required=True),
-        "plan_json_v2": fields.Raw(required=True),
-        "base_domain_id": fields.Integer(required=False),
-        "conversation_id": fields.String(required=False),
-        "trace_id": fields.String(required=False),
-        "llm_id": fields.Integer(required=False, description="Optional workspace LLM override id"),
-    },
-)
 
 
 _PLAN_DOMAIN_FIELDS = frozenset(plan_domain_request_model.keys())
@@ -88,7 +70,7 @@ class PlannerPlanDomain(Resource):
     @planner_ns.expect(plan_domain_request_model, validate=False)
     def post(self):
         body: Dict[str, Any] = {}
-        planner_service = PlannerDomainService()
+        planner_service = PlannerFeatureService(planner_domain_service_factory=_planner_domain_service_factory())
         with _PlanFailureTraceContext(planner_service=planner_service, payload=body):
             body = request.get_json(silent=True) or {}
             _reject_unknown_fields(body, allowed_fields=_PLAN_DOMAIN_FIELDS)
@@ -99,7 +81,7 @@ class PlannerPlanDomain(Resource):
 
             body["workspace_id"] = header_workspace_id
             user_id = require_user_id()
-            result = planner_service.plan(body, user_id=user_id)
+            result = planner_service.plan_domain(body, user_id=user_id)
             return result, 200
 
 
@@ -110,7 +92,9 @@ class PlannerPlanDomainProfile(Resource):
     def get(self, trace_id: str):
         workspace_id = extract_workspace_id()
         user_id = require_user_id()
-        result = PlannerDomainService().get_pipeline_profile(
+        result = PlannerFeatureService(
+            planner_domain_service_factory=_planner_domain_service_factory(),
+        ).get_pipeline_profile(
             trace_id=trace_id,
             workspace_id=workspace_id,
             user_id=user_id,
@@ -133,5 +117,7 @@ class PlannerPlanDomainNextActions(Resource):
 
         body["workspace_id"] = header_workspace_id
         user_id = require_user_id()
-        result = PlannerDomainService().generate_next_actions(body, user_id=user_id)
+        result = PlannerFeatureService(
+            planner_domain_service_factory=_planner_domain_service_factory(),
+        ).generate_next_actions(body, user_id=user_id)
         return result, 200

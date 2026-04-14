@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.features.query_engine.query_tree_api as query_tree_routes
+import app.features.saved_queries.query_tree_api as query_tree_routes
 from app.exceptions.forge_error import ForgeError
 
 
@@ -29,6 +29,33 @@ def test_saved_query_share_to_workspace(client, auth_headers, monkeypatch):
     assert resp.status_code == 200
     assert resp.json["principalType"] == "WORKSPACE"
     assert resp.json["canEdit"] is True
+
+
+def test_saved_query_share_to_user(client, auth_headers, monkeypatch):
+    class _Svc:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def share_to_user(self, query_id: str, shared_with_user_id: str, can_edit: bool = False):
+            return {
+                "aclId": "a2",
+                "queryId": query_id,
+                "principalType": "USER",
+                "principalId": shared_with_user_id,
+                "permission": "READ",
+                "canEdit": False,
+            }
+
+    monkeypatch.setattr(query_tree_routes, "SavedQueryShareService", _Svc)
+
+    resp = client.post(
+        "/api/v1/saved-queries/q1/shares",
+        headers=auth_headers,
+        json={"shareKind": "USER", "sharedWithUserId": "user-2"},
+    )
+    assert resp.status_code == 200
+    assert resp.json["principalType"] == "USER"
+    assert resp.json["principalId"] == "user-2"
 
 
 def test_saved_query_share_non_owner_returns_404(client, auth_headers, monkeypatch):
@@ -89,15 +116,15 @@ def test_saved_query_unshare(client, auth_headers, monkeypatch):
         def __init__(self, *args, **kwargs):
             pass
 
-        def unshare(self, query_id: str):
-            return {"queryId": query_id, "shareKind": "WORKSPACE", "removed": True}
+        def unshare(self, query_id: str, share_kind: str, shared_with_user_id=None):
+            return {"queryId": query_id, "shareKind": share_kind, "removed": True}
 
     monkeypatch.setattr(query_tree_routes, "SavedQueryShareService", _Svc)
 
     resp = client.delete(
         "/api/v1/saved-queries/q1/shares",
         headers=auth_headers,
-        json={"shareKind": "WORKSPACE"},
+        json={"shareKind": "USER", "sharedWithUserId": "user-2"},
     )
     assert resp.status_code == 200
     assert resp.json["removed"] is True

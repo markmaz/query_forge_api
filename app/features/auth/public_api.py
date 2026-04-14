@@ -1,36 +1,23 @@
+from __future__ import annotations
+
 import logging
 import re
 import time
 from typing import Any, Dict, Optional
 
 from flask import redirect, request
-from flask_restx import Namespace, Resource, fields
-from sqlalchemy.exc import SQLAlchemyError
+from flask_restx import Namespace, Resource
 
 from app.config import ERROR_SERVER_URL, ERROR_VALIDATION_URL, THANK_YOU_REDIRECT
 from app.decorators.rbac import public
+from app.features.auth.schemas import register_public_models
 from app.services.sales_inquiry_service import SalesInquiryService
 
 logger = logging.getLogger(__name__)
 
 public_ns = Namespace("public", description="Public sales inquiry operations")
-
-sales_inquiry_model = public_ns.model(
-    "SalesInquiry",
-    {
-        "first_name": fields.String(required=True, description="First name"),
-        "last_name": fields.String(required=True, description="Last name"),
-        "work_email": fields.String(required=True, description="Work email"),
-        "phone": fields.String(required=False, description="Phone number"),
-        "organization": fields.String(required=True, description="Organization"),
-        "role_title": fields.String(required=True, description="Role title"),
-        "primary_interest": fields.String(required=True, description="Primary interest"),
-        "primary_data_model": fields.String(required=True, description="Primary data model"),
-        "problem_statement": fields.String(required=True, description="Problem statement"),
-        "consent_contact": fields.Boolean(required=True, description="Consent to be contacted"),
-        "source": fields.String(required=False, description="Submission source"),
-    },
-)
+MODELS = register_public_models(public_ns)
+sales_inquiry_model = MODELS["sales_inquiry_model"]
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _FORM_TS_MIN_MS = 3000
@@ -153,7 +140,7 @@ class SalesInquiry(Resource):
         service = SalesInquiryService()
         try:
             service.create_inquiry(payload)
-        except SQLAlchemyError:
+        except Exception:
             logger.exception("Sales inquiry insert failed")
             return redirect(ERROR_SERVER_URL, code=303)
 

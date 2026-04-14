@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import app.features.query_engine.query_forge_api as query_forge_routes
+import app.features.query_engine.query_api as query_forge_routes
 
 
 def test_query_forge_post_success(client, auth_headers, monkeypatch):

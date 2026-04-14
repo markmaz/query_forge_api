@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from flask import g, request
-from flask_restx import Namespace, Resource, abort
+from flask_restx import Namespace, abort, Resource
 
 from app.decorators.rbac import require_admin
 from app.decorators.security import token_required
@@ -21,7 +21,10 @@ def _list_user_role_rows(user_id: str, workspace_id: str) -> list[UserRole]:
         UserRole.query.join(Role)
         .filter(UserRole.user_id == user_id)
         .filter(
-            ((UserRole.workspace_id == workspace_id) | ((UserRole.workspace_id.is_(None)) & (Role.name.in_(GLOBAL_ROLES))))
+            (
+                (UserRole.workspace_id == workspace_id)
+                | ((UserRole.workspace_id.is_(None)) & (Role.name.in_(GLOBAL_ROLES)))
+            )
         )
         .order_by(UserRole.id.asc())
         .all()

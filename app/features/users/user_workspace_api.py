@@ -4,35 +4,23 @@ from typing import Any
 from urllib.parse import quote
 
 from flask import request
-from flask_restx import Namespace, Resource, fields, reqparse
+from flask_restx import Namespace, Resource
 
 from app.decorators.rbac import require_admin
 from app.decorators.security import token_required
+from app.features.users.schemas import build_user_workspace_parser, register_user_workspace_models
+from app.features.users.service import users_feature_service
 from app.services.user_service import UserService
 
-_parser = reqparse.RequestParser()
-_parser.add_argument("user_id", type=str, required=True, help="The user id", location="args")
-_parser.add_argument("workspace_id", type=str, required=True, help="The workspace id", location="args")
-
 user_workspace_ns = Namespace("user-workspaces", description="Manage the user to workspace relationship")
-
-mapping_model = user_workspace_ns.model(
-    "UserWorkspaceMapping",
-    {
-        "user_id": fields.String(required=True, description="The ID of the user"),
-        "workspace_id": fields.String(required=True, description="The ID of the workspace"),
-        "is_default": fields.Boolean(required=False, description="Is this the default workspace for the user."),
-    },
-)
-
-connection_response = user_workspace_ns.model(
-    "ConnectionResponse",
-    {"message": fields.String(description="Success or error message")},
-)
+MODELS = register_user_workspace_models(user_workspace_ns)
+mapping_model = MODELS["mapping_model"]
+connection_response = MODELS["connection_response"]
+_parser = build_user_workspace_parser()
 
 
 def _user_service() -> UserService:
-    return UserService()
+    return users_feature_service.build_user_service(user_service_factory=UserService)
 
 
 def _json_payload() -> dict[str, Any]:

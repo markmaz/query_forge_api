@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 
-import app.routes.ingestion_routes as ingestion_routes_module
+import app.features.ingestion.ingestion_api as ingestion_routes_module
 
 
 def _mock_token(monkeypatch, *, is_admin: bool = True, roles: set[str] | None = None):
@@ -601,7 +601,7 @@ def test_get_schemas_returns_list(client, monkeypatch):
     mock_provider = MagicMock()
     mock_provider.list_schemas.return_value = ["asset", "raw"]
 
-    import app.routes.ingestion_routes as _mod
+    import app.features.ingestion.ingestion_api as _mod
     monkeypatch.setattr(_mod.MetadataProviderFactory, "create", lambda _dialect, _exec: mock_provider)
 
     resp = client.get(
@@ -622,7 +622,7 @@ def test_get_schemas_with_catalog(client, monkeypatch):
     mock_provider = MagicMock()
     mock_provider.list_schemas.return_value = ["sales"]
 
-    import app.routes.ingestion_routes as _mod
+    import app.features.ingestion.ingestion_api as _mod
     monkeypatch.setattr(_mod.MetadataProviderFactory, "create", lambda _dialect, _exec: mock_provider)
 
     resp = client.get(
@@ -657,7 +657,7 @@ def test_get_schemas_uses_workspace_bound_datasource_when_omitted(client, monkey
     mock_provider = MagicMock()
     mock_provider.list_schemas.return_value = ["asset", "raw"]
 
-    import app.routes.ingestion_routes as _mod
+    import app.features.ingestion.ingestion_api as _mod
     monkeypatch.setattr(_mod.MetadataProviderFactory, "create", lambda _dialect, _exec: mock_provider)
 
     resp = client.get(
@@ -694,7 +694,7 @@ def test_get_schemas_provider_failure(client, monkeypatch):
     mock_provider = MagicMock()
     mock_provider.list_schemas.side_effect = RuntimeError("connection refused")
 
-    import app.routes.ingestion_routes as _mod
+    import app.features.ingestion.ingestion_api as _mod
     monkeypatch.setattr(_mod.MetadataProviderFactory, "create", lambda _dialect, _exec: mock_provider)
 
     resp = client.get(

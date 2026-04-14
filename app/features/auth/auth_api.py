@@ -1,16 +1,16 @@
+from __future__ import annotations
+
 import logging
 import os
-from typing import Any, Dict
-from urllib.parse import unquote
 
-from itsdangerous import BadData
 from flask import g, jsonify, make_response, request
-from flask_restx import Namespace, Resource, fields
+from flask_restx import Namespace, Resource
 
-from app.config import COOKIE_SAMESITE, COOKIE_SECURE, REFRESH_COOKIE_PATH
 from app.decorators.rbac import public
 from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
+from app.features.auth.schemas import register_auth_models
+from app.features.auth.service import auth_feature_service
 from app.models.tenancy.status_enum import UserStatus
 from app.models.tenancy.user import User
 from app.services.auth import (
@@ -34,130 +34,19 @@ MFA_CONFIRM_WINDOW_SECONDS = int(os.getenv("MFA_CONFIRM_WINDOW_SECONDS", "600"))
 MFA_DISABLE_MAX_ATTEMPTS = int(os.getenv("MFA_DISABLE_MAX_ATTEMPTS", "6"))
 MFA_DISABLE_WINDOW_SECONDS = int(os.getenv("MFA_DISABLE_WINDOW_SECONDS", "600"))
 
-login_model = qf_auth_ns.model(
-    "Login",
-    {
-        "username": fields.String(required=True, description="Username"),
-        "password": fields.String(required=True, description="Password"),
-    },
-)
-
-invite_accept_model = qf_auth_ns.model(
-    "InviteAcceptRequest",
-    {
-        "token": fields.String(required=False, description="Invite token (or use ?token=...)"),
-        "first_name": fields.String(required=False),
-        "last_name": fields.String(required=False),
-        "password": fields.String(required=True),
-        "email": fields.String(required=False, description="Must match invited email if provided"),
-        "tos_accepted": fields.Boolean(required=False),
-        "eula_accepted": fields.Boolean(required=False),
-        "two_factor_preference": fields.String(required=False),
-    },
-)
-
-totp_confirm_model = qf_auth_ns.model(
-    "TotpConfirmRequest",
-    {
-        "code": fields.String(required=True, description="6-digit authenticator code"),
-    },
-)
-
-totp_verify_model = qf_auth_ns.model(
-    "TotpVerifyRequest",
-    {
-        "challenge_id": fields.String(required=True, description="MFA login challenge id"),
-        "code": fields.String(required=True, description="6-digit authenticator code"),
-    },
-)
-
-totp_disable_model = qf_auth_ns.model(
-    "TotpDisableRequest",
-    {
-        "password": fields.String(required=True, description="Current account password"),
-        "code": fields.String(required=True, description="6-digit authenticator code"),
-    },
-)
+MODELS = register_auth_models(qf_auth_ns)
+login_model = MODELS["login_model"]
+invite_accept_model = MODELS["invite_accept_model"]
+totp_confirm_model = MODELS["totp_confirm_model"]
+totp_verify_model = MODELS["totp_verify_model"]
+totp_disable_model = MODELS["totp_disable_model"]
 
 
-def _extract_default_workspace_id(user: Any) -> str | None:
-    workspaces = getattr(user, "workspaces", None) or []
-    default_ws = next((w for w in workspaces if getattr(w, "is_default", False)), None)
-    workspace_id = getattr(default_ws, "workspace_id", None)
-    if workspace_id is None:
-        return None
-    return str(workspace_id)
-
-
-def _extract_invite_token(body: Dict[str, Any]) -> str:
-    body_token = str((body or {}).get("token") or "").strip()
-    if body_token:
-        return body_token
-    return str(request.args.get("token") or "").strip()
-
-
-def _validate_invite_token(token: str) -> str:
-    try:
-        return str(validate_token(token)).strip()
-    except (BadData, TypeError, ValueError):
-        return ""
-
-
-def _clear_legacy_refresh_cookies(response) -> None:
-    for legacy_path in ("/", "/api/v1"):
-        if legacy_path == REFRESH_COOKIE_PATH:
-            continue
-        response.set_cookie(
-            "refresh_token",
-            "",
-            httponly=True,
-            secure=bool(COOKIE_SECURE),
-            samesite=COOKIE_SAMESITE,
-            max_age=0,
-            path=legacy_path,
-        )
-
-
-def _set_refresh_cookie(response, refresh_token: str, max_age: int) -> None:
-    response.set_cookie(
-        "refresh_token",
-        refresh_token,
-        httponly=True,
-        secure=bool(COOKIE_SECURE),
-        samesite=COOKIE_SAMESITE,
-        max_age=max_age,
-        path=REFRESH_COOKIE_PATH,
-    )
-    _clear_legacy_refresh_cookies(response)
-
-
-def _get_refresh_candidates_from_request() -> list[str]:
-    values: list[str] = []
-    seen: set[str] = set()
-
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header.split(" ", 1)[1].strip()
-        if token and token not in seen:
-            seen.add(token)
-            values.append(token)
-
-    raw_cookie = request.headers.get("Cookie", "")
-    for chunk in raw_cookie.split(";"):
-        name, sep, value = chunk.partition("=")
-        if sep == "" or name.strip() != "refresh_token":
-            continue
-        token = unquote(value.strip().strip('"'))
-        if token and token not in seen:
-            seen.add(token)
-            values.append(token)
-
-    parsed_cookie = request.cookies.get("refresh_token")
-    if parsed_cookie and parsed_cookie not in seen:
-        seen.add(parsed_cookie)
-        values.append(parsed_cookie)
-
-    return values
+_extract_default_workspace_id = auth_feature_service.extract_default_workspace_id
+_extract_invite_token = auth_feature_service.extract_invite_token
+_clear_legacy_refresh_cookies = auth_feature_service.clear_legacy_refresh_cookies
+_set_refresh_cookie = auth_feature_service.set_refresh_cookie
+_get_refresh_candidates_from_request = auth_feature_service.get_refresh_candidates_from_request
 
 
 @qf_auth_ns.route("/auth")
@@ -165,15 +54,9 @@ def _get_refresh_candidates_from_request() -> list[str]:
 class Authenticate(Resource):
     @public
     def post(self):
-        data = request.get_json(silent=True) or {}
+        data = request.json
         username = data.get("username")
         password = data.get("password")
-
-        limiter = RateLimitService()
-        ip = str(request.remote_addr or "unknown")
-        limiter.enforce(scope="auth:login:ip", identifier=ip, max_attempts=20, window_s=900)
-        if username:
-            limiter.enforce(scope="auth:login:user", identifier=str(username), max_attempts=10, window_s=900)
 
         auth = AuthService()
         user = auth.non_interactive_authentication(username, password)
@@ -220,16 +103,9 @@ class Login(Resource):
     )
     @public
     def post(self):
-        """Step 1: credential authentication and OTP challenge issuance"""
         data = request.get_json(silent=True) or {}
         username = data.get("username")
         password = data.get("password")
-
-        limiter = RateLimitService()
-        ip = str(request.remote_addr or "unknown")
-        limiter.enforce(scope="auth:login:ip", identifier=ip, max_attempts=20, window_s=900)
-        if username:
-            limiter.enforce(scope="auth:login:user", identifier=str(username), max_attempts=10, window_s=900)
 
         auth = AuthService()
         user = auth.authenticate(username, password)
@@ -413,8 +289,8 @@ class Refresh(Resource):
             except ForgeError:
                 logger.warning("refresh user_lookup_failed user_id=%s", user_id)
             access_token = auth.generate_access_token(user_id)
-        except ForgeError as exc:
-            return {"error": str(exc)}, getattr(exc, "status_code", 401) or 401
+        except ForgeError as e:
+            return {"error": str(e)}, getattr(e, "status_code", 401) or 401
 
         response = make_response(
             jsonify(
@@ -460,16 +336,7 @@ class Logout(Resource):
                 return {"error": "Invalid access token"}, 401
 
         response = make_response(("", 204))
-        response.set_cookie(
-            "refresh_token",
-            "",
-            httponly=True,
-            secure=bool(COOKIE_SECURE),
-            samesite=COOKIE_SAMESITE,
-            max_age=0,
-            path=REFRESH_COOKIE_PATH,
-        )
-        _clear_legacy_refresh_cookies(response)
+        _set_refresh_cookie(response, "", 0)
         return response
 
 
@@ -480,14 +347,12 @@ class InviteValidationResource(Resource):
         if not token:
             return {"error": "Missing token"}, 400
 
-        user_id = _validate_invite_token(token)
-        if not user_id:
-            return {"error": "Invalid or expired token"}, 400
         try:
+            user_id = validate_token(token)
             user_service = UserService()
             user = user_service.get_user(user_id)
             return {"email": user.email, "user_id": user_id}
-        except (ForgeError, TypeError, ValueError):
+        except Exception:
             return {"error": "Invalid or expired token"}, 400
 
 
@@ -505,7 +370,10 @@ class InviteAcceptResource(Resource):
         if not token:
             return {"error": "Missing token"}, 400
 
-        user_id = _validate_invite_token(token)
+        try:
+            user_id = str(validate_token(token)).strip()
+        except Exception:
+            return {"error": "Invalid or expired token"}, 400
         if not user_id:
             return {"error": "Invalid or expired token"}, 400
 
@@ -564,11 +432,7 @@ class InviteAcceptResource(Resource):
 class ResetPasswordRequest(Resource):
     @public
     def post(self):
-        ip = str(request.remote_addr or "unknown")
-        RateLimitService().enforce(scope="auth:reset:request:ip", identifier=ip, max_attempts=5, window_s=900)
-        email = (request.get_json(silent=True) or {}).get("email")
-        if not email:
-            return {"error": "email is required"}, 400
+        email = request.json["email"]
         auth = AuthService()
         return auth.send_reset_request(email)
 
@@ -600,6 +464,7 @@ class ResetPassword(Resource):
             return ("", 400)
 
         password = request.json["password"]
+
         if not password:
             return ("", 400)
 

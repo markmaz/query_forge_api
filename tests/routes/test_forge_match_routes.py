@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 
-import app.routes.forge_match_routes as forge_match_routes
+import app.features.forge_match.forge_match_api as forge_match_routes
 
 
 def _headers(monkeypatch):

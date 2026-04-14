@@ -1,12 +1,16 @@
+from __future__ import annotations
+
 import logging
 
-from flask import g, jsonify, request
-from flask_restx import Namespace, Resource, fields, reqparse
+from flask import jsonify, request
+from flask_restx import Namespace, Resource
 from pydantic import ValidationError
 
 from app.decorators.rbac import require_admin
 from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
+from app.features.users.schemas import build_user_parser, register_user_models
+from app.features.users.service import users_feature_service
 from app.models.tenancy.user import User
 from app.models.tenancy.user_workspace import UserInvitation
 from app.routes.request_helpers import extract_workspace_id
@@ -15,88 +19,22 @@ from app.services.user_service import UserService
 logger = logging.getLogger(__name__)
 
 qf_user_ns = Namespace("users", description="User management operations")
-SENSITIVE_USER_FIELDS = {"password", "otp_secret"}
-qf_user_parser = reqparse.RequestParser()
-qf_user_parser.add_argument("status", type=str, default="All", help="Filter by status", action="store", location="args")
-qf_user_parser.add_argument("cursor", type=str, help="Cursor for pagination (user_id)", location="args")
-qf_user_parser.add_argument("limit", type=int, default=10, help="Number of records per page", location="args")
-qf_user_parser.add_argument(
-    "direction",
-    type=str,
-    default="forward",
-    choices=["forward", "backward"],
-    help="Pagination direction",
-    location="args",
-)
-qf_user_parser.add_argument("q", type=str, location="args")
-
-user_model = qf_user_ns.model(
-    "User",
-    {
-        "user_id": fields.String(required=True, description="User ID"),
-        "username": fields.String(required=True, description="Username"),
-        "password": fields.String(required=True, description="Password"),
-        "first_name": fields.String(required=True, description="First name"),
-        "last_name": fields.String(required=True, description="Last name"),
-        "display_name": fields.String(readonly=True, description="Computed display name"),
-        "organization": fields.String(description="Organization", default=None),
-        "email": fields.String(description="List of emails", default=None),
-        "status": fields.String(description="Status", default="New", enum=["New", "Active", "Inactive", "Pending"]),
-        "tos_accepted": fields.Boolean(description="Terms of service", default=False),
-        "eula_accepted": fields.Boolean(description="EULA accepted", default=False),
-        "otp_secret": fields.String(description="OTP secret", default=None),
-    },
-)
-
-mapping_model = qf_user_ns.model(
-    "UserWorkspaceMapping",
-    {
-        "user_id": fields.String(required=True, description="The ID of the user"),
-        "workspace_id": fields.String(required=True, description="The ID of the workspace"),
-    },
-)
-
-user_role_add_model = qf_user_ns.model(
-    "UserRoleAdd",
-    {
-        "role_name": fields.String(required=True, description="Canonical role name to assign directly to the user"),
-    },
-)
-
-user_role_replace_model = qf_user_ns.model(
-    "UserRoleReplace",
-    {
-        "role_names": fields.List(fields.String, required=True, description="Complete direct role name list"),
-    },
-)
-
-user_role_update_model = qf_user_ns.model(
-    "UserRoleUpdate",
-    {
-        "role_name": fields.String(required=True, description="Replacement role name"),
-    },
-)
-
-pagination_response = qf_user_ns.model(
-    "PaginationResponse",
-    {
-        "users": fields.List(fields.Nested(user_model)),
-        "next_cursor": fields.String(description="Cursor for next page", default=None),
-        "prev_cursor": fields.String(description="Cursor for previous page", default=None),
-        "total_count": fields.Integer(description="Total number of users"),
-    },
-)
+MODELS = register_user_models(qf_user_ns)
+qf_user_parser = build_user_parser()
+user_model = MODELS["user_model"]
+mapping_model = MODELS["mapping_model"]
+user_role_add_model = MODELS["user_role_add_model"]
+user_role_replace_model = MODELS["user_role_replace_model"]
+user_role_update_model = MODELS["user_role_update_model"]
+pagination_response = MODELS["pagination_response"]
 
 
 def _public_user_payload(user: User) -> dict:
-    return user.model_dump(mode="json", exclude=SENSITIVE_USER_FIELDS)
+    return users_feature_service.public_user_payload(user)
 
 
 def _admin_user_scope_workspace_id() -> str | None:
-    effective_roles = getattr(g, "effective_roles", set()) or set()
-    if bool(getattr(g, "is_admin", False)) or "super_admin" in effective_roles:
-        return None
-    return (request.headers.get("X-Workspace-Id") or "").strip() or None
+    return users_feature_service.admin_user_scope_workspace_id()
 
 
 @qf_user_ns.route("/")
@@ -108,11 +46,10 @@ class UserList(Resource):
     def post(self):
         try:
             payload = UserInvitation(**request.json)
-        except ValidationError as exc:
-            return {"error": exc.errors()}, 400
+        except ValidationError as e:
+            return {"error": e.errors()}, 400
 
-        user_service = UserService()
-        result = user_service.create_invite(payload)
+        result = users_feature_service.build_user_service(user_service_factory=UserService).create_invite(payload)
         return result, 201
 
     @token_required
@@ -122,21 +59,25 @@ class UserList(Resource):
         workspace_id = _admin_user_scope_workspace_id()
         logger.info("Parsed args: %s", args)
         logger.info(args["status"])
-        user_service = UserService()
-        users, next_cursor, prev_cursor, total_count = user_service.get_users(
-            status=args["status"],
-            cursor=args["cursor"],
-            limit=args["limit"],
-            direction=args["direction"],
-            username=args["q"],
-            workspace_id=workspace_id,
-        )
-        return {
-            "users": [_public_user_payload(user) for user in users],
-            "next_cursor": next_cursor,
-            "prev_cursor": prev_cursor,
-            "total_count": total_count,
-        }, 200
+        try:
+            users, next_cursor, prev_cursor, total_count = users_feature_service.build_user_service(
+                user_service_factory=UserService
+            ).get_users(
+                status=args["status"],
+                cursor=args["cursor"],
+                limit=args["limit"],
+                direction=args["direction"],
+                username=args["q"],
+                workspace_id=workspace_id,
+            )
+            return {
+                "users": [_public_user_payload(user) for user in users],
+                "next_cursor": next_cursor,
+                "prev_cursor": prev_cursor,
+                "total_count": total_count,
+            }, 200
+        except Exception as e:
+            qf_user_ns.abort(500, f"Error fetching users: {str(e)}")
 
 
 @qf_user_ns.route("/<string:user_id>")
@@ -152,13 +93,11 @@ class UserUpdates(Resource):
             raise ForgeError("Invalid JSON body", status_code=400)
 
         user = User(**body)
-        user_service = UserService()
-        result = user_service.update_user(
+        result = users_feature_service.build_user_service(user_service_factory=UserService).update_user(
             user_id=user_id,
             update_data=user,
             workspace_id=_admin_user_scope_workspace_id(),
         )
-
         return jsonify(_public_user_payload(result))
 
     @qf_user_ns.response(200, "User deleted")
@@ -166,22 +105,19 @@ class UserUpdates(Resource):
     @token_required
     @require_admin()
     def delete(self, user_id):
-        user_service = UserService()
-        result = user_service.delete_user(user_id)
+        result = users_feature_service.build_user_service(user_service_factory=UserService).delete_user(user_id)
         return result
 
     @token_required
     @require_admin()
     def get(self, user_id):
-        user_service = UserService()
-        result = user_service.get_user(
+        result = users_feature_service.build_user_service(user_service_factory=UserService).get_user(
             user_id,
             workspace_id=_admin_user_scope_workspace_id(),
         )
         return jsonify(_public_user_payload(result))
 
     def options(self, user_id):
-        del user_id
         return {}, 200
 
 
@@ -190,8 +126,7 @@ class UserWorkspaces(Resource):
     @token_required
     @require_admin()
     def get(self, user_id):
-        user_service = UserService()
-        results = user_service.get_user_workspaces(user_id)
+        results = users_feature_service.build_user_service(user_service_factory=UserService).get_user_workspaces(user_id)
         return results
 
 
@@ -201,7 +136,7 @@ class UserDirectRoles(Resource):
     @require_admin()
     def get(self, user_id):
         workspace_id = extract_workspace_id()
-        user_service = UserService()
+        user_service = users_feature_service.build_user_service(user_service_factory=UserService)
         direct_roles = user_service.get_user_direct_roles(user_id, workspace_id=workspace_id)
         effective_roles = user_service.get_user_effective_roles(user_id, workspace_id=workspace_id)
         return {
@@ -220,8 +155,9 @@ class UserDirectRoles(Resource):
         role_name = str(data.get("role_name") or "").strip()
         if not role_name:
             return {"error": "role_name is required"}, 400
-        user_service = UserService()
-        mapping = user_service.add_user_direct_role(user_id, role_name, workspace_id=workspace_id)
+        mapping = users_feature_service.build_user_service(user_service_factory=UserService).add_user_direct_role(
+            user_id, role_name, workspace_id=workspace_id
+        )
         return {"mapping": mapping}, 200
 
     @token_required
@@ -233,8 +169,9 @@ class UserDirectRoles(Resource):
         role_names = data.get("role_names")
         if not isinstance(role_names, list):
             return {"error": "role_names must be an array"}, 400
-        user_service = UserService()
-        result = user_service.replace_user_direct_roles(user_id, role_names, workspace_id=workspace_id)
+        result = users_feature_service.build_user_service(user_service_factory=UserService).replace_user_direct_roles(
+            user_id, role_names, workspace_id=workspace_id
+        )
         return result, 200
 
 
@@ -249,8 +186,7 @@ class UserDirectRoleById(Resource):
         new_role_name = str(data.get("role_name") or "").strip()
         if not new_role_name:
             return {"error": "role_name is required"}, 400
-        user_service = UserService()
-        result = user_service.update_user_direct_role(
+        result = users_feature_service.build_user_service(user_service_factory=UserService).update_user_direct_role(
             user_id,
             role_name,
             new_role_name,
@@ -262,8 +198,9 @@ class UserDirectRoleById(Resource):
     @require_admin()
     def delete(self, user_id, role_name):
         workspace_id = extract_workspace_id()
-        user_service = UserService()
-        result = user_service.remove_user_direct_role(user_id, role_name, workspace_id=workspace_id)
+        result = users_feature_service.build_user_service(user_service_factory=UserService).remove_user_direct_role(
+            user_id, role_name, workspace_id=workspace_id
+        )
         return result, 200
 
 
@@ -284,11 +221,9 @@ class UserWorkspaceDashboard(Resource):
         )
     )
     def get(self, user_id, workspace_id, dashboard_id):
-        del user_id, workspace_id, dashboard_id
         return {"status": "ok"}, 200
 
     def options(self, user_id, workspace_id, dashboard_id):
-        del user_id, workspace_id, dashboard_id
         return {}, 200
 
 
@@ -297,8 +232,7 @@ class UserCounts(Resource):
     @token_required
     @require_admin()
     def get(self):
-        user_service = UserService()
-        results = user_service.get_counts(
+        results = users_feature_service.build_user_service(user_service_factory=UserService).get_counts(
             workspace_id=(request.headers.get("X-Workspace-Id") or "").strip() or None,
         )
         return results, 200
@@ -311,11 +245,10 @@ class ResentInvite(Resource):
     def post(self):
         try:
             payload = UserInvitation(**request.json)
-        except ValidationError as exc:
-            return {"error": exc.errors()}, 400
+        except ValidationError as e:
+            return {"error": e.errors()}, 400
 
-        user_service = UserService()
-        user_service.resend_invite(payload.user_id, payload.email)
+        users_feature_service.build_user_service(user_service_factory=UserService).resend_invite(payload.user_id, payload.email)
 
 
 @qf_user_ns.route("/bulk-invite")
@@ -324,5 +257,6 @@ class BulkInviteUsers(Resource):
     @require_admin()
     def post(self):
         data = request.json
-        service = UserService()
-        return service.create_invite_bulk(data["emails"], data["workspaces"])
+        return users_feature_service.build_user_service(user_service_factory=UserService).create_invite_bulk(
+            data["emails"], data["workspaces"]
+        )

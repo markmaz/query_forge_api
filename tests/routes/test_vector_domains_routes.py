@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.vector_domains as vector_routes
+import app.features.vector.vector_api as vector_routes
 
 
 def _headers(monkeypatch):

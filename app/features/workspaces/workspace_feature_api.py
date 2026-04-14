@@ -7,7 +7,6 @@ from sqlalchemy import text
 from app.decorators.rbac import require_admin
 from app.decorators.security import token_required
 from app.extensions import db
-from app.exceptions.forge_error import ForgeError
 from app.models.rbac import FEATURE_KEYS, Role, UserRole, WorkspaceFeature
 from app.services.rbac_service import set_workspace_feature
 from app.services.workspace_service import WorkspaceService
@@ -79,7 +78,7 @@ def _workspace_readiness_payload(workspace_id: str) -> dict[str, object]:
     try:
         workspace = WorkspaceService().get_workspace(workspace_id)
         workspace_name = str(workspace.get("workspace_name") or workspace.get("workspace_id") or "").strip() or None
-    except ForgeError:
+    except Exception:
         workspace_name = None
 
     return {
@@ -102,7 +101,10 @@ class WorkspaceFeatureList(Resource):
         enabled = {row.feature_key for row in _active_workspace_feature_rows(workspace_id)}
         return {
             "workspace_id": workspace_id,
-            "features": [{"feature_key": feature_key, "enabled": feature_key in enabled} for feature_key in FEATURE_KEYS],
+            "features": [
+                {"feature_key": feature_key, "enabled": feature_key in enabled}
+                for feature_key in FEATURE_KEYS
+            ],
         }, 200
 
     @token_required

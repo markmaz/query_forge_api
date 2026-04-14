@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 from flask import make_response, request
 from flask_restx import Namespace, Resource
 
 from app.config import COOKIE_SAMESITE, COOKIE_SECURE, REFRESH_COOKIE_PATH
 from app.decorators.rbac import public
+from app.features.auth.service import auth_feature_service
 from app.services.auth_service import AuthService
 from app.services.otp_service import verify_otp_challenge
 
@@ -33,9 +36,7 @@ class VerifyOTP(Resource):
 
         auth = AuthService()
         tokens = auth.issue_tokens(user)
-        workspaces = getattr(user, "workspaces", None) or []
-        default_ws = next((w for w in workspaces if getattr(w, "is_default", False)), None)
-        workspace_id = getattr(default_ws, "workspace_id", None)
+        workspace_id = auth_feature_service.extract_default_workspace_id(user)
         response = make_response(
             {
                 "access_token": tokens["access_token"],

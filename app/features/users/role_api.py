@@ -1,30 +1,22 @@
 from __future__ import annotations
 
 from flask import request
-from flask_restx import Namespace, Resource, fields
+from flask_restx import Namespace, Resource
 
 from app.decorators.rbac import require_admin
 from app.decorators.security import token_required
+from app.features.users.schemas import register_role_models
+from app.features.users.service import users_feature_service
 from app.services.role_service import RoleService
 
 role_ns = Namespace("roles", description="Role management")
-
-role_model = role_ns.model(
-    "role",
-    {
-        "role_name": fields.String(required=True, description="Canonical role name"),
-        "display_name": fields.String(required=False, description="Human readable role name"),
-        "description": fields.String(required=False, description="Role description"),
-        "feature_key": fields.String(required=False, description="Owning feature key"),
-        "is_system": fields.Boolean(required=False, description="True for system-managed roles"),
-    },
-)
-
-roles = role_ns.model("role_list", {"roles": fields.List(fields.Nested(role_model))})
+MODELS = register_role_models(role_ns)
+role_model = MODELS["role_model"]
+roles = MODELS["roles"]
 
 
 def _service() -> RoleService:
-    return RoleService()
+    return users_feature_service.build_role_service(role_service_factory=RoleService)
 
 
 @role_ns.route("")

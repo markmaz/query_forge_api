@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.chat_minimal as chat_route
+import app.features.ai.chat_api as chat_route
 from app.exceptions.forge_error import ForgeError
 
 

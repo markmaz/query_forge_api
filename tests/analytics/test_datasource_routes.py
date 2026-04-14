@@ -1,10 +1,10 @@
-"""Tests for GET /api/v1/datasources — app.routes.datasource_routes."""
+"""Tests for GET /api/v1/datasources — app.features.ingestion.datasource_api."""
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
 
-import app.routes.datasource_routes as datasource_routes
+import app.features.ingestion.datasource_api as datasource_routes
 import app.services.rbac_service as rbac_service
 from app.services.analytics.registry import AnalyticsDatasourceRegistry
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import app.routes.nlp_review as nlp_review
-import app.routes.nlp_tier2 as nlp_tier2
+import app.features.ai.nlp_review_api as nlp_review
+import app.features.ai.nlp_tier2_api as nlp_tier2
 
 
 def _headers(monkeypatch):

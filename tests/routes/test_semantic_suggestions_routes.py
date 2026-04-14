@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.semantic_suggestions as semantic_suggestions
+import app.features.semantic.semantic_suggestions_api as semantic_suggestions
 
 
 def _headers(monkeypatch):

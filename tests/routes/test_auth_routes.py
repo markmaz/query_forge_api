@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Dict
 
 import app.features.auth.auth_api as auth_routes
-from itsdangerous import BadSignature
 from app.decorators import security
 from app.exceptions.forge_error import ForgeError
 from app.models.tenancy.user import User
@@ -11,8 +10,6 @@ from app.models.tenancy.user_workspace import UserWorkspace
 
 
 def test_login_success(client, monkeypatch):
-    monkeypatch.setattr(auth_routes.RateLimitService, "enforce", lambda self, **_kwargs: None)
-
     def _auth(self, username: str, password: str) -> Dict[str, Any]:
         return {
             "user_id": "u1",
@@ -36,8 +33,6 @@ def test_login_success(client, monkeypatch):
 
 
 def test_login_invalid_credentials(client, monkeypatch):
-    monkeypatch.setattr(auth_routes.RateLimitService, "enforce", lambda self, **_kwargs: None)
-
     def _auth(self, username: str, password: str):
         return None
 
@@ -49,7 +44,6 @@ def test_login_invalid_credentials(client, monkeypatch):
 
 
 def test_login_totp_enabled_returns_mfa_challenge(client, monkeypatch):
-    monkeypatch.setattr(auth_routes.RateLimitService, "enforce", lambda self, **_kwargs: None)
     monkeypatch.setattr(
         auth_routes.AuthService,
         "authenticate",
@@ -91,7 +85,6 @@ def test_totp_verify_success(client, monkeypatch):
 
 
 def test_auth_sets_refresh_cookie_and_clears_legacy_paths(client, monkeypatch):
-    monkeypatch.setattr(auth_routes.RateLimitService, "enforce", lambda self, **_kwargs: None)
     monkeypatch.setattr(
         auth_routes.AuthService,
         "non_interactive_authentication",
@@ -204,7 +197,7 @@ def test_reset_validate_missing_token(client):
 
 
 def test_invite_validate_returns_generic_error_when_token_invalid(client, monkeypatch):
-    monkeypatch.setattr(auth_routes, "validate_token", lambda _token: (_ for _ in ()).throw(BadSignature("bad token")))
+    monkeypatch.setattr(auth_routes, "validate_token", lambda _token: (_ for _ in ()).throw(Exception("bad token")))
 
     resp = client.get("/api/v1/auth/invite/validate/bad")
     assert resp.status_code == 400
@@ -266,7 +259,7 @@ def test_invite_accept_missing_token(client):
 
 
 def test_invite_accept_invalid_token(client, monkeypatch):
-    monkeypatch.setattr(auth_routes, "validate_token", lambda _token: (_ for _ in ()).throw(BadSignature("bad token")))
+    monkeypatch.setattr(auth_routes, "validate_token", lambda _token: (_ for _ in ()).throw(Exception("bad token")))
     resp = client.post(
         "/api/v1/auth/invite/accept",
         json={"token": "bad", "password": "Oscar0875sera!!"},

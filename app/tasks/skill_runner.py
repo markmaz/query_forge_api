@@ -506,7 +506,7 @@ def _resolve_next_scheduled_run(
     return next_run_at
 
 
-# Backward-compat aliases — tasks/__init__.py and skills_routes.py use old names
+# Backward-compat aliases — tasks/__init__.py and the skills feature use old names
 execute_skill_task = execute_skill
 dispatch_due_skills_task = dispatch_due_skills
 

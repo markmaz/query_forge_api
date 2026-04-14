@@ -35,7 +35,7 @@ def _get_db_session():
 class _DB:
     """
     Provides a Flask-SQLAlchemy-compatible interface over raw SQLAlchemy.
-    Used by app/models/destinations.py and app/routes/destination_routes.py.
+    Used by app/models/destinations.py and app/features/skills/destination_api.py.
     """
 
     Model = _DestBase
