@@ -115,13 +115,11 @@ def test_normalize_llm_plan_sets_required_fields() -> None:
         raw_plan=raw,
         trace_id="t1",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=42,
     )
     assert result["schema_version"] == 2
     assert result["trace_id"] == "t1"
     assert result["workspace_id"] == "ws-1"
-    assert result["vertical_norm"] == "education"
     assert result["base_domain_id"] == 42
 
 
@@ -130,7 +128,6 @@ def test_normalize_llm_plan_adds_domain_name_when_provided() -> None:
         raw_plan={},
         trace_id="t1",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=1,
         base_domain_name="Student Demographics",
     )
@@ -142,7 +139,6 @@ def test_normalize_llm_plan_omits_domain_name_when_blank() -> None:
         raw_plan={},
         trace_id="t1",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=1,
         base_domain_name="",
     )
@@ -160,7 +156,6 @@ def test_normalize_llm_plan_normalizes_camel_case_column_key() -> None:
         raw_plan=raw,
         trace_id="t1",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=1,
     )
     assert result["selects"]["dimensions"][0]["column_key"] == "wt1.grade"
@@ -177,7 +172,6 @@ def test_normalize_llm_plan_normalizes_camel_case_metric_ref() -> None:
         raw_plan=raw,
         trace_id="t1",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=1,
     )
     assert result["selects"]["metrics"][0]["metric_ref"] == "count"
@@ -194,7 +188,6 @@ def test_normalize_llm_plan_drops_empty_column_keys() -> None:
         raw_plan=raw,
         trace_id="t1",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=1,
     )
     assert len(result["selects"]["dimensions"]) == 1
@@ -206,7 +199,6 @@ def test_normalize_llm_plan_sets_defaults_for_missing_keys() -> None:
         raw_plan={},
         trace_id="t1",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=1,
     )
     assert result["intent"] == "list"
@@ -296,7 +288,6 @@ def test_call_llm_slots_returns_slot_extraction_result_on_valid_response() -> No
     result = svc._call_llm_slots(  # noqa: SLF001
         normalized_prompt="show students",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=6,
     )
     assert result.payload["intent"] == "list"
@@ -311,7 +302,6 @@ def test_call_llm_slots_falls_back_gracefully_on_invalid_response() -> None:
     result = svc._call_llm_slots(  # noqa: SLF001
         normalized_prompt="show students",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=6,
         fast_mode=True,
     )
@@ -340,7 +330,6 @@ def test_call_llm_plan_returns_llm_plan_result_on_valid_response() -> None:
     result = svc._call_llm_plan(  # noqa: SLF001
         normalized_prompt="show grades",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=6,
         capabilities={"dimensions": [{"column_key": "wt1.grade", "column_name": "grade"}]},
         schema={"type": "object"},

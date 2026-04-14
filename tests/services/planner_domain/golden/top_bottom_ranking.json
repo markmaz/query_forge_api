@@ -405,8 +405,7 @@
   "shared_pipeline": {
     "domain_selection": {
       "pipeline_name": "planner_domain_selection_pipeline",
-      "trace_id": "planner_domain_selection:ws-1:education",
-      "vertical_norm": "education",
+      "trace_id": "planner_domain_selection:ws-1",
       "timings_ms": {
         "normalize_text": 0,
         "resolve_capabilities": 0,
@@ -538,8 +537,8 @@
       "label": "Load and prepare conversation context"
     },
     {
-      "step": "normalize_prompt_and_vertical",
-      "label": "Normalize prompt and effective vertical"
+      "step": "normalize_prompt",
+      "label": "Normalize prompt and planner context"
     },
     {
       "step": "domain_selection",

@@ -13,7 +13,6 @@ from app.services.semantic.catalog.catalog_models import (
     RelationshipUpsert,
     ValueAliasUpsert,
 )
-from app.services.semantic.vertical_norm import normalize_semantic_vertical
 
 logger = logging.getLogger(__name__)
 RELATIONSHIP_FK_TARGET_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
@@ -54,14 +53,13 @@ class SemanticCatalogRepository:
     def get_concepts(
         self,
         *,
-        vertical_norm: str,
         concept_keys: Iterable[str],
     ) -> List[Dict[str, Any]]:
         keys = [str(k or "").strip() for k in concept_keys if str(k or "").strip()]
         if not keys:
             return []
 
-        params: Dict[str, Any] = {"vertical_norm": normalize_semantic_vertical(vertical_norm)}
+        params: Dict[str, Any] = {}
         placeholders: List[str] = []
         for idx, key in enumerate(keys):
             param_name = f"k_{idx}"
@@ -72,7 +70,6 @@ class SemanticCatalogRepository:
             f"""
             SELECT
               id,
-              vertical_norm,
               concept_key,
               name,
               description,
@@ -85,8 +82,7 @@ class SemanticCatalogRepository:
               is_identifier,
               is_metric
             FROM semantic_concept
-            WHERE vertical_norm = :vertical_norm
-              AND concept_key IN ({', '.join(placeholders)})
+            WHERE concept_key IN ({', '.join(placeholders)})
             ORDER BY id ASC
             """,
             params,
@@ -95,13 +91,12 @@ class SemanticCatalogRepository:
     def get_aliases_by_concept_keys(
         self,
         *,
-        vertical_norm: str,
         concept_keys: Iterable[str],
     ) -> Dict[str, List[str]]:
         keys = [str(k or "").strip() for k in concept_keys if str(k or "").strip()]
         if not keys:
             return {}
-        params: Dict[str, Any] = {"vertical_norm": normalize_semantic_vertical(vertical_norm)}
+        params: Dict[str, Any] = {}
         placeholders: List[str] = []
         for idx, key in enumerate(keys):
             name = f"k_{idx}"
@@ -112,8 +107,7 @@ class SemanticCatalogRepository:
             f"""
             SELECT concept_key, alias_key
             FROM semantic_concept_alias
-            WHERE vertical_norm = :vertical_norm
-              AND concept_key IN ({', '.join(placeholders)})
+            WHERE concept_key IN ({', '.join(placeholders)})
             ORDER BY concept_key ASC, weight DESC, id ASC
             """,
             params,
@@ -136,7 +130,6 @@ class SemanticCatalogRepository:
             tx.execute_write(
                 """
                 INSERT INTO semantic_concept (
-                  vertical_norm,
                   concept_key,
                   name,
                   description,
@@ -153,7 +146,6 @@ class SemanticCatalogRepository:
                   `sensitive`,
                   `status`
                 ) VALUES (
-                  :vertical_norm,
                   :concept_key,
                   :name,
                   :description,
@@ -193,14 +185,10 @@ class SemanticCatalogRepository:
                 """
                 SELECT id
                 FROM semantic_concept
-                WHERE vertical_norm = :vertical_norm
-                  AND concept_key = :concept_key
+                WHERE concept_key = :concept_key
                 LIMIT 1
                 """,
-                {
-                    "vertical_norm": payload["vertical_norm"],
-                    "concept_key": payload["concept_key"],
-                },
+                {"concept_key": payload["concept_key"]},
             )
             if result:
                 concept_id_by_key[str(payload["concept_key"])] = int(result[0].get("id") or 0)
@@ -213,13 +201,11 @@ class SemanticCatalogRepository:
             tx.execute_write(
                 """
                 INSERT INTO semantic_concept_alias (
-                  vertical_norm,
                   alias_key,
                   concept_key,
                   match_kind,
                   weight
                 ) VALUES (
-                  :vertical_norm,
                   :alias_key,
                   :concept_key,
                   :match_kind,
@@ -320,7 +306,6 @@ class SemanticCatalogRepository:
             f"""
             SELECT
               id,
-              LOWER(COALESCE(vertical_norm, 'generic')) AS vertical_norm,
               concept_key,
               semantic_type,
               sub_type,
@@ -343,11 +328,9 @@ class SemanticCatalogRepository:
             return {}
 
         for row in concept_rows:
-            vertical = normalize_semantic_vertical(row.get("vertical_norm"))
             tx.execute_write(
                 """
                 INSERT INTO semantic_registry (
-                  vertical,
                   concept_key,
                   semantic_type,
                   sub_type,
@@ -362,7 +345,6 @@ class SemanticCatalogRepository:
                   display_priority,
                   `sensitive`
                 ) VALUES (
-                  :vertical,
                   :concept_key,
                   :semantic_type,
                   :sub_type,
@@ -393,7 +375,6 @@ class SemanticCatalogRepository:
                   updated_at = CURRENT_TIMESTAMP
                 """,
                 {
-                    "vertical": vertical,
                     "concept_key": str(row.get("concept_key") or "").strip(),
                     "semantic_type": str(row.get("semantic_type") or "other").strip().lower() or "other",
                     "sub_type": row.get("sub_type"),
@@ -418,7 +399,6 @@ class SemanticCatalogRepository:
             FROM semantic_concept sc
             JOIN semantic_registry sr
               ON UPPER(TRIM(sr.concept_key)) = UPPER(TRIM(sc.concept_key))
-             AND LOWER(COALESCE(sr.vertical_norm, 'generic')) = LOWER(COALESCE(sc.vertical_norm, 'generic'))
             WHERE sc.id IN ({in_sql})
             """,
             in_params,
@@ -438,14 +418,12 @@ class SemanticCatalogRepository:
             tx.execute_write(
                 """
                 INSERT INTO semantic_value_alias (
-                  vertical_norm,
                   semantic_concept_id,
                   canonical_value,
                   alias_value,
                   match_kind,
                   weight
                 ) VALUES (
-                  :vertical_norm,
                   :semantic_concept_id,
                   :canonical_value,
                   :alias_value,

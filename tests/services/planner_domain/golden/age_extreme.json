@@ -1,104 +1,97 @@
 {
-  "adm_filter_normalization": [],
+  "normalized_prompt": "show me the oldest student",
+  "conversation_id": "<conversation_id>",
+  "conversation_context_used": false,
+  "followup_mode": false,
+  "conversation_seeded_from_client": false,
+  "selected_domain_id": 8,
   "capabilities": {
+    "domain_id": 8,
+    "domain_version": 1,
     "dimensions": [
       {
         "column_key": "wt24.student_unique_id",
-        "column_name": "student_unique_id",
+        "label": "Student ID",
         "data_type": "string",
         "filterable": false,
-        "label": "Student ID",
+        "workspace_table_id": 24,
         "model_column_id": 1001,
-        "workspace_table_id": 24
+        "column_name": "student_unique_id"
       },
       {
         "column_key": "wt24.birth_date",
-        "column_name": "birth_date",
+        "label": "Birth Date",
         "data_type": "date",
         "filterable": true,
-        "label": "Birth Date",
+        "workspace_table_id": 24,
         "model_column_id": 1010,
-        "workspace_table_id": 24
+        "column_name": "birth_date"
       }
     ],
-    "domain_id": 8,
     "domain_metrics": [],
-    "domain_version": 1,
+    "user_metrics": [],
     "overlay_metrics": [],
-    "time_columns": [],
-    "user_metrics": []
+    "time_columns": []
   },
   "capabilities_llm": {
+    "domain_id": 8,
+    "domain_version": 1,
     "dimensions": [
       {
         "column_key": "wt24.student_unique_id",
-        "column_name": "student_unique_id",
+        "label": "Student ID",
         "data_type": "string",
         "filterable": false,
-        "label": "Student ID",
+        "workspace_table_id": 24,
         "model_column_id": 1001,
-        "workspace_table_id": 24
+        "column_name": "student_unique_id"
       },
       {
         "column_key": "wt24.birth_date",
-        "column_name": "birth_date",
+        "label": "Birth Date",
         "data_type": "date",
         "filterable": true,
-        "label": "Birth Date",
+        "workspace_table_id": 24,
         "model_column_id": 1010,
-        "workspace_table_id": 24
+        "column_name": "birth_date"
       }
     ],
-    "domain_id": 8,
-    "domain_metrics": [],
-    "domain_version": 1,
+    "time_columns": [],
     "filter_columns": [
       {
         "column_key": "wt24.birth_date",
-        "column_name": "birth_date",
+        "label": "Birth Date",
         "data_type": "date",
         "filterable": true,
-        "label": "Birth Date",
+        "workspace_table_id": 24,
         "model_column_id": 1010,
-        "workspace_table_id": 24
+        "column_name": "birth_date"
       }
     ],
-    "overlay_metrics": [],
-    "time_columns": [],
-    "user_metrics": []
+    "domain_metrics": [],
+    "user_metrics": [],
+    "overlay_metrics": []
   },
-  "column_shortlist_count": 2,
-  "conversation_context_used": false,
-  "conversation_id": "<conversation_id>",
-  "conversation_seeded_from_client": false,
-  "country_value_normalization": [],
-  "district_county_retry_hint": null,
   "domain_candidates": [
     {
       "domain_id": 8,
       "name": "domain_8",
-      "reason": [],
-      "recall_mode": "provided",
       "score": 1.0,
-      "semantic_reasons": [],
+      "source": "provided",
+      "reason": [],
       "semantic_recall": false,
-      "source": "provided"
+      "semantic_reasons": [],
+      "recall_mode": "provided"
     }
   ],
   "domain_ranking": [
     {
-      "base_score": 1.19,
-      "column_shortlist_count": 2,
-      "dimension_count": 2,
-      "domain_capabilities": {
-        "missing": [],
-        "present": [
-          "BIRTH_DATE"
-        ]
-      },
       "domain_id": 8,
+      "score": 1.19,
+      "base_score": 1.19,
+      "semantic_score": 0.09,
+      "vector_score": 1.0,
       "policy_adjustment": 0.0,
-      "policy_effects": [],
       "rerank_signals": [
         "age_extreme_prompt",
         "canonical_name_preference_prompt",
@@ -107,125 +100,23 @@
         "student_listing",
         "student_school_context_prompt"
       ],
+      "domain_capabilities": {
+        "present": [
+          "BIRTH_DATE"
+        ],
+        "missing": []
+      },
+      "policy_effects": [],
       "rerank_summary": {
         "base_score": 1.19,
-        "final_score": 1.19,
-        "policy_adjustment": 0.0
+        "policy_adjustment": 0.0,
+        "final_score": 1.19
       },
-      "score": 1.19,
-      "semantic_score": 0.09,
-      "source": "provided",
-      "vector_score": 1.0
+      "column_shortlist_count": 2,
+      "dimension_count": 2,
+      "source": "provided"
     }
   ],
-  "explanation_summary_trace": {
-    "content_preview": "{}",
-    "enabled": true,
-    "error": null,
-    "finish_reason": null,
-    "used": false
-  },
-  "followup_mode": false,
-  "llm_attempts": 1,
-  "llm_raw_json": "{}",
-  "llm_repaired": false,
-  "next_actions_trace": {
-    "deferred": true,
-    "enabled": true,
-    "used": false
-  },
-  "normalized_prompt": "show me the oldest student",
-  "pipeline_profile": [
-    {
-      "label": "Load and prepare conversation context",
-      "step": "conversation_context"
-    },
-    {
-      "label": "Normalize prompt and effective vertical",
-      "step": "normalize_prompt_and_vertical"
-    },
-    {
-      "label": "Select candidate domains from vector index",
-      "step": "domain_selection"
-    },
-    {
-      "label": "Load capabilities, shortlist columns, resolve semester indicators",
-      "step": "capabilities"
-    },
-    {
-      "label": "Compact capabilities payload for plan generation",
-      "step": "capabilities_compaction"
-    },
-    {
-      "label": "Generate slots+plan with LLM (unified)",
-      "step": "llm_unified"
-    },
-    {
-      "label": "Normalize plan and apply deterministic value/filter normalizers",
-      "step": "plan_normalization"
-    },
-    {
-      "label": "Validate and repair plan against capabilities",
-      "step": "validation"
-    },
-    {
-      "label": "Retry PlanV2 generation after validation feedback",
-      "step": "llm_retry"
-    },
-    {
-      "label": "Normalize retry plan and re-apply deterministic normalizers",
-      "step": "retry_plan_normalization"
-    },
-    {
-      "label": "Validate and repair retry plan",
-      "step": "validation_retry"
-    },
-    {
-      "label": "Map validated plan to SQL JSON",
-      "step": "map_to_sqljson"
-    },
-    {
-      "label": "Build deterministic explanation object",
-      "step": "explanation_build"
-    },
-    {
-      "label": "Optionally polish explanation summary with LLM",
-      "step": "explanation_polish"
-    },
-    {
-      "label": "Defer next action generation (async)",
-      "step": "next_actions"
-    },
-    {
-      "label": "Persist conversation state for follow-up context",
-      "step": "conversation_state_save"
-    }
-  ],
-  "planner_unified_llm": false,
-  "projection_policy": {
-    "excluded_column_names": [],
-    "excluded_concept_keys": [],
-    "matched_policies": [
-      "student_listing_identity_projection"
-    ],
-    "projection_mode": "prepend",
-    "prompt_signals": [
-      "age_extreme_prompt",
-      "canonical_name_preference_prompt",
-      "listing_intent",
-      "needs_student_identity",
-      "student_listing",
-      "student_school_context_prompt"
-    ],
-    "required_column_names": [],
-    "required_concept_keys": [
-      "STUDENT_ID",
-      "STUDENT_FIRST_NAME",
-      "STUDENT_LAST_NAME"
-    ],
-    "required_filter_concept_keys": [],
-    "required_join_tables": []
-  },
   "rerank_signals": [
     "age_extreme_prompt",
     "canonical_name_preference_prompt",
@@ -234,57 +125,340 @@
     "student_listing",
     "student_school_context_prompt"
   ],
-  "school_name_filter_normalization": [],
-  "school_year_value_normalization": [],
-  "selected_domain_id": 8,
-  "semantic_assist_enabled": true,
-  "semantic_grounding": {
-    "alias_constraints": [
+  "column_shortlist_count": 2,
+  "slot_hints": {
+    "intent": "list",
+    "entity": "",
+    "subgroups": [
+      "Student"
+    ],
+    "constraints": [
       {
         "kind": "unknown",
-        "notes": "semantic_alias:REPORTER_DESCRIPTION",
-        "op": "eq",
         "text": "Student",
-        "value_hint": "Student"
+        "op": "eq",
+        "value_hint": "Student",
+        "notes": "semantic_alias:REPORTER_DESCRIPTION"
       }
     ],
-    "candidate_summary": {
-      "base_domain_id": 8,
-      "base_domain_key": "DOMAIN_PROGRAMS_COHORTS_AND_STUDENT_SERVICES",
-      "dimension_count": 2,
-      "dimensions": [
-        "STUDENT_UNIQUE_ID",
-        "BIRTH_DATE"
-      ],
-      "filter_count": 0,
-      "filters": [],
-      "metric_count": 0,
-      "metrics": [],
-      "semantic_source": "semantic_catalog+filter_capability_fallback",
-      "time_count": 0,
-      "times": [],
-      "value_count": 0
-    },
-    "warnings": []
+    "time_phrases": []
   },
+  "semantic_assist_enabled": true,
   "semantic_value_alias_constraints": [
     {
       "kind": "unknown",
-      "notes": "semantic_alias:REPORTER_DESCRIPTION",
-      "op": "eq",
       "text": "Student",
-      "value_hint": "Student"
+      "op": "eq",
+      "value_hint": "Student",
+      "notes": "semantic_alias:REPORTER_DESCRIPTION"
     }
   ],
   "semantic_value_alias_normalization": {
     "applied": 0,
     "changes": []
   },
+  "semantic_grounding": {
+    "warnings": [],
+    "alias_constraints": [
+      {
+        "kind": "unknown",
+        "text": "Student",
+        "op": "eq",
+        "value_hint": "Student",
+        "notes": "semantic_alias:REPORTER_DESCRIPTION"
+      }
+    ],
+    "candidate_summary": {
+      "base_domain_id": 8,
+      "base_domain_key": "DOMAIN_PROGRAMS_COHORTS_AND_STUDENT_SERVICES",
+      "semantic_source": "semantic_catalog+filter_capability_fallback",
+      "metric_count": 0,
+      "dimension_count": 2,
+      "filter_count": 0,
+      "time_count": 0,
+      "value_count": 0,
+      "metrics": [],
+      "dimensions": [
+        "STUDENT_UNIQUE_ID",
+        "BIRTH_DATE"
+      ],
+      "filters": [],
+      "times": []
+    }
+  },
   "semester_indicator_columns": {},
+  "slot_raw_json": "{}",
+  "slot_attempts": 1,
+  "slot_repaired": false,
+  "country_value_normalization": [],
+  "school_year_value_normalization": [],
   "semester_value_normalization": [],
+  "school_name_filter_normalization": [],
+  "staff_role_filter_normalization": [],
+  "adm_filter_normalization": [],
+  "district_county_retry_hint": null,
+  "llm_raw_json": "{}",
+  "llm_attempts": 1,
+  "llm_repaired": false,
+  "planner_unified_llm": false,
+  "unified_llm_trace": {
+    "llm_model": "qwen2.5:14b-instruct-16k",
+    "llm_tokens": {},
+    "planner_mode": "compact_semantic_v2",
+    "finish_reason": "",
+    "candidate_summary": {
+      "domain_count": 5,
+      "metric_count": 0,
+      "dimension_count": 2,
+      "filter_count": 0,
+      "time_count": 0,
+      "value_count": 0,
+      "base_domain_key": "DOMAIN_PROGRAMS_COHORTS_AND_STUDENT_SERVICES"
+    },
+    "validation_warnings": [],
+    "llm_prompt_trace": {
+      "system_prompt": "You are a query planner that returns STRICT JSON only. Never return prose, markdown, comments, or code fences.",
+      "developer_prompt": "You are a constrained semantic query planner.\nReturn strict JSON only matching the response schema.\nNever generate SQL.\nUse only provided candidate concept keys.\nNever invent concept keys, metrics, dimensions, filters, values, or domains.\nPrefer NAME/LABEL concepts for grouping when user says 'by X'.\nDo not add filters unless user asked for a restriction.\nDo not infer time range or time grain unless user asked for time.\nFor relative phrases like this/last month/quarter/year, set time.time_range and keep time.time_concept_key null unless it exists in time_candidates.\nIf a business term maps to multiple metrics and no default is provided, ask for clarification.\nUse intent='aggregate' for totals, sums, counts, averages, and grouped 'by' requests.\nNo markdown, prose, code fences, or comments.\n",
+      "response_format": {
+        "type": "json_schema",
+        "json_schema": {
+          "name": "compact_semantic_plan_v2",
+          "strict": true,
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "base_domain_key",
+              "intent",
+              "metrics",
+              "dimensions",
+              "filters",
+              "time",
+              "needs_clarification",
+              "clarification_question",
+              "confidence"
+            ],
+            "properties": {
+              "base_domain_key": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "intent": {
+                "type": "string",
+                "enum": [
+                  "aggregate",
+                  "list",
+                  "trend"
+                ]
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 0
+              },
+              "dimensions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 0
+              },
+              "filters": {
+                "type": "array",
+                "minItems": 0,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "field_concept_key",
+                    "operator",
+                    "value"
+                  ],
+                  "properties": {
+                    "field_concept_key": {
+                      "type": "string"
+                    },
+                    "operator": {
+                      "type": "string",
+                      "enum": [
+                        "eq",
+                        "neq",
+                        "in",
+                        "not_in",
+                        "gt",
+                        "gte",
+                        "lt",
+                        "lte",
+                        "between",
+                        "contains"
+                      ]
+                    },
+                    "value": {}
+                  }
+                }
+              },
+              "time": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "time_concept_key",
+                  "time_range",
+                  "time_grain",
+                  "start_date",
+                  "end_date"
+                ],
+                "properties": {
+                  "time_concept_key": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "time_range": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "time_grain": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "day",
+                      "week",
+                      "month",
+                      "quarter",
+                      "year",
+                      null
+                    ]
+                  },
+                  "start_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "end_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              },
+              "needs_clarification": {
+                "type": "boolean"
+              },
+              "clarification_question": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          }
+        }
+      },
+      "max_tokens": 700
+    },
+    "needs_clarification": false,
+    "clarification_question": null,
+    "confidence": 0.0
+  },
+  "explanation_summary_trace": {
+    "enabled": true,
+    "used": false,
+    "error": null,
+    "finish_reason": null,
+    "content_preview": "{}"
+  },
+  "next_actions_trace": {
+    "enabled": true,
+    "used": false,
+    "deferred": true
+  },
+  "technical_details": {
+    "trace_id": "<trace_id>",
+    "conversation_id": "<conversation_id>",
+    "fast_mode": false,
+    "planner_unified_llm": false,
+    "planner_compact_enabled": true,
+    "llm_resolution": {
+      "source": "bootstrap",
+      "role": "planner",
+      "llm_id": null,
+      "provider": "generic",
+      "model": "",
+      "endpoint": ""
+    }
+  },
+  "projection_policy": {
+    "prompt_signals": [
+      "age_extreme_prompt",
+      "canonical_name_preference_prompt",
+      "listing_intent",
+      "needs_student_identity",
+      "student_listing",
+      "student_school_context_prompt"
+    ],
+    "matched_policies": [
+      "student_listing_identity_projection"
+    ],
+    "projection_mode": "prepend",
+    "required_concept_keys": [
+      "STUDENT_ID",
+      "STUDENT_FIRST_NAME",
+      "STUDENT_LAST_NAME"
+    ],
+    "excluded_concept_keys": [],
+    "required_column_names": [],
+    "excluded_column_names": [],
+    "required_filter_concept_keys": [],
+    "required_join_tables": []
+  },
   "shared_pipeline": {
     "domain_selection": {
+      "pipeline_name": "planner_domain_selection_pipeline",
+      "trace_id": "planner_domain_selection:ws-1",
+      "timings_ms": {
+        "normalize_text": 0,
+        "resolve_capabilities": 0,
+        "extract_signals": 0,
+        "apply_policy_rerank": 0
+      },
       "debug": {
+        "normalize_text": {
+          "request_text_key": "prompt",
+          "normalized_text": "show me the oldest student"
+        },
+        "resolve_capabilities": {
+          "candidate_count": 1,
+          "capability_counts": {
+            "8": 1
+          }
+        },
+        "extract_signals": {
+          "source_text": "show me the oldest student",
+          "signals": [
+            "age_extreme_prompt",
+            "canonical_name_preference_prompt",
+            "listing_intent",
+            "needs_student_identity",
+            "student_listing",
+            "student_school_context_prompt"
+          ]
+        },
         "apply_policy_rerank": {
           "candidate_count": 1,
           "policy_effect_count": 0,
@@ -296,83 +470,41 @@
             "student_listing",
             "student_school_context_prompt"
           ]
-        },
-        "extract_signals": {
-          "signals": [
-            "age_extreme_prompt",
-            "canonical_name_preference_prompt",
-            "listing_intent",
-            "needs_student_identity",
-            "student_listing",
-            "student_school_context_prompt"
-          ],
-          "source_text": "show me the oldest student"
-        },
-        "normalize_text": {
-          "normalized_text": "show me the oldest student",
-          "request_text_key": "prompt"
-        },
-        "resolve_capabilities": {
-          "candidate_count": 1,
-          "capability_counts": {
-            "8": 1
-          }
         }
       },
-      "metadata": {
-        "executed_nodes": [
-          "normalize_text",
-          "resolve_capabilities",
-          "extract_signals",
-          "apply_policy_rerank"
-        ],
-        "graph_lineage": [],
-        "pipeline_definition": "planner_domain_selection_pipeline",
-        "skipped_nodes": []
-      },
-      "pipeline_name": "planner_domain_selection_pipeline",
-      "timings_ms": {
-        "apply_policy_rerank": 0,
-        "extract_signals": 0,
-        "normalize_text": 0,
-        "resolve_capabilities": 0
-      },
-      "trace_id": "planner_domain_selection:ws-1:education",
       "trace_nodes": [
         {
-          "lineage": [
-            "planner_domain_selection_pipeline"
-          ],
-          "node": "normalize_text",
           "pipeline_name": "planner_domain_selection_pipeline",
+          "node": "normalize_text",
           "status": "completed",
           "summary": {
-            "normalized_text": "show me the oldest student",
-            "request_text_key": "prompt"
-          }
-        },
-        {
+            "request_text_key": "prompt",
+            "normalized_text": "show me the oldest student"
+          },
           "lineage": [
             "planner_domain_selection_pipeline"
-          ],
-          "node": "resolve_capabilities",
+          ]
+        },
+        {
           "pipeline_name": "planner_domain_selection_pipeline",
+          "node": "resolve_capabilities",
           "status": "completed",
           "summary": {
             "candidate_count": 1,
             "capability_counts": {
               "8": 1
             }
-          }
-        },
-        {
+          },
           "lineage": [
             "planner_domain_selection_pipeline"
-          ],
-          "node": "extract_signals",
+          ]
+        },
+        {
           "pipeline_name": "planner_domain_selection_pipeline",
+          "node": "extract_signals",
           "status": "completed",
           "summary": {
+            "source_text": "show me the oldest student",
             "signals": [
               "age_extreme_prompt",
               "canonical_name_preference_prompt",
@@ -380,16 +512,15 @@
               "needs_student_identity",
               "student_listing",
               "student_school_context_prompt"
-            ],
-            "source_text": "show me the oldest student"
-          }
-        },
-        {
+            ]
+          },
           "lineage": [
             "planner_domain_selection_pipeline"
-          ],
-          "node": "apply_policy_rerank",
+          ]
+        },
+        {
           "pipeline_name": "planner_domain_selection_pipeline",
+          "node": "apply_policy_rerank",
           "status": "completed",
           "summary": {
             "candidate_count": 1,
@@ -402,221 +533,89 @@
               "student_listing",
               "student_school_context_prompt"
             ]
-          }
+          },
+          "lineage": [
+            "planner_domain_selection_pipeline"
+          ]
         }
       ],
-      "vertical_norm": "education"
+      "metadata": {
+        "graph_lineage": [],
+        "pipeline_definition": "planner_domain_selection_pipeline",
+        "executed_nodes": [
+          "normalize_text",
+          "resolve_capabilities",
+          "extract_signals",
+          "apply_policy_rerank"
+        ],
+        "skipped_nodes": []
+      }
     }
   },
-  "slot_attempts": 1,
-  "slot_hints": {
-    "constraints": [
-      {
-        "kind": "unknown",
-        "notes": "semantic_alias:REPORTER_DESCRIPTION",
-        "op": "eq",
-        "text": "Student",
-        "value_hint": "Student"
-      }
-    ],
-    "entity": "",
-    "intent": "list",
-    "subgroups": [
-      "Student"
-    ],
-    "time_phrases": []
-  },
-  "slot_raw_json": "{}",
-  "slot_repaired": false,
-  "staff_role_filter_normalization": [],
-  "technical_details": {
-    "conversation_id": "<conversation_id>",
-    "fast_mode": false,
-    "llm_resolution": {
-      "endpoint": "",
-      "llm_id": null,
-      "model": "",
-      "provider": "generic",
-      "role": "planner",
-      "source": "bootstrap"
+  "pipeline_profile": [
+    {
+      "step": "conversation_context",
+      "label": "Load and prepare conversation context"
     },
-    "planner_compact_enabled": true,
-    "planner_unified_llm": false,
-    "trace_id": "<trace_id>"
-  },
-  "unified_llm_trace": {
-    "candidate_summary": {
-      "base_domain_key": "DOMAIN_PROGRAMS_COHORTS_AND_STUDENT_SERVICES",
-      "dimension_count": 2,
-      "domain_count": 5,
-      "filter_count": 0,
-      "metric_count": 0,
-      "time_count": 0,
-      "value_count": 0
+    {
+      "step": "normalize_prompt",
+      "label": "Normalize prompt and planner context"
     },
-    "clarification_question": null,
-    "confidence": 0.0,
-    "finish_reason": "",
-    "llm_model": "qwen2.5:14b-instruct-16k",
-    "llm_prompt_trace": {
-      "developer_prompt": "You are a constrained semantic query planner.\nReturn strict JSON only matching the response schema.\nNever generate SQL.\nUse only provided candidate concept keys.\nNever invent concept keys, metrics, dimensions, filters, values, or domains.\nPrefer NAME/LABEL concepts for grouping when user says 'by X'.\nDo not add filters unless user asked for a restriction.\nDo not infer time range or time grain unless user asked for time.\nFor relative phrases like this/last month/quarter/year, set time.time_range and keep time.time_concept_key null unless it exists in time_candidates.\nIf a business term maps to multiple metrics and no default is provided, ask for clarification.\nUse intent='aggregate' for totals, sums, counts, averages, and grouped 'by' requests.\nNo markdown, prose, code fences, or comments.\n",
-      "max_tokens": 700,
-      "response_format": {
-        "json_schema": {
-          "name": "compact_semantic_plan_v2",
-          "schema": {
-            "additionalProperties": false,
-            "properties": {
-              "base_domain_key": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "clarification_question": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "confidence": {
-                "maximum": 1,
-                "minimum": 0,
-                "type": "number"
-              },
-              "dimensions": {
-                "items": {
-                  "type": "string"
-                },
-                "minItems": 0,
-                "type": "array"
-              },
-              "filters": {
-                "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "field_concept_key": {
-                      "type": "string"
-                    },
-                    "operator": {
-                      "enum": [
-                        "eq",
-                        "neq",
-                        "in",
-                        "not_in",
-                        "gt",
-                        "gte",
-                        "lt",
-                        "lte",
-                        "between",
-                        "contains"
-                      ],
-                      "type": "string"
-                    },
-                    "value": {}
-                  },
-                  "required": [
-                    "field_concept_key",
-                    "operator",
-                    "value"
-                  ],
-                  "type": "object"
-                },
-                "minItems": 0,
-                "type": "array"
-              },
-              "intent": {
-                "enum": [
-                  "aggregate",
-                  "list",
-                  "trend"
-                ],
-                "type": "string"
-              },
-              "metrics": {
-                "items": {
-                  "type": "string"
-                },
-                "minItems": 0,
-                "type": "array"
-              },
-              "needs_clarification": {
-                "type": "boolean"
-              },
-              "time": {
-                "additionalProperties": false,
-                "properties": {
-                  "end_date": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "start_date": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "time_concept_key": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "time_grain": {
-                    "enum": [
-                      "day",
-                      "week",
-                      "month",
-                      "quarter",
-                      "year",
-                      null
-                    ],
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "time_range": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  }
-                },
-                "required": [
-                  "time_concept_key",
-                  "time_range",
-                  "time_grain",
-                  "start_date",
-                  "end_date"
-                ],
-                "type": "object"
-              }
-            },
-            "required": [
-              "base_domain_key",
-              "intent",
-              "metrics",
-              "dimensions",
-              "filters",
-              "time",
-              "needs_clarification",
-              "clarification_question",
-              "confidence"
-            ],
-            "type": "object"
-          },
-          "strict": true
-        },
-        "type": "json_schema"
-      },
-      "system_prompt": "You are a query planner that returns STRICT JSON only. Never return prose, markdown, comments, or code fences."
+    {
+      "step": "domain_selection",
+      "label": "Select candidate domains from vector index"
     },
-    "llm_tokens": {},
-    "needs_clarification": false,
-    "planner_mode": "compact_semantic_v2",
-    "validation_warnings": []
-  }
+    {
+      "step": "capabilities",
+      "label": "Load capabilities, shortlist columns, resolve semester indicators"
+    },
+    {
+      "step": "capabilities_compaction",
+      "label": "Compact capabilities payload for plan generation"
+    },
+    {
+      "step": "llm_unified",
+      "label": "Generate slots+plan with LLM (unified)"
+    },
+    {
+      "step": "plan_normalization",
+      "label": "Normalize plan and apply deterministic value/filter normalizers"
+    },
+    {
+      "step": "validation",
+      "label": "Validate and repair plan against capabilities"
+    },
+    {
+      "step": "llm_retry",
+      "label": "Retry PlanV2 generation after validation feedback"
+    },
+    {
+      "step": "retry_plan_normalization",
+      "label": "Normalize retry plan and re-apply deterministic normalizers"
+    },
+    {
+      "step": "validation_retry",
+      "label": "Validate and repair retry plan"
+    },
+    {
+      "step": "map_to_sqljson",
+      "label": "Map validated plan to SQL JSON"
+    },
+    {
+      "step": "explanation_build",
+      "label": "Build deterministic explanation object"
+    },
+    {
+      "step": "explanation_polish",
+      "label": "Optionally polish explanation summary with LLM"
+    },
+    {
+      "step": "next_actions",
+      "label": "Defer next action generation (async)"
+    },
+    {
+      "step": "conversation_state_save",
+      "label": "Persist conversation state for follow-up context"
+    }
+  ]
 }

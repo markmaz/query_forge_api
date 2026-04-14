@@ -187,8 +187,8 @@ def create_app():
 
     if SEMANTIC_CONCEPT_SEED_ON_STARTUP:
         try:
-            ConceptSeedService().ensure_seeded(SEMANTIC_VERTICAL_DEFAULT)
-            logger.info("Seeded semantic concepts on startup for vertical=%s", SEMANTIC_VERTICAL_DEFAULT)
+            ConceptSeedService().ensure_seeded()
+            logger.info("Seeded semantic concepts on startup")
         except (ForgeError, OSError, RuntimeError, ValueError):
             logger.exception("Semantic concept startup seed failed")
     valkey_client = valkey.StrictValkey(host=VALKEY_ADDRESS, port=VALKEY_PORT, decode_responses=True)

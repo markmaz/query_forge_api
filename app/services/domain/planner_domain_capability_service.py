@@ -33,7 +33,6 @@ class PlannerDomainCapabilityService:
         workspace_id: str,
         user_id: str,
         base_domain_id: int,
-        vertical_norm: str = "generic",
         include_inactive: bool = False,
     ) -> Dict[str, Any]:
         domain_row = self._load_domain_row(
@@ -75,7 +74,6 @@ class PlannerDomainCapabilityService:
         capabilities: List[Dict[str, Any]] = []
         for row in rows:
             payload = _json_safe_mapping(dict(row))
-            payload.pop("scope_vertical_norm", None)
             try:
                 payload.update(PlannerDomainCapabilityRecord(**payload).model_dump())
             except CAPABILITY_RECORD_VALIDATION_ERRORS:
@@ -93,7 +91,6 @@ class PlannerDomainCapabilityService:
         )
         return {
             "workspace_id": str(workspace_id),
-            "vertical_norm": str(vertical_norm or "generic"),
             "base_domain_id": int(base_domain_id),
             "domain_name": str(domain_row.get("domain_name") or "").strip() or None,
             "can_edit": bool(domain_row.get("can_edit")),
@@ -270,15 +267,12 @@ class PlannerDomainCapabilityService:
         self,
         *,
         workspace_id: str,
-        vertical_norm: str,
         base_domain_id: int,
         capabilities: Mapping[str, Any],
         shortlisted_columns: Sequence[Mapping[str, Any]],
     ) -> Dict[str, Any]:
-        del vertical_norm
         explicit_rows = self._load_effective_capability_rows(
             workspace_id=workspace_id,
-            vertical_norm="generic",
             base_domain_id=base_domain_id,
         )
         inferred_rows = _infer_capability_rows(capabilities=capabilities, shortlisted_columns=shortlisted_columns)
@@ -303,10 +297,8 @@ class PlannerDomainCapabilityService:
         self,
         *,
         workspace_id: str,
-        vertical_norm: str = "generic",
         base_domain_id: int,
     ) -> List[Dict[str, Any]]:
-        del vertical_norm
         try:
             rows = self._sql.execute_query_mappings(
                 """
@@ -351,7 +343,6 @@ class PlannerDomainCapabilityService:
                 continue
             current = by_key.get(record.capability_key)
             record_payload = record.model_dump()
-            record_payload.pop("scope_vertical_norm", None)
             if current is None or _capability_rank(record_payload) >= _capability_rank(current):
                 by_key[record.capability_key] = record_payload
         return [by_key[key] for key in sorted(by_key)]

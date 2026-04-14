@@ -93,7 +93,6 @@ def test_score_adjustment_for_staff_work_context_shortlist() -> None:
 
     adjustment = svc.score_adjustment(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt_signals=["staff_work_context_prompt"],
         shortlist_features=["STAFF_IDENTITY_COLUMN"],
         capability_features=[],
@@ -107,7 +106,6 @@ def test_score_adjustment_for_adm_shortlist_and_metric() -> None:
 
     adjustment = svc.score_adjustment(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt_signals=["adm_prompt"],
         shortlist_features=["ADM_SIGNAL_COLUMN"],
         capability_features=["ADM_METRIC"],
@@ -121,7 +119,6 @@ def test_score_adjustment_for_calendar_days_off_combines_shortlist_features() ->
 
     adjustment = svc.score_adjustment(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt_signals=["calendar_days_off_prompt"],
         shortlist_features=["CALENDAR_DAY_COLUMN", "SCHOOL_DAY_FLAG_COLUMN"],
         capability_features=[],
@@ -143,7 +140,6 @@ def test_domain_selection_policy_service_prefers_workspace_rule_over_global_rule
 
     adjustment = svc.score_adjustment(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt_signals=["staff_work_context_prompt"],
         shortlist_features=["STAFF_IDENTITY_COLUMN"],
         capability_features=[],
@@ -198,9 +194,8 @@ def test_domain_selection_policy_service_lists_workspace_specific_policies() -> 
     )
     svc = PlannerDomainSelectionPolicyService(sql=sql, enable_db_lookup=True)
 
-    out = svc.list_policies(workspace_id="ws-1", vertical_norm="education", include_inactive=False, include_seeded=True)
+    out = svc.list_policies(workspace_id="ws-1", include_inactive=False, include_seeded=True)
 
-    assert out["vertical_norm"] == "education"
     assert out["policies"][0]["scope_type"] == "workspace"
     assert out["policies"][0]["is_effective"] is True
 
@@ -261,7 +256,6 @@ def test_domain_selection_policy_service_falls_back_on_expected_db_lookup_errors
 
     adjustment = svc.score_adjustment(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt_signals=["staff_work_context_prompt"],
         shortlist_features=["STAFF_IDENTITY_COLUMN"],
         capability_features=[],
@@ -283,4 +277,4 @@ def test_domain_selection_policy_service_surfaces_unexpected_policy_parse_errors
     monkeypatch.setattr(selection_policy_service, "_parse_policy_rule", _boom)
 
     with pytest.raises(AssertionError, match="unexpected policy parse bug"):
-        svc.get_applicable_policies(workspace_id="ws-1", vertical_norm="education")
+        svc.get_applicable_policies(workspace_id="ws-1")

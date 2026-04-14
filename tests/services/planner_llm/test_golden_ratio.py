@@ -6,8 +6,8 @@ from app.services.planner_llm.service import PlannerLLMConstraints, PlannerLLMSe
 
 
 class _FakeRetriever:
-    def retrieve(self, *, workspace_id, vertical, normalized_prompt, constraints):
-        del workspace_id, vertical, normalized_prompt, constraints
+    def retrieve(self, *, workspace_id, normalized_prompt, constraints):
+        del workspace_id, normalized_prompt, constraints
         return {
             "domains": [
                 {
@@ -111,8 +111,7 @@ class _FakeLLM:
 
 
 class _FakeCache:
-    def get_registry_version(self, *, vertical):
-        del vertical
+    def get_registry_version(self):
         return "v1"
 
     def build_cache_key(self, **kwargs):
@@ -149,7 +148,6 @@ def test_golden_students_per_teacher_by_county_uses_derived_ratio_and_repairs_do
         {
             "workspace_id": "ws-1",
             "prompt": "students per teacher by county",
-            "vertical": "education",
             "constraints": PlannerLLMConstraints(max_domains=3).model_dump(mode="json"),
             "debug": True,
         }
@@ -185,7 +183,6 @@ def test_plan_survives_expected_cache_write_failures() -> None:
         {
             "workspace_id": "ws-1",
             "prompt": "students per teacher by county",
-            "vertical": "education",
             "constraints": PlannerLLMConstraints(max_domains=3).model_dump(mode="json"),
             "debug": False,
         }
@@ -207,7 +204,6 @@ def test_plan_surfaces_unexpected_cache_write_failures() -> None:
             {
                 "workspace_id": "ws-1",
                 "prompt": "students per teacher by county",
-                "vertical": "education",
                 "constraints": PlannerLLMConstraints(max_domains=3).model_dump(mode="json"),
                 "debug": False,
             }

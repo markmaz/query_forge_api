@@ -17,9 +17,9 @@
 --  WHERE LOWER(TRIM(COALESCE(parent.vertical_norm, ''))) IN ('education', 'global', '__global__', '', 'none', 'null')
 --     OR LOWER(TRIM(COALESCE(child.vertical_norm, ''))) IN ('education', 'global', '__global__', '', 'none', 'null');
 
-DROP TEMPORARY TABLE IF EXISTS _semantic_registry_vertical_remap;
+DROP TABLE IF EXISTS _semantic_registry_vertical_remap;
 
-CREATE TEMPORARY TABLE _semantic_registry_vertical_remap (
+CREATE TABLE _semantic_registry_vertical_remap (
   old_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
   new_id BIGINT UNSIGNED NOT NULL
 );
@@ -33,7 +33,7 @@ JOIN semantic_registry generic
 WHERE LOWER(TRIM(COALESCE(legacy.vertical_norm, ''))) IN ('education', 'global', '__global__', '', 'none', 'null')
   AND legacy.id <> generic.id;
 
-INSERT INTO _semantic_registry_vertical_remap (old_id, new_id)
+INSERT IGNORE INTO _semantic_registry_vertical_remap (old_id, new_id)
 SELECT legacy.id AS old_id, keeper.keep_id AS new_id
 FROM semantic_registry legacy
 JOIN (
@@ -44,11 +44,7 @@ JOIN (
 ) keeper
   ON keeper.concept_key = legacy.concept_key
 WHERE LOWER(TRIM(COALESCE(legacy.vertical_norm, ''))) IN ('education', 'global', '__global__', '', 'none', 'null')
-  AND NOT EXISTS (
-    SELECT 1
-    FROM _semantic_registry_vertical_remap existing
-    WHERE existing.old_id = legacy.id
-  );
+;
 
 UPDATE semantic_registry sr
 JOIN _semantic_registry_vertical_remap remap
@@ -119,4 +115,4 @@ JOIN _semantic_registry_vertical_remap remap
   ON remap.old_id = sr.id
 WHERE remap.old_id <> remap.new_id;
 
-DROP TEMPORARY TABLE IF EXISTS _semantic_registry_vertical_remap;
+DROP TABLE IF EXISTS _semantic_registry_vertical_remap;

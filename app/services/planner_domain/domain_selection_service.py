@@ -83,7 +83,6 @@ class DomainSelectionService:
         *,
         workspace_id: str,
         user_id: str,
-        vertical_norm: str,
         prompt: str,
         provided_domain_id: Optional[int],
     ) -> Tuple[List[Dict[str, Any]], int, Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
@@ -96,7 +95,6 @@ class DomainSelectionService:
         self._last_pipeline_context = None
         domain_candidates = self._get_domain_candidates(
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             prompt=prompt,
             provided_domain_id=provided_domain_id,
         )
@@ -104,7 +102,6 @@ class DomainSelectionService:
             self._select_domain_and_shortlist_columns(
                 workspace_id=workspace_id,
                 user_id=user_id,
-                vertical_norm=vertical_norm,
                 prompt=prompt,
                 domain_candidates=domain_candidates,
             )
@@ -126,7 +123,6 @@ class DomainSelectionService:
         slot_hints: Optional[Mapping[str, Any]] = None,
         fast_mode: bool = False,
         workspace_id: Optional[str] = None,
-        vertical_norm: Optional[str] = None,
         projection_policy_service: Optional[PlannerProjectionPolicyService] = None,
         capability_packing_policy_service: Optional[PlannerCapabilityPackingPolicyService] = None,
         include_projection_policy_debug: bool = False,
@@ -138,7 +134,6 @@ class DomainSelectionService:
             slot_hints=slot_hints,
             fast_mode=fast_mode,
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             projection_policy_service=projection_policy_service,
             capability_packing_policy_service=capability_packing_policy_service,
             include_projection_policy_debug=include_projection_policy_debug,
@@ -162,14 +157,12 @@ class DomainSelectionService:
         score = (vector_score * 0.65) + (shortlist_ratio * 0.35)
         score += (selection_policy_service or PlannerDomainSelectionPolicyService()).score_adjustment(
             workspace_id=None,
-            vertical_norm=None,
             prompt_signals=PromptSignalService().extract_signals(prompt=prompt),
             shortlist_features=_collect_domain_selection_shortlist_features(shortlisted_columns=shortlisted_columns),
             capability_features=_collect_domain_selection_capability_features(capabilities=capabilities),
         )
         score += PlannerRetrievalPolicyService(enable_db_lookup=False).score_domain_name_bias(
             workspace_id=None,
-            vertical_norm=None,
             prompt_signals=PromptSignalService().extract_signals(prompt=prompt),
             candidate_name=str(candidate.get("name") or ""),
         )
@@ -214,13 +207,11 @@ class DomainSelectionService:
         self,
         *,
         workspace_id: str,
-        vertical_norm: str,
         prompt: str,
         provided_domain_id: Optional[int],
     ) -> List[Dict[str, Any]]:
         return load_domain_candidates(
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             prompt=prompt,
             provided_domain_id=provided_domain_id,
             search_domains_fn=self._domain_vector.search_domains,
@@ -234,7 +225,6 @@ class DomainSelectionService:
         *,
         workspace_id: str,
         user_id: str,
-        vertical_norm: str,
         prompt: str,
         domain_candidates: Sequence[Mapping[str, Any]],
     ) -> Tuple[int, Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
@@ -248,7 +238,6 @@ class DomainSelectionService:
         ) = choose_domain_and_shortlist_columns(
             workspace_id=workspace_id,
             user_id=user_id,
-            vertical_norm=vertical_norm,
             prompt=prompt,
             domain_candidates=domain_candidates,
             get_domain_capabilities_fn=self._capabilities.get_domain_capabilities,

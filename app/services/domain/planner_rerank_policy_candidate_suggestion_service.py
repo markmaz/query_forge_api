@@ -57,14 +57,12 @@ class PlannerRerankPolicyCandidateSuggestionService:
         payload: Any,
     ) -> Dict[str, Any]:
         req = PlannerRerankPolicyCandidateSuggestRequest.model_validate(payload)
-        vertical_norm = "generic"
         prompt_signals = self._signals.extract_signals(prompt=req.prompt)
 
         expected_domain = self._build_domain_snapshot(
             workspace_id=workspace_id,
             user_id=user_id,
             domain_id=int(req.expected_base_domain_id),
-            vertical_norm=vertical_norm,
         )
         observed_domain = None
         if req.observed_base_domain_id is not None:
@@ -72,7 +70,6 @@ class PlannerRerankPolicyCandidateSuggestionService:
                 workspace_id=workspace_id,
                 user_id=user_id,
                 domain_id=int(req.observed_base_domain_id),
-                vertical_norm=vertical_norm,
             )
 
         llm_client, llm_resolution = self._resolve_llm(
@@ -87,7 +84,6 @@ class PlannerRerankPolicyCandidateSuggestionService:
                     user_prompt=_user_prompt(
                         prompt=req.prompt,
                         prompt_signals=prompt_signals,
-                        vertical_norm=vertical_norm,
                         expected_domain=expected_domain,
                         observed_domain=observed_domain,
                         notes=req.notes,
@@ -171,19 +167,16 @@ class PlannerRerankPolicyCandidateSuggestionService:
         workspace_id: str,
         user_id: str,
         domain_id: int,
-        vertical_norm: str,
     ) -> Dict[str, Any]:
         domain_name = self._load_domain_name(workspace_id=workspace_id, domain_id=domain_id)
         capabilities = self._domain_capabilities.get_domain_capabilities(
             workspace_id=workspace_id,
             user_id=user_id,
             domain_id=domain_id,
-            vertical_norm=vertical_norm,
         )
         dimensions = list(capabilities.get("dimensions") or [])
         resolved = self._planner_capabilities.resolve_capabilities(
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             base_domain_id=domain_id,
             capabilities=capabilities,
             shortlisted_columns=dimensions,
@@ -287,14 +280,12 @@ def _user_prompt(
     *,
     prompt: str,
     prompt_signals: List[str],
-    vertical_norm: str,
     expected_domain: Mapping[str, Any],
     observed_domain: Optional[Mapping[str, Any]],
     notes: Optional[str],
 ) -> str:
     context = {
         "task": "Suggest one pending planner rerank policy candidate.",
-        "vertical_norm": vertical_norm,
         "prompt": prompt,
         "prompt_signals": prompt_signals,
         "known_signals": sorted(PLANNER_RERANK_SIGNAL_KEYS),

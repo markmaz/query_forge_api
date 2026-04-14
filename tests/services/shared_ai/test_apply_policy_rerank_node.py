@@ -11,8 +11,8 @@ from app.services.shared_ai.nodes.apply_policy_rerank import ApplyPolicyRerankNo
 
 
 class _FakePolicyService:
-    def get_applicable_policies(self, *, workspace_id: str, vertical_norm: str, base_domain_id: int):
-        del workspace_id, vertical_norm
+    def get_applicable_policies(self, *, workspace_id: str, base_domain_id: int):
+        del workspace_id
         if base_domain_id != 6:
             return []
         return [
@@ -58,7 +58,6 @@ def test_apply_policy_rerank_node_reranks_candidates() -> None:
         trace_id="trace-1",
         workspace_id="ws-1",
         user_id="user-1",
-        vertical_norm="generic",
         request={},
     )
     context.set_artifact("capability_enriched_candidates", CandidateSetArtifact(candidates=[birth_date, k_student]))
@@ -127,7 +126,6 @@ def test_preferred_domain_id_ignores_expected_parse_errors() -> None:
         trace_id="trace-1",
         workspace_id="ws-1",
         user_id="user-1",
-        vertical_norm="generic",
         request={"preferred_domain_id": "not-an-int"},
     )
 
@@ -144,7 +142,6 @@ def test_preferred_domain_id_surfaces_unexpected_parse_errors() -> None:
         trace_id="trace-1",
         workspace_id="ws-1",
         user_id="user-1",
-        vertical_norm="generic",
         request={"preferred_domain_id": _BadInt()},
     )
 

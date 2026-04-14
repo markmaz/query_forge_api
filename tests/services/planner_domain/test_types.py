@@ -38,7 +38,6 @@ def test_plan_conversation_context_is_frozen() -> None:
         conversation_id="pdc_123",
         prior_prompt="show me students",
         prior_plan_json_v2={"intent": "list"},
-        prior_vertical_norm="education",
         followup_mode=True,
         seeded_from_client=False,
     )

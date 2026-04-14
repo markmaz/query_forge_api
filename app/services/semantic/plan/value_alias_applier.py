@@ -7,10 +7,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.semantic.value_alias_service import canonicalize_value
-from app.services.semantic.vertical_norm import normalize_semantic_vertical
 from app.services.semantic.plan.utils import _in_clause
 
 JSON_ROUNDTRIP_FALLBACK_ERRORS = (TypeError, ValueError)
+GENERIC_VERTICAL_NORM = "generic"
 
 
 class ValueAliasApplier:
@@ -21,10 +21,9 @@ class ValueAliasApplier:
     ) -> None:
         self._sql = sql or ForgeMetaSQL()
 
-    def apply(self, *, vertical_norm: str, llm_plan: Dict[str, Any]) -> Dict[str, Any]:
+    def apply(self, *, llm_plan: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(llm_plan, dict):
             return llm_plan
-        vertical = normalize_semantic_vertical(vertical_norm)
         raw_filters = llm_plan.get("filters")
         if not isinstance(raw_filters, list) or not raw_filters:
             return llm_plan
@@ -39,11 +38,10 @@ class ValueAliasApplier:
         if not concept_keys:
             return llm_plan
 
-        rules_by_concept = self._load_value_alias_rules(vertical_norm=vertical, concept_keys=concept_keys)
+        rules_by_concept = self._load_value_alias_rules(concept_keys=concept_keys)
         normalized_filters, changed = ValueAliasApplier._normalize_filters_with_value_aliases(raw_filters, rules_by_concept)
         normalized_filters, canonical_changed = ValueAliasApplier._canonicalize_filters_with_static_aliases(
             filters=normalized_filters,
-            vertical_norm=vertical,
         )
         total_changed = changed + canonical_changed
         if total_changed <= 0:
@@ -58,7 +56,7 @@ class ValueAliasApplier:
         out["notes"] = notes
         return out
 
-    def _load_value_alias_rules(self, *, vertical_norm: str, concept_keys: Sequence[str]) -> Dict[str, List[Dict[str, Any]]]:
+    def _load_value_alias_rules(self, *, concept_keys: Sequence[str]) -> Dict[str, List[Dict[str, Any]]]:
         keys = [str(k or "").strip().upper() for k in concept_keys if str(k or "").strip()]
         if not keys:
             return {}
@@ -70,22 +68,16 @@ class ValueAliasApplier:
               va.alias_value,
               va.canonical_value,
               va.match_kind,
-              va.weight,
-              va.vertical_norm
+              va.weight
             FROM semantic_value_alias va
             JOIN semantic_concept sc ON sc.id = va.semantic_concept_id
             WHERE sc.concept_key IN ({in_sql})
-              AND va.vertical_norm IN (:vertical_norm, 'generic')
             ORDER BY
-              CASE WHEN va.vertical_norm = :vertical_norm THEN 0 ELSE 1 END,
               sc.concept_key,
               va.weight DESC,
               va.id ASC
             """,
-            {
-                **in_params,
-                "vertical_norm": normalize_semantic_vertical(vertical_norm),
-            },
+            in_params,
         )
         out: Dict[str, List[Dict[str, Any]]] = {}
         for row in rows:
@@ -170,7 +162,6 @@ class ValueAliasApplier:
     def _canonicalize_filters_with_static_aliases(
         *,
         filters: Sequence[Dict[str, Any]],
-        vertical_norm: str,
     ) -> Tuple[List[Dict[str, Any]], int]:
         out: List[Dict[str, Any]] = []
         changed = 0
@@ -181,7 +172,7 @@ class ValueAliasApplier:
             concept_key = str(item.get("concept_key") or "").strip().upper()
             value = item.get("value")
             if isinstance(value, str) and concept_key:
-                canonical = canonicalize_value(concept_key, value, vertical=vertical_norm)
+                canonical = canonicalize_value(concept_key, value, vertical=GENERIC_VERTICAL_NORM)
                 if canonical and canonical != value:
                     next_item = dict(item)
                     next_item["value"] = canonical

@@ -100,7 +100,6 @@ class ForgeMatchCandidateRetriever:
         workspace_id: str,
         source_record: SourceFieldRecord,
         top_n: int = 8,
-        vertical_norm: Optional[str] = None,
         domain_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         ws = str(workspace_id or "").strip()
@@ -113,7 +112,6 @@ class ForgeMatchCandidateRetriever:
             trace_id=f"forge_match_{uuid.uuid4().hex}",
             workspace_id=ws,
             user_id=None,
-            vertical_norm=str(vertical_norm or "generic"),
             request={
                 "prompt": str(source_record.normalized_search_text or source_record.source_field_name or "").strip(),
                 "source_record": source_record,
@@ -605,7 +603,6 @@ class ForgeMatchColumnRetrievalAdapter:
                     context.request.get("preferred_domain_id") or context.request.get("domain_id")
                 ),
                 "search_scope": "workspace_global",
-                "vertical_norm": str(context.vertical_norm or "generic"),
             },
         )
 

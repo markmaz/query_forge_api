@@ -27,12 +27,11 @@ class SemanticConceptEmbeddingService:
         self._qdrant = qdrant or QdrantClientWrapper(collection_name=COLLECTION_NAME)
         self._model = model or EmbeddingModel()
 
-    def rebuild_semantic_concept_index(self, vertical_norm: str) -> Dict[str, int]:
-        vertical = _norm_vertical(vertical_norm)
+    def rebuild_semantic_concept_index(self) -> Dict[str, int]:
         self._qdrant.ensure_collection(COLLECTION_NAME, VECTOR_SIZE)
 
-        concept_rows = self._load_concepts(vertical)
-        alias_rows = self._load_aliases(vertical)
+        concept_rows = self._load_concepts()
+        alias_rows = self._load_aliases()
 
         concept_count = self._upsert_concepts(concept_rows)
         alias_count = self._upsert_aliases(alias_rows)
@@ -48,7 +47,6 @@ class SemanticConceptEmbeddingService:
             """
             SELECT
               id,
-              vertical_norm,
               concept_key,
               name,
               description,
@@ -77,7 +75,6 @@ class SemanticConceptEmbeddingService:
             """
             SELECT
               a.id AS alias_id,
-              a.vertical_norm,
               a.alias_key,
               a.concept_key,
               a.match_kind,
@@ -88,10 +85,8 @@ class SemanticConceptEmbeddingService:
             FROM semantic_concept_alias a
             LEFT JOIN semantic_concept c
               ON c.concept_key = a.concept_key
-             AND c.vertical_norm IN (a.vertical_norm, 'generic')
              AND c.`status` = 'active'
             WHERE a.id = :id
-            ORDER BY CASE WHEN c.vertical_norm = a.vertical_norm THEN 0 ELSE 1 END
             LIMIT 1
             """,
             {"id": int(alias_id)},
@@ -100,12 +95,11 @@ class SemanticConceptEmbeddingService:
             return 0
         return self._upsert_aliases(rows)
 
-    def _load_concepts(self, vertical_norm: str) -> List[Dict[str, Any]]:
+    def _load_concepts(self) -> List[Dict[str, Any]]:
         return self._sql.execute_query_mappings(
             """
             SELECT
               id,
-              vertical_norm,
               concept_key,
               name,
               description,
@@ -119,18 +113,16 @@ class SemanticConceptEmbeddingService:
               is_metric
             FROM semantic_concept
             WHERE `status` = 'active'
-              AND vertical_norm IN (:vertical_norm, 'generic')
-            ORDER BY CASE WHEN vertical_norm = :vertical_norm THEN 0 ELSE 1 END, concept_key
+            ORDER BY concept_key
             """,
-            {"vertical_norm": vertical_norm},
+            None,
         )
 
-    def _load_aliases(self, vertical_norm: str) -> List[Dict[str, Any]]:
+    def _load_aliases(self) -> List[Dict[str, Any]]:
         return self._sql.execute_query_mappings(
             """
             SELECT
               a.id AS alias_id,
-              a.vertical_norm,
               a.alias_key,
               a.concept_key,
               a.match_kind,
@@ -141,12 +133,10 @@ class SemanticConceptEmbeddingService:
             FROM semantic_concept_alias a
             LEFT JOIN semantic_concept c
               ON c.concept_key = a.concept_key
-             AND c.vertical_norm IN (a.vertical_norm, 'generic')
              AND c.`status` = 'active'
-            WHERE a.vertical_norm IN (:vertical_norm, 'generic')
-            ORDER BY CASE WHEN a.vertical_norm = :vertical_norm THEN 0 ELSE 1 END, a.id
+            ORDER BY a.id
             """,
-            {"vertical_norm": vertical_norm},
+            None,
         )
 
     def _upsert_concepts(self, rows: Iterable[Dict[str, Any]]) -> int:
@@ -160,7 +150,6 @@ class SemanticConceptEmbeddingService:
             concept_id = int(row["id"])
             payload = {
                 "type": "concept",
-                "vertical_norm": row.get("vertical_norm"),
                 "concept_id": concept_id,
                 "concept_key": row.get("concept_key"),
                 "name": row.get("name"),
@@ -194,7 +183,6 @@ class SemanticConceptEmbeddingService:
             alias_id = int(row["alias_id"])
             payload = {
                 "type": "alias",
-                "vertical_norm": row.get("vertical_norm"),
                 "alias_id": alias_id,
                 "alias_key": row.get("alias_key"),
                 "concept_id": row.get("concept_id"),
@@ -232,11 +220,4 @@ class SemanticConceptEmbeddingService:
 
 def _point_id(kind: str, row_id: int) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"semantic:{kind}:{int(row_id)}"))
-
-
-def _norm_vertical(vertical_norm: str) -> str:
-    value = str(vertical_norm or "generic").strip().lower()
-    return value or "generic"
-
-
 __all__ = ["SemanticConceptEmbeddingService"]

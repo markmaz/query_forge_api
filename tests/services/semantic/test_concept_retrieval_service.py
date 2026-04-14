@@ -39,10 +39,8 @@ def test_concept_vector_dedup() -> None:
     )
     svc = ConceptRetrievalService(qdrant=qdrant, model=_FakeModel())
 
-    out = svc.search(prompt="black students by grade", vertical_norm="education", max_concepts=5)
+    out = svc.search(prompt="black students by grade", max_concepts=5)
     hits = out["hits"]
     assert len([h for h in hits if h["concept_key"] == "GRADE_LEVEL"]) == 1
     assert any(h["concept_key"] == "RACE" for h in hits)
-    match_any = qdrant.query_filters[0].must[1].match.any
-    assert "generic" in match_any
-    assert "education" not in match_any
+    assert len(qdrant.query_filters[0].must) == 1

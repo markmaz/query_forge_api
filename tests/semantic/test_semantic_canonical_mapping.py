@@ -57,28 +57,25 @@ class _StubLabeler:
 
 
 class _StubMatcher:
-    def load_known_concepts(self, vertical_norm: str) -> List[Dict[str, Any]]:
-        del vertical_norm
+    def load_known_concepts(self) -> List[Dict[str, Any]]:
         return [
             {"concept_key": "SCHOOL_ID"},
             {"concept_key": "SCHOOL_YEAR"},
             {"concept_key": "CITY"},
         ]
 
-    def load_alias_rules(self, vertical_norm: str) -> List[Dict[str, Any]]:
-        del vertical_norm
+    def load_alias_rules(self) -> List[Dict[str, Any]]:
         return []
 
     def resolve_pre_llm(
         self,
         *,
         card: Dict[str, Any],
-        vertical_norm: str,
         known_concepts: Optional[List[Dict[str, Any]]] = None,
         alias_rules: Optional[List[Dict[str, Any]]] = None,
         alias_conf_threshold: float = 0.75,
     ):
-        del vertical_norm, known_concepts, alias_rules, alias_conf_threshold
+        del known_concepts, alias_rules, alias_conf_threshold
         col = str(card.get("columnName") or "").lower()
         if col == "k_school":
             return (
@@ -130,11 +127,10 @@ class _StubMatcher:
         self,
         card: Dict[str, Any],
         proposal: Dict[str, Any],
-        vertical_norm: str,
         known_concepts: Optional[List[Dict[str, Any]]] = None,
         alias_rules: Optional[List[Dict[str, Any]]] = None,
     ):
-        del vertical_norm, known_concepts, alias_rules
+        del known_concepts, alias_rules
         out = dict(proposal)
         if str(out.get("concept_source") or "").lower() == "deterministic":
             return out, []
@@ -163,8 +159,6 @@ def _run_row(status: str = "created") -> Dict[str, Any]:
     return {
         "id": 55,
         "workspace_id": "ws1",
-        "vertical": "education",
-        "vertical_norm": "education",
         "status": status,
         "params_json": '{"page_size": 100}',
         "total_columns": 0,
@@ -191,7 +185,6 @@ def test_llm_canonical_not_in_known_list_flips_to_fallback() -> None:
         [
             {
                 "id": 1,
-                "vertical_norm": "education",
                 "concept_key": "SCHOOL_YEAR",
                 "semantic_type": "time",
                 "sub_type": "time.year",
@@ -218,7 +211,6 @@ def test_llm_canonical_not_in_known_list_flips_to_fallback() -> None:
             "canonical_match_confidence": 0.9,
             "semantic_type": "attribute",
         },
-        vertical_norm="education",
     )
 
     assert out["concept_source"] == "fallback"
@@ -233,7 +225,6 @@ def test_alias_and_heuristic_mapping() -> None:
         [
             {
                 "id": 3,
-                "vertical_norm": "education",
                 "concept_key": "STATE_COURSE_CODE",
                 "semantic_type": "identifier",
                 "sub_type": None,
@@ -255,12 +246,10 @@ def test_alias_and_heuristic_mapping() -> None:
     out_alias, _notes_alias = matcher.enforce_canonical_if_strong(
         card={"columnName": "k_school", "description": "", "samples": []},
         proposal={"concept_key": "K_SCHOOL", "concept_source": "fallback", "canonical_match_confidence": 0.0},
-        vertical_norm="education",
     )
     out_heuristic, _notes_heuristic = matcher.enforce_canonical_if_strong(
         card={"columnName": "state_course_code", "description": "", "samples": ["C18H81"]},
         proposal={"concept_key": "STATE_COURSE_CODE", "concept_source": "fallback", "canonical_match_confidence": 0.0},
-        vertical_norm="education",
     )
 
     assert out_alias["concept_key"] == "SCHOOL_ID"
@@ -273,7 +262,6 @@ def test_match_by_alias_ignores_expected_weight_parse_errors() -> None:
     matcher = SemanticConceptMatcher(sql=FakeForgeQueryPort())
     candidate, notes = matcher.match_by_alias(
         {"columnName": "student_identifier"},
-        vertical_norm="education",
         alias_rules=[
             {
                 "alias_key": "student_identifier",
@@ -289,26 +277,25 @@ def test_match_by_alias_ignores_expected_weight_parse_errors() -> None:
     assert notes == ["alias_match:exact:student_identifier"]
 
 
-def test_matcher_load_known_concepts_normalizes_education_to_generic() -> None:
+def test_matcher_load_known_concepts_uses_generic_lookup() -> None:
     sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [[]]
     matcher = SemanticConceptMatcher(sql=sql)
 
-    matcher.load_known_concepts("education")
+    matcher.load_known_concepts()
 
     assert sql.query_mappings_calls
-    assert (sql.query_mappings_calls[0].params or {})["vertical"] == "generic"
+    assert (sql.query_mappings_calls[0].params or {}) == {}
 
-
-def test_matcher_load_alias_rules_normalizes_global_to_generic() -> None:
+def test_matcher_load_alias_rules_uses_generic_lookup() -> None:
     sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [[]]
     matcher = SemanticConceptMatcher(sql=sql)
 
-    matcher.load_alias_rules("global")
+    matcher.load_alias_rules()
 
     assert sql.query_mappings_calls
-    assert (sql.query_mappings_calls[0].params or {})["vertical"] == "generic"
+    assert (sql.query_mappings_calls[0].params or {}) == {}
 
 
 def test_match_by_heuristics_works_under_generic_vertical() -> None:
@@ -316,7 +303,6 @@ def test_match_by_heuristics_works_under_generic_vertical() -> None:
 
     key, notes = matcher.match_by_heuristics(
         {"columnName": "k_school", "description": "", "samples": []},
-        vertical_norm="generic",
     )
 
     assert key == "SCHOOL_ID"
@@ -333,7 +319,6 @@ def test_match_by_alias_surfaces_unexpected_weight_parse_errors() -> None:
     with pytest.raises(AssertionError, match="weight bug"):
         matcher.match_by_alias(
             {"columnName": "student_identifier"},
-            vertical_norm="education",
             alias_rules=[
                 {
                     "alias_key": "student_identifier",
@@ -450,7 +435,6 @@ def test_alias_override_k_school_to_school_id() -> None:
         [
             {
                 "id": 500,
-                "vertical_norm": "education",
                 "concept_key": "SCHOOL_ID",
                 "semantic_type": "identifier",
                 "sub_type": None,
@@ -526,7 +510,6 @@ def test_k_lea_to_lea_id_identifier_prepass() -> None:
     matcher = SemanticConceptMatcher(sql=FakeForgeQueryPort())
     proposal, _notes = matcher.resolve_pre_llm(
         card={"columnName": "k_lea", "description": "", "samples": []},
-        vertical_norm="education",
         known_concepts=[],
         alias_rules=[],
     )
@@ -540,7 +523,6 @@ def test_k_school_to_school_id_identifier_prepass() -> None:
     matcher = SemanticConceptMatcher(sql=FakeForgeQueryPort())
     proposal, _notes = matcher.resolve_pre_llm(
         card={"columnName": "k_school", "description": "", "samples": []},
-        vertical_norm="education",
         known_concepts=[],
         alias_rules=[],
     )
@@ -554,7 +536,6 @@ def test_student_id_to_student_id_identifier_prepass() -> None:
     matcher = SemanticConceptMatcher(sql=FakeForgeQueryPort())
     proposal, _notes = matcher.resolve_pre_llm(
         card={"columnName": "student_id", "description": "", "samples": []},
-        vertical_norm="education",
         known_concepts=[],
         alias_rules=[],
     )
@@ -568,7 +549,6 @@ def test_tenant_code_to_tenant_code_identifier_prepass() -> None:
     matcher = SemanticConceptMatcher(sql=FakeForgeQueryPort())
     proposal, _notes = matcher.resolve_pre_llm(
         card={"columnName": "tenant_code", "description": "", "samples": []},
-        vertical_norm="education",
         known_concepts=[],
         alias_rules=[],
     )

@@ -136,7 +136,6 @@ def _merge_domain_query_specs(
 def get_domain_candidates(
     *,
     workspace_id: str,
-    vertical_norm: str,
     prompt: str,
     provided_domain_id: Optional[int],
     search_domains_fn: Callable[..., Mapping[str, Any]],
@@ -148,7 +147,7 @@ def get_domain_candidates(
     if provided is not None and provided > 0:
         return [{"domain_id": provided, "name": f"domain_{provided}", "score": 1.0, "source": "provided"}]
 
-    semantic_constraints = semantic_alias_constraints_fn(prompt=prompt, vertical_norm=vertical_norm)
+    semantic_constraints = semantic_alias_constraints_fn(prompt=prompt)
     prompt_signals = extract_prompt_signals_fn(prompt=prompt)
     semantic_concept_keys = _semantic_constraint_concept_keys(semantic_constraints)
     query_specs = _merge_domain_query_specs(
@@ -161,7 +160,6 @@ def get_domain_candidates(
             },
             *retrieval_policy_service.build_query_specs(
                 workspace_id=workspace_id,
-                vertical_norm=vertical_norm,
                 prompt_signals=prompt_signals,
                 semantic_concept_keys=semantic_concept_keys,
             ),

@@ -12,7 +12,6 @@ def test_packing_policy_returns_school_listing_location_actions() -> None:
 
     out = service.get_packing_requirements(
         workspace_id="ws_demo",
-        vertical_norm="k12",
         prompt_signals=["school_listing", "city_state_prompt"],
         capability_features=["HAS_PREFERRED_STATE_COLUMN"],
     )
@@ -30,7 +29,6 @@ def test_packing_policy_returns_nativity_filter_support() -> None:
 
     out = service.get_packing_requirements(
         workspace_id="ws_demo",
-        vertical_norm="k12",
         prompt_signals=["nativity_prompt"],
         capability_features=[],
     )
@@ -44,7 +42,6 @@ def test_packing_policy_returns_canonical_name_preference() -> None:
 
     out = service.get_packing_requirements(
         workspace_id="ws_demo",
-        vertical_norm="k12",
         prompt_signals=["canonical_name_preference_prompt"],
         capability_features=["HAS_CANONICAL_NAME_COLUMNS"],
     )
@@ -58,7 +55,6 @@ def test_packing_policy_returns_name_constraint_support() -> None:
 
     out = service.get_packing_requirements(
         workspace_id="ws_demo",
-        vertical_norm="k12",
         prompt_signals=["name_constraint_prompt"],
         capability_features=[],
     )
@@ -77,7 +73,6 @@ def test_packing_policy_service_falls_back_on_expected_db_lookup_errors() -> Non
 
     out = service.get_packing_requirements(
         workspace_id="ws_demo",
-        vertical_norm="k12",
         prompt_signals=["school_listing", "city_state_prompt"],
         capability_features=["HAS_PREFERRED_STATE_COLUMN"],
     )
@@ -100,7 +95,6 @@ def test_packing_policy_service_surfaces_unexpected_policy_parse_errors(monkeypa
     with pytest.raises(AssertionError, match="unexpected policy parse bug"):
         service.get_packing_requirements(
             workspace_id="ws_demo",
-            vertical_norm="k12",
             prompt_signals=["school_listing"],
             capability_features=[],
         )

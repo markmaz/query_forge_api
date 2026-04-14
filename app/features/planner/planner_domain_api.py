@@ -40,7 +40,6 @@ plan_domain_request_model = planner_ns.model(
     "PlannerDomainRequest",
     {
         "workspace_id": fields.String(required=False),
-        "vertical_norm": fields.String(required=False, default="generic"),
         "prompt": fields.String(required=True),
         "conversation_id": fields.String(required=False),
         "context_seed_plan_json_v2": fields.Raw(required=False),
@@ -61,13 +60,25 @@ next_actions_request_model = planner_ns.model(
         "workspace_id": fields.String(required=False),
         "prompt": fields.String(required=True),
         "plan_json_v2": fields.Raw(required=True),
-        "vertical_norm": fields.String(required=False, default="generic"),
         "base_domain_id": fields.Integer(required=False),
         "conversation_id": fields.String(required=False),
         "trace_id": fields.String(required=False),
         "llm_id": fields.Integer(required=False, description="Optional workspace LLM override id"),
     },
 )
+
+
+_PLAN_DOMAIN_FIELDS = frozenset(plan_domain_request_model.keys())
+_NEXT_ACTION_FIELDS = frozenset(next_actions_request_model.keys())
+
+
+def _reject_unknown_fields(body: Dict[str, Any], *, allowed_fields: frozenset[str]) -> None:
+    unknown_fields = sorted(set(body) - allowed_fields)
+    if not unknown_fields:
+        return
+    if len(unknown_fields) == 1:
+        raise ForgeError(f"Unsupported field: {unknown_fields[0]}", status_code=400)
+    raise ForgeError(f"Unsupported fields: {', '.join(unknown_fields)}", status_code=400)
 
 
 @planner_ns.route("/plan_domain")
@@ -80,6 +91,7 @@ class PlannerPlanDomain(Resource):
         planner_service = PlannerDomainService()
         with _PlanFailureTraceContext(planner_service=planner_service, payload=body):
             body = request.get_json(silent=True) or {}
+            _reject_unknown_fields(body, allowed_fields=_PLAN_DOMAIN_FIELDS)
             header_workspace_id = extract_workspace_id()
             payload_workspace_id = str(body.get("workspace_id") or "").strip()
             if payload_workspace_id and payload_workspace_id != header_workspace_id:
@@ -113,6 +125,7 @@ class PlannerPlanDomainNextActions(Resource):
     @planner_ns.expect(next_actions_request_model, validate=False)
     def post(self):
         body: Dict[str, Any] = request.get_json(silent=True) or {}
+        _reject_unknown_fields(body, allowed_fields=_NEXT_ACTION_FIELDS)
         header_workspace_id = extract_workspace_id()
         payload_workspace_id = str(body.get("workspace_id") or "").strip()
         if payload_workspace_id and payload_workspace_id != header_workspace_id:

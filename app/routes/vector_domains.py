@@ -21,7 +21,6 @@ _domain_search_request_model = vector_ns.model(
     "DomainVectorSearchRequest",
     {
         "workspace_id": fields.String(required=False),
-        "vertical_norm": fields.String(required=False, default="generic"),
         "query": fields.String(required=True),
         "limit": fields.Integer(required=False, default=5),
         "score_threshold": fields.Float(required=False, default=0.2),
@@ -77,7 +76,6 @@ class DomainVectorSearch(Resource):
         if not query:
             raise ForgeError("query is required", status_code=400)
 
-        vertical_norm = str(body.get("vertical_norm") or "generic").strip().lower() or "generic"
         limit = _parse_int(body.get("limit"), default=5)
         score_threshold = _parse_float(body.get("score_threshold"), default=0.2)
         include_payload = _parse_bool(body.get("include_payload"), default=True)
@@ -86,7 +84,6 @@ class DomainVectorSearch(Resource):
         result = svc.search_domains(
             workspace_id=header_workspace_id,
             query=query,
-            vertical_norm=vertical_norm,
             limit=limit,
             score_threshold=score_threshold,
             include_payload=include_payload,

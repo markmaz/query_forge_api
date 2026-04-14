@@ -16,7 +16,6 @@ def test_resolve_capabilities_node_infers_column_capabilities() -> None:
         trace_id="trace-1",
         workspace_id="ws-1",
         user_id="user-1",
-        vertical_norm="generic",
         request={},
     )
     context.set_artifact(

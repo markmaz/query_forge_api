@@ -146,7 +146,7 @@ def test_plan_normalizes_legacy_vertical_before_concept_retrieval() -> None:
         include_llm=False,
     )
 
-    assert concept_retrieval.calls[0]["vertical_norm"] == "generic"
+    assert "vertical_norm" not in concept_retrieval.calls[0]
 
 
 def test_plan_degrades_when_tier2_runner_runtime_fails(monkeypatch) -> None:

@@ -59,7 +59,7 @@ def test_plan_domain_route_returns_service_payload(client, monkeypatch):
     monkeypatch.setattr(planner_domain_route, "PlannerDomainService", _Svc)
     resp = client.post(
         "/api/v1/planner/plan_domain",
-        json={"workspace_id": "ws-1", "prompt": "students per teacher by county", "vertical_norm": "education"},
+        json={"workspace_id": "ws-1", "prompt": "students per teacher by county"},
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 200
@@ -73,7 +73,7 @@ def test_plan_domain_route_calendar_days_off_workflow_payload_survives_http_boun
     class _Svc:
         def plan(self, payload, *, user_id):
             assert payload["prompt"] == prompt
-            assert payload["vertical_norm"] == "education"
+            assert "vertical_norm" not in payload
             assert payload["workspace_id"] == "ws-1"
             assert user_id == "user-1"
             return {
@@ -105,7 +105,7 @@ def test_plan_domain_route_calendar_days_off_workflow_payload_survives_http_boun
     monkeypatch.setattr(planner_domain_route, "PlannerDomainService", _Svc)
     resp = client.post(
         "/api/v1/planner/plan_domain",
-        json={"workspace_id": "ws-1", "prompt": prompt, "vertical_norm": "education", "debug": True},
+        json={"workspace_id": "ws-1", "prompt": prompt, "debug": True},
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 200
@@ -219,6 +219,24 @@ def test_plan_domain_route_workspace_mismatch(client, monkeypatch):
     resp = client.post(
         "/api/v1/planner/plan_domain",
         json={"workspace_id": "ws-other", "prompt": "students by county"},
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 400
+
+
+def test_plan_domain_route_rejects_unknown_field(client, monkeypatch):
+    class _Svc:
+        def emit_failed_plan_trace(self, *, payload, user_id, error):
+            del payload, user_id, error
+            return None
+
+        def plan(self, payload, *, user_id):
+            raise AssertionError("plan should not be called")
+
+    monkeypatch.setattr(planner_domain_route, "PlannerDomainService", _Svc)
+    resp = client.post(
+        "/api/v1/planner/plan_domain",
+        json={"workspace_id": "ws-1", "prompt": "students per teacher by county", "vertical_norm": "education"},
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 400

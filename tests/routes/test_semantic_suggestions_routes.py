@@ -55,7 +55,7 @@ def test_items_filtering_endpoint(client, monkeypatch):
     assert captured["page_size"] == 10
 
 
-def test_create_run_route_omits_vertical_fields_from_response(client, monkeypatch):
+def test_create_run_route_returns_run_without_removed_vertical_fields(client, monkeypatch):
     class _Svc:
         def create_run(self, payload, *, created_by=None):
             assert payload == {"workspace_id": "ws-1"}
@@ -63,8 +63,6 @@ def test_create_run_route_omits_vertical_fields_from_response(client, monkeypatc
             return {
                 "id": 7,
                 "workspace_id": "ws-1",
-                "vertical": "generic",
-                "vertical_norm": "generic",
                 "status": "created",
                 "params_json": {},
             }

@@ -58,7 +58,6 @@ class ForgeMatchSessionJobCoordinator:
         *,
         workspace_id: str,
         session_id: str,
-        vertical_norm: Optional[str] = None,
         domain_id: Optional[int] = None,
         top_n: int = 8,
         force: bool = False,
@@ -67,7 +66,6 @@ class ForgeMatchSessionJobCoordinator:
         return self.run_analyze_job(
             workspace_id=workspace_id,
             session_id=session_id,
-            vertical_norm=vertical_norm,
             domain_id=domain_id,
             top_n=top_n,
             force=force,
@@ -82,7 +80,6 @@ class ForgeMatchSessionJobCoordinator:
         session_id: str,
         top_n: int = 8,
         domain_id: Optional[int] = None,
-        vertical_norm: Optional[str] = None,
         force: bool = False,
         llm_id: Optional[int] = None,
     ) -> Dict[str, Any]:
@@ -126,7 +123,6 @@ class ForgeMatchSessionJobCoordinator:
             "message": "ForgeMatch analysis queued",
             "top_n": max(3, int(top_n or 8)),
             "domain_id": int(domain_id) if domain_id is not None else None,
-            "vertical_norm": _to_text_or_none(vertical_norm),
             "force": bool(force),
             "llm_id": int(llm_id) if llm_id is not None else None,
         }
@@ -136,7 +132,6 @@ class ForgeMatchSessionJobCoordinator:
         *,
         workspace_id: str,
         session_id: str,
-        vertical_norm: Optional[str] = None,
         domain_id: Optional[int] = None,
         top_n: int = 8,
         force: bool = False,
@@ -148,12 +143,10 @@ class ForgeMatchSessionJobCoordinator:
             trace_id=f"forge_match_session:{uuid.uuid4().hex}",
             workspace_id=workspace_id,
             user_id=None,
-            vertical_norm=str(vertical_norm or "generic"),
             request={
                 "session_id": session_id,
                 "job_id": _to_text_or_none(job_id),
                 "top_n": max(3, int(top_n or 8)),
-                "vertical_norm": _to_text_or_none(vertical_norm),
                 "domain_id": int(domain_id) if domain_id is not None else None,
                 "preferred_domain_id": int(domain_id) if domain_id is not None else None,
                 "force": bool(force),

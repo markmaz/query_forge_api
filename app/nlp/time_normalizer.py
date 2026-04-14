@@ -14,14 +14,14 @@ class CanonicalTime:
 
 
 def normalize_time_terms(terms: Sequence[str], vertical: str) -> List[CanonicalTime]:
-    vertical_norm = str(vertical or "generic").strip().lower() or "generic"
+    vertical_key = str(vertical or "generic").strip().lower() or "generic"
     out: List[CanonicalTime] = []
     seen: set[str] = set()
     for raw in terms or []:
         text = _norm(raw)
         if text == "":
             continue
-        rows = _normalize_education_time(text) if vertical_norm == "education" else _normalize_generic_time(text)
+        rows = _normalize_education_time(text) if vertical_key == "education" else _normalize_generic_time(text)
         for row in rows:
             key = f"{row.key}::{row.value}"
             if key in seen:

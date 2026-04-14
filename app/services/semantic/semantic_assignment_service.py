@@ -81,18 +81,15 @@ class SemanticAssignmentService:
         semantic_concept_id: int,
         relationship_kind: str = "primary",
         weight: float = 1.0,
-        vertical_norm: str = "generic",
     ) -> int:
         return self._sql.execute_write(
             """
             INSERT INTO workspace_column_semantic_concept_map (
-              vertical_norm,
               semantic_concept_id,
               workspace_column_id,
               relationship_kind,
               weight
             ) VALUES (
-              :vertical_norm,
               :semantic_concept_id,
               :workspace_column_id,
               :relationship_kind,
@@ -102,7 +99,6 @@ class SemanticAssignmentService:
               weight = GREATEST(weight, VALUES(weight))
             """,
             {
-                "vertical_norm": (str(vertical_norm or "generic").strip().lower() or "generic"),
                 "semantic_concept_id": int(semantic_concept_id),
                 "workspace_column_id": int(workspace_column_id),
                 "relationship_kind": (str(relationship_kind or "primary").strip().lower() or "primary"),

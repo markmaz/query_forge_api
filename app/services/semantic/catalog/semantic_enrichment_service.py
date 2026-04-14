@@ -30,7 +30,6 @@ class SemanticEnrichmentLLMInterface(Protocol):
         *,
         profiles: Sequence[ColumnProfile],
         workspace_id: str,
-        vertical_norm: str,
         domain_name: Optional[str],
         llm_id: Optional[int] = None,
     ) -> List[ColumnEnrichment]:
@@ -61,7 +60,6 @@ class LLMSemanticEnrichmentClient:
         *,
         profiles: Sequence[ColumnProfile],
         workspace_id: str,
-        vertical_norm: str,
         domain_name: Optional[str],
         llm_id: Optional[int] = None,
     ) -> List[ColumnEnrichment]:
@@ -104,7 +102,6 @@ class LLMSemanticEnrichmentClient:
         ]
 
         prompt_payload = {
-            "vertical_norm": vertical_norm,
             "domain_name": domain_name,
             "cards": cards,
         }
@@ -221,7 +218,6 @@ class SemanticEnrichmentService:
         *,
         profiles: Sequence[ColumnProfile],
         workspace_id: str,
-        vertical_norm: str,
         domain_name: Optional[str],
         llm_id: Optional[int] = None,
     ) -> List[EnrichedColumnProfile]:
@@ -247,7 +243,6 @@ class SemanticEnrichmentService:
                 llm_items = self._llm.enrich_batch(
                     profiles=batch_profiles,
                     workspace_id=workspace_id,
-                    vertical_norm=vertical_norm,
                     domain_name=domain_name,
                     llm_id=llm_id,
                 )

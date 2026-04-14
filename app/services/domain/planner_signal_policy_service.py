@@ -610,8 +610,7 @@ class PlannerSignalPolicyService:
         self._sql = sql or ForgeMetaSQL()
         self._enable_db_lookup = bool(enable_db_lookup)
 
-    def extract_policy_signals(self, *, prompt: str, workspace_id: str | None = None, vertical_norm: str | None = None) -> list[str]:
-        del vertical_norm
+    def extract_policy_signals(self, *, prompt: str, workspace_id: str | None = None) -> list[str]:
         text = str(prompt or "").strip()
         if not text:
             return []
@@ -686,7 +685,6 @@ class PlannerSignalPolicyService:
         policies: list[dict[str, Any]] = []
         for row in rows:
             payload = _json_safe_mapping(dict(row))
-            payload.pop("scope_vertical_norm", None)
             payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             payload["is_seeded"] = bool(payload.get("_seeded"))
             payload["can_edit"] = not payload["is_seeded"]

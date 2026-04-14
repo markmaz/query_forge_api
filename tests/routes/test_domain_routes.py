@@ -596,6 +596,34 @@ def test_planner_rerank_policy_candidates_post_success(client, auth_headers, mon
     assert resp.json["candidate_id"] == 21
 
 
+def test_planner_rerank_policy_candidates_post_rejects_removed_vertical_field(client, auth_headers, monkeypatch):
+    class _Svc:
+        def create_candidate(self, *, workspace_id: str, payload):
+            del workspace_id, payload
+            raise AssertionError("service should not be called")
+
+    monkeypatch.setattr(domain_routes, "PlannerRerankPolicyCandidateService", _Svc)
+    resp = client.post(
+        "/api/v1/domains/planner-rerank-policy-candidates",
+        headers=auth_headers,
+        json={
+            "candidate": {
+                "candidate_key": "candidate_1",
+                "vertical_norm": "education",
+                "candidate_policy": {
+                    "version": 1,
+                    "when_signals_all": ["student_listing"],
+                    "prefer_capabilities": ["STUDENT_IDENTITY"],
+                    "boost": 0.2,
+                    "max_effect": 0.2,
+                },
+            }
+        },
+    )
+    assert resp.status_code == 400
+    assert any(error.get("loc") == ["vertical_norm"] for error in resp.json["details"]["errors"])
+
+
 def test_planner_rerank_policy_candidates_put_success(client, auth_headers, monkeypatch):
     class _Svc:
         def create_candidate(self, *, workspace_id: str, payload):
@@ -704,6 +732,28 @@ def test_planner_rerank_policy_candidate_suggest_success(client, auth_headers, m
     )
     assert resp.status_code == 201
     assert resp.json["candidate"]["candidate_id"] == 41
+
+
+def test_planner_rerank_policy_candidate_suggest_rejects_removed_vertical_field(client, auth_headers, monkeypatch):
+    class _Svc:
+        def suggest_candidate(self, *, workspace_id: str, user_id: str, payload):
+            del workspace_id, user_id, payload
+            raise AssertionError("service should not be called")
+
+    monkeypatch.setattr(domain_routes, "PlannerRerankPolicyCandidateSuggestionService", _Svc)
+    resp = client.post(
+        "/api/v1/domains/planner-rerank-policy-candidates/suggest",
+        headers=auth_headers,
+        json={
+            "suggestion": {
+                "prompt": "Show me all the students enrolled at Barksdale Elementary",
+                "expected_base_domain_id": 9,
+                "vertical_norm": "education",
+            }
+        },
+    )
+    assert resp.status_code == 400
+    assert any(error.get("loc") == ["vertical_norm"] for error in resp.json["details"]["errors"])
 
 
 def test_planner_rerank_policy_candidate_suggest_returns_validation_error(client, auth_headers, monkeypatch):

@@ -26,23 +26,23 @@ def test_get_relationship_fk_target_surfaces_unexpected_lookup_errors() -> None:
         repo._get_relationship_fk_target()
 
 
-def test_get_concepts_normalizes_legacy_vertical_to_generic() -> None:
+def test_get_concepts_queries_by_concept_key_only() -> None:
     sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [[]]
     repo = SemanticCatalogRepository(sql=sql)
 
-    out = repo.get_concepts(vertical_norm="education", concept_keys=["STUDENT_ID"])
+    out = repo.get_concepts(concept_keys=["STUDENT_ID"])
 
     assert out == []
-    assert sql.query_mappings_calls[0].params["vertical_norm"] == "generic"
+    assert "vertical_norm" not in (sql.query_mappings_calls[0].params or {})
 
 
-def test_get_aliases_by_concept_keys_normalizes_global_vertical_to_generic() -> None:
+def test_get_aliases_by_concept_keys_queries_by_concept_key_only() -> None:
     sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [[]]
     repo = SemanticCatalogRepository(sql=sql)
 
-    out = repo.get_aliases_by_concept_keys(vertical_norm="global", concept_keys=["STUDENT_ID"])
+    out = repo.get_aliases_by_concept_keys(concept_keys=["STUDENT_ID"])
 
     assert out == {}
-    assert sql.query_mappings_calls[0].params["vertical_norm"] == "generic"
+    assert "vertical_norm" not in (sql.query_mappings_calls[0].params or {})

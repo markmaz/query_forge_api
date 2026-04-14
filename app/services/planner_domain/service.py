@@ -48,7 +48,6 @@ from app.services.planner_domain.conversation_store import (
 )
 from app.services.planner_domain.conversation_context import (
     _bootstrap_conversation_state_from_seed,
-    _norm_vertical,
     _plan_conversation_context_from_state,
     normalize_plan_prompt,
 )
@@ -95,8 +94,6 @@ logger = logging.getLogger(__name__)
 
 CONVERSATION_STORE_FALLBACK_ERRORS = (OSError, ValkeyError)
 OPTIONAL_TIME_POLICY_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, ValueError, SQLAlchemyError)
-
-
 class PlannerDomainService:
     def __init__(
         self,
@@ -282,7 +279,6 @@ class PlannerDomainService:
                 prior_state = _bootstrap_conversation_state_from_seed(
                     workspace_id=req.workspace_id,
                     user_id=str(user_id),
-                    vertical_norm=req.vertical_norm,
                     seed_plan_json_v2=seed_plan,
                     seed_last_prompt=seed_last_prompt,
                 )
@@ -323,26 +319,21 @@ class PlannerDomainService:
 
         t_prompt_norm = perf_counter()
         normalized_prompt = normalize_plan_prompt(req.prompt)
-        vertical = _norm_vertical(req.vertical_norm)
-        if context is not None and vertical == "generic" and context.prior_vertical_norm in {"education", "healthcare"}:
-            vertical = context.prior_vertical_norm
         _add_pipeline_step(
             profile_steps=pipeline_profile_steps,
             enabled=profile_enabled,
-            step="normalize_prompt_and_vertical",
-            label="Normalize prompt and effective vertical",
+            step="normalize_prompt",
+            label="Normalize prompt and planner context",
             started_at=t_prompt_norm,
         )
         pipeline_trace["normalized_prompt"] = normalized_prompt
-        pipeline_trace["vertical_norm"] = vertical
         _append_pipeline_trace_step(
             trace=pipeline_trace,
             enabled=trace_capture_enabled,
-            step="normalize_prompt_and_vertical",
+            step="normalize_prompt",
             data={
                 "prompt": req.prompt,
                 "normalized_prompt": normalized_prompt,
-                "vertical_norm": vertical,
                 "conversation_context_used": context is not None,
                 "followup_mode": bool(context and context.followup_mode),
             },
@@ -363,7 +354,6 @@ class PlannerDomainService:
         ) = self._domain_selection.select_domain_and_shortlist(
             workspace_id=req.workspace_id,
             user_id=str(user_id),
-            vertical_norm=vertical,
             prompt=normalized_prompt,
             provided_domain_id=effective_domain_id,
         )
@@ -388,7 +378,6 @@ class PlannerDomainService:
         capabilities_full = DomainSelectionService.full_capabilities_for_execution(capabilities)
         semester_indicator_columns = self._semantic_integration.resolve_semester_indicator_columns(
             workspace_id=req.workspace_id,
-            vertical_norm=vertical,
             capabilities=capabilities_full,
         )
         timings["capabilities"] = _add_pipeline_step(
@@ -453,7 +442,6 @@ class PlannerDomainService:
                 slot_hints=None,
                 fast_mode=fast_mode,
                 workspace_id=req.workspace_id,
-                vertical_norm=vertical,
                 include_projection_policy_debug=bool(req.debug),
             )
             if req.debug:
@@ -463,7 +451,6 @@ class PlannerDomainService:
             semantic_grounding_bundle = self._semantic_integration.build_grounding_bundle(
                 prompt=normalized_prompt,
                 workspace_id=req.workspace_id,
-                vertical_norm=vertical,
                 base_domain_id=int(selected_domain_id),
                 base_domain_name=selected_domain_name,
                 capabilities_compact=semantic_capabilities,
@@ -478,7 +465,6 @@ class PlannerDomainService:
             prompt=req.prompt,
             normalized_prompt=normalized_prompt,
             workspace_id=req.workspace_id,
-            vertical_norm=vertical,
             base_domain_id=selected_domain_id,
             domain_name=selected_domain_name,
             capabilities=capabilities,
@@ -512,7 +498,6 @@ class PlannerDomainService:
             capabilities_llm=capabilities_llm,
             trace_id=trace_id,
             workspace_id=req.workspace_id,
-            vertical_norm=vertical,
             base_domain_id=selected_domain_id,
             base_domain_name=selected_domain_name,
             prompt=normalized_prompt,
@@ -668,7 +653,6 @@ class PlannerDomainService:
         return self._finalization.finalize(
             workspace_id=req.workspace_id,
             user_id=str(user_id),
-            vertical_norm=vertical,
             normalized_prompt=normalized_prompt,
             trace_id=trace_id,
             conversation_id=conversation_id,
@@ -751,7 +735,6 @@ class PlannerDomainService:
             workspace_id=req.workspace_id,
             user_id=str(user_id),
             domain_id=domain_id,
-            vertical_norm=_norm_vertical(req.vertical_norm),
         )
         capabilities_full = DomainSelectionService.full_capabilities_for_execution(capabilities=capabilities)
         selected_domain_name = str(plan_json.get("domain_name") or f"domain_{domain_id}").strip() or f"domain_{domain_id}"

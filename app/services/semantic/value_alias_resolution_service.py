@@ -5,15 +5,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
-from app.services.semantic.vertical_norm import normalize_semantic_vertical
 
 
 class ValueAliasResolutionService:
     def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
         self._sql = sql or ForgeMetaSQL()
 
-    def resolve(self, *, prompt: str, vertical_norm: str) -> List[Dict[str, Any]]:
-        vertical = normalize_semantic_vertical(vertical_norm)
+    def resolve(self, *, prompt: str) -> List[Dict[str, Any]]:
         ngrams = _build_ngrams(prompt)
         if not ngrams:
             return []
@@ -32,21 +30,16 @@ class ValueAliasResolutionService:
                 FROM semantic_value_alias va
                 JOIN semantic_concept sc
                   ON sc.id = va.semantic_concept_id
-                WHERE va.vertical_norm IN (:vertical_norm, 'generic')
-                  AND (
+                WHERE (
                     (va.match_kind = 'exact' AND LOWER(va.alias_value) = :ngram)
                     OR
                     (va.match_kind = 'contains' AND :ngram LIKE CONCAT('%', LOWER(va.alias_value), '%'))
                   )
                 ORDER BY
-                  CASE WHEN va.vertical_norm = :vertical_norm THEN 0 ELSE 1 END,
                   va.weight DESC,
                   va.id ASC
                 """,
-                {
-                    "vertical_norm": vertical,
-                    "ngram": ngram,
-                },
+                {"ngram": ngram},
             )
             for row in rows:
                 concept_key = str(row.get("concept_key") or "").strip().upper()

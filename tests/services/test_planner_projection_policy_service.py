@@ -82,7 +82,6 @@ def test_projection_policy_service_returns_seeded_student_listing_defaults() -> 
     svc = PlannerProjectionPolicyService(sql=_FakeSQL(rows_by_call=[[]]))
     out = svc.get_projection_requirements(
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=9,
         prompt_signals=["student_listing", "needs_student_identity"],
     )
@@ -97,7 +96,6 @@ def test_projection_policy_service_returns_seeded_human_school_filter_defaults()
     svc = PlannerProjectionPolicyService(sql=_FakeSQL(rows_by_call=[[]]))
     out = svc.get_projection_requirements(
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=9,
         prompt_signals=["needs_school_filter", "school_literal_present"],
     )
@@ -111,7 +109,6 @@ def test_projection_policy_service_returns_seeded_staff_role_filter_defaults() -
     svc = PlannerProjectionPolicyService(sql=_FakeSQL(rows_by_call=[[]]))
     out = svc.get_projection_requirements(
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=9,
         prompt_signals=["staff_role_prompt"],
     )
@@ -125,7 +122,6 @@ def test_projection_policy_service_returns_seeded_school_listing_defaults() -> N
     svc = PlannerProjectionPolicyService(sql=_FakeSQL(rows_by_call=[[]]))
     out = svc.get_projection_requirements(
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=9,
         prompt_signals=["school_listing", "listing_intent"],
     )
@@ -152,7 +148,6 @@ def test_projection_policy_service_prefers_more_specific_db_policy_over_seed() -
     )
     out = svc.get_projection_requirements(
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=9,
         prompt_signals=["student_listing"],
     )
@@ -183,7 +178,6 @@ def test_projection_policy_service_prefers_domain_and_workspace_scope_over_less_
 
     out = svc.get_projection_requirements(
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=9,
         prompt_signals=["student_listing"],
     )
@@ -225,7 +219,7 @@ def test_projection_policy_service_lists_seeded_and_db_policies() -> None:
         )
     )
 
-    out = svc.list_policies(workspace_id="ws-1", vertical_norm="education", base_domain_id=None)
+    out = svc.list_policies(workspace_id="ws-1", base_domain_id=None)
 
     assert out["workspace_id"] == "ws-1"
     assert out["policies"][0]["id"] == 21
@@ -321,7 +315,6 @@ def test_projection_policy_service_interpolates_scope_predicate() -> None:
 
     svc.get_applicable_policies(
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=9,
     )
 
@@ -341,7 +334,6 @@ def test_projection_policy_service_keeps_seeded_defaults_when_db_lookup_fails() 
     svc = PlannerProjectionPolicyService(sql=_RaisingSQL(rows_by_call=[]))
     out = svc.get_projection_requirements(
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=9,
         prompt_signals=["student_listing"],
     )

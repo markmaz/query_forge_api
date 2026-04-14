@@ -67,8 +67,8 @@ def _isolate_pipeline_logs(monkeypatch, tmp_path):
 
 
 class _FakeCapabilitiesService:
-    def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
-        del workspace_id, user_id, vertical_norm
+    def get_domain_capabilities(self, *, workspace_id, user_id, domain_id):
+        del workspace_id, user_id
         assert domain_id == 6
         return {
             "domain_id": 6,
@@ -208,8 +208,8 @@ class _FakeValueAliasResolver:
         self.rows = list(rows or [])
         self.should_raise = should_raise
 
-    def resolve(self, *, prompt: str, vertical_norm: str):
-        del prompt, vertical_norm
+    def resolve(self, *, prompt: str):
+        del prompt
         if self.should_raise:
             raise RuntimeError("boom")
         return list(self.rows)
@@ -219,8 +219,8 @@ class _FakeSemanticGroundingService:
     def __init__(self) -> None:
         self.calls = []
 
-    def resolve_alias_constraints(self, *, prompt: str, vertical_norm: str):
-        del prompt, vertical_norm
+    def resolve_alias_constraints(self, *, prompt: str):
+        del prompt
         return [
             {
                 "kind": "unknown",
@@ -258,7 +258,6 @@ class _RankingSemanticGroundingService:
             candidates = SemanticCandidatePayload(
                 prompt="prompt",
                 workspace_id="ws-1",
-                vertical_norm="education",
                 base_domain_id=5,
                 base_domain_key="STAFF",
                 metric_candidates=[
@@ -276,7 +275,6 @@ class _RankingSemanticGroundingService:
         candidates = SemanticCandidatePayload(
             prompt="prompt",
             workspace_id="ws-1",
-            vertical_norm="education",
             base_domain_id=6,
             base_domain_key="STUDENTS",
             dimension_candidates=[
@@ -286,8 +284,8 @@ class _RankingSemanticGroundingService:
         )
         return SemanticGroundingBundle(candidates=candidates, alias_constraints=[])
 
-    def resolve_alias_constraints(self, *, prompt: str, vertical_norm: str):
-        del prompt, vertical_norm
+    def resolve_alias_constraints(self, *, prompt: str):
+        del prompt
         return []
 
 
@@ -295,8 +293,8 @@ class _FakePlannerRerankPolicyService:
     def __init__(self, rows=None) -> None:
         self.rows = list(rows or [])
 
-    def get_applicable_policies(self, *, workspace_id: str, vertical_norm: str, base_domain_id: int):
-        del workspace_id, vertical_norm, base_domain_id
+    def get_applicable_policies(self, *, workspace_id: str, base_domain_id: int):
+        del workspace_id, base_domain_id
         return list(self.rows)
 
 
@@ -409,8 +407,8 @@ def test_column_heuristic_boost_prefers_name_over_id_and_type_for_grouping() -> 
 
 
 class _FakeStaffCapabilitiesService:
-    def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
-        del workspace_id, user_id, vertical_norm
+    def get_domain_capabilities(self, *, workspace_id, user_id, domain_id):
+        del workspace_id, user_id
         assert domain_id == 5
         return {
             "domain_id": 5,
@@ -641,12 +639,11 @@ def test_plan_fast_mode_is_passed_to_slot_and_plan_calls(monkeypatch) -> None:
         *,
         normalized_prompt,
         workspace_id,
-        vertical_norm,
         base_domain_id,
         conversation_context=None,
         fast_mode=False,
     ):
-        del self, normalized_prompt, workspace_id, vertical_norm, base_domain_id, conversation_context
+        del self, normalized_prompt, workspace_id, base_domain_id, conversation_context
         captured["slot_fast_mode"] = fast_mode
         return SlotExtractionResult(
             payload={"intent": "list", "entity": "students", "constraints": [], "time_phrases": []},
@@ -660,7 +657,6 @@ def test_plan_fast_mode_is_passed_to_slot_and_plan_calls(monkeypatch) -> None:
         *,
         normalized_prompt,
         workspace_id,
-        vertical_norm,
         base_domain_id,
         capabilities,
         schema,
@@ -674,7 +670,6 @@ def test_plan_fast_mode_is_passed_to_slot_and_plan_calls(monkeypatch) -> None:
             self,
             normalized_prompt,
             workspace_id,
-            vertical_norm,
             base_domain_id,
             capabilities,
             schema,
@@ -734,12 +729,11 @@ def test_fast_mode_retries_when_first_plan_is_invalid(monkeypatch) -> None:
         *,
         normalized_prompt,
         workspace_id,
-        vertical_norm,
         base_domain_id,
         conversation_context=None,
         fast_mode=False,
     ):
-        del self, normalized_prompt, workspace_id, vertical_norm, base_domain_id, conversation_context, fast_mode
+        del self, normalized_prompt, workspace_id, base_domain_id, conversation_context, fast_mode
         return SlotExtractionResult(
             payload={"intent": "list", "entity": "students", "constraints": [], "time_phrases": []},
             raw_content="{}",
@@ -752,7 +746,6 @@ def test_fast_mode_retries_when_first_plan_is_invalid(monkeypatch) -> None:
         *,
         normalized_prompt,
         workspace_id,
-        vertical_norm,
         base_domain_id,
         capabilities,
         schema,
@@ -766,7 +759,6 @@ def test_fast_mode_retries_when_first_plan_is_invalid(monkeypatch) -> None:
             self,
             normalized_prompt,
             workspace_id,
-            vertical_norm,
             base_domain_id,
             capabilities,
             schema,
@@ -837,7 +829,6 @@ def test_unified_llm_invalid_json_falls_back_to_legacy_path(monkeypatch) -> None
         prompt,
         normalized_prompt,
         workspace_id,
-        vertical_norm,
         base_domain_id,
         domain_name,
         capabilities,
@@ -851,7 +842,6 @@ def test_unified_llm_invalid_json_falls_back_to_legacy_path(monkeypatch) -> None
             prompt,
             normalized_prompt,
             workspace_id,
-            vertical_norm,
             base_domain_id,
             domain_name,
             capabilities,
@@ -871,12 +861,11 @@ def test_unified_llm_invalid_json_falls_back_to_legacy_path(monkeypatch) -> None
         *,
         normalized_prompt,
         workspace_id,
-        vertical_norm,
         base_domain_id,
         conversation_context=None,
         fast_mode=False,
     ):
-        del self, normalized_prompt, workspace_id, vertical_norm, base_domain_id, conversation_context, fast_mode
+        del self, normalized_prompt, workspace_id, base_domain_id, conversation_context, fast_mode
         calls["slots"] += 1
         return SlotExtractionResult(
             payload={"intent": "list", "entity": "students", "constraints": [], "time_phrases": []},
@@ -890,7 +879,6 @@ def test_unified_llm_invalid_json_falls_back_to_legacy_path(monkeypatch) -> None
         *,
         normalized_prompt,
         workspace_id,
-        vertical_norm,
         base_domain_id,
         capabilities,
         schema,
@@ -904,7 +892,6 @@ def test_unified_llm_invalid_json_falls_back_to_legacy_path(monkeypatch) -> None
             self,
             normalized_prompt,
             workspace_id,
-            vertical_norm,
             base_domain_id,
             capabilities,
             schema,
@@ -957,8 +944,8 @@ def test_unified_llm_invalid_json_falls_back_to_legacy_path(monkeypatch) -> None
 
 def test_explanation_summary_can_be_polished_by_llm(monkeypatch) -> None:
     class _StaffCapsService:
-        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
-            del workspace_id, user_id, vertical_norm
+        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id):
+            del workspace_id, user_id
             assert domain_id == 5
             return {
                 "domain_id": 5,
@@ -2361,7 +2348,6 @@ def test_get_domain_candidates_expands_work_prompt_and_includes_staff_domain() -
 
     out = svc._domain_selection._get_domain_candidates(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt="Show me where Jennifer Gilstrap works",
         provided_domain_id=None,
     )
@@ -2394,7 +2380,6 @@ def test_get_domain_candidates_expands_adm_prompt_and_includes_adm_domain() -> N
 
     out = svc._domain_selection._get_domain_candidates(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt="Show base ADM by report period for school year 2026",
         provided_domain_id=None,
     )
@@ -2434,7 +2419,6 @@ def test_get_domain_candidates_uses_semantic_alias_queries_to_improve_recall(mon
 
     out = svc._domain_selection._get_domain_candidates(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt="Show students not born in the US",
         provided_domain_id=None,
     )
@@ -2480,8 +2464,8 @@ def test_select_domain_and_shortlist_columns_uses_semantic_reranking_when_enable
     monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
 
     class _DualCapabilitiesService:
-        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
-            del workspace_id, user_id, vertical_norm
+        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id):
+            del workspace_id, user_id
             if domain_id == 5:
                 return {
                     "domain_id": 5,
@@ -2546,7 +2530,6 @@ def test_select_domain_and_shortlist_columns_uses_semantic_reranking_when_enable
     selected_domain_id, _capabilities, shortlisted_columns, ranking, rerank_signals = svc._domain_selection._select_domain_and_shortlist_columns(
         workspace_id="ws-1",
         user_id="user-1",
-        vertical_norm="education",
         prompt="Show staff count by school",
         domain_candidates=[
             {"domain_id": 6, "name": "Students", "score": 0.8},
@@ -2579,15 +2562,14 @@ def test_semantic_value_alias_constraints_feature_flag_off(monkeypatch) -> None:
 
     constraints = svc._semantic_integration.resolve_alias_constraints(  # noqa: SLF001
         prompt="Show students not born in the US",
-        vertical_norm="education",
     )
     assert constraints == []
 
 
 def test_rerank_policies_prefer_enrollment_domain_for_school_enrollment_listing(monkeypatch) -> None:
     class _SchoolEnrollmentCapabilitiesService:
-        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
-            del workspace_id, user_id, vertical_norm
+        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id):
+            del workspace_id, user_id
             if domain_id == 9:
                 return {
                     "domain_id": 9,
@@ -2676,7 +2658,6 @@ def test_rerank_policies_prefer_enrollment_domain_for_school_enrollment_listing(
     selected_domain_id, _capabilities, _shortlisted_columns, ranking, rerank_signals = svc._domain_selection._select_domain_and_shortlist_columns(
         workspace_id="ws-1",
         user_id="user-1",
-        vertical_norm="education",
         prompt="Show me all the students enrolled at Barksdale Elementary",
         domain_candidates=[
             {"domain_id": 9, "name": "Student Enrollment And Attendance", "score": 0.5964},
@@ -2712,7 +2693,6 @@ def test_semantic_value_alias_constraints_feature_flag_on_merges_into_slot_hints
 
     constraints = svc._semantic_integration.resolve_alias_constraints(  # noqa: SLF001
         prompt="Show students not born in the US",
-        vertical_norm="education",
     )
     assert constraints and constraints[0]["value_hint"] == "United States"
 
@@ -2737,7 +2717,6 @@ def test_semantic_value_alias_constraints_feature_flag_on_is_resilient_to_errors
 
     constraints = svc._semantic_integration.resolve_alias_constraints(  # noqa: SLF001
         prompt="Show students not born in the US",
-        vertical_norm="education",
     )
     assert constraints == []
 
@@ -2775,8 +2754,8 @@ def test_plan_debug_includes_semantic_grounding_bundle_when_enabled(monkeypatch)
 
 def test_plan_normalizes_semantic_value_aliases_in_fallback_path(monkeypatch) -> None:
     class _RaceCapsService:
-        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
-            del workspace_id, user_id, vertical_norm
+        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id):
+            del workspace_id, user_id
             assert domain_id == 6
             return {
                 "domain_id": 6,
@@ -2978,7 +2957,6 @@ def test_semester_indicator_resolution_uses_explicit_semantic_concept_keys(monke
 
     out = svc._semantic_integration.resolve_semester_indicator_columns(  # noqa: SLF001
         workspace_id="ws-1",
-        vertical_norm="education",
         capabilities=capabilities,
     )
     assert out["spring"] == "wt24.is_spring_block"
@@ -3041,7 +3019,6 @@ def test_semantic_value_alias_normalization_coerces_boolean_flag_values(monkeypa
     normalized_plan, issues, debug = svc._semantic_integration.normalize_semantic_value_alias_filters(  # noqa: SLF001
         plan_json=plan_json,
         workspace_id="ws-1",
-        vertical_norm="generic",
         capabilities=capabilities,
     )
 
@@ -3056,8 +3033,8 @@ def test_semantic_value_alias_normalization_coerces_boolean_flag_values(monkeypa
 
 def test_validation_uses_full_capabilities_not_compact_subset() -> None:
     class _StudentCapsService:
-        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
-            del workspace_id, user_id, vertical_norm
+        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id):
+            del workspace_id, user_id
             assert domain_id == 6
             return {
                 "domain_id": 6,
@@ -3157,8 +3134,8 @@ def test_validation_uses_full_capabilities_not_compact_subset() -> None:
 
 def test_plan_keeps_first_and_last_name_filters_when_columns_are_filterable() -> None:
     class _NameCapsService:
-        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
-            del workspace_id, user_id, vertical_norm
+        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id):
+            del workspace_id, user_id
             assert domain_id == 6
             return {
                 "domain_id": 6,
@@ -3297,7 +3274,6 @@ def test_normalize_llm_plan_accepts_metric_ref_aliases() -> None:
         },
         trace_id="t1",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=3,
         base_domain_name="Sales Performance",
     )

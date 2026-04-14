@@ -45,7 +45,6 @@ class ForgeMatchRowPipelineRunner:
         source_record_id: int,
         source_record: SourceFieldRecord,
         top_n: int,
-        vertical_norm: Optional[str],
         domain_id: Optional[int],
         llm_id: Optional[int],
     ) -> tuple[MatchOutcomeArtifact, dict[str, Any], PersistenceArtifact]:
@@ -54,7 +53,6 @@ class ForgeMatchRowPipelineRunner:
             trace_id=f"forge_match_row:{uuid.uuid4().hex}",
             workspace_id=workspace_id,
             user_id=None,
-            vertical_norm=str(vertical_norm or "generic"),
             request={
                 "prompt": str(
                     source_record.normalized_search_text

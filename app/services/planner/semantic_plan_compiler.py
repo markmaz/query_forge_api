@@ -7,7 +7,6 @@ from app.services.planner.semantic_candidate_models import (
     CompactSemanticPlan,
     SemanticCandidatePayload,
 )
-from app.services.semantic.vertical_norm import normalize_semantic_vertical
 
 
 @dataclass(frozen=True)
@@ -24,7 +23,6 @@ class SemanticPlanCompiler:
         candidates: SemanticCandidatePayload,
         trace_id: str,
         workspace_id: str,
-        vertical_norm: str,
         base_domain_id: int,
         base_domain_name: Optional[str],
     ) -> SemanticCompileResult:
@@ -112,7 +110,6 @@ class SemanticPlanCompiler:
             "schema_version": 2,
             "trace_id": str(trace_id or "").strip(),
             "workspace_id": str(workspace_id or "").strip(),
-            "vertical_norm": normalize_semantic_vertical(vertical_norm),
             "base_domain_id": int(base_domain_id),
             "domain_name": str(base_domain_name or f"domain_{int(base_domain_id)}").strip() or f"domain_{int(base_domain_id)}",
             "intent": "aggregate" if intent == "trend" and metric_refs else intent,

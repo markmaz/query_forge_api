@@ -98,7 +98,7 @@ def test_apply_value_aliases_to_llm_plan_rewrites_filter_and_sql_json() -> None:
         "notes": [],
     }
 
-    out = applier.apply(vertical_norm="education", llm_plan=llm_plan)
+    out = applier.apply(llm_plan=llm_plan)
 
     assert out["filters"] == [
         {"concept_key": "DISTRICT_NAME", "op": "=", "value": "Metro Schools District"}
@@ -106,7 +106,8 @@ def test_apply_value_aliases_to_llm_plan_rewrites_filter_and_sql_json() -> None:
     assert out["sql_json"]["where"][0]["param"]["value"] == "Metro Schools District"
     assert "value_aliases_applied=1" in out["notes"]
     assert len(sql.query_mappings_calls) == 1
-    assert sql.query_mappings_calls[0].params["vertical_norm"] == "generic"
+    assert "vertical_norm" not in (sql.query_mappings_calls[0].params or {})
+    assert "va.vertical_norm" not in sql.query_mappings_calls[0].query
     assert "FROM semantic_value_alias va" in sql.query_mappings_calls[0].query
 
 
@@ -330,10 +331,11 @@ def test_apply_value_aliases_to_llm_plan_rewrites_sql_json_filter_tree_values() 
         "notes": [],
     }
 
-    out = applier.apply(vertical_norm="education", llm_plan=llm_plan)
+    out = applier.apply(llm_plan=llm_plan)
 
     assert out["sql_json"]["filters"]["children"][0]["value"] == "Metro Schools District"
-    assert sql.query_mappings_calls[0].params["vertical_norm"] == "generic"
+    assert "vertical_norm" not in (sql.query_mappings_calls[0].params or {})
+    assert "va.vertical_norm" not in sql.query_mappings_calls[0].query
 
 
 def test_apply_value_aliases_to_llm_plan_surfaces_unexpected_json_roundtrip_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -366,7 +368,7 @@ def test_apply_value_aliases_to_llm_plan_surfaces_unexpected_json_roundtrip_erro
     monkeypatch.setattr(value_alias_applier.json, "dumps", _boom)
 
     with pytest.raises(AssertionError, match="unexpected json roundtrip bug"):
-        applier.apply(vertical_norm="education", llm_plan=llm_plan)
+        applier.apply(llm_plan=llm_plan)
 
 
 def test_plan_flow_keeps_birth_country_mapping_and_filter_column() -> None:
@@ -376,8 +378,8 @@ def test_plan_flow_keeps_birth_country_mapping_and_filter_column() -> None:
             return {"matched": [], "unmatched_tokens": ["kids", "born", "us"]}
 
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "Show all kids not born in the US",
                 "hits": [
@@ -495,8 +497,8 @@ def test_plan_flow_forces_canonical_district_filter_and_drops_locale_alias_filte
             return {"matched": [], "unmatched_tokens": ["metro", "schools"]}
 
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "metro schools",
                 "hits": [
@@ -572,8 +574,8 @@ def test_plan_flow_forces_canonical_district_filter_and_drops_locale_alias_filte
             }
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return [
                 {
                     "concept_key": "DISTRICT_NAME",
@@ -636,8 +638,8 @@ def test_plan_suppresses_identifier_concepts_when_prompt_has_no_identifier_inten
             return {"matched": [], "unmatched_tokens": []}
 
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "show students in metro schools",
                 "hits": [
@@ -668,8 +670,8 @@ def test_plan_suppresses_identifier_concepts_when_prompt_has_no_identifier_inten
             return {"filtered_to_candidate_count": 0, "hits": []}
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -712,8 +714,8 @@ def test_plan_keeps_identifier_concepts_when_prompt_requests_ids() -> None:
             return {"matched": [], "unmatched_tokens": []}
 
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "show student id and school id",
                 "hits": [
@@ -743,8 +745,8 @@ def test_plan_keeps_identifier_concepts_when_prompt_requests_ids() -> None:
             return {"filtered_to_candidate_count": 0, "hits": []}
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -785,8 +787,8 @@ def test_plan_black_kids_includes_race_from_lexical_alias_pass() -> None:
             return {"matched": [], "unmatched_tokens": ["black", "kids"]}
 
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "black kids",
                 "hits": [
@@ -815,8 +817,8 @@ def test_plan_black_kids_includes_race_from_lexical_alias_pass() -> None:
             return {"filtered_to_candidate_count": 0, "hits": []}
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -863,8 +865,8 @@ def test_plan_black_kids_includes_race_from_lexical_alias_pass() -> None:
 
 def test_plan_students_named_holden_prefers_student_name_mapping_and_filter() -> None:
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "Find all the students named Holden",
                 "hits": [
@@ -951,8 +953,8 @@ def test_plan_students_named_holden_prefers_student_name_mapping_and_filter() ->
             }
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -989,8 +991,8 @@ def test_plan_students_named_holden_prefers_student_name_mapping_and_filter() ->
 
 def test_plan_staff_named_holden_prefers_staff_name_filter() -> None:
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "Find all the staff named Holden",
                 "hits": [
@@ -1040,8 +1042,8 @@ def test_plan_staff_named_holden_prefers_staff_name_filter() -> None:
             }
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -1074,8 +1076,8 @@ def test_plan_staff_named_holden_prefers_staff_name_filter() -> None:
 
 def test_plan_validity_gate_injects_defaults_when_llm_returns_empty() -> None:
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "Find all the students named Holden",
                 "hits": [
@@ -1125,8 +1127,8 @@ def test_plan_validity_gate_injects_defaults_when_llm_returns_empty() -> None:
             }
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -1169,8 +1171,8 @@ def test_plan_el_subgroup_injects_is_el_filter_and_keeps_sql_json() -> None:
             }
 
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "How many EL students were chronically absent last year?",
                 "hits": [
@@ -1217,8 +1219,8 @@ def test_plan_el_subgroup_injects_is_el_filter_and_keeps_sql_json() -> None:
             }
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -1263,8 +1265,8 @@ def test_plan_el_subgroup_injects_is_el_filter_and_keeps_sql_json() -> None:
 
 def test_plan_injects_student_first_last_and_school_filter_for_school_phrase_prompt() -> None:
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "Give me all the first and last names of all students at the Clarksville Elementary School",
                 "hits": [
@@ -1309,8 +1311,8 @@ def test_plan_injects_student_first_last_and_school_filter_for_school_phrase_pro
             }
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -1368,8 +1370,8 @@ def test_plan_injects_student_first_last_and_school_filter_for_school_phrase_pro
 
 def test_plan_injects_school_filter_for_quoted_school_phrase_prompt() -> None:
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": 'Give me all the first and last names of all students at "Clarksville Elementary School"',
                 "hits": [
@@ -1412,8 +1414,8 @@ def test_plan_injects_school_filter_for_quoted_school_phrase_prompt() -> None:
             }
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -1519,8 +1521,8 @@ def test_plan_uses_tier2_school_slot_to_force_filter(monkeypatch) -> None:
             return {"matched": [], "unmatched_tokens": []}
 
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "students at Clarksville Elementary School",
                 "hits": [
@@ -1601,8 +1603,8 @@ def test_plan_uses_tier2_school_slot_to_force_filter(monkeypatch) -> None:
             return {"domain_id": None, "source": "auto", "threshold_met": False, "domains": []}
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     svc = PlanService(

@@ -36,7 +36,7 @@ def test_list_concepts_route(client, monkeypatch):
     class _Svc:
         def list_concepts(self, **kwargs):
             return {
-                "rows": [{"id": 1, "concept_key": "SCHOOL_YEAR", "vertical_norm": "generic"}],
+                "rows": [{"id": 1, "concept_key": "SCHOOL_YEAR"}],
                 "total": 1,
                 "page": kwargs["page"],
                 "page_size": kwargs["page_size"],
@@ -48,7 +48,6 @@ def test_list_concepts_route(client, monkeypatch):
     assert resp.status_code == 200
     assert resp.json["total"] == 1
     assert resp.json["rows"][0]["concept_key"] == "SCHOOL_YEAR"
-    assert "vertical_norm" not in resp.json["rows"][0]
 
 
 def test_list_concept_keys_route(client, monkeypatch):
@@ -102,7 +101,7 @@ def test_create_alias_route(client, monkeypatch):
 def test_seed_route(client, monkeypatch):
     class _Svc:
         def seed(self):
-            return {"vertical_norm": "generic", "concepts_created": 1, "aliases_created": 1}
+            return {"concepts_created": 1, "aliases_created": 1}
 
     monkeypatch.setattr(semantic_concepts, "SemanticConceptService", _Svc)
 
@@ -112,13 +111,13 @@ def test_seed_route(client, monkeypatch):
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 200
-    assert "vertical_norm" not in resp.json["result"]
+    assert resp.json["result"]["concepts_created"] == 1
 
 
 def test_rebuild_index_route(client, monkeypatch):
     class _EmbedSvc:
-        def rebuild_semantic_concept_index(self, *, vertical_norm):
-            return {"collection": "semantic_concepts_v1", "points_upserted": 10, "vertical_norm": vertical_norm}
+        def rebuild_semantic_concept_index(self):
+            return {"collection": "semantic_concepts_v1", "points_upserted": 10}
 
     monkeypatch.setattr(semantic_concepts, "SemanticConceptEmbeddingService", _EmbedSvc)
 
@@ -128,7 +127,6 @@ def test_rebuild_index_route(client, monkeypatch):
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 200
-    assert "vertical_norm" not in resp.json["result"]
     assert resp.json["result"]["points_upserted"] == 10
 
 
@@ -139,7 +137,6 @@ def test_backfill_primary_keys_route(client, monkeypatch):
             assert dry_run is True
             return {
                 "workspace_id": workspace_id,
-                "vertical_norm": "generic",
                 "dry_run": dry_run,
                 "candidates": 4,
                 "updated": 0,

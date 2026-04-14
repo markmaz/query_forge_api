@@ -15,7 +15,6 @@ def select_domain_and_shortlist_columns(
     *,
     workspace_id: str,
     user_id: str,
-    vertical_norm: str,
     prompt: str,
     domain_candidates: Sequence[Mapping[str, Any]],
     get_domain_capabilities_fn: Callable[..., Mapping[str, Any]],
@@ -43,7 +42,6 @@ def select_domain_and_shortlist_columns(
                 workspace_id=workspace_id,
                 user_id=user_id,
                 domain_id=domain_id,
-                vertical_norm=vertical_norm,
             )
         except ForgeError as exc:
             if first_error is None:
@@ -65,13 +63,11 @@ def select_domain_and_shortlist_columns(
                 slot_hints=None,
                 fast_mode=False,
                 workspace_id=workspace_id,
-                vertical_norm=vertical_norm,
                 projection_policy_service=projection_policy_service,
             )
             grounding_bundle = semantic_grounding_factory().build_grounding_bundle(
                 prompt=prompt,
                 workspace_id=workspace_id,
-                vertical_norm=vertical_norm,
                 base_domain_id=domain_id,
                 base_domain_name=str(candidate.get("name") or f"domain_{domain_id}"),
                 capabilities_compact=semantic_capabilities,
@@ -114,10 +110,9 @@ def select_domain_and_shortlist_columns(
 
     pipeline_context = PipelineContext(
         pipeline_name="planner_domain_selection_pipeline",
-        trace_id=f"planner_domain_selection:{workspace_id}:{vertical_norm}",
+        trace_id=f"planner_domain_selection:{workspace_id}",
         workspace_id=workspace_id,
         user_id=user_id,
-        vertical_norm=vertical_norm,
         request={"prompt": prompt},
     )
     pipeline_context.set_artifact(

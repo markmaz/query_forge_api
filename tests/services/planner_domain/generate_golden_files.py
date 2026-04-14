@@ -153,7 +153,8 @@ def _make_caps(domain_id: int, dimensions: list, metrics: list | None = None,
     }
 
     class _Svc:
-        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
+        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id):
+            del workspace_id, user_id, domain_id
             return caps
 
     return _Svc()
@@ -336,7 +337,8 @@ def _capture_race_alias_normalization(tmp_dir: str) -> None:
             }
 
     class _AliasResolver:
-        def resolve(self, *, prompt: str, vertical_norm: str):
+        def resolve(self, *, prompt: str):
+            del prompt
             return [
                 {
                     "column_key": "wt24.race_ethnicity",

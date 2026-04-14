@@ -110,7 +110,7 @@ def test_get_applicable_policies_orders_by_scope_then_priority() -> None:
         ]
     )
     svc = PlannerRerankPolicyService(sql=sql)
-    out = svc.get_applicable_policies(workspace_id="ws-1", vertical_norm="education", base_domain_id=9)
+    out = svc.get_applicable_policies(workspace_id="ws-1", base_domain_id=9)
     assert [row["policy_key"] for row in out] == [
         "workspace_domain_rule",
         "workspace_rule",
@@ -134,7 +134,6 @@ def test_list_policies_includes_domain_context_and_inherited_flags() -> None:
         workspace_id="ws-1",
         user_id="user-1",
         base_domain_id=9,
-        vertical_norm="education",
         include_inactive=False,
     )
 
@@ -247,7 +246,7 @@ def test_get_applicable_policies_returns_empty_on_expected_lookup_error() -> Non
     sql.execute_query_mappings = lambda query, params=None: (_ for _ in ()).throw(RuntimeError("db unavailable"))  # type: ignore[method-assign]
     svc = PlannerRerankPolicyService(sql=sql)
 
-    out = svc.get_applicable_policies(workspace_id="ws-1", vertical_norm="education", base_domain_id=9)
+    out = svc.get_applicable_policies(workspace_id="ws-1", base_domain_id=9)
 
     assert out == []
 
@@ -258,7 +257,7 @@ def test_get_applicable_policies_surfaces_unexpected_lookup_error() -> None:
     svc = PlannerRerankPolicyService(sql=sql)
 
     with pytest.raises(AssertionError, match="lookup bug"):
-        svc.get_applicable_policies(workspace_id="ws-1", vertical_norm="education", base_domain_id=9)
+        svc.get_applicable_policies(workspace_id="ws-1", base_domain_id=9)
 
 
 def test_parse_policy_rule_wraps_expected_json_parse_errors() -> None:

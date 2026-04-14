@@ -54,7 +54,6 @@ def test_dispatch_subgraph_node_executes_child_graph_and_preserves_artifacts() -
         trace_id="trace-1",
         workspace_id="ws-1",
         user_id="user-1",
-        vertical_norm="generic",
         request={"prompt": "hello"},
     )
 

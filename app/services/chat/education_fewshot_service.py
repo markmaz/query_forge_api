@@ -130,11 +130,6 @@ def _is_education_payload(payload: Optional[Mapping[str, Any]]) -> bool:
     route = str(payload.get("route") or "").strip().lower()
     if route in {"plan_domain", "education_pipeline"}:
         return True
-    plan = payload.get("plan_json_v2")
-    if isinstance(plan, Mapping):
-        vertical = str(plan.get("vertical_norm") or "").strip().lower()
-        if vertical == "education":
-            return True
     return False
 
 

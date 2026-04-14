@@ -136,7 +136,6 @@ class PlannerProjectionPolicyService:
         self,
         *,
         workspace_id: Optional[str],
-        vertical_norm: Optional[str],
         base_domain_id: Optional[int],
         prompt_signals: Sequence[str],
     ) -> Dict[str, Any]:
@@ -155,7 +154,6 @@ class PlannerProjectionPolicyService:
 
         policies = self.get_applicable_policies(
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             base_domain_id=base_domain_id,
         )
         required_concept_keys: List[str] = []
@@ -230,10 +228,8 @@ class PlannerProjectionPolicyService:
         self,
         *,
         workspace_id: Optional[str],
-        vertical_norm: Optional[str],
         base_domain_id: Optional[int],
     ) -> List[Dict[str, Any]]:
-        del vertical_norm
         rows: List[Dict[str, Any]] = [dict(item) for item in _SEED_POLICIES]
         try:
             db_rows = self._sql.execute_query_mappings(
@@ -271,7 +267,6 @@ class PlannerProjectionPolicyService:
         normalized: List[Dict[str, Any]] = []
         for row in rows:
             payload = dict(row)
-            payload.pop("scope_vertical_norm", None)
             try:
                 payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             except (TypeError, ValueError, ValidationError):
@@ -285,7 +280,6 @@ class PlannerProjectionPolicyService:
         *,
         workspace_id: str,
         base_domain_id: Optional[int] = None,
-        vertical_norm: str = "generic",
         include_inactive: bool = False,
         include_seeded: bool = True,
     ) -> Dict[str, Any]:
@@ -322,7 +316,6 @@ class PlannerProjectionPolicyService:
         policies: List[Dict[str, Any]] = []
         for row in rows:
             payload = _json_safe_mapping(dict(row))
-            payload.pop("scope_vertical_norm", None)
             payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             payload["is_seeded"] = bool(payload.get("_seeded"))
             payload["can_edit"] = not payload["is_seeded"]
@@ -333,7 +326,6 @@ class PlannerProjectionPolicyService:
 
         return {
             "workspace_id": str(workspace_id),
-            "vertical_norm": str(vertical_norm or "generic").strip() or "generic",
             "base_domain_id": int(base_domain_id) if base_domain_id is not None else None,
             "can_edit": True,
             "policies": policies,

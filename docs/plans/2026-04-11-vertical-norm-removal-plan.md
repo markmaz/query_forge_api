@@ -604,6 +604,476 @@ Full phase gate:
 - backend: `pytest -q` -> `2659 passed, 78 skipped`
 - frontend: `npx vitest run` -> `143 passed`, `655 passed | 3 todo`
 
+### 2026-04-13 - Backend runtime and utility sweep completed
+
+Completed:
+
+- removed the remaining semantic suggestion runtime dependency on `vertical` / `vertical_norm`:
+  - generic-only matcher loading and concept resolution
+  - generic-only suggestion-run persistence and apply flow
+  - dropped `semantic_suggestion_run.vertical` and `vertical_norm` from the ORM and added a follow-on migration
+- removed stale compatibility-only `scope_vertical_norm` cleanup from the remaining planner policy service wrappers
+- collapsed the planner-domain internal call path off dead `vertical_norm` parameters:
+  - domain candidate retrieval
+  - domain selection ranking
+  - LLM slot/plan generation helpers
+  - postprocess retry orchestration
+  - pipeline failure trace context
+- removed post-migration semantic/runtime queries that still referenced dropped `vertical_norm` columns:
+  - planner semantic integration lookups
+  - planner LLM cache registry-version lookup
+  - planner concept search filter
+  - semantic plan concept/value-alias SQL
+  - semantic catalog enrichment prompt plumbing
+- removed the last runtime-only compatibility payloads in chat/planner helpers and backend utility scripts:
+  - education fewshot detection
+  - Forge insights auto-plan handoff
+  - domain reindex script
+  - registry seed builder
+
+Code references:
+
+- [semantic_suggestion_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/semantic/semantic_suggestion_service.py)
+- [semantic_concept_matcher.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/semantic/semantic_concept_matcher.py)
+- [semantic_suggestion.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/models/semantic/semantic_suggestion.py)
+- [20260413_drop_semantic_suggestion_run_vertical.sql](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/migrations/20260413_drop_semantic_suggestion_run_vertical.sql)
+- [service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/service.py)
+- [domain_selection_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/domain_selection_service.py)
+- [llm_planning_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/llm_planning_service.py)
+- [semantic_integration_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/semantic_integration_service.py)
+- [cache.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_llm/cache.py)
+- [service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_llm/service.py)
+- [value_alias_applier.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/semantic/plan/value_alias_applier.py)
+- [concept_scorer.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/semantic/plan/concept_scorer.py)
+
+Verification completed before the final phase gate:
+
+- semantic suggestion + canonical matcher slice: `28 passed`
+- semantic route slice: `23 passed`
+- planner-domain helper slice: `127 passed`
+- semantic/runtime follow-on slice: `122 passed`
+
+Full phase gate:
+
+- backend app/runtime scan: only deliberate removed-field rejection and legacy normalization helpers still mention `vertical_norm`
+- backend: `pytest -q`
+
+### 2026-04-13 - Planner and semantic runtime follow-through cleanup complete
+
+Completed:
+
+- removed the remaining live planner runtime calls that still threaded `vertical_norm` into generic-only helpers:
+  - semantic grounding alias resolution
+  - planner-domain capability loading during selection ranking
+  - slot extraction prompt construction
+  - next-actions capability loading
+- removed stale `PipelineContext` test construction that still passed `vertical_norm` after the shared AI context schema was flattened
+- aligned planner-domain and semantic-plan tests with the new generic-only behavior:
+  - unified planner helper tests no longer pass `vertical_norm` into `build_plan_and_slots`
+  - planner-domain fake capability and alias resolver stubs now match the collapsed helper signatures
+  - semantic plan extract coverage now asserts `vertical_norm` is absent from concept retrieval calls
+- regenerated planner-domain golden fixtures so the shared pipeline debug snapshot no longer preserves `domain_selection.vertical_norm`
+- kept request-model compatibility where public planner and semantic payloads still accept legacy `vertical_norm`, but removed the internal downstream dependency for the cleaned paths above
+
+Code references:
+
+- [service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/service.py)
+- [llm_planning_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/llm_planning_service.py)
+- [domain_selection_ranking.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/domain_selection_ranking.py)
+- [semantic_grounding_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner/semantic_grounding_service.py)
+- [generate_golden_files.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/services/planner_domain/generate_golden_files.py)
+- [test_golden_regression.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/services/planner_domain/test_golden_regression.py)
+- [test_plan_service_semantic_extract.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/services/semantic/test_plan_service_semantic_extract.py)
+
+Focused verification completed before the final regression gate:
+
+- backend planner helper slice: `8 passed`
+- backend planner-domain golden slice: `9 passed`
+- backend semantic plan extract slice: `6 passed`
+
+Full phase gate:
+
+- backend: `pytest -q` -> `2694 passed, 80 skipped`
+
+### 2026-04-13 - Secondary planner policy vertical scope cleanup complete
+
+Completed:
+
+- removed `scope_vertical_norm` from the secondary planner policy request models, ORM models, and composite scope indexes:
+  - semantic join
+  - capability packing
+  - concept scoring
+  - semantic projection
+  - semantic time
+- collapsed stored `vertical` planner-policy scope rows to `global` in a follow-on migration and dropped the retired vertical scope column/indexes from those tables
+- removed `vertical_norm` from the capability packing runtime/service interface and switched secondary planner policy lookups to the shared global/workspace scope predicates and dedupe path
+- updated planner-domain callers that still passed removed compatibility arguments into retrieval and domain-selection policy services after the wider planner-policy cleanup
+- kept broader semantic/domain compatibility uses of `vertical_norm` outside the planner-policy track unchanged in this slice
+
+Code references:
+
+- [planner_semantic_join_policy.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/models/domain/planner_semantic_join_policy.py)
+- [planner_capability_packing_policy.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/models/domain/planner_capability_packing_policy.py)
+- [planner_concept_scoring_policy.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/models/domain/planner_concept_scoring_policy.py)
+- [planner_semantic_projection_policy.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/models/domain/planner_semantic_projection_policy.py)
+- [planner_semantic_time_policy.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/models/domain/planner_semantic_time_policy.py)
+- [planner_capability_packing_policy_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/domain/planner_capability_packing_policy_service.py)
+- [domain_selection_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/domain_selection_service.py)
+- [domain_candidate_retriever.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/domain_candidate_retriever.py)
+- [capability_compactor.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/capability_compactor.py)
+- [20260413_drop_vertical_norm_from_secondary_planner_policies.sql](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/migrations/20260413_drop_vertical_norm_from_secondary_planner_policies.sql)
+
+Focused verification completed before the full phase gate:
+
+- backend secondary planner policy slice: `14 passed`
+- backend planner-domain follow-on slice: `101 passed`
+
+Full phase gate:
+
+- backend: `pytest -q` -> `2694 passed, 80 skipped`
+
+### 2026-04-13 - Planner policy compatibility cleanup slice complete
+
+Completed:
+
+- removed the compatibility-only `vertical_norm` parameter and echoed response field from the live planner policy services that had already stopped using it:
+  - rerank policy
+  - projection policy
+  - domain capability
+  - prompt intent policy
+  - retrieval policy
+  - domain selection policy
+  - signal extraction
+- updated in-repo planner/shared-AI callers and affected tests so they no longer pass the retired compatibility argument to those services
+- removed the leftover `vertical_norm` ORM column and composite scope index residue from `planner_rerank_policy_candidate`
+- added a follow-on migration to drop `planner_rerank_policy_candidate.vertical_norm` and recreate `idx_prpc_scope` on `workspace_id` only
+- removed the remaining raw SQL update that still wrote `vertical_norm = NULL` for rerank policy candidates
+
+Code references:
+
+- [planner_rerank_policy.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/models/domain/planner_rerank_policy.py)
+- [planner_rerank_policy_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/domain/planner_rerank_policy_service.py)
+- [planner_projection_policy_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/domain/planner_projection_policy_service.py)
+- [planner_domain_capability_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/domain/planner_domain_capability_service.py)
+- [planner_prompt_intent_policy_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/domain/planner_prompt_intent_policy_service.py)
+- [planner_retrieval_policy_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/domain/planner_retrieval_policy_service.py)
+- [planner_domain_selection_policy_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/domain/planner_domain_selection_policy_service.py)
+- [planner_signal_policy_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/domain/planner_signal_policy_service.py)
+- [planner_rerank_policy_candidate_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/domain/planner_rerank_policy_candidate_service.py)
+- [20260413_drop_planner_rerank_policy_candidate_vertical.sql](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/migrations/20260413_drop_planner_rerank_policy_candidate_vertical.sql)
+
+Focused verification:
+
+- backend planner compatibility slice: `106 passed`
+
+Follow-on still pending:
+
+- the secondary planner policy families that still model real `scope_vertical_norm` / `vertical` scope behavior:
+  - semantic join
+  - capability packing
+  - concept scoring
+  - semantic projection
+  - semantic time
+
+### 2026-04-13 - Phase 5 candidate cleanup slice complete
+
+Completed:
+
+- candidate create and suggest request models now reject removed `vertical_norm` inputs instead of silently ignoring them
+- candidate insert writes no longer include the retired vertical placeholder, so new planner rerank candidates persist without planner vertical data
+- AI candidate suggestion prompt construction no longer includes `vertical_norm` in the LLM context
+- candidate approval promotion continues using the existing workspace/domain scope payload without any vertical field
+- planner policy seed payloads remain normalized with no `scope_vertical_norm` placeholders in the live planner-policy service defaults
+
+Code references:
+
+- [planner_rerank_policy.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/models/domain/planner_rerank_policy.py)
+- [planner_rerank_policy_candidate_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/domain/planner_rerank_policy_candidate_service.py)
+- [planner_rerank_policy_candidate_suggestion_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/domain/planner_rerank_policy_candidate_suggestion_service.py)
+- [test_planner_rerank_policy_candidate_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/services/test_planner_rerank_policy_candidate_service.py)
+- [test_planner_rerank_policy_candidate_suggestion_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/services/test_planner_rerank_policy_candidate_suggestion_service.py)
+- [test_domain_routes.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/routes/test_domain_routes.py)
+
+Focused verification completed before the full phase gate:
+
+- backend candidate services: `16 passed`
+- backend candidate domain routes: `9 skipped` (`TEST_USERNAME` / `TEST_PASSWORD` not set in local env)
+
+### 2026-04-13 - Compact semantic planner runtime collapsed off vertical_norm
+
+Completed:
+
+- removed `vertical_norm` from the compact semantic candidate payload and retry trimming path
+- removed `vertical_norm` from compact semantic retrieval, prompt-building, and plan-compilation interfaces
+- changed the planner catalog lookup repository to query only the normalized generic semantic partition instead of pretending the compact planner still accepts a vertical axis
+- removed the compact planner `vertical_norm` parameter from the planner-domain call path
+- removed `vertical_norm` from compact semantic planner prompt payloads and compiled `plan_json_v2`
+- kept alias resolution on the deeper semantic service contract for now; this slice is limited to the compact planner runtime path
+
+Code references:
+
+- [semantic_candidate_models.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner/semantic_candidate_models.py)
+- [semantic_retrieval_helpers.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner/semantic_retrieval_helpers.py)
+- [semantic_catalog_lookup_repository.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner/semantic_catalog_lookup_repository.py)
+- [semantic_retrieval_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner/semantic_retrieval_service.py)
+- [planner_prompt_builder.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner/planner_prompt_builder.py)
+- [semantic_plan_compiler.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner/semantic_plan_compiler.py)
+- [compact_planner.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner/compact_planner.py)
+- [semantic_grounding_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner/semantic_grounding_service.py)
+- [llm_planning_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/llm_planning_service.py)
+
+Focused verification completed before the full phase gate:
+
+- backend compact semantic planner slice: `24 passed`
+- backend planner-domain integration slice: `97 passed`
+
+Full phase gate:
+
+- backend: `pytest -q` -> `2694 passed, 78 skipped`
+
+### 2026-04-13 - Planner-domain semantic assist runtime collapsed off vertical_norm
+
+Completed:
+
+- removed `vertical_norm` from planner-domain semantic alias constraint resolution
+- removed `vertical_norm` from planner-domain semester-indicator resolution and semantic value-alias normalization interfaces
+- changed planner-domain semantic assist SQL lookups to read only the normalized generic partition instead of preferring a caller-selected vertical
+- removed `vertical_norm` from semantic grounding bundle construction in the planner-domain call path
+- updated domain candidate retrieval to use semantic alias constraints without threading a vertical argument through semantic integration
+
+Code references:
+
+- [semantic_grounding_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner/semantic_grounding_service.py)
+- [semantic_integration_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/semantic_integration_service.py)
+- [domain_candidate_retriever.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/domain_candidate_retriever.py)
+- [domain_selection_ranking.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/domain_selection_ranking.py)
+- [plan_postprocess_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/plan_postprocess_service.py)
+- [service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/service.py)
+
+Focused verification completed before the full phase gate:
+
+- backend semantic grounding / semantic integration slice: `86 passed`
+
+Full phase gate:
+
+- backend: `pytest -q` -> `2694 passed, 78 skipped`
+
+### 2026-04-13 - Semantic plan core collapsed off vertical_norm
+
+Completed:
+
+- removed `vertical_norm` from semantic plan concept-scoring runtime interfaces
+- changed slot-driven intent normalization, lexical alias lookup, concept detail lookup, and resolved value-constraint lookup to operate on the generic compatibility partition only
+- removed `vertical_norm` from the semantic plan value-alias applier interface and changed its SQL/runtime canonicalization path to generic-only
+- updated `PlanService` to keep accepting compatibility request payloads while routing the internal semantic-plan core through the generic-only runtime
+
+Code references:
+
+- [concept_scorer.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/semantic/plan/concept_scorer.py)
+- [value_alias_applier.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/semantic/plan/value_alias_applier.py)
+- [service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/semantic/plan/service.py)
+- [test_plan_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/services/semantic/test_plan_service.py)
+- [test_plan_service_semantic_extract.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/services/semantic/test_plan_service_semantic_extract.py)
+- [test_slot_driven_planner.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/services/semantic/test_slot_driven_planner.py)
+
+Focused verification completed before the full phase gate:
+
+- backend semantic plan slice: `36 passed`
+
+Full phase gate:
+
+- backend: `pytest -q` -> pending
+
+### 2026-04-13 - Planner-domain runtime and plan payload boundary cleaned up
+
+Completed:
+
+- removed `vertical_norm` from the planner-domain request DTOs used by the live service boundary
+- removed planner-domain conversation-state persistence of `vertical_norm`
+- removed the planner-domain follow-up fallback that revived legacy `education` or `healthcare` verticals from prior conversation state
+- normalized planner-domain runtime execution to the generic compatibility partition at the service boundary
+- removed `vertical_norm` from the planner-domain `PlanV2` schema and plan normalization path
+- updated the Query Forge frontend `PlanV2` type/parser to stop requiring or preserving `vertical_norm`
+- refreshed the planner-domain golden debug fixtures to match the new prompt-normalization step name and the removed vertical field
+
+Code references:
+
+- [types.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/types.py)
+- [conversation_context.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/conversation_context.py)
+- [conversation_store.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/conversation_store.py)
+- [plan_finalization_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/plan_finalization_service.py)
+- [service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/service.py)
+- [schema_v2.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/schema_v2.py)
+- [validate_v2.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/validate_v2.py)
+- [llm_planning_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_domain/llm_planning_service.py)
+- [types.ts](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/query-forge/ui/ai/types.ts)
+
+Focused verification completed before the full phase gate:
+
+- backend planner-domain route and service slice: `138 passed`
+- backend expanded planner-domain regression slice: `404 passed`
+- frontend Query Forge planner slice: `54 passed | 3 todo`
+
+Full phase gate:
+
+- backend: `pytest -q` -> `2694 passed, 78 skipped`
+- frontend: `npx vitest run` -> `659 passed | 3 todo`
+
+### 2026-04-13 - Forge Match and semantic catalog public contracts cleaned up
+
+Completed:
+
+- removed `vertical_norm` from the Forge Match analyze request schema, routes, Celery task, mapping/session job orchestration, candidate retrieval path, and row/session pipeline request payloads
+- removed the Forge Match vertical input and vertical pipeline badge from the frontend, and dropped the field from the shared Forge Match frontend contracts
+- removed `vertical_norm` from the semantic catalog build admin request contract on both backend and frontend
+- changed semantic catalog build to reject stale `vertical_norm` input instead of silently accepting it
+- stripped `vertical_norm` from the semantic catalog build admin response payload so the admin surface no longer advertises the field
+
+Code references:
+
+- [forge_match_schema.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/schemas/forge_match_schema.py)
+- [forge_match_routes.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/routes/forge_match_routes.py)
+- [forge_match_tasks.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/tasks/forge_match_tasks.py)
+- [mapping_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/forge_match/mapping_service.py)
+- [session_job_coordinator.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/forge_match/session_job_coordinator.py)
+- [row_pipeline_runner.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/forge_match/row_pipeline_runner.py)
+- [pipeline_adapters.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/forge_match/pipeline_adapters.py)
+- [candidate_retriever.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/forge_match/candidate_retriever.py)
+- [ForgeMatchAnalyzeControls.tsx](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/forgeMatch/components/ForgeMatchAnalyzeControls.tsx)
+- [ForgeMatchSummary.tsx](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/forgeMatch/components/ForgeMatchSummary.tsx)
+- [ForgeMatchResultDrawer.tsx](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/forgeMatch/components/ForgeMatchResultDrawer.tsx)
+- [contracts.ts](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/shared/services/forgeMatch/contracts.ts)
+- [semantic_catalog_admin.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/models/semantic/semantic_catalog_admin.py)
+- [models.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/routes/admin/models.py)
+- [vector_domain_routes.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/routes/admin/vector_domain_routes.py)
+- [semanticCatalog.ts](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/system-admin/api/semanticCatalog.ts)
+- [semanticCatalog.ts](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/system-admin/types/semanticCatalog.ts)
+- [SemanticCatalogBuilderPage.tsx](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/system-admin/ui/semantic-catalog/SemanticCatalogBuilderPage.tsx)
+
+Focused verification completed before the full phase gate:
+
+- backend Forge Match slice: `44 passed`
+- backend semantic catalog admin slice: `4 passed`
+- frontend Forge Match slice: `14 passed`
+- frontend semantic catalog slice: `8 passed`
+
+Full phase gate:
+
+- backend: `pytest -q` -> `2692 passed, 78 skipped`
+- frontend: `npx vitest run` -> `659 passed | 3 todo`
+
+### 2026-04-13 - Query Forge AI and planner-domain request contracts cleaned up
+
+Completed:
+
+- removed `vertical_norm`/`verticalNorm` from the deprecated `/api/v1/ai/suggest` and `/api/v1/ai/suggest-semantic-adapter` request surface
+- stopped the AI bridge from stripping and honoring legacy vertical overrides; stale request fields now fail under the existing strict request validator
+- removed `vertical_norm` from the public `/api/v1/planner/plan_domain` and `/api/v1/planner/plan_domain/next_actions` request models
+- added explicit route-level rejection for stale planner request payloads that still send `vertical_norm` or `verticalNorm`
+- removed the Query Forge frontend planner request field from the shared AI types and stopped sending `vertical_norm` in planner requests
+
+Code references:
+
+- [ai.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/routes/ai.py)
+- [planner_domain_api.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/features/planner/planner_domain_api.py)
+- [test_ai_routes.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/routes/test_ai_routes.py)
+- [test_planner_domain_routes.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/routes/test_planner_domain_routes.py)
+- [types.ts](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/query-forge/ui/ai/types.ts)
+- [aiCopilotApi.ts](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/query-forge/ui/ai/aiCopilotApi.ts)
+- [aiCopilotApi.test.ts](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/query-forge/ui/ai/__tests__/aiCopilotApi.test.ts)
+- [usePlannerConversation.test.tsx](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/query-forge/ui/ai/__tests__/usePlannerConversation.test.tsx)
+- [QueryForgePage.test.tsx](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/query-forge/ui/__tests__/QueryForgePage.test.tsx)
+
+Focused verification completed before the full phase gate:
+
+- backend AI/planner route slice: `16 passed`
+- frontend Query Forge AI slice: `35 passed | 3 todo`
+
+Full phase gate:
+
+- backend: `pytest -q` -> `2694 passed, 78 skipped`
+- frontend: `npx vitest run` -> `659 passed | 3 todo`
+
+### 2026-04-13 - Domain embedding state schema cleanup slice complete
+
+Completed:
+
+- removed `vertical_norm` from the `domain_embedding_state` write path in the domain vector index service
+- removed `vertical_norm` and its old index from the demo DDL for `domain_embedding_state`
+- added a dedicated migration to drop the compatibility column from `domain_embedding_state`
+- added a regression that proves the incremental index state write no longer references the removed column
+
+Code references:
+
+- [domain_index_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/vector/domain_index_service.py)
+- [20260413_drop_domain_embedding_state_vertical.sql](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/migrations/20260413_drop_domain_embedding_state_vertical.sql)
+- [query_forge_demo_ddl.sql](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/query_forge_demo_ddl.sql)
+- [test_domain_vector_search.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/test_domain_vector_search.py)
+
+Focused verification completed before the full phase gate:
+
+- backend domain embedding state slice: `15 passed`
+
+Full phase gate:
+
+- backend: `pytest -q` -> `2691 passed, 78 skipped`
+
+### 2026-04-13 - Planner LLM vertical cleanup slice complete
+
+Completed:
+
+- removed the internal `vertical` argument from the planner LLM cache key, registry-version lookup, and cache write path
+- collapsed planner LLM semantic concept retrieval to the generic-only semantic partition instead of a dynamic vertical filter
+- removed the `vertical` column from the planner cache demo DDL and added a migration to drop it from the live schema
+- removed planner LLM logging and fake-test contracts that still modeled a planner vertical axis even though runtime had already hardcoded `generic`
+
+Code references:
+
+- [cache.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_llm/cache.py)
+- [service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/planner_llm/service.py)
+- [20260413_drop_planner_cache_vertical.sql](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/migrations/20260413_drop_planner_cache_vertical.sql)
+- [query_forge_demo_ddl.sql](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/query_forge_demo_ddl.sql)
+- [test_cache.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/services/planner_llm/test_cache.py)
+- [test_golden_ratio.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/services/planner_llm/test_golden_ratio.py)
+
+Focused verification completed before the full phase gate:
+
+- backend planner LLM slice: `9 passed`
+
+Full phase gate:
+
+- backend: `pytest -q` -> `2692 passed, 78 skipped`
+
+### 2026-04-13 - Domain vector contract cleanup slice complete
+
+Completed:
+
+- removed `vertical_norm` from the domain vector admin rebuild contract:
+  - `/admin/vector/domains/reindex`
+  - `/admin/vector/rebuild-all`
+- removed `vertical_norm` from the public domain vector search contract:
+  - `/vector/domains/search`
+- removed the dead `vertical_norm` parameter from the domain vector service entry points and the internal `DomainEmbeddingState` runtime object
+- updated the Forge Insights domain-vector caller to use the generic-only domain vector search contract
+- removed the vertical input from the frontend rebuild-all dialog and domain vector rebuild requests
+- updated the domain profile UI follow-up rebuild flow to call domain vector reindex without a vertical payload
+
+Code references:
+
+- [domain_index_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/vector/domain_index_service.py)
+- [vector_domain_routes.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/routes/admin/vector_domain_routes.py)
+- [vector_domains.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/routes/vector_domains.py)
+- [forge_insights_router_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/chat/forge_insights_router_service.py)
+- [vectorIndex.ts](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/system-admin/types/vectorIndex.ts)
+- [VectorIndexPage.tsx](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/system-admin/ui/vectors/VectorIndexPage.tsx)
+- [RebuildAllDialog.tsx](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/system-admin/ui/vectors/RebuildAllDialog.tsx)
+- [DomainProfileList.tsx](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/system-admin/ui/domains/DomainProfileList.tsx)
+
+Focused verification completed before the full phase gate:
+
+- backend domain vector slice: `80 passed`
+- frontend vector admin/domain profile slice: `11 passed`
+
 ### 2026-04-13 - Semantic public-contract cleanup slice complete
 
 Completed:
@@ -638,6 +1108,58 @@ Full phase gate:
 
 - backend: `pytest -q` -> `2688 passed, 78 skipped`
 - frontend: `npx vitest run` -> `143 passed`, `656 passed | 3 todo`
+
+### 2026-04-13 - Final backend zero-reference cleanup complete
+
+Completed:
+
+- removed the last explicit backend app/runtime references to `vertical_norm` and `scope_vertical_norm`
+- replaced the planner-domain and semantic-suggestion request-boundary special cases with generic unsupported-field validation so stale payloads still fail without hardcoding retired field names
+- deleted the now-unreferenced semantic normalization helper services that only existed to rewrite legacy `vertical_norm` storage rows
+- regenerated the planner-domain golden fixtures and closed the remaining full-suite fallout from the runtime cleanup
+
+Code references:
+
+- [planner_domain_api.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/features/planner/planner_domain_api.py)
+- [semantic_suggestion_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/semantic/semantic_suggestion_service.py)
+- [test_planner_domain_routes.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/routes/test_planner_domain_routes.py)
+- [test_semantic_suggestion_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/services/semantic/test_semantic_suggestion_service.py)
+- [generate_golden_files.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/services/planner_domain/generate_golden_files.py)
+
+Focused verification completed before the final gate:
+
+- targeted regression rerun: `13 passed`
+- backend app/runtime scan: `rg -n "vertical_norm|scope_vertical_norm" app/features app/services app/models app/routes app/nlp app/scripts` -> no matches
+
+Full phase gate:
+
+- backend: `pytest -q` -> `2688 passed, 80 skipped`
+- frontend: not rerun in this slice because the changes were backend-only
+
+### 2026-04-13 - Semantic concept vector rebuild cleanup slice complete
+
+Completed:
+
+- removed the semantic concept embedding service rebuild entrypoint's `vertical_norm` parameter and made semantic concept vector rebuild implicitly generic-only
+- changed the semantic concept embedding service generic load queries to read only normalized generic concept and alias rows during full rebuild
+- removed `vertical_norm` from the semantic concept rebuild admin route contract and response
+- removed the semantic concept rebuild `vertical_norm` payload from the frontend vector admin types and client call path
+- kept `vertical_norm` in the broader vector admin flow only where domain-vector rebuild still actually depends on it
+
+Code references:
+
+- [semantic_concept_embedding_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/services/embedding/semantic_concept_embedding_service.py)
+- [vector_domain_routes.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/routes/admin/vector_domain_routes.py)
+- [semantic_concepts.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/app/routes/semantic_concepts.py)
+- [test_semantic_concept_embedding_service.py](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-api/tests/services/embedding/test_semantic_concept_embedding_service.py)
+- [vectorIndex.ts](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/system-admin/types/vectorIndex.ts)
+- [VectorIndexPage.tsx](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/system-admin/ui/vectors/VectorIndexPage.tsx)
+- [vectorIndexes.test.ts](/Users/mmaslak/Local%20Documents/projects/query_forge/query-forge-ui/src/features/system-admin/api/vectorIndexes.test.ts)
+
+Focused verification completed before the full phase gate:
+
+- backend semantic vector slice: `78 passed`
+- frontend vector admin api slice: `1 passed`
 
 ### 2026-04-13 - Semantic CRUD and registry contract cleanup slice complete
 

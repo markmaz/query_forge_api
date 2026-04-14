@@ -107,3 +107,59 @@ def test_start_surfaces_unexpected_inline_rows_fetch_errors(monkeypatch) -> None
 
     with pytest.raises(AssertionError, match="unexpected inline fetch failure"):
         service.start("ws1", {"sqlJson": {"domainId": 1}, "kind": "query_builder"}, {})
+
+
+def test_execution_service_uses_keyword_workspace_id_for_domain_resolver(monkeypatch) -> None:
+    captured = {}
+
+    class _SqlExec:
+        pass
+
+    class _Ctx:
+        sql_exec = _SqlExec()
+
+    class _Builder:
+        def build(self, workspace_id: str):
+            assert workspace_id == "ws1"
+            return _Ctx()
+
+    class _Prepared:
+        sql = "SELECT 1"
+        params = {}
+        qf_rendered_sql = "SELECT 1"
+        qf_count_sql = None
+
+    class _QueryForgeService:
+        def __init__(self, executor, domain_resolver):
+            captured["executor"] = executor
+            captured["domain_resolver"] = domain_resolver
+
+        def prepare(self, raw_query, mode="preview", limit=200, offset=0):
+            assert raw_query == {"domainId": 1}
+            return _Prepared()
+
+    class _DomainResolver:
+        def __init__(self, *, workspace_id: str, allow_ambiguous: bool = False, sql=None):
+            captured["workspace_id"] = workspace_id
+            captured["allow_ambiguous"] = allow_ambiguous
+            captured["sql"] = sql
+
+    monkeypatch.setattr(execution_service, "_get_valkey_client", lambda: _FakeValkey())
+    monkeypatch.setattr(execution_service, "QueryForgeService", _QueryForgeService)
+    monkeypatch.setattr(execution_service, "DomainResolver", _DomainResolver)
+
+    service = execution_service.ExecutionService(context_builder=_Builder())
+
+    class _SubmitExec(_SqlExec):
+        def submit_statement_async(self, sql, parameters):
+            assert sql == "SELECT 1"
+            assert parameters == {}
+            return {"statement_id": "stmt-kw"}
+
+    _Ctx.sql_exec = _SubmitExec()
+    payload, status_code = service.start("ws1", {"sqlJson": {"domainId": 1}, "kind": "query_builder"}, {})
+
+    assert status_code == 200
+    assert payload["statementId"] == "stmt-kw"
+    assert captured["workspace_id"] == "ws1"
+    assert captured["allow_ambiguous"] is False

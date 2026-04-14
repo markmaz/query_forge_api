@@ -117,7 +117,7 @@ def _service() -> DomainVectorIndexService:
     )
 
 
-def test_domain_vector_search_filters_workspace_but_ignores_vertical() -> None:
+def test_domain_vector_search_filters_workspace() -> None:
     svc = _service()
     svc.ensure_collection()
     svc.upsert_domains(
@@ -168,7 +168,6 @@ def test_domain_vector_search_filters_workspace_but_ignores_vertical() -> None:
     out = svc.search_domains(
         workspace_id="ws-1",
         query="health claims",
-        vertical_norm="education",
         limit=5,
         score_threshold=0.0,
         include_payload=False,
@@ -228,7 +227,6 @@ def test_domain_vector_search_stable_order_by_score_then_id() -> None:
     out = svc.search_domains(
         workspace_id="ws-1",
         query="student enrollment",
-        vertical_norm="education",
         limit=3,
         score_threshold=0.0,
         include_payload=False,
@@ -262,7 +260,6 @@ def test_domain_vector_search_returns_payload_fields() -> None:
     out = svc.search_domains(
         workspace_id="ws-1",
         query="district enrollment",
-        vertical_norm="education",
         limit=1,
         score_threshold=0.0,
         include_payload=True,
@@ -303,7 +300,7 @@ def test_domain_reindex_does_not_filter_rows_by_vertical() -> None:
         collection_name="domain_catalog_v1",
     )
 
-    out = svc.reindex_domains(workspace_id="ws-1", vertical_norm="generic", force=True)
+    out = svc.reindex_domains(workspace_id="ws-1", force=True)
 
     assert out["total"] == 1
     assert out["upserted"] == 1
@@ -379,7 +376,7 @@ def test_load_embedding_state_tolerates_missing_table() -> None:
         collection_name="domain_catalog_v1",
     )
 
-    out = svc._load_embedding_state(workspace_id="ws-1", vertical_norm=None)
+    out = svc._load_embedding_state(workspace_id="ws-1")
 
     assert out == {}
 
@@ -399,12 +396,42 @@ def test_upsert_embedding_state_tolerates_missing_table() -> None:
             DomainEmbeddingState(
                 domain_id=51,
                 workspace_id="ws-1",
-                vertical_norm="education",
                 domain_version=3,
                 embedding_hash="abc123",
             )
         ]
     )
+
+
+def test_upsert_embedding_state_writes_without_vertical_column() -> None:
+    sql = FakeForgeQueryPort()
+    svc = DomainVectorIndexService(
+        sql=sql,
+        qdrant=_FakeQdrant(),
+        model=_FakeEmbeddingModel(),
+        collection_name="domain_catalog_v1",
+    )
+
+    svc._upsert_embedding_state(
+        [
+            DomainEmbeddingState(
+                domain_id=77,
+                workspace_id="ws-1",
+                domain_version=9,
+                embedding_hash="hash-77",
+            )
+        ]
+    )
+
+    assert len(sql.write_calls) == 1
+    call = sql.write_calls[0]
+    assert "vertical_norm" not in call.query
+    assert call.params == {
+        "domain_id": 77,
+        "workspace_id": "ws-1",
+        "domain_version": 9,
+        "embedding_hash": "hash-77",
+    }
 
 
 def test_upsert_embedding_state_surfaces_unexpected_write_errors() -> None:
@@ -423,7 +450,6 @@ def test_upsert_embedding_state_surfaces_unexpected_write_errors() -> None:
                 DomainEmbeddingState(
                     domain_id=52,
                     workspace_id="ws-1",
-                    vertical_norm="education",
                     domain_version=4,
                     embedding_hash="def456",
                 )

@@ -163,7 +163,6 @@ def fallback_candidates_from_capabilities(
     workspace_id: str,
     base_domain_id: int,
     base_domain_name: Optional[str],
-    vertical_norm: str,
     capability_index: CapabilityIndex,
 ) -> SemanticCandidatePayload:
     domain_key = domain_key_from_name(base_domain_name, base_domain_id)
@@ -225,7 +224,6 @@ def fallback_candidates_from_capabilities(
         prompt=prompt,
         normalized_prompt=prompt,
         workspace_id=workspace_id,
-        vertical_norm=str(vertical_norm or "generic").strip().lower() or "generic",
         base_domain_id=int(base_domain_id),
         base_domain_key=domain_key,
         domain=domain_candidate,

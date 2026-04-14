@@ -46,8 +46,6 @@ semantic_relationship_patch_model = semantic_relationships_ns.model(
 def _strip_semantic_vertical_fields(value: Any) -> Any:
     if isinstance(value, dict):
         cleaned = dict(value)
-        cleaned.pop("vertical", None)
-        cleaned.pop("vertical_norm", None)
         if "rows" in cleaned and isinstance(cleaned["rows"], list):
             cleaned["rows"] = [_strip_semantic_vertical_fields(row) for row in cleaned["rows"]]
         return cleaned

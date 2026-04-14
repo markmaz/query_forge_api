@@ -26,7 +26,6 @@ from app.services.semantic.concept_to_column_service import ConceptToColumnServi
 from app.services.semantic.constrained_column_vector_service import ConstrainedColumnVectorService
 from app.services.semantic.deterministic_matcher import DeterministicMatcher
 from app.services.semantic.domain_selection_service import DomainSelectionService
-from app.services.semantic.vertical_norm import normalize_semantic_vertical
 from app.services.semantic.value_alias_resolution_service import ValueAliasResolutionService
 from app.nlp.tier2_spacy.pipeline import run_tier2_with_meta
 
@@ -49,6 +48,7 @@ from app.services.semantic.plan.value_alias_applier import ValueAliasApplier
 
 SEMANTIC_EXTRACT_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError)
 TIER2_RUNNER_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError)
+GENERIC_VERTICAL_NORM = "generic"
 
 
 class PlanService:
@@ -148,7 +148,6 @@ class PlanService:
             raise ForgeError("Invalid planning request", status_code=400, details={"errors": exc.errors()}) from exc
 
         workspace_id = str(req.workspace_id or "").strip()
-        vertical_norm = normalize_semantic_vertical(req.vertical_norm)
         prompt = str(req.prompt or "").strip()
         if workspace_id == "" or prompt == "":
             raise ForgeError("workspace_id and prompt are required", status_code=400)
@@ -184,7 +183,6 @@ class PlanService:
         t_slot_intent = time.perf_counter()
         slot_intent = self._concept_scorer.build_slot_driven_intent(
             prompt=prompt,
-            vertical_norm=vertical_norm,
             semantic_extract_payload=semantic_extract_payload,
         )
         timings_ms["slot_intent"] = _elapsed_ms(t_slot_intent)
@@ -228,7 +226,7 @@ class PlanService:
                 deterministic["extracted_values"] = deterministic_extracted_values
 
         t0b = time.perf_counter()
-        lexical_hits = self._concept_scorer.lexical_alias_concept_hits(prompt=prompt, vertical_norm=vertical_norm)
+        lexical_hits = self._concept_scorer.lexical_alias_concept_hits(prompt=prompt)
         lexical_keys = [str(hit.get("concept_key") or "").strip().upper() for hit in lexical_hits if hit.get("concept_key")]
         timings_ms["lexical_alias"] = _elapsed_ms(t0b)
 
@@ -236,7 +234,6 @@ class PlanService:
         slot_scoped = self._concept_scorer.search_slot_scoped_concepts(
             prompt=prompt,
             slot_intent=slot_intent,
-            vertical_norm=vertical_norm,
             max_concepts=max_concepts,
             deterministic_matches=deterministic.get("matched") if isinstance(deterministic, dict) else None,
         )
@@ -258,7 +255,7 @@ class PlanService:
             has_org_district_signal=bool(slot_intent.org_district_terms),
         )
         concept_keys = [str(hit.get("concept_key") or "").upper() for hit in concept_vector.get("hits", [])]
-        concept_info = self._concept_scorer.load_concept_details(vertical_norm=vertical_norm, concept_keys=concept_keys)
+        concept_info = self._concept_scorer.load_concept_details(concept_keys=concept_keys)
         concept_vector["hits"] = self._concept_scorer.apply_intent_entity_to_concept_hits(
             hits=concept_vector.get("hits", []),
             concept_info=concept_info,
@@ -295,7 +292,6 @@ class PlanService:
         t1b = time.perf_counter()
         resolved_constraints = self._concept_scorer.resolve_prompt_value_constraints(
             prompt=prompt,
-            vertical_norm=vertical_norm,
             concept_hits=concept_vector.get("hits", []),
         )
         concept_vector["hits"] = ConceptScorer.apply_constraint_overrides_to_concept_hits(
@@ -310,7 +306,6 @@ class PlanService:
         t2 = time.perf_counter()
         concept_mapping = self._concept_to_column.map_concepts_to_columns(
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             concept_hits=concept_vector.get("hits", []),
             max_columns=max_columns,
             domain_id=selected_domain_id,
@@ -332,7 +327,6 @@ class PlanService:
             selected_domain_id = _to_int(domain_selection.get("domain_id"))
             concept_mapping = self._concept_to_column.map_concepts_to_columns(
                 workspace_id=workspace_id,
-                vertical_norm=vertical_norm,
                 concept_hits=concept_vector.get("hits", []),
                 max_columns=max_columns,
                 domain_id=selected_domain_id,
@@ -424,7 +418,6 @@ class PlanService:
             llm_plan = self._plan_with_llm(
                 workspace_id=workspace_id,
                 prompt=prompt,
-                vertical_norm=vertical_norm,
                 domain_id=selected_domain_id,
                 concept_hits=concept_vector.get("hits", []),
                 concept_info=concept_info,
@@ -496,7 +489,6 @@ class PlanService:
         *,
         workspace_id: str,
         prompt: str,
-        vertical_norm: str,
         domain_id: Optional[int],
         concept_hits: Sequence[Dict[str, Any]],
         concept_info: Dict[str, Dict[str, Any]],
@@ -578,7 +570,6 @@ class PlanService:
         )
         policy_result = self._projection_policy_service.get_projection_requirements(
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             base_domain_id=domain_id,
             prompt_signals=policy_signals,
         )
@@ -603,7 +594,6 @@ class PlanService:
         semantic_forced_filters = ForcedFilterBuilder.build_semantic_extract_filters(
             semantic_extract=semantic_extract_payload if isinstance(semantic_extract_payload, dict) else {},
             mapped_columns=columns_for_llm,
-            vertical_norm=vertical_norm,
         )
         forced_filters = ForcedFilterBuilder.merge(
             existing_filters=forced_filters, forced_filters=semantic_forced_filters, prompt=prompt,
@@ -675,7 +665,7 @@ class PlanService:
         grounded = SqlJsonBuilder.ground_plan(
             parsed, columns_for_llm, concepts_for_llm, prompt=prompt, domain_id=domain_id,
         )
-        grounded = self._value_alias_applier.apply(vertical_norm=vertical_norm, llm_plan=grounded)
+        grounded = self._value_alias_applier.apply(llm_plan=grounded)
         grounded, grounded_filter_warnings = self._plan_validator.enforce_grounded_org_filters(
             llm_plan=grounded,
             prompt=prompt,
@@ -687,7 +677,6 @@ class PlanService:
             llm_plan=grounded,
             prompt=prompt,
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             intent_entity=intent_entity,
             extracted_values=extracted_values,
             mapped_columns=columns_for_llm,

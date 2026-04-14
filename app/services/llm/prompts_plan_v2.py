@@ -135,14 +135,12 @@ def build_slot_user_prompt(
     *,
     normalized_prompt: str,
     workspace_id: str,
-    vertical_norm: str,
     base_domain_id: int,
 ) -> str:
     return (
         "Extract slot hints from this prompt.\n"
         f"prompt: {normalized_prompt}\n"
         f"workspace_id: {workspace_id}\n"
-        f"vertical_norm: {vertical_norm}\n"
         f"base_domain_id: {base_domain_id}\n"
         "Return JSON only."
     )
@@ -416,7 +414,6 @@ def build_user_prompt(
     *,
     normalized_prompt: str,
     workspace_id: str,
-    vertical_norm: str,
     base_domain: Mapping[str, Any],
     capabilities: Mapping[str, Sequence[Mapping[str, Any]]],
     schema: Dict[str, Any],
@@ -441,7 +438,6 @@ def build_user_prompt(
         "Now build PlanV2 for:\n"
         f"prompt: {normalized_prompt}\n"
         f"workspace_id: {workspace_id}\n"
-        f"vertical_norm: {vertical_norm}\n"
         f"base_domain: {json.dumps(dict(base_domain), ensure_ascii=True)}\n"
         f"slot_hints: {json.dumps(dict(slot_hints), ensure_ascii=True)}\n"
         f"allowed_dimensions: {json.dumps(dimensions, ensure_ascii=True)}\n"

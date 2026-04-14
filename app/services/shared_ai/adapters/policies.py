@@ -40,7 +40,6 @@ class PolicyDrivenRerankAdapter:
         capability_map: CapabilityMapArtifact,
     ) -> RerankedCandidatesArtifact:
         workspace_id = str(context.workspace_id or "").strip()
-        vertical_norm = str(context.vertical_norm or "generic")
         reranked: list[Candidate] = []
         effects: list[dict[str, Any]] = []
 
@@ -57,7 +56,6 @@ class PolicyDrivenRerankAdapter:
             if workspace_id and base_domain_id > 0:
                 policies = self._policies.get_applicable_policies(
                     workspace_id=workspace_id,
-                    vertical_norm=vertical_norm,
                     base_domain_id=base_domain_id,
                 )
                 for row in policies:

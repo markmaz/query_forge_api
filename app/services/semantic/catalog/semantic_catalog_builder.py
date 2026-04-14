@@ -20,7 +20,6 @@ from app.services.semantic.catalog.column_profile_builder import ColumnProfileBu
 from app.services.semantic.catalog.semantic_catalog_repository import SemanticCatalogRepository
 from app.services.semantic.catalog.semantic_enrichment_service import SemanticEnrichmentService
 from app.services.semantic.catalog.semantic_index_builder import SemanticIndexBuilder
-from app.services.semantic.vertical_norm import normalize_semantic_vertical
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +63,11 @@ class SemanticCatalogBuilder:
         *,
         workspace_id: str,
         domain_id: int,
-        vertical_norm: str = "generic",
         domain_name: Optional[str] = None,
         dry_run: bool = False,
         table_limit: int = 5000,
         llm_id: Optional[int] = None,
     ) -> SemanticCatalogBuildResult:
-        normalized_vertical = _normalize_vertical(vertical_norm)
         resolved_domain_name = domain_name or self._load_domain_name(workspace_id=workspace_id, domain_id=domain_id)
 
         profiles = self._profile_builder.build_profiles(
@@ -81,7 +78,6 @@ class SemanticCatalogBuilder:
         enriched = self._enrichment.enrich_profiles(
             profiles=profiles,
             workspace_id=workspace_id,
-            vertical_norm=normalized_vertical,
             domain_name=resolved_domain_name,
             llm_id=llm_id,
         )
@@ -89,7 +85,6 @@ class SemanticCatalogBuilder:
             enriched = _apply_sales_performance_overrides(enriched)
 
         concepts, aliases, source_map = self._build_core_concepts(
-            vertical_norm=normalized_vertical,
             domain_name=resolved_domain_name,
             enriched=enriched,
         )
@@ -98,7 +93,6 @@ class SemanticCatalogBuilder:
             concepts=concepts,
         )
         derived_concepts, derived_aliases = _concepts_for_derived_metrics(
-            vertical_norm=normalized_vertical,
             specs=derived_specs,
         )
         concepts.extend(derived_concepts)
@@ -125,7 +119,6 @@ class SemanticCatalogBuilder:
                 workspace_id=workspace_id,
                 domain_id=int(domain_id),
                 domain_name=resolved_domain_name,
-                vertical_norm=normalized_vertical,
                 profile_count=len(profiles),
                 enriched_count=len(enriched),
                 concepts_upserted=len(preview_concepts),
@@ -157,7 +150,6 @@ class SemanticCatalogBuilder:
             source_map=source_map,
         )
         value_aliases = _build_value_aliases(
-            vertical_norm=normalized_vertical,
             concept_id_by_key=concept_id_by_key,
             enriched=enriched,
         )
@@ -170,8 +162,8 @@ class SemanticCatalogBuilder:
         )
 
         all_keys = [c.concept_key for c in concepts]
-        concept_rows = self._repo.get_concepts(vertical_norm=normalized_vertical, concept_keys=all_keys)
-        alias_map = self._repo.get_aliases_by_concept_keys(vertical_norm=normalized_vertical, concept_keys=all_keys)
+        concept_rows = self._repo.get_concepts(concept_keys=all_keys)
+        alias_map = self._repo.get_aliases_by_concept_keys(concept_keys=all_keys)
         domain_key_map = _domain_key_map_for_rows(rows=concept_rows, domain_name=resolved_domain_name)
         index_items = self._index.build_items(
             concept_rows=concept_rows,
@@ -184,7 +176,6 @@ class SemanticCatalogBuilder:
             workspace_id=workspace_id,
             domain_id=int(domain_id),
             domain_name=resolved_domain_name,
-            vertical_norm=normalized_vertical,
             profile_count=len(profiles),
             enriched_count=len(enriched),
             concepts_upserted=int(write_result.get("concept_count") or 0),
@@ -211,7 +202,6 @@ class SemanticCatalogBuilder:
         *,
         workspace_id: str,
         domain_id: int,
-        vertical_norm: str = "generic",
         dry_run: bool = True,
         llm_id: Optional[int] = None,
     ) -> SemanticCatalogBuildResult:
@@ -221,7 +211,6 @@ class SemanticCatalogBuilder:
         return self.build_catalog(
             workspace_id=workspace_id,
             domain_id=domain_id,
-            vertical_norm=vertical_norm,
             domain_name="Sales Performance",
             dry_run=dry_run,
             llm_id=llm_id,
@@ -245,7 +234,6 @@ class SemanticCatalogBuilder:
     def _build_core_concepts(
         self,
         *,
-        vertical_norm: str,
         domain_name: str,
         enriched: Sequence[EnrichedColumnProfile],
     ) -> Tuple[List[ConceptUpsert], List[AliasUpsert], Dict[str, str]]:
@@ -255,7 +243,6 @@ class SemanticCatalogBuilder:
 
         domain_key = _domain_concept_key(domain_name)
         concepts[domain_key] = ConceptUpsert(
-            vertical_norm=vertical_norm,
             concept_key=domain_key,
             name=domain_name,
             description=f"Semantic domain for {domain_name}.",
@@ -280,7 +267,6 @@ class SemanticCatalogBuilder:
             semantic_type = _normalize_semantic_type(info.semantic_type)
             is_metric = semantic_type in {"measure", "metric"}
             concept = ConceptUpsert(
-                vertical_norm=vertical_norm,
                 concept_key=concept_key,
                 name=info.business_label or _humanize(profile.column_name),
                 description=info.description,
@@ -303,7 +289,6 @@ class SemanticCatalogBuilder:
             for alias in _dedupe_aliases(info.aliases + [_humanize(profile.column_name)]):
                 aliases.append(
                     AliasUpsert(
-                        vertical_norm=vertical_norm,
                         alias_key=alias,
                         concept_key=concept_key,
                         match_kind="exact",
@@ -398,7 +383,6 @@ def _build_derived_metric_specs(*, domain_name: str, concepts: Sequence[ConceptU
 
 def _concepts_for_derived_metrics(
     *,
-    vertical_norm: str,
     specs: Sequence[_DerivedMetricSpec],
 ) -> Tuple[List[ConceptUpsert], List[AliasUpsert]]:
     concepts: List[ConceptUpsert] = []
@@ -406,7 +390,6 @@ def _concepts_for_derived_metrics(
     for spec in specs:
         concepts.append(
             ConceptUpsert(
-                vertical_norm=vertical_norm,
                 concept_key=spec.concept_key,
                 name=spec.name,
                 description=f"{spec.description} Derived metric using controlled grammar ({spec.formula_kind}).",
@@ -427,7 +410,6 @@ def _concepts_for_derived_metrics(
         for alias in _dedupe_aliases([spec.name, spec.concept_key.replace("_", " ").title()]):
             aliases.append(
                 AliasUpsert(
-                    vertical_norm=vertical_norm,
                     alias_key=alias,
                     concept_key=spec.concept_key,
                     match_kind="exact",
@@ -485,7 +467,6 @@ def _build_relationships(
 
 def _build_value_aliases(
     *,
-    vertical_norm: str,
     concept_id_by_key: Mapping[str, int],
     enriched: Sequence[EnrichedColumnProfile],
 ) -> List[ValueAliasUpsert]:
@@ -508,7 +489,6 @@ def _build_value_aliases(
             seen.add(key)
             rows.append(
                 ValueAliasUpsert(
-                    vertical_norm=vertical_norm,
                     semantic_concept_id=concept_id,
                     canonical_value=token,
                     alias_value=token,
@@ -543,7 +523,6 @@ def _pseudo_concept_rows(preview_concepts: Sequence[Mapping[str, Any]]) -> List[
         rows.append(
             {
                 "id": idx + 1,
-                "vertical_norm": row.get("vertical_norm"),
                 "concept_key": row.get("concept_key"),
                 "name": row.get("name"),
                 "description": row.get("description"),
@@ -632,12 +611,6 @@ def _to_concept_key(value: str) -> str:
 
 def _humanize(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").replace("_", " ").strip()).title()
-
-
-def _normalize_vertical(value: str) -> str:
-    return normalize_semantic_vertical(value)
-
-
 def _entity_hint_from_column(column_name: str) -> Optional[str]:
     name = str(column_name or "").strip().lower()
     for entity in ("sales", "territory", "region", "account", "customer", "product", "rep", "order", "quota"):

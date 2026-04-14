@@ -103,7 +103,6 @@ def test_semantic_enrichment_service_falls_back_to_heuristics_when_llm_fails() -
     enriched = svc.enrich_profiles(
         profiles=profiles,
         workspace_id="ws-test",
-        vertical_norm="generic",
         domain_name="Sales Performance",
     )
 
@@ -138,7 +137,6 @@ def test_semantic_enrichment_service_surfaces_unexpected_llm_errors() -> None:
         svc.enrich_profiles(
             profiles=profiles,
             workspace_id="ws-test",
-            vertical_norm="generic",
             domain_name="Sales Performance",
         )
 
@@ -222,7 +220,6 @@ def test_semantic_catalog_builder_sales_example_generates_expected_derived_metri
     result = builder.run_sales_performance_example(
         workspace_id="ws_1",
         domain_id=3,
-        vertical_norm="generic",
         dry_run=True,
     )
 
@@ -234,7 +231,7 @@ def test_semantic_catalog_builder_sales_example_generates_expected_derived_metri
     assert result.relationships_upserted > 0
 
 
-def test_semantic_catalog_builder_normalizes_legacy_vertical_to_generic() -> None:
+def test_semantic_catalog_builder_no_longer_emits_vertical_norm() -> None:
     profiles = [
         ColumnProfile(
             workspace_table_id=10,
@@ -255,16 +252,15 @@ def test_semantic_catalog_builder_normalizes_legacy_vertical_to_generic() -> Non
     result = builder.build_catalog(
         workspace_id="ws_1",
         domain_id=3,
-        vertical_norm="education",
         domain_name="Sales Performance",
         dry_run=True,
     )
 
-    assert result.vertical_norm == "generic"
-    assert all(str(row.get("vertical_norm") or "") == "generic" for row in result.concept_preview)
+    assert "vertical_norm" not in result.model_dump(mode="json")
+    assert all("vertical_norm" not in row for row in result.concept_preview)
 
 
-def test_semantic_catalog_models_default_and_normalize_vertical_to_generic() -> None:
+def test_semantic_catalog_models_drop_vertical_norm_fields() -> None:
     concept = ConceptUpsert(
         concept_key="STUDENT_ID",
         name="Student Id",
@@ -272,12 +268,10 @@ def test_semantic_catalog_models_default_and_normalize_vertical_to_generic() -> 
         semantic_type="identifier",
     )
     legacy_alias = AliasUpsert(
-        vertical_norm="education",
         alias_key="student id",
         concept_key="STUDENT_ID",
     )
     legacy_value_alias = ValueAliasUpsert(
-        vertical_norm="global",
         semantic_concept_id=42,
         canonical_value="A",
         alias_value="A",
@@ -285,13 +279,12 @@ def test_semantic_catalog_models_default_and_normalize_vertical_to_generic() -> 
     result = SemanticCatalogBuildResult(
         workspace_id="ws-1",
         domain_id=3,
-        vertical_norm="education",
     )
 
-    assert concept.vertical_norm == "generic"
-    assert legacy_alias.vertical_norm == "generic"
-    assert legacy_value_alias.vertical_norm == "generic"
-    assert result.vertical_norm == "generic"
+    assert "vertical_norm" not in concept.model_dump(mode="json")
+    assert "vertical_norm" not in legacy_alias.model_dump(mode="json")
+    assert "vertical_norm" not in legacy_value_alias.model_dump(mode="json")
+    assert "vertical_norm" not in result.model_dump(mode="json")
 
 
 def test_to_int_first_ignores_invalid_numeric_values() -> None:

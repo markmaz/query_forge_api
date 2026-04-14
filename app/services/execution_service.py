@@ -104,7 +104,7 @@ class ExecutionService:
         )
         self._query_builder_mode = ExecutionModeQueryBuilder(
             query_forge_service_cls=QueryForgeService,
-            domain_resolver_factory=DomainResolver,
+            domain_resolver_factory=lambda workspace_id: DomainResolver(workspace_id=workspace_id),
         )
         self._query_builder_sql_mode = ExecutionModeQueryBuilderSql()
 

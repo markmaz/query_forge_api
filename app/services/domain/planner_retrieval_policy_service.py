@@ -302,11 +302,10 @@ class PlannerRetrievalPolicyService:
         self,
         *,
         workspace_id: Optional[str],
-        vertical_norm: Optional[str],
         prompt_signals: Sequence[str],
         semantic_concept_keys: Sequence[str],
     ) -> List[Dict[str, Any]]:
-        policies = self.get_applicable_policies(workspace_id=workspace_id, vertical_norm=vertical_norm)
+        policies = self.get_applicable_policies(workspace_id=workspace_id)
         signals = _normalized_tokens(prompt_signals, upper=False)
         concept_keys = _normalized_tokens(semantic_concept_keys, upper=True)
 
@@ -334,7 +333,6 @@ class PlannerRetrievalPolicyService:
         self,
         *,
         workspace_id: Optional[str],
-        vertical_norm: Optional[str],
         prompt_signals: Sequence[str],
         candidate_name: str,
     ) -> float:
@@ -342,7 +340,7 @@ class PlannerRetrievalPolicyService:
         if name == "":
             return 0.0
 
-        policies = self.get_applicable_policies(workspace_id=workspace_id, vertical_norm=vertical_norm)
+        policies = self.get_applicable_policies(workspace_id=workspace_id)
         signals = _normalized_tokens(prompt_signals, upper=False)
         total_bias = 0.0
         for row in policies:
@@ -361,9 +359,7 @@ class PlannerRetrievalPolicyService:
         self,
         *,
         workspace_id: Optional[str],
-        vertical_norm: Optional[str],
     ) -> List[Dict[str, Any]]:
-        del vertical_norm
         rows: List[Dict[str, Any]] = [dict(item) for item in _SEED_POLICIES]
         if self._enable_db_lookup:
             try:
@@ -399,7 +395,6 @@ class PlannerRetrievalPolicyService:
         policies: List[Dict[str, Any]] = []
         for row in sort_and_dedupe_global_workspace_policies(rows):
             payload = dict(row)
-            payload.pop("scope_vertical_norm", None)
             try:
                 payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             except POLICY_RULE_VALIDATION_ERRORS:
@@ -449,7 +444,6 @@ class PlannerRetrievalPolicyService:
         policies: list[dict[str, Any]] = []
         for row in rows:
             payload = _json_safe_mapping(dict(row))
-            payload.pop("scope_vertical_norm", None)
             payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             payload["is_seeded"] = bool(payload.get("_seeded"))
             payload["can_edit"] = not payload["is_seeded"]

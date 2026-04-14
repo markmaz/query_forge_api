@@ -13,7 +13,6 @@ class _FakeRetrievalService:
         return SemanticCandidatePayload(
             prompt="students by county",
             workspace_id="ws-1",
-            vertical_norm="generic",
             base_domain_id=6,
             base_domain_key="ENROLLMENT",
             metric_candidates=[
@@ -45,8 +44,8 @@ class _FakeValueAliasResolver:
     def __init__(self) -> None:
         self.calls = []
 
-    def resolve(self, *, prompt: str, vertical_norm: str):
-        self.calls.append({"prompt": prompt, "vertical_norm": vertical_norm})
+    def resolve(self, *, prompt: str):
+        self.calls.append({"prompt": prompt})
         return [
             {
                 "concept_key": "COUNTRY",
@@ -67,7 +66,6 @@ def test_build_grounding_bundle_combines_candidates_and_alias_constraints() -> N
     out = svc.build_grounding_bundle(
         prompt="students by county not born in the US",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=6,
         base_domain_name="Enrollment",
         capabilities_compact={"dimensions": [], "filter_columns": [], "time_columns": []},
@@ -79,8 +77,8 @@ def test_build_grounding_bundle_combines_candidates_and_alias_constraints() -> N
     assert debug["candidate_summary"]["metric_count"] == 1
     assert debug["candidate_summary"]["dimension_count"] == 1
     assert debug["candidate_summary"]["metrics"] == ["ENROLLMENT_COUNT"]
-    assert retrieval.calls[0]["vertical_norm"] == "generic"
-    assert resolver.calls[0]["vertical_norm"] == "generic"
+    assert "vertical_norm" not in retrieval.calls[0]
+    assert resolver.calls[0]["prompt"] == "students by county not born in the US"
 
 
 class _RaisingRetrievalService:
@@ -90,8 +88,8 @@ class _RaisingRetrievalService:
 
 
 class _RaisingAliasResolver:
-    def resolve(self, *, prompt: str, vertical_norm: str):
-        del prompt, vertical_norm
+    def resolve(self, *, prompt: str):
+        del prompt
         raise RuntimeError("alias resolution unavailable")
 
 
@@ -104,7 +102,6 @@ def test_build_grounding_bundle_marks_candidate_retrieval_failure() -> None:
     out = svc.build_grounding_bundle(
         prompt="students by county",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=6,
         base_domain_name="Enrollment",
         capabilities_compact={"dimensions": [], "filter_columns": [], "time_columns": []},
@@ -123,7 +120,6 @@ def test_resolve_alias_constraints_returns_empty_on_resolver_failure() -> None:
 
     out = svc.resolve_alias_constraints(
         prompt="students by county",
-        vertical_norm="education",
     )
 
     assert out == []

@@ -24,8 +24,8 @@ class _FakeLLM:
 
 
 class _FakeCapabilitiesService:
-    def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
-        del workspace_id, user_id, vertical_norm
+    def get_domain_capabilities(self, *, workspace_id, user_id, domain_id):
+        del workspace_id, user_id
         assert domain_id == 6
         return {
             "domain_id": 6,
@@ -83,7 +83,6 @@ def test_unified_planner_valid_json_returns_slot_hints_and_plan():
         prompt="Show students by county",
         normalized_prompt="Show students by county",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=6,
         domain_name="Enrollment",
         capabilities_compact={"dimensions": [{"column_key": "wt20.county_fips_code"}], "filter_columns": []},
@@ -106,7 +105,6 @@ def test_unified_planner_extracts_json_wrapped_in_text():
         prompt="Show students by county",
         normalized_prompt="Show students by county",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=6,
         domain_name="Enrollment",
         capabilities_compact={"dimensions": [{"column_key": "wt20.county_fips_code"}], "filter_columns": []},
@@ -131,7 +129,6 @@ def test_unified_planner_retries_once_when_first_json_invalid():
         prompt="Show students by county",
         normalized_prompt="Show students by county",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=6,
         domain_name="Enrollment",
         capabilities_compact={"dimensions": [{"column_key": "wt20.county_fips_code"}], "filter_columns": []},
@@ -159,7 +156,6 @@ def test_unified_planner_surfaces_unexpected_parse_failures(monkeypatch):
             prompt="Show students by county",
             normalized_prompt="Show students by county",
             workspace_id="ws-1",
-            vertical_norm="education",
             base_domain_id=6,
             domain_name="Enrollment",
             capabilities_compact={"dimensions": [{"column_key": "wt20.county_fips_code"}], "filter_columns": []},
@@ -181,7 +177,6 @@ def test_unified_pipeline_invalid_columns_are_repaired(monkeypatch):
         prompt,
         normalized_prompt,
         workspace_id,
-        vertical_norm,
         base_domain_id,
         domain_name,
         capabilities,
@@ -195,7 +190,6 @@ def test_unified_pipeline_invalid_columns_are_repaired(monkeypatch):
             prompt,
             normalized_prompt,
             workspace_id,
-            vertical_norm,
             base_domain_id,
             domain_name,
             capabilities,

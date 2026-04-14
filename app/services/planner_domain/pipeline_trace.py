@@ -536,7 +536,6 @@ class PipelineTraceService:
                         "request_context": {
                             "workspace_id": str(body.get("workspace_id") or ""),
                             "conversation_id": str(body.get("conversation_id") or ""),
-                            "vertical_norm": str(body.get("vertical_norm") or ""),
                             "base_domain_id": body.get("base_domain_id"),
                             "profile_pipeline": bool(body.get("profile_pipeline")),
                             "profile_pipeline_data": bool(body.get("profile_pipeline_data")),

@@ -190,7 +190,8 @@ class _RaceAliasLLM:
 
 
 class _RaceAliasResolver:
-    def resolve(self, *, prompt: str, vertical_norm: str):
+    def resolve(self, *, prompt: str):
+        del prompt
         return [
             {
                 "column_key": "wt24.race_ethnicity",

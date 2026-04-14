@@ -36,14 +36,14 @@ def test_admin_domain_reindex_uses_workspace_header(client, monkeypatch):
     class _Svc:
         def reindex_domains(self, **kwargs):
             assert kwargs["workspace_id"] == "ws-1"
-            assert kwargs["vertical_norm"] == "education"
+            assert "vertical_norm" not in kwargs
             return {"upserted": 3}
 
     monkeypatch.setattr(admin_routes, "DomainVectorIndexService", _Svc)
 
     resp = client.post(
         "/api/v1/admin/vector/domains/reindex",
-        json={"vertical_norm": "education", "force": True},
+        json={"force": True},
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 200
@@ -53,7 +53,7 @@ def test_admin_domain_reindex_uses_workspace_header(client, monkeypatch):
 def test_admin_domain_reindex_rejects_workspace_id_in_body(client, monkeypatch):
     resp = client.post(
         "/api/v1/admin/vector/domains/reindex",
-        json={"workspace_id": "ws-2", "vertical_norm": "education"},
+        json={"workspace_id": "ws-2"},
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 400
@@ -70,7 +70,7 @@ def test_admin_domain_reindex_returns_underlying_error_details(client, monkeypat
 
     resp = client.post(
         "/api/v1/admin/vector/domains/reindex",
-        json={"vertical_norm": "education"},
+        json={},
         headers=_headers(monkeypatch),
     )
 

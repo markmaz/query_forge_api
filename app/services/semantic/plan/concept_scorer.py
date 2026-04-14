@@ -24,6 +24,8 @@ from app.services.semantic.plan.utils import (
     _to_int,
 )
 
+GENERIC_VERTICAL_NORM = "generic"
+
 
 class ConceptScorer:
     def __init__(
@@ -43,7 +45,6 @@ class ConceptScorer:
         self,
         *,
         prompt: str,
-        vertical_norm: str,
         semantic_extract_payload: Dict[str, Any],
     ) -> SlotDrivenIntent:
         slots = semantic_extract_payload.get("slots") if isinstance(semantic_extract_payload, dict) else {}
@@ -63,10 +64,9 @@ class ConceptScorer:
                 value = str(match.group(1) or "").strip()
                 if value:
                     dimension_terms.append(value)
-        time_normalized = normalize_time_terms(time_terms, vertical=vertical_norm)
-        if not time_normalized and str(vertical_norm or "").lower() == "education":
-            if re.search(r"\b(this school year|current school year)\b", str(prompt or "").lower()):
-                time_normalized = [CanonicalTime(key="CURRENT_SCHOOL_YEAR", confidence=0.9, raw_text=prompt)]
+        time_normalized = normalize_time_terms(time_terms, vertical=GENERIC_VERTICAL_NORM)
+        if not time_normalized and re.search(r"\b(this school year|current school year)\b", str(prompt or "").lower()):
+            time_normalized = [CanonicalTime(key="CURRENT_SCHOOL_YEAR", confidence=0.9, raw_text=prompt)]
         return SlotDrivenIntent(
             metric_terms=metric_terms,
             dimension_terms=dimension_terms,
@@ -82,7 +82,6 @@ class ConceptScorer:
         *,
         prompt: str,
         slot_intent: SlotDrivenIntent,
-        vertical_norm: str,
         max_concepts: int,
         deterministic_matches: Optional[Sequence[Dict[str, Any]]],
     ) -> Dict[str, Any]:
@@ -98,7 +97,6 @@ class ConceptScorer:
             t_metric = time.perf_counter()
             metric_hits = self.search_concepts_for_query(
                 query=metric_query,
-                vertical_norm=vertical_norm,
                 max_concepts=min(10, max_concepts),
                 deterministic_matches=deterministic_matches,
             )
@@ -111,7 +109,6 @@ class ConceptScorer:
                 t_dimension = time.perf_counter()
                 dimension_hits = self.search_concepts_for_query(
                     query=dimension_query,
-                    vertical_norm=vertical_norm,
                     max_concepts=min(20, max_concepts),
                     deterministic_matches=deterministic_matches,
                 )
@@ -122,7 +119,6 @@ class ConceptScorer:
             t_subgroup = time.perf_counter()
             subgroup_hits = self.search_concepts_for_query(
                 query=subgroup_query,
-                vertical_norm=vertical_norm,
                 max_concepts=min(20, max_concepts),
                 deterministic_matches=deterministic_matches,
             )
@@ -134,7 +130,6 @@ class ConceptScorer:
             t_fallback = time.perf_counter()
             fallback_hits = self.search_concepts_for_query(
                 query=prompt,
-                vertical_norm=vertical_norm,
                 max_concepts=max_concepts,
                 deterministic_matches=deterministic_matches,
             )
@@ -154,7 +149,7 @@ class ConceptScorer:
             "subgroup": {str(row.get("concept_key") or "").strip().upper() for row in subgroup_hits},
         }
         all_keys = sorted({key for keys in role_keys.values() for key in keys if key})
-        concept_info = self.load_concept_details(vertical_norm=vertical_norm, concept_keys=all_keys)
+        concept_info = self.load_concept_details(concept_keys=all_keys)
         metric_filtered = self.filter_hits_for_role(
             hits=metric_hits,
             concept_info=concept_info,
@@ -200,13 +195,11 @@ class ConceptScorer:
         self,
         *,
         query: str,
-        vertical_norm: str,
         max_concepts: int,
         deterministic_matches: Optional[Sequence[Dict[str, Any]]],
     ) -> List[Dict[str, Any]]:
         out = self._concept_retrieval.search(
             prompt=query,
-            vertical_norm=vertical_norm,
             max_concepts=max_concepts,
             deterministic_matches=deterministic_matches,
         )
@@ -284,7 +277,7 @@ class ConceptScorer:
         out.sort(key=lambda row: -(_to_float(row.get("score")) or 0.0))
         return out[:max_concepts]
 
-    def load_concept_details(self, *, vertical_norm: str, concept_keys: Sequence[str]) -> Dict[str, Dict[str, Any]]:
+    def load_concept_details(self, *, concept_keys: Sequence[str]) -> Dict[str, Dict[str, Any]]:
         keys = [str(k or "").strip().upper() for k in concept_keys if str(k or "").strip()]
         if not keys:
             return {}
@@ -300,14 +293,10 @@ class ConceptScorer:
               is_identifier
             FROM semantic_concept
             WHERE concept_key IN ({in_sql})
-              AND vertical_norm IN (:vertical_norm, 'generic')
               AND `status` = 'active'
-            ORDER BY CASE WHEN vertical_norm = :vertical_norm THEN 0 ELSE 1 END
+            ORDER BY concept_key
             """,
-            {
-                **in_params,
-                "vertical_norm": str(vertical_norm or "generic").strip().lower() or "generic",
-            },
+            in_params,
         )
         out: Dict[str, Dict[str, Any]] = {}
         for row in rows:
@@ -632,11 +621,10 @@ class ConceptScorer:
         out = out[: max(max_concepts, len(force_keys))]
         return ConceptScorer.ensure_keys_in_hits(hits=out, required_keys=force_keys, max_concepts=max_concepts)
 
-    def lexical_alias_concept_hits(self, *, prompt: str, vertical_norm: str) -> List[Dict[str, Any]]:
+    def lexical_alias_concept_hits(self, *, prompt: str) -> List[Dict[str, Any]]:
         ngrams = _build_prompt_ngrams(prompt)
         if not ngrams:
             return []
-        vertical = str(vertical_norm or "generic").strip().lower() or "generic"
         matches: Dict[str, Dict[str, Any]] = {}
         for ngram in ngrams:
             rows = self._sql.execute_query_mappings(
@@ -647,18 +635,16 @@ class ConceptScorer:
                   match_kind,
                   weight
                 FROM semantic_concept_alias
-                WHERE vertical_norm IN (:vertical_norm, 'generic')
-                  AND (
+                WHERE (
                     (match_kind = 'exact' AND LOWER(alias_key) = :ngram)
                     OR
                     (match_kind = 'contains' AND :ngram LIKE CONCAT('%', LOWER(alias_key), '%'))
                   )
                 ORDER BY
-                  CASE WHEN vertical_norm = :vertical_norm THEN 0 ELSE 1 END,
                   weight DESC,
                   id ASC
                 """,
-                {"vertical_norm": vertical, "ngram": ngram},
+                {"ngram": ngram},
             )
             for row in rows:
                 concept_key = str(row.get("concept_key") or "").strip().upper()
@@ -733,10 +719,11 @@ class ConceptScorer:
         self,
         *,
         prompt: str,
-        vertical_norm: str,
         concept_hits: Sequence[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        resolved = self._value_alias_resolver.resolve(prompt=prompt, vertical_norm=vertical_norm)
+        resolved = self._value_alias_resolver.resolve(
+            prompt=prompt,
+        )
         if not resolved:
             return []
 

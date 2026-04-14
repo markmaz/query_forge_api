@@ -7,8 +7,9 @@ from sqlalchemy import DateTime, Index, Integer, String, Text, UniqueConstraint,
 from sqlalchemy.dialects.mysql import BIGINT, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.domain.planner_rerank_policy import PLANNER_RERANK_SCOPE_TYPES, PLANNER_RERANK_SIGNAL_KEYS
+from app.models.domain.planner_rerank_policy import PLANNER_RERANK_SIGNAL_KEYS
 from app.models.semantic.semantic_registry import SemanticBase
+from app.services.domain.policy_scope_service import GLOBAL_WORKSPACE_SCOPE_TYPES
 
 PLANNER_CAPABILITY_PACKING_FEATURE_KEYS = frozenset(
     {
@@ -133,13 +134,12 @@ class PlannerCapabilityPackingPolicyUpsertRequest(BaseModel):
     description: Optional[str] = None
     scope_type: str = Field(min_length=1, max_length=32)
     scope_workspace_id: Optional[str] = Field(default=None, max_length=128)
-    scope_vertical_norm: Optional[str] = Field(default=None, max_length=64)
     priority: int = Field(default=100)
     is_active: bool = True
     stop_on_match: bool = False
     policy_json: PlannerCapabilityPackingPolicyRule
 
-    @field_validator("policy_key", "name", "description", "scope_workspace_id", "scope_vertical_norm", mode="before")
+    @field_validator("policy_key", "name", "description", "scope_workspace_id", mode="before")
     @classmethod
     def _clean_text(cls, value: Any) -> Optional[str]:
         if value is None:
@@ -151,7 +151,7 @@ class PlannerCapabilityPackingPolicyUpsertRequest(BaseModel):
     @classmethod
     def _normalize_scope_type(cls, value: Any) -> str:
         token = str(value or "").strip().lower()
-        if token not in PLANNER_RERANK_SCOPE_TYPES:
+        if token not in GLOBAL_WORKSPACE_SCOPE_TYPES:
             raise ValueError(f"Invalid scope_type: {value}")
         return token
 
@@ -162,10 +162,9 @@ class PlannerCapabilityPackingPolicy(SemanticBase):
         UniqueConstraint(
             "policy_key",
             "scope_workspace_id",
-            "scope_vertical_norm",
             name="uidx_capability_packing_policy_scope",
         ),
-        Index("idx_pcpp_scope", "scope_workspace_id", "scope_vertical_norm"),
+        Index("idx_pcpp_scope", "scope_workspace_id"),
         Index("idx_pcpp_priority", "priority"),
         Index("idx_pcpp_active", "is_active"),
     )
@@ -176,7 +175,6 @@ class PlannerCapabilityPackingPolicy(SemanticBase):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
     scope_workspace_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    scope_vertical_norm: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("100"))
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     stop_on_match: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))

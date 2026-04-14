@@ -81,7 +81,6 @@ def test_relationship_concept_lookup_route(client, monkeypatch):
                 "rows": [
                     {
                         "id": 1,
-                        "vertical_norm": "generic",
                         "concept_key": "TOTAL_NET_AMOUNT",
                         "concept_name": "Total Net Amount",
                         "display_label": "Total Net Amount (TOTAL_NET_AMOUNT)",
@@ -97,7 +96,6 @@ def test_relationship_concept_lookup_route(client, monkeypatch):
     resp = client.get("/api/v1/semantic/relationships/concepts?q=sales", headers=_headers(monkeypatch))
     assert resp.status_code == 200
     assert resp.json["rows"][0]["concept_name"] == "Total Net Amount"
-    assert "vertical_norm" not in resp.json["rows"][0]
 
 
 def test_patch_relationship_by_id_route(client, monkeypatch):

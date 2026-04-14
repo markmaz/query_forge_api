@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
-from app.services.semantic.vertical_norm import normalize_semantic_vertical
 
 
 class ConceptToColumnService:
@@ -18,14 +17,12 @@ class ConceptToColumnService:
         self,
         *,
         workspace_id: str,
-        vertical_norm: Optional[str] = None,
         concept_hits: Sequence[Dict[str, Any]],
         max_columns: int,
         domain_id: Optional[int] = None,
         intent_entity: Optional[str] = None,
     ) -> Dict[str, Any]:
         workspace = str(workspace_id or "").strip()
-        vertical = _norm_vertical(vertical_norm)
         concepts = [str(hit.get("concept_key") or "").strip().upper() for hit in concept_hits]
         concepts = [c for c in concepts if c]
 
@@ -42,7 +39,6 @@ class ConceptToColumnService:
         max_cols = max(1, min(500, int(max_columns or 60)))
         ranked_m2m = self._query_ranked_m2m(
             workspace_id=workspace,
-            vertical_norm=vertical,
             concept_keys=concepts,
             domain_id=domain_id,
             per_concept_limit=self.PER_CONCEPT_LIMIT,
@@ -54,7 +50,6 @@ class ConceptToColumnService:
         if missing_concepts:
             ranked_fallback = self._query_ranked_primary_fallback(
                 workspace_id=workspace,
-                vertical_norm=vertical,
                 concept_keys=missing_concepts,
                 domain_id=domain_id,
                 per_concept_limit=self.PER_CONCEPT_LIMIT,
@@ -111,7 +106,6 @@ class ConceptToColumnService:
         self,
         *,
         workspace_id: str,
-        vertical_norm: str,
         concept_keys: Sequence[str],
         domain_id: Optional[int],
         per_concept_limit: int,
@@ -121,7 +115,6 @@ class ConceptToColumnService:
         in_sql, in_params = _in_clause("ck", concept_keys)
         params: Dict[str, Any] = {
             "workspace_id": workspace_id,
-            "vertical_norm": vertical_norm,
             "per_concept_limit": max(1, int(per_concept_limit or self.PER_CONCEPT_LIMIT)),
             **in_params,
         }
@@ -144,14 +137,10 @@ class ConceptToColumnService:
                 LOWER(a.alias_key) AS alias_key_lc,
                 ROW_NUMBER() OVER (
                   PARTITION BY a.concept_key
-                  ORDER BY
-                    CASE WHEN a.vertical_norm = :vertical_norm THEN 0 ELSE 1 END,
-                    a.weight DESC,
-                    a.id ASC
+                  ORDER BY a.weight DESC, a.id ASC
                 ) AS rn_alias
               FROM semantic_concept_alias a
-              WHERE a.vertical_norm IN (:vertical_norm, 'generic')
-                AND a.concept_key IN ({in_sql})
+              WHERE a.concept_key IN ({in_sql})
             ),
             alias_top AS (
               SELECT concept_key, alias_key_lc
@@ -212,8 +201,7 @@ class ConceptToColumnService:
                AND wt.workspace_id = :workspace_id
                AND wt.exists_in_dbx = 1
               {domain_join}
-              WHERE m.vertical_norm IN (:vertical_norm, 'generic')
-                AND sc.concept_key IN ({in_sql})
+              WHERE sc.concept_key IN ({in_sql})
             ),
             dedup AS (
               SELECT
@@ -282,7 +270,6 @@ class ConceptToColumnService:
         self,
         *,
         workspace_id: str,
-        vertical_norm: str,
         concept_keys: Sequence[str],
         domain_id: Optional[int],
         per_concept_limit: int,
@@ -292,7 +279,6 @@ class ConceptToColumnService:
         in_sql, in_params = _in_clause("ck", concept_keys)
         params: Dict[str, Any] = {
             "workspace_id": workspace_id,
-            "vertical_norm": vertical_norm,
             "per_concept_limit": max(1, int(per_concept_limit or self.PER_CONCEPT_LIMIT)),
             **in_params,
         }
@@ -315,14 +301,10 @@ class ConceptToColumnService:
                 LOWER(a.alias_key) AS alias_key_lc,
                 ROW_NUMBER() OVER (
                   PARTITION BY a.concept_key
-                  ORDER BY
-                    CASE WHEN a.vertical_norm = :vertical_norm THEN 0 ELSE 1 END,
-                    a.weight DESC,
-                    a.id ASC
+                  ORDER BY a.weight DESC, a.id ASC
                 ) AS rn_alias
               FROM semantic_concept_alias a
-              WHERE a.vertical_norm IN (:vertical_norm, 'generic')
-                AND a.concept_key IN ({in_sql})
+              WHERE a.concept_key IN ({in_sql})
             ),
             alias_top AS (
               SELECT concept_key, alias_key_lc
@@ -337,13 +319,10 @@ class ConceptToColumnService:
                 sc.entity,
                 ROW_NUMBER() OVER (
                   PARTITION BY sc.concept_key
-                  ORDER BY
-                    CASE WHEN sc.vertical_norm = :vertical_norm THEN 0 ELSE 1 END,
-                    sc.id ASC
+                  ORDER BY sc.id ASC
                 ) AS rn_concept
               FROM semantic_concept sc
               WHERE sc.concept_key IN ({in_sql})
-                AND sc.vertical_norm IN (:vertical_norm, 'generic')
             ),
             scored AS (
               SELECT
@@ -687,10 +666,6 @@ def _in_clause(prefix: str, values: Sequence[str]) -> Tuple[str, Dict[str, Any]]
         keys.append(f":{name}")
         params[name] = str(value)
     return ", ".join(keys) if keys else "NULL", params
-
-
-def _norm_vertical(value: str) -> str:
-    return normalize_semantic_vertical(value)
 
 
 def _norm_entity(value: Any) -> Optional[str]:

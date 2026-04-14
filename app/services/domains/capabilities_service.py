@@ -17,7 +17,6 @@ _OVERLAY_CATALOG: List[Dict[str, Any]] = [
     {
         "overlay_key": "students_per_teacher",
         "label": "Students per Teacher",
-        "vertical_norm": "education",
         "base_domain_name_tokens": ["enrollment", "student"],
         "requires_domain_name_tokens": ["staff"],
     }
@@ -35,7 +34,6 @@ class DomainCapabilitiesService:
         workspace_id: str,
         user_id: str,
         domain_id: int,
-        vertical_norm: str = "generic",
     ) -> Dict[str, Any]:
         domain = self._load_domain(workspace_id=workspace_id, user_id=user_id, domain_id=domain_id)
         columns = self._load_domain_columns(workspace_id=workspace_id, domain_id=domain_id)
@@ -46,7 +44,6 @@ class DomainCapabilitiesService:
             workspace_id=workspace_id,
             base_domain_id=domain_id,
             base_domain_name=str(domain.get("name") or ""),
-            vertical_norm=vertical_norm,
         )
 
         return {
@@ -65,14 +62,12 @@ class DomainCapabilitiesService:
         workspace_id: str,
         user_id: str,
         domain_id: int,
-        vertical_norm: str = "generic",
     ) -> List[Dict[str, Any]]:
         domain = self._load_domain(workspace_id=workspace_id, user_id=user_id, domain_id=domain_id)
         return self._build_overlay_metrics(
             workspace_id=workspace_id,
             base_domain_id=domain_id,
             base_domain_name=str(domain.get("name") or ""),
-            vertical_norm=vertical_norm,
         )
 
     def _load_domain(self, *, workspace_id: str, user_id: str, domain_id: int) -> Dict[str, Any]:
@@ -215,15 +210,11 @@ class DomainCapabilitiesService:
         workspace_id: str,
         base_domain_id: int,
         base_domain_name: str,
-        vertical_norm: str,
     ) -> List[Dict[str, Any]]:
         overlays: List[Dict[str, Any]] = []
         domain_name_norm = _norm_token_blob(base_domain_name)
         related_domains = self._load_workspace_domain_name_map(workspace_id=workspace_id)
         for item in _OVERLAY_CATALOG:
-            overlay_vertical = str(item.get("vertical_norm") or "generic").strip().lower()
-            if overlay_vertical != str(vertical_norm or "generic").strip().lower():
-                continue
             required_tokens = [str(token).strip().lower() for token in list(item.get("base_domain_name_tokens") or [])]
             if required_tokens and not any(token in domain_name_norm for token in required_tokens):
                 continue

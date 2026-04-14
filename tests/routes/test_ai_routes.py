@@ -114,14 +114,12 @@ def test_ai_suggest_semantic_adapter_validates_request(client, monkeypatch):
     assert resp.status_code == 400
 
 
-def test_ai_suggest_semantic_adapter_uses_current_sqljson_domain_and_vertical_default(client, monkeypatch):
-    client.application.config["SEMANTIC_VERTICAL_DEFAULT"] = "education"
-
+def test_ai_suggest_semantic_adapter_uses_current_sqljson_domain(client, monkeypatch):
     class _PlanService:
         def plan(self, payload, *, include_llm=True):
             assert include_llm is True
             assert payload["domain_id"] == 6
-            assert payload["vertical_norm"] == "education"
+            assert "vertical_norm" not in payload
             return {
                 "llm_plan": {
                     "model": "qwen25-14b",
@@ -146,6 +144,27 @@ def test_ai_suggest_semantic_adapter_uses_current_sqljson_domain_and_vertical_de
     )
     assert resp.status_code == 200
     assert resp.json["sqlJson"]["domainId"] == 6
+
+
+def test_ai_suggest_semantic_adapter_rejects_removed_vertical_field(client, monkeypatch):
+    class _PlanService:
+        def plan(self, payload, *, include_llm=True):
+            raise AssertionError("plan should not be called")
+
+    monkeypatch.setattr(ai_routes, "PlanService", _PlanService)
+
+    resp = client.post(
+        "/api/v1/ai/suggest-semantic-adapter",
+        json={
+            "mode": "ai_first",
+            "prompt": "students in montgomery county",
+            "vertical_norm": "education",
+            "currentSqlJson": {"domainId": 6},
+            "candidates": {"tables": [], "columns": []},
+        },
+        headers=_headers(monkeypatch),
+    )
+    assert resp.status_code == 400
 
 
 def test_ai_suggest_deprecated_wrapper_uses_semantic_plan(client, monkeypatch):

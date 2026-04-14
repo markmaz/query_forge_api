@@ -154,7 +154,6 @@ class ForgeMatchMappingService:
         *,
         workspace_id: str,
         session_id: str,
-        vertical_norm: Optional[str] = None,
         domain_id: Optional[int] = None,
         top_n: int = 8,
         force: bool = False,
@@ -165,7 +164,6 @@ class ForgeMatchMappingService:
         return self._session_jobs.analyze_session(
             workspace_id=ws,
             session_id=sid,
-            vertical_norm=vertical_norm,
             domain_id=domain_id,
             top_n=top_n,
             force=force,
@@ -179,7 +177,6 @@ class ForgeMatchMappingService:
         session_id: str,
         top_n: int = 8,
         domain_id: Optional[int] = None,
-        vertical_norm: Optional[str] = None,
         force: bool = False,
         llm_id: Optional[int] = None,
     ) -> Dict[str, Any]:
@@ -190,7 +187,6 @@ class ForgeMatchMappingService:
             session_id=sid,
             top_n=top_n,
             domain_id=domain_id,
-            vertical_norm=vertical_norm,
             force=force,
             llm_id=llm_id,
         )
@@ -200,7 +196,6 @@ class ForgeMatchMappingService:
         *,
         workspace_id: str,
         session_id: str,
-        vertical_norm: Optional[str] = None,
         domain_id: Optional[int] = None,
         top_n: int = 8,
         force: bool = False,
@@ -212,7 +207,6 @@ class ForgeMatchMappingService:
         return self._session_jobs.run_analyze_job(
             workspace_id=ws,
             session_id=sid,
-            vertical_norm=vertical_norm,
             domain_id=domain_id,
             top_n=top_n,
             force=force,

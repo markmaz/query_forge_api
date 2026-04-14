@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -61,12 +62,11 @@ class _FakePlannerCapabilities:
         self,
         *,
         workspace_id: str,
-        vertical_norm: str,
         base_domain_id: int,
         capabilities: Dict[str, Any],
         shortlisted_columns: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        del workspace_id, vertical_norm, capabilities, shortlisted_columns
+        del workspace_id, capabilities, shortlisted_columns
         if base_domain_id == 9:
             present = ["ENROLLMENT_STATUS", "SCHOOL_NAME", "STUDENT_IDENTITY"]
         else:
@@ -179,6 +179,8 @@ def test_suggest_candidate_persists_ai_candidate() -> None:
     assert persisted["source_type"] == "ai_recommendation"
     assert persisted["workspace_id"] == "ws-1"
     assert "vertical_norm" not in persisted
+    llm_prompt = json.loads(llm.calls[0]["user_prompt"])
+    assert "vertical_norm" not in llm_prompt
     assert persisted["candidate_policy"]["prefer_capabilities"] == [
         "SCHOOL_NAME",
         "STUDENT_IDENTITY",

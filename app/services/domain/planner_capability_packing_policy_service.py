@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.models.domain.planner_capability_packing_policy import PlannerCapabilityPackingPolicyRule
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.domain.policy_scope_service import global_workspace_query_predicate, sort_and_dedupe_global_workspace_policies
 
 logger = logging.getLogger(__name__)
 POLICY_LOOKUP_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
@@ -21,7 +22,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Append a district-style name column when the prompt references a school or district context.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 100,
         "is_active": 1,
         "stop_on_match": 0,
@@ -39,7 +39,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Append city and state columns for school listing prompts.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 110,
         "is_active": 1,
         "stop_on_match": 0,
@@ -58,7 +57,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Suppress technical state-school codes when a city/state school listing prompt has a preferred state column.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 120,
         "is_active": 1,
         "stop_on_match": 0,
@@ -77,7 +75,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Ensure nativity prompts expose birth-country style filter columns.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 130,
         "is_active": 1,
         "stop_on_match": 0,
@@ -95,7 +92,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Prefer canonical first/last name columns over preferred-name variants when the prompt implies identity lookup and does not explicitly ask for preferred names.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 140,
         "is_active": 1,
         "stop_on_match": 0,
@@ -115,7 +111,6 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
         "description": "Ensure prompts with explicit first/last-name constraints surface the needed name columns.",
         "scope_type": "global",
         "scope_workspace_id": None,
-        "scope_vertical_norm": None,
         "priority": 150,
         "is_active": 1,
         "stop_on_match": 0,
@@ -138,7 +133,6 @@ class PlannerCapabilityPackingPolicyService:
         self,
         *,
         workspace_id: Optional[str],
-        vertical_norm: Optional[str],
         prompt_signals: Sequence[str],
         capability_features: Sequence[str],
     ) -> Dict[str, Any]:
@@ -172,7 +166,7 @@ class PlannerCapabilityPackingPolicyService:
         excluded_seen: set[str] = set()
         filter_seen: set[str] = set()
 
-        for row in self.get_applicable_policies(workspace_id=workspace_id, vertical_norm=vertical_norm):
+        for row in self.get_applicable_policies(workspace_id=workspace_id):
             rule = _parse_policy_rule(row.get("policy_json"))
             if not _rule_matches(rule=rule, prompt_signals=signals, capability_features=features):
                 continue
@@ -220,14 +214,13 @@ class PlannerCapabilityPackingPolicyService:
         self,
         *,
         workspace_id: Optional[str],
-        vertical_norm: Optional[str],
     ) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = [dict(item) for item in _SEED_POLICIES]
         if not self._enable_db_lookup:
             return rows
         try:
             db_rows = self._sql.execute_query_mappings(
-                """
+                f"""
                 SELECT
                   id,
                   policy_key,
@@ -235,47 +228,25 @@ class PlannerCapabilityPackingPolicyService:
                   description,
                   scope_type,
                   scope_workspace_id,
-                  scope_vertical_norm,
                   priority,
                   is_active,
                   stop_on_match,
                   policy_json
                 FROM planner_capability_packing_policy
                 WHERE is_active = 1
-                  AND (
-                    scope_type = 'global'
-                    OR (scope_type = 'vertical' AND scope_vertical_norm = :vertical_norm)
-                    OR (scope_type = 'workspace' AND scope_workspace_id = :workspace_id)
-                  )
+                  AND {global_workspace_query_predicate()}
                 ORDER BY priority ASC, id ASC
                 """,
                 {
                     "workspace_id": str(workspace_id or "") or None,
-                    "vertical_norm": str(vertical_norm or "").strip().lower() or None,
                 },
             )
         except POLICY_LOOKUP_FALLBACK_ERRORS:
             logger.exception("Failed to load planner capability packing policies from db")
             return rows
 
-        keyed_rows: Dict[tuple[str, str, str], Dict[str, Any]] = {}
-        for row in rows:
-            key = (
-                str(row.get("policy_key") or ""),
-                str(row.get("scope_workspace_id") or ""),
-                str(row.get("scope_vertical_norm") or ""),
-            )
-            keyed_rows[key] = row
-        for db_row in db_rows:
-            row = dict(db_row)
-            row["policy_json"] = _coerce_json_dict(row.get("policy_json"))
-            key = (
-                str(row.get("policy_key") or ""),
-                str(row.get("scope_workspace_id") or ""),
-                str(row.get("scope_vertical_norm") or ""),
-            )
-            keyed_rows[key] = row
-        return sorted(keyed_rows.values(), key=lambda item: (int(item.get("priority") or 100), int(item.get("id") or 0)))
+        rows.extend({**dict(db_row), "policy_json": _coerce_json_dict(db_row.get("policy_json"))} for db_row in db_rows)
+        return sort_and_dedupe_global_workspace_policies(rows)
 
 
 def _parse_policy_rule(value: Any) -> PlannerCapabilityPackingPolicyRule:

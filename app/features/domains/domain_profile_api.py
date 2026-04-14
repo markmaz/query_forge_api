@@ -14,12 +14,10 @@ class DomainCapabilities(Resource):
     @domain_routes.require_access("catalog")
     def get(self, domain_id: int):
         def handler() -> Tuple[Any, int]:
-            vertical_norm = (domain_routes.request.args.get("vertical_norm") or "generic").strip().lower() or "generic"
             payload = domain_routes.DomainCapabilitiesService().get_domain_capabilities(
                 workspace_id=domain_routes.workspace_id(),
                 user_id=domain_routes.require_user_id(),
                 domain_id=domain_id,
-                vertical_norm=vertical_norm,
             )
             return payload, 200
 
@@ -32,12 +30,10 @@ class DomainOverlayMetrics(Resource):
     @domain_routes.require_access("catalog")
     def get(self, domain_id: int):
         def handler() -> Tuple[Any, int]:
-            vertical_norm = (domain_routes.request.args.get("vertical_norm") or "generic").strip().lower() or "generic"
             metrics = domain_routes.DomainCapabilitiesService().get_overlay_metrics(
                 workspace_id=domain_routes.workspace_id(),
                 user_id=domain_routes.require_user_id(),
                 domain_id=domain_id,
-                vertical_norm=vertical_norm,
             )
             return {"domain_id": int(domain_id), "overlay_metrics": metrics}, 200
 

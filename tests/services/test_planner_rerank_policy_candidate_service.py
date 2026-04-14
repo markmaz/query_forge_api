@@ -128,6 +128,8 @@ def test_create_candidate_persists_pending_candidate() -> None:
     assert out["candidate_id"] == 5
     assert out["review_status"] == "pending"
     assert sql.write_calls
+    assert "vertical_norm" not in sql.write_calls[0]["query"]
+    assert "NULL," not in sql.write_calls[0]["query"]
 
 
 def test_delete_candidate_removes_existing_row() -> None:

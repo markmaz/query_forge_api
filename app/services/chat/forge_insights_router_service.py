@@ -142,7 +142,6 @@ class ForgeInsightsRouterService:
             plan_payload: Dict[str, Any] = {
                 "workspace_id": workspace_id,
                 "prompt": user_prompt,
-                "vertical_norm": "education",
                 "debug": bool(req.debug),
                 # Allow fi_* conversations to bootstrap the planner store on first request.
                 "allow_unknown_conversation": True,
@@ -284,7 +283,6 @@ class ForgeInsightsRouterService:
             out = service.search_domains(
                 workspace_id=workspace_id,
                 query=prompt,
-                vertical_norm="education",
                 limit=self._route_domain_vector_limit,
                 score_threshold=self._route_domain_vector_score_threshold,
                 include_payload=False,

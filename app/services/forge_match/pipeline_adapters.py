@@ -164,7 +164,6 @@ class ExistingRetrieverCandidateAdapter:
             workspace_id=str(context.workspace_id or "").strip(),
             source_record=source_record,
             top_n=int(context.request.get("top_n") or 8),
-            vertical_norm=str(context.vertical_norm or "generic"),
             domain_id=int(context.request["domain_id"]) if context.request.get("domain_id") is not None else None,
         )
         return CandidateSetArtifact(
@@ -260,7 +259,6 @@ class ForgeMatchSessionExecutionAdapter:
         job_id = _text_or_none(context.request.get("job_id"))
         force = bool(context.request.get("force"))
         top_n = max(3, int(context.request.get("top_n") or 8))
-        vertical_norm = _text_or_none(context.request.get("vertical_norm")) or str(context.vertical_norm or "generic")
         domain_id = _safe_int(context.request.get("domain_id"))
         llm_id = _safe_int(context.request.get("llm_id"))
 
@@ -335,7 +333,6 @@ class ForgeMatchSessionExecutionAdapter:
                     source_record_id=src_id,
                     source_record=source_record,
                     top_n=top_n,
-                    vertical_norm=vertical_norm,
                     domain_id=domain_id,
                     llm_id=llm_id,
                 )

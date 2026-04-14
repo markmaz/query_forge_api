@@ -292,7 +292,6 @@ def compact_capabilities_for_llm(
     slot_hints: Optional[Mapping[str, Any]] = None,
     fast_mode: bool = False,
     workspace_id: Optional[str] = None,
-    vertical_norm: Optional[str] = None,
     projection_policy_service: Optional[PlannerProjectionPolicyService] = None,
     capability_packing_policy_service: Optional[PlannerCapabilityPackingPolicyService] = None,
     include_projection_policy_debug: bool = False,
@@ -311,7 +310,6 @@ def compact_capabilities_for_llm(
         prompt_signals.add("explicit_school_key_request")
     policy_result = (projection_policy_service or PlannerProjectionPolicyService()).get_projection_requirements(
         workspace_id=workspace_id,
-        vertical_norm=vertical_norm,
         base_domain_id=_to_int(capabilities.get("domain_id")),
         prompt_signals=sorted(prompt_signals),
     )
@@ -319,7 +317,6 @@ def compact_capabilities_for_llm(
         capability_packing_policy_service or PlannerCapabilityPackingPolicyService()
     ).get_packing_requirements(
         workspace_id=workspace_id,
-        vertical_norm=vertical_norm,
         prompt_signals=sorted(prompt_signals),
         capability_features=_collect_capability_packing_features(full_dims=full_dims),
     )

@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
-VerticalNorm = Literal["education", "healthcare", "generic"]
 PlanIntent = Literal["aggregate", "list", "trend"]
 TimeRange = Literal["last_7_days", "last_30_days", "last_year", "ytd", "custom"]
 TimeGrain = Literal["day", "week", "month", "term", "school_year"]
@@ -95,7 +94,6 @@ class PlanV2(BaseModel):
     schema_version: Literal[2] = 2
     trace_id: str = Field(min_length=1)
     workspace_id: str = Field(min_length=1)
-    vertical_norm: VerticalNorm = "generic"
     base_domain_id: int = Field(gt=0)
     domain_name: Optional[str] = None
     intent: PlanIntent

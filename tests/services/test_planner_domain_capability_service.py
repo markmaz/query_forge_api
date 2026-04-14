@@ -113,7 +113,6 @@ def test_list_capabilities_returns_scope_sorted_rows() -> None:
         workspace_id="ws-1",
         user_id="user-1",
         base_domain_id=9,
-        vertical_norm="education",
         include_inactive=False,
     )
 
@@ -150,7 +149,6 @@ def test_list_capabilities_normalizes_decimal_confidence() -> None:
         workspace_id="ws-1",
         user_id="user-1",
         base_domain_id=9,
-        vertical_norm="generic",
         include_inactive=False,
     )
 
@@ -268,7 +266,6 @@ def test_list_capabilities_ignores_expected_record_validation_errors(monkeypatch
         workspace_id="ws-1",
         user_id="user-1",
         base_domain_id=9,
-        vertical_norm="generic",
         include_inactive=False,
     )
 
@@ -313,7 +310,6 @@ def test_list_capabilities_surfaces_unexpected_record_validation_errors(monkeypa
             workspace_id="ws-1",
             user_id="user-1",
             base_domain_id=9,
-            vertical_norm="generic",
             include_inactive=False,
         )
 
@@ -325,7 +321,6 @@ def test_load_effective_capability_rows_returns_empty_on_expected_lookup_error()
 
     out = svc._load_effective_capability_rows(
         workspace_id="ws-1",
-        vertical_norm="generic",
         base_domain_id=9,
     )
 
@@ -340,7 +335,6 @@ def test_load_effective_capability_rows_surfaces_unexpected_lookup_error() -> No
     with pytest.raises(AssertionError, match="lookup bug"):
         svc._load_effective_capability_rows(
             workspace_id="ws-1",
-            vertical_norm="generic",
             base_domain_id=9,
         )
 
@@ -377,7 +371,6 @@ def test_load_effective_capability_rows_ignores_expected_record_validation_error
 
     out = svc._load_effective_capability_rows(
         workspace_id="ws-1",
-        vertical_norm="generic",
         base_domain_id=9,
     )
 
@@ -417,6 +410,5 @@ def test_load_effective_capability_rows_surfaces_unexpected_record_validation_er
     with pytest.raises(AssertionError, match="row bug"):
         svc._load_effective_capability_rows(
             workspace_id="ws-1",
-            vertical_norm="generic",
             base_domain_id=9,
         )

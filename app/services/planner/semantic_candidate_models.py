@@ -104,7 +104,6 @@ class SemanticCandidatePayload(BaseModel):
     prompt: str
     normalized_prompt: Optional[str] = None
     workspace_id: str
-    vertical_norm: str = "generic"
     base_domain_id: int
     base_domain_key: Optional[str] = None
     domain: Optional[SemanticConceptCandidate] = None
@@ -118,7 +117,7 @@ class SemanticCandidatePayload(BaseModel):
     planning_rules: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("prompt", "normalized_prompt", "workspace_id", "base_domain_key", "vertical_norm", mode="before")
+    @field_validator("prompt", "normalized_prompt", "workspace_id", "base_domain_key", mode="before")
     @classmethod
     def _normalize_optional_text(cls, value: Any) -> Optional[str]:
         if value is None:

@@ -171,7 +171,6 @@ class ForcedFilterBuilder:
         *,
         semantic_extract: Dict[str, Any],
         mapped_columns: Sequence[Dict[str, Any]],
-        vertical_norm: str,
     ) -> List[Dict[str, Any]]:
         if not isinstance(semantic_extract, dict):
             return []
@@ -202,14 +201,14 @@ class ForcedFilterBuilder:
             list(slots.get("subgroups") or []) + list(by_label.get("SUBGROUP") or [])
         )
         for subgroup in subgroup_values:
-            race_value = canonicalize_value("RACE", subgroup, vertical=vertical_norm)
+            race_value = canonicalize_value("RACE", subgroup, vertical="generic")
             if race_value and "RACE" in available_concepts:
                 out.append({"concept_key": "RACE", "op": "=", "value": race_value})
                 continue
             if race_value and "RACE_ETHNICITY" in available_concepts:
                 out.append({"concept_key": "RACE_ETHNICITY", "op": "=", "value": race_value})
                 continue
-            ethnicity_value = canonicalize_value("ETHNICITY", subgroup, vertical=vertical_norm)
+            ethnicity_value = canonicalize_value("ETHNICITY", subgroup, vertical="generic")
             if ethnicity_value and "ETHNICITY" in available_concepts:
                 out.append({"concept_key": "ETHNICITY", "op": "=", "value": ethnicity_value})
                 continue

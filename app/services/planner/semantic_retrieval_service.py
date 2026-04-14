@@ -20,7 +20,6 @@ from app.services.planner.semantic_candidate_models import (
 from app.services.planner.semantic_catalog_lookup_repository import (
     SemanticCatalogLookupRepository,
 )
-from app.services.semantic.vertical_norm import normalize_semantic_vertical
 from app.services.planner.semantic_retrieval_helpers import (
     AliasRule,
     ConceptRow,
@@ -66,12 +65,10 @@ class SemanticRetrievalService:
         workspace_id: str,
         base_domain_id: int,
         base_domain_name: Optional[str],
-        vertical_norm: str,
         capabilities_compact: Mapping[str, Any],
         max_per_type: int = 20,
     ) -> SemanticCandidatePayload:
         normalized_prompt = str(prompt or "").strip()
-        vertical = normalize_semantic_vertical(vertical_norm)
         max_items = max(3, min(40, int(max_per_type or 20)))
 
         capability_index = build_capability_index(capabilities_compact=capabilities_compact)
@@ -80,14 +77,13 @@ class SemanticRetrievalService:
             workspace_id=workspace_id,
             base_domain_id=base_domain_id,
             base_domain_name=base_domain_name,
-            vertical_norm=vertical,
             capability_index=capability_index,
         )
         try:
-            concept_rows_raw = self._repo.load_concepts(vertical_norm=vertical)
-            alias_rows = self._repo.load_aliases(vertical_norm=vertical)
-            relationship_rows = self._repo.load_relationships(vertical_norm=vertical)
-            column_map_rows = self._repo.load_concept_column_maps(vertical_norm=vertical)
+            concept_rows_raw = self._repo.load_concepts()
+            alias_rows = self._repo.load_aliases()
+            relationship_rows = self._repo.load_relationships()
+            column_map_rows = self._repo.load_concept_column_maps()
             suggestion_scores = self._repo.load_suggestion_scores()
         except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
             logger.warning("semantic_retrieval fallback workspace_id=%s reason=%s", workspace_id, exc)
@@ -331,7 +327,6 @@ class SemanticRetrievalService:
         ]
         ngrams = build_ngrams(normalized_prompt)
         value_rows = self._repo.search_value_aliases(
-            vertical_norm=vertical,
             ngrams=ngrams,
             semantic_concept_ids=concept_id_allowlist,
         )
@@ -356,7 +351,6 @@ class SemanticRetrievalService:
             prompt=normalized_prompt,
             normalized_prompt=normalized_prompt,
             workspace_id=workspace_id,
-            vertical_norm=vertical,
             base_domain_id=int(base_domain_id),
             base_domain_key=selected_domain_key,
             domain=domain_obj,

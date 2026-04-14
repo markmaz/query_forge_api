@@ -42,7 +42,6 @@ def build_compact_plan_and_project(
     prompt: str,
     normalized_prompt: str,
     workspace_id: str,
-    vertical_norm: str,
     base_domain_id: int,
     domain_name: Optional[str],
     capabilities_compact: Mapping[str, Any],
@@ -77,7 +76,6 @@ def build_compact_plan_and_project(
             workspace_id=workspace_id,
             base_domain_id=int(base_domain_id),
             base_domain_name=domain_name,
-            vertical_norm=vertical_norm,
             capabilities_compact=capabilities_compact,
             max_per_type=(12 if fast_mode else 20),
         )
@@ -99,7 +97,6 @@ def build_compact_plan_and_project(
         prompt=prompt,
         normalized_prompt=normalized_prompt,
         workspace_id=workspace_id,
-        vertical_norm=vertical_norm,
         candidates=candidates,
         conversation_context=conversation_context,
     )
@@ -145,7 +142,6 @@ def build_compact_plan_and_project(
                     prompt=prompt,
                     normalized_prompt=normalized_prompt,
                     workspace_id=workspace_id,
-                    vertical_norm=vertical_norm,
                     candidates=candidates,
                     conversation_context={},
                 )
@@ -222,7 +218,6 @@ def build_compact_plan_and_project(
         candidates=candidates,
         trace_id=trace_id,
         workspace_id=workspace_id,
-        vertical_norm=vertical_norm,
         base_domain_id=int(base_domain_id),
         base_domain_name=domain_name,
     )
@@ -281,7 +276,6 @@ def _trim_candidates_for_retry(candidates: SemanticCandidatePayload) -> Semantic
         prompt=candidates.prompt,
         normalized_prompt=candidates.normalized_prompt,
         workspace_id=candidates.workspace_id,
-        vertical_norm=candidates.vertical_norm,
         base_domain_id=candidates.base_domain_id,
         base_domain_key=candidates.base_domain_key,
         domain=candidates.domain,

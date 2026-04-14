@@ -43,16 +43,8 @@ class RebuildSemanticConceptVectors(Resource):
     @require_admin()
     def post(self):
         _require_admin()
-        body = request.get_json(silent=True) or {}
-        vertical_norm = (
-            str(body.get("vertical_norm") or "generic").strip().lower()
-            or "generic"
-        )
-        result = (
-            semantic_concept_embedding_service()
-            .rebuild_semantic_concept_index(vertical_norm=vertical_norm)
-        )
-        return {"result": result, "vertical_norm": vertical_norm}, 200
+        result = semantic_concept_embedding_service().rebuild_semantic_concept_index()
+        return {"result": result}, 200
 
 
 @admin_ns.route("/vector/domains/reindex")
@@ -69,15 +61,13 @@ class ReindexDomainVectors(Resource):
             raise ForgeError(
                 "workspace_id must be provided via X-Workspace-Id header",
                 status_code=400,
-            )
+        )
         workspace_id = extract_workspace_id()
-        vertical_norm = str(body.get("vertical_norm") or "").strip().lower() or None
         force = bool(body.get("force", False))
         json_fallback_path = str(body.get("json_fallback_path") or "").strip() or None
         try:
             result = domain_vector_index_service().reindex_domains(
                 workspace_id=workspace_id,
-                vertical_norm=vertical_norm,
                 force=force,
                 json_fallback_path=json_fallback_path,
             )
@@ -122,20 +112,13 @@ class RebuildAllVectors(Resource):
         _require_admin()
         body = request.get_json(silent=True) or {}
         workspace_id = extract_workspace_id()
-        vertical_norm = (
-            str(body.get("vertical_norm") or "generic").strip().lower()
-            or "generic"
-        )
         force = bool(body.get("force", False))
 
         results = {}
         errors = {}
 
         try:
-            results["semantic_concepts"] = (
-                semantic_concept_embedding_service()
-                .rebuild_semantic_concept_index(vertical_norm=vertical_norm)
-            )
+            results["semantic_concepts"] = semantic_concept_embedding_service().rebuild_semantic_concept_index()
         except (ForgeError, OSError, RuntimeError, TypeError, ValueError) as exc:
             logger.exception("rebuild-all: semantic concepts failed")
             errors["semantic_concepts"] = str(exc)
@@ -152,7 +135,6 @@ class RebuildAllVectors(Resource):
         try:
             results["domain_vectors"] = domain_vector_index_service().reindex_domains(
                 workspace_id=workspace_id,
-                vertical_norm=vertical_norm,
                 force=force,
             )
         except (ForgeError, OSError, RuntimeError, TypeError, ValueError) as exc:
@@ -165,7 +147,6 @@ class RebuildAllVectors(Resource):
             "results": results,
             "errors": errors,
             "workspace_id": workspace_id,
-            "vertical_norm": vertical_norm,
         }, 200
 
 
@@ -299,7 +280,6 @@ class SemanticCatalogBuild(Resource):
         result = semantic_catalog_builder().build_catalog(
             workspace_id=workspace_id,
             domain_id=req.domain_id,
-            vertical_norm=req.vertical_norm,
             domain_name=req.domain_name,
             dry_run=req.dry_run,
             table_limit=req.table_limit,

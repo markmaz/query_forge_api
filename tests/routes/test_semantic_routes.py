@@ -55,8 +55,6 @@ def test_semantic_registry_list_route_serializes_datetimes(client, monkeypatch):
         [
             {
                 "id": 1,
-                "vertical": "education",
-                "vertical_norm": "education",
                 "concept_key": "student.id",
                 "semantic_type": "identifier",
                 "sub_type": None,
@@ -81,8 +79,6 @@ def test_semantic_registry_list_route_serializes_datetimes(client, monkeypatch):
 
     resp = client.get("/api/v1/semantic/registry?limit=1", headers=_headers(monkeypatch))
     assert resp.status_code == 200
-    assert "vertical" not in resp.json["rows"][0]
-    assert "vertical_norm" not in resp.json["rows"][0]
     assert resp.json["rows"][0]["created_at"] == "2026-03-22T11:15:00"
     assert resp.json["rows"][0]["updated_at"] == "2026-03-22T11:16:30"
 

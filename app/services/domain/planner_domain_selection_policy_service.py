@@ -240,14 +240,12 @@ class PlannerDomainSelectionPolicyService:
         self,
         *,
         workspace_id: Optional[str],
-        vertical_norm: Optional[str],
         prompt_signals: Sequence[str],
         shortlist_features: Sequence[str],
         capability_features: Sequence[str],
     ) -> float:
         policies = self.get_applicable_policies(
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
         )
         signal_set = set(_normalized_tokens(prompt_signals))
         shortlist_set = set(_normalized_tokens(shortlist_features, upper=True))
@@ -272,9 +270,7 @@ class PlannerDomainSelectionPolicyService:
         self,
         *,
         workspace_id: Optional[str],
-        vertical_norm: Optional[str],
     ) -> List[Dict[str, Any]]:
-        del vertical_norm
         rows: List[Dict[str, Any]] = [dict(item) for item in _SEED_POLICIES]
         if self._enable_db_lookup:
             try:
@@ -310,7 +306,6 @@ class PlannerDomainSelectionPolicyService:
         policies: List[Dict[str, Any]] = []
         for row in sort_and_dedupe_scoped_policies(rows):
             payload = dict(row)
-            payload.pop("scope_vertical_norm", None)
             try:
                 payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             except POLICY_RULE_VALIDATION_ERRORS:
@@ -323,7 +318,6 @@ class PlannerDomainSelectionPolicyService:
         self,
         *,
         workspace_id: str,
-        vertical_norm: str = "generic",
         include_inactive: bool = False,
         include_seeded: bool = True,
     ) -> Dict[str, Any]:
@@ -358,7 +352,6 @@ class PlannerDomainSelectionPolicyService:
         policies: list[dict[str, Any]] = []
         for row in rows:
             payload = _json_safe_mapping(dict(row))
-            payload.pop("scope_vertical_norm", None)
             payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             payload["is_seeded"] = bool(payload.get("_seeded"))
             payload["can_edit"] = not payload["is_seeded"]
@@ -367,7 +360,6 @@ class PlannerDomainSelectionPolicyService:
 
         return {
             "workspace_id": str(workspace_id),
-            "vertical_norm": str(vertical_norm or "generic").strip().lower() or "generic",
             "can_edit": True,
             "policies": annotate_effective_scoped_rows(policies),
         }

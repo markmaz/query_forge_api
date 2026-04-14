@@ -30,7 +30,6 @@ class PlanPostprocessService:
         llm_result: LLMPlanResult,
         trace_id: str,
         workspace_id: str,
-        vertical_norm: str,
         base_domain_id: int,
         base_domain_name: str,
         prompt: str,
@@ -50,7 +49,6 @@ class PlanPostprocessService:
             raw_plan=llm_result.plan_json,
             trace_id=trace_id,
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             base_domain_id=base_domain_id,
             base_domain_name=base_domain_name,
         )
@@ -63,7 +61,6 @@ class PlanPostprocessService:
         llm_plan, semantic_alias_issues, semantic_alias_debug = self._semantic_integration.normalize_semantic_value_alias_filters(
             plan_json=llm_plan,
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             capabilities=capabilities,
         )
         norm_result = self._normalization.run(
@@ -139,7 +136,6 @@ class PlanPostprocessService:
         capabilities_llm: Mapping[str, Any],
         trace_id: str,
         workspace_id: str,
-        vertical_norm: str,
         base_domain_id: int,
         base_domain_name: str,
         prompt: str,
@@ -159,7 +155,6 @@ class PlanPostprocessService:
             llm_result=llm_result,
             trace_id=trace_id,
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             base_domain_id=base_domain_id,
             base_domain_name=base_domain_name,
             prompt=prompt,
@@ -192,7 +187,6 @@ class PlanPostprocessService:
             llm_retry = self._llm_planning._call_llm_plan(
                 normalized_prompt=prompt,
                 workspace_id=workspace_id,
-                vertical_norm=vertical_norm,
                 base_domain_id=base_domain_id,
                 capabilities=capabilities_llm,
                 schema=schema,
@@ -224,7 +218,6 @@ class PlanPostprocessService:
                 llm_result=llm_retry,
                 trace_id=trace_id,
                 workspace_id=workspace_id,
-                vertical_norm=vertical_norm,
                 base_domain_id=base_domain_id,
                 base_domain_name=base_domain_name,
                 prompt=prompt,

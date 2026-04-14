@@ -141,8 +141,8 @@ def test_prompt_intent_service_prefers_workspace_rule_when_db_lookup_enabled() -
     )
     svc = PlannerPromptIntentPolicyService(sql=sql, enable_db_lookup=True)
 
-    assert svc.looks_like_list_students("workspace roster", workspace_id="ws-1", vertical_norm="education") is True
-    assert svc.looks_like_list_students("provider roster", workspace_id="ws-1", vertical_norm="education") is False
+    assert svc.looks_like_list_students("workspace roster", workspace_id="ws-1") is True
+    assert svc.looks_like_list_students("provider roster", workspace_id="ws-1") is False
 
 
 def test_prompt_intent_policy_upsert_request_rejects_vertical_scope() -> None:
@@ -195,9 +195,8 @@ def test_prompt_intent_policy_service_lists_workspace_specific_policies() -> Non
     )
     svc = PlannerPromptIntentPolicyService(sql=sql, enable_db_lookup=True)
 
-    out = svc.list_policies(workspace_id="ws-1", vertical_norm="education", include_inactive=False, include_seeded=True)
+    out = svc.list_policies(workspace_id="ws-1", include_inactive=False, include_seeded=True)
 
-    assert out["vertical_norm"] == "education"
     assert out["policies"][0]["scope_type"] == "workspace"
     assert out["policies"][0]["is_effective"] is True
 

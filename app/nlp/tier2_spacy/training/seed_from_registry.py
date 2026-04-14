@@ -19,10 +19,10 @@ class RegistrySeedBuilder:
     def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
         self._sql = sql or ForgeMetaSQL()
 
-    def build(self, *, output_path: str, vertical_norm: str = "generic", limit: int = 500) -> SeedBuildResult:
-        concepts = self._load_concepts(vertical_norm=vertical_norm, limit=limit)
-        aliases = self._load_aliases(vertical_norm=vertical_norm, limit=limit)
-        values = self._load_value_aliases(vertical_norm=vertical_norm, limit=limit)
+    def build(self, *, output_path: str, limit: int = 500) -> SeedBuildResult:
+        concepts = self._load_concepts(limit=limit)
+        aliases = self._load_aliases(limit=limit)
+        values = self._load_value_aliases(limit=limit)
 
         rows: List[DatasetExample] = []
         rows.extend(self._build_from_aliases(aliases))
@@ -36,42 +36,39 @@ class RegistrySeedBuilder:
         write_jsonl(output_path, dedup.values())
         return SeedBuildResult(examples=len(dedup), output_path=output_path)
 
-    def _load_concepts(self, *, vertical_norm: str, limit: int) -> List[Dict[str, Any]]:
+    def _load_concepts(self, *, limit: int) -> List[Dict[str, Any]]:
         return self._sql.execute_query_mappings(
             """
             SELECT concept_key, name, entity, semantic_type
             FROM semantic_concept
-            WHERE vertical_norm IN (:vertical_norm, 'generic')
-              AND status = 'active'
-            ORDER BY CASE WHEN vertical_norm = :vertical_norm THEN 0 ELSE 1 END, id ASC
+            WHERE status = 'active'
+            ORDER BY id ASC
             LIMIT :limit
             """,
-            {"vertical_norm": vertical_norm, "limit": int(limit)},
+            {"limit": int(limit)},
         )
 
-    def _load_aliases(self, *, vertical_norm: str, limit: int) -> List[Dict[str, Any]]:
+    def _load_aliases(self, *, limit: int) -> List[Dict[str, Any]]:
         return self._sql.execute_query_mappings(
             """
             SELECT concept_key, alias_key
             FROM semantic_concept_alias
-            WHERE vertical_norm IN (:vertical_norm, 'generic')
-            ORDER BY CASE WHEN vertical_norm = :vertical_norm THEN 0 ELSE 1 END, weight DESC, id ASC
+            ORDER BY weight DESC, id ASC
             LIMIT :limit
             """,
-            {"vertical_norm": vertical_norm, "limit": int(limit)},
+            {"limit": int(limit)},
         )
 
-    def _load_value_aliases(self, *, vertical_norm: str, limit: int) -> List[Dict[str, Any]]:
+    def _load_value_aliases(self, *, limit: int) -> List[Dict[str, Any]]:
         return self._sql.execute_query_mappings(
             """
             SELECT sc.concept_key, va.alias_value, va.canonical_value
             FROM semantic_value_alias va
             JOIN semantic_concept sc ON sc.id = va.semantic_concept_id
-            WHERE va.vertical_norm IN (:vertical_norm, 'generic')
-            ORDER BY CASE WHEN va.vertical_norm = :vertical_norm THEN 0 ELSE 1 END, va.weight DESC, va.id ASC
+            ORDER BY va.weight DESC, va.id ASC
             LIMIT :limit
             """,
-            {"vertical_norm": vertical_norm, "limit": int(limit)},
+            {"limit": int(limit)},
         )
 
     def _build_from_aliases(self, aliases: List[Dict[str, Any]]) -> List[DatasetExample]:
@@ -187,5 +184,5 @@ class RegistrySeedBuilder:
         return [DatasetEntity(start=match.start(), end=match.end(), label=label)]
 
 
-def generate_seed_jsonl(*, output_path: str, vertical_norm: str = "generic", limit: int = 500) -> SeedBuildResult:
-    return RegistrySeedBuilder().build(output_path=output_path, vertical_norm=vertical_norm, limit=limit)
+def generate_seed_jsonl(*, output_path: str, limit: int = 500) -> SeedBuildResult:
+    return RegistrySeedBuilder().build(output_path=output_path, limit=limit)

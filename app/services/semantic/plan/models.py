@@ -4,27 +4,19 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-from app.services.semantic.vertical_norm import normalize_semantic_vertical
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PlanningRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     workspace_id: str
-    vertical_norm: str = "generic"
     prompt: str
     domain_id: Optional[int] = None
     max_concepts: int = 12
     max_columns: int = 60
     debug: bool = False
     llm_id: Optional[int] = None
-
-    @field_validator("vertical_norm", mode="before")
-    @classmethod
-    def _normalize_vertical_norm(cls, value: Any) -> str:
-        return normalize_semantic_vertical(value)
 
 
 class LLMSelectedColumn(BaseModel):

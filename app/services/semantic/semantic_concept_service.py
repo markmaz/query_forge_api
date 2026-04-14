@@ -726,7 +726,7 @@ class SemanticConceptService:
         }
 
     def seed(self) -> Dict[str, Any]:
-        return self._seed.ensure_seeded("generic")
+        return self._seed.ensure_seeded()
 
     def _ensure_concept_exists(self, *, concept_key: str) -> None:
         rows = self._sql.execute_query_mappings(

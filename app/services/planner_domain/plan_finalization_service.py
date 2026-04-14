@@ -26,7 +26,6 @@ class PlanFinalizationService:
         *,
         workspace_id: str,
         user_id: str,
-        vertical_norm: str,
         normalized_prompt: str,
         trace_id: str,
         conversation_id: str,
@@ -46,7 +45,6 @@ class PlanFinalizationService:
         state = build_conversation_state(
             workspace_id=workspace_id,
             user_id=str(user_id),
-            vertical_norm=vertical_norm,
             prompt=normalized_prompt,
             trace_id=trace_id,
             plan_json_v2=dict(plan_json_v2 or {}),

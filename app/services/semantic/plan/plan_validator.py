@@ -144,7 +144,6 @@ class PlanValidator:
         llm_plan: Dict[str, Any],
         prompt: str,
         workspace_id: str,
-        vertical_norm: str,
         intent_entity: Optional[str],
         extracted_values: Sequence[Dict[str, Any]],
         mapped_columns: Sequence[Dict[str, Any]],
@@ -175,7 +174,6 @@ class PlanValidator:
             )
             policy_result = self._projection_policy_service.get_projection_requirements(
                 workspace_id=workspace_id,
-                vertical_norm=vertical_norm,
                 base_domain_id=domain_id,
                 prompt_signals=policy_signals,
             )

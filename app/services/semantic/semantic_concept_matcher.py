@@ -14,13 +14,11 @@ class SemanticConceptMatcher:
     def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
         self._sql = sql or ForgeMetaSQL()
 
-    def load_known_concepts(self, vertical_norm: str) -> List[Dict[str, Any]]:
-        vertical = _norm_vertical(vertical_norm)
+    def load_known_concepts(self) -> List[Dict[str, Any]]:
         rows = self._sql.execute_query_mappings(
             """
             SELECT
               id,
-              vertical_norm,
               concept_key,
               semantic_type,
               sub_type,
@@ -36,10 +34,8 @@ class SemanticConceptMatcher:
               `sensitive` AS `sensitive`
             FROM semantic_concept
             WHERE `status` = 'active'
-              AND vertical_norm IN (:vertical, 'generic')
-            ORDER BY CASE WHEN vertical_norm = :vertical THEN 0 ELSE 1 END, concept_key
+            ORDER BY concept_key
             """,
-            {"vertical": vertical},
         )
         out: List[Dict[str, Any]] = []
         for row in rows:
@@ -53,30 +49,26 @@ class SemanticConceptMatcher:
             out.append(item)
         return out
 
-    def load_alias_rules(self, vertical_norm: str) -> List[Dict[str, Any]]:
-        vertical = _norm_vertical(vertical_norm)
+    def load_alias_rules(self) -> List[Dict[str, Any]]:
         return self._sql.execute_query_mappings(
             """
-            SELECT alias_key, concept_key, match_kind, weight, vertical_norm
+            SELECT alias_key, concept_key, match_kind, weight
             FROM semantic_concept_alias
-            WHERE vertical_norm IN (:vertical, 'generic')
-            ORDER BY CASE WHEN vertical_norm = :vertical THEN 0 ELSE 1 END, weight DESC, id ASC
+            ORDER BY weight DESC, id ASC
             """,
-            {"vertical": vertical},
         )
 
     def match_by_alias(
         self,
         card: Dict[str, Any],
         *,
-        vertical_norm: str,
         alias_rules: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[Optional[Dict[str, Any]], List[str]]:
         col = str(card.get("columnName") or "").strip().lower()
         if not col:
             return None, []
 
-        rows = alias_rules if alias_rules is not None else self.load_alias_rules(vertical_norm)
+        rows = alias_rules if alias_rules is not None else self.load_alias_rules()
 
         best_candidate: Optional[Dict[str, Any]] = None
         best_score = -1.0
@@ -144,7 +136,6 @@ class SemanticConceptMatcher:
         self,
         *,
         card: Dict[str, Any],
-        vertical_norm: str,
         known_concepts: Optional[List[Dict[str, Any]]] = None,
         alias_rules: Optional[List[Dict[str, Any]]] = None,
         alias_conf_threshold: float = 0.75,
@@ -157,7 +148,6 @@ class SemanticConceptMatcher:
 
         alias_candidate, alias_notes = self.match_by_alias(
             card=card,
-            vertical_norm=vertical_norm,
             alias_rules=alias_rules,
         )
         if alias_candidate and float(alias_candidate.get("confidence") or 0.0) >= float(alias_conf_threshold):
@@ -188,8 +178,7 @@ class SemanticConceptMatcher:
 
         return None, det_notes + alias_notes
 
-    def match_by_heuristics(self, card: Dict[str, Any], *, vertical_norm: str) -> Tuple[Optional[str], List[str]]:
-        del vertical_norm
+    def match_by_heuristics(self, card: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
         col = str(card.get("columnName") or "").strip().lower()
         desc = str(card.get("description") or "").strip().lower()
         samples = card.get("samples") if isinstance(card.get("samples"), list) else []
@@ -221,7 +210,6 @@ class SemanticConceptMatcher:
         self,
         card: Dict[str, Any],
         proposal: Dict[str, Any],
-        vertical_norm: str,
         known_concepts: Optional[List[Dict[str, Any]]] = None,
         alias_rules: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[Dict[str, Any], List[str]]:
@@ -236,7 +224,6 @@ class SemanticConceptMatcher:
 
         alias_candidate, alias_notes = self.match_by_alias(
             card,
-            vertical_norm=vertical_norm,
             alias_rules=alias_rules,
         )
         if alias_candidate:
@@ -256,10 +243,10 @@ class SemanticConceptMatcher:
             notes.extend(alias_notes)
             return out, notes
 
-        known = known_concepts if known_concepts is not None else self.load_known_concepts(vertical_norm)
+        known = known_concepts if known_concepts is not None else self.load_known_concepts()
         known_map = {normalize_concept_key(c["concept_key"]): c for c in known}
 
-        heuristic_key, heuristic_notes = self.match_by_heuristics(card, vertical_norm=vertical_norm)
+        heuristic_key, heuristic_notes = self.match_by_heuristics(card)
         if heuristic_key and heuristic_key in known_map:
             out["concept_key"] = heuristic_key
             out["concept_source"] = "deterministic"
@@ -361,15 +348,6 @@ class SemanticConceptMatcher:
         if "tenant" in col:
             return "TENANT_CODE"
         return None
-
-
-def _norm_vertical(vertical_norm: str) -> str:
-    value = str(vertical_norm or "generic").strip().lower()
-    if value in {"", "global", "__global__", "none", "null", "education"}:
-        return "generic"
-    return value or "generic"
-
-
 def _contains(text: str, needle: str) -> bool:
     return needle in text
 

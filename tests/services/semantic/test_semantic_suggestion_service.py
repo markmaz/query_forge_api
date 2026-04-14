@@ -66,8 +66,6 @@ def _run_row(status: str = "created") -> Dict[str, Any]:
     return {
         "id": 1,
         "workspace_id": None,
-        "vertical": "education",
-        "vertical_norm": "education",
         "status": status,
         "params_json": '{"page_size": 100}',
         "total_columns": 0,
@@ -159,32 +157,17 @@ def test_execution_flow_with_mocked_llm() -> None:
     assert any("INSERT INTO semantic_suggestion_item" in call.query for call in sql.write_calls)
 
 
-def test_create_run_normalizes_global_vertical_to_generic() -> None:
+def test_create_run_rejects_unknown_fields() -> None:
     sql = FakeForgeQueryPort()
-    row = _run_row(status="created")
-    row["vertical"] = "generic"
-    row["vertical_norm"] = "generic"
-    sql.query_mappings_responses = [[row]]
-
     svc = SemanticSuggestionService(sql=sql)
 
-    run = svc.create_run({"vertical": "global"})
+    with pytest.raises(ForgeError, match="Unsupported field: vertical"):
+        svc.create_run({"vertical": "global"})
 
-    assert run["vertical"] == "generic"
-    assert sql.insert_calls
-    assert (sql.insert_calls[0].params or {})["vertical"] == "generic"
-
-
-def test_execute_run_normalizes_global_vertical_to_generic_for_matcher() -> None:
+def test_execute_run_uses_generic_matcher_surface() -> None:
     sql = FakeForgeQueryPort()
-    created_row = _run_row(status="created")
-    created_row["vertical"] = "global"
-    created_row["vertical_norm"] = "global"
-    completed_row = _run_row(status="completed")
-    completed_row["vertical"] = "global"
-    completed_row["vertical_norm"] = "global"
     sql.query_mappings_responses = [
-        [created_row],
+        [_run_row(status="created")],
         [
             {
                 "total": 1,
@@ -197,7 +180,7 @@ def test_execute_run_normalizes_global_vertical_to_generic_for_matcher() -> None
                 "failed_apply_items": 0,
             }
         ],
-        [completed_row],
+        [_run_row(status="completed")],
     ]
 
     cards = [
@@ -233,12 +216,12 @@ def test_execute_run_normalizes_global_vertical_to_generic_for_matcher() -> None
     matcher_calls: List[str] = []
 
     class _Matcher:
-        def load_known_concepts(self, vertical_norm: str) -> List[Dict[str, Any]]:
-            matcher_calls.append(f"known:{vertical_norm}")
+        def load_known_concepts(self) -> List[Dict[str, Any]]:
+            matcher_calls.append("known")
             return []
 
-        def load_alias_rules(self, vertical_norm: str) -> List[Dict[str, Any]]:
-            matcher_calls.append(f"alias:{vertical_norm}")
+        def load_alias_rules(self) -> List[Dict[str, Any]]:
+            matcher_calls.append("alias")
             return []
 
         def enforce_canonical_if_strong(
@@ -246,12 +229,11 @@ def test_execute_run_normalizes_global_vertical_to_generic_for_matcher() -> None
             *,
             card: Dict[str, Any],
             proposal: Dict[str, Any],
-            vertical_norm: str,
             known_concepts: List[Dict[str, Any]],
             alias_rules: List[Dict[str, Any]],
         ) -> tuple[Dict[str, Any], List[str]]:
             del card, known_concepts, alias_rules
-            matcher_calls.append(f"canonical:{vertical_norm}")
+            matcher_calls.append("canonical")
             return proposal, []
 
     svc = SemanticSuggestionService(
@@ -265,23 +247,21 @@ def test_execute_run_normalizes_global_vertical_to_generic_for_matcher() -> None
     run = svc.execute_run(1)
 
     assert run["status"] == "completed"
-    assert matcher_calls == ["known:generic", "alias:generic", "canonical:generic"]
+    assert matcher_calls == ["known", "alias", "canonical"]
 
-
-def test_resolve_concept_id_normalizes_global_vertical_to_generic() -> None:
+def test_resolve_concept_id_uses_generic_lookup() -> None:
     sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [[{"id": 500}]]
     svc = SemanticSuggestionService(sql=sql)
 
     concept_id = svc._resolve_concept_id(
         concept_key="student.first_name",
-        vertical_norm="global",
         concept_source="llm",
     )
 
     assert concept_id == 500
     assert sql.query_mappings_calls
-    assert (sql.query_mappings_calls[0].params or {})["vertical_norm"] == "generic"
+    assert (sql.query_mappings_calls[0].params or {}) == {"concept_key": "student.first_name"}
 
 
 def test_cannot_approve_invalid_item() -> None:
@@ -496,12 +476,10 @@ def test_execute_run_tolerates_matcher_lookup_sql_failures() -> None:
     ]
 
     class _Matcher:
-        def load_known_concepts(self, vertical_norm: str) -> List[Dict[str, Any]]:
-            del vertical_norm
+        def load_known_concepts(self) -> List[Dict[str, Any]]:
             raise SQLAlchemyError("lookup failed")
 
-        def load_alias_rules(self, vertical_norm: str) -> List[Dict[str, Any]]:
-            del vertical_norm
+        def load_alias_rules(self) -> List[Dict[str, Any]]:
             return []
 
         def enforce_canonical_if_strong(
@@ -509,11 +487,10 @@ def test_execute_run_tolerates_matcher_lookup_sql_failures() -> None:
             *,
             card: Dict[str, Any],
             proposal: Dict[str, Any],
-            vertical_norm: str,
             known_concepts: List[Dict[str, Any]],
             alias_rules: List[Dict[str, Any]],
         ) -> tuple[Dict[str, Any], List[str]]:
-            del card, vertical_norm, known_concepts, alias_rules
+            del card, known_concepts, alias_rules
             return proposal, []
 
     svc = SemanticSuggestionService(
@@ -537,12 +514,10 @@ def test_execute_run_surfaces_unexpected_matcher_errors() -> None:
     ]
 
     class _Matcher:
-        def load_known_concepts(self, vertical_norm: str) -> List[Dict[str, Any]]:
-            del vertical_norm
+        def load_known_concepts(self) -> List[Dict[str, Any]]:
             raise TypeError("bad matcher wiring")
 
-        def load_alias_rules(self, vertical_norm: str) -> List[Dict[str, Any]]:
-            del vertical_norm
+        def load_alias_rules(self) -> List[Dict[str, Any]]:
             return []
 
     svc = SemanticSuggestionService(
@@ -572,12 +547,10 @@ def test_execute_run_surfaces_unexpected_assertion_errors() -> None:
     ]
 
     class _Matcher:
-        def load_known_concepts(self, vertical_norm: str) -> List[Dict[str, Any]]:
-            del vertical_norm
+        def load_known_concepts(self) -> List[Dict[str, Any]]:
             raise AssertionError("unexpected matcher bug")
 
-        def load_alias_rules(self, vertical_norm: str) -> List[Dict[str, Any]]:
-            del vertical_norm
+        def load_alias_rules(self) -> List[Dict[str, Any]]:
             return []
 
     svc = SemanticSuggestionService(
@@ -739,16 +712,10 @@ def test_apply_approved_surfaces_unexpected_apply_errors() -> None:
     assert not failed_item_updates
 
 
-def test_apply_approved_normalizes_global_vertical_to_generic_for_registry_and_assignment() -> None:
+def test_apply_approved_uses_generic_registry_and_assignment_paths() -> None:
     sql = FakeForgeQueryPort()
-    completed_row = _run_row(status="completed")
-    completed_row["vertical"] = "global"
-    completed_row["vertical_norm"] = "global"
-    applied_row = _run_row(status="applied")
-    applied_row["vertical"] = "global"
-    applied_row["vertical_norm"] = "global"
     sql.query_mappings_responses = [
-        [completed_row],
+        [_run_row(status="completed")],
         [
             {
                 "id": 11,
@@ -789,7 +756,6 @@ def test_apply_approved_normalizes_global_vertical_to_generic_for_registry_and_a
         ],
         [
             {
-                "vertical_norm": "global",
                 "semantic_type": "identifier",
                 "sub_type": None,
                 "entity": "student",
@@ -806,8 +772,8 @@ def test_apply_approved_normalizes_global_vertical_to_generic_for_registry_and_a
         ],
         [{"id": 901}],
         [{"total": 1, "valid_items": 1, "invalid_items": 0, "auto_approved_items": 0, "approved_items": 0, "rejected_items": 0, "applied_items": 1, "failed_apply_items": 0}],
-        [completed_row],
-        [applied_row],
+        [_run_row(status="completed")],
+        [_run_row(status="applied")],
     ]
     assignment = _AssignmentRecorder()
     svc = SemanticSuggestionService(sql=sql, assignment_service=assignment)
@@ -817,6 +783,6 @@ def test_apply_approved_normalizes_global_vertical_to_generic_for_registry_and_a
     assert run["status"] == "applied"
     registry_writes = [call for call in sql.write_calls if "INSERT INTO semantic_registry" in call.query]
     assert registry_writes
-    assert (registry_writes[0].params or {})["vertical"] == "generic"
     assert assignment.ensure_calls
-    assert assignment.ensure_calls[0]["vertical_norm"] == "generic"
+    assert "vertical" not in (registry_writes[0].params or {})
+    assert "vertical_norm" not in assignment.ensure_calls[0]

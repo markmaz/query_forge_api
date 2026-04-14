@@ -734,7 +734,7 @@ def test_semantic_catalog_build_dry_run(client, monkeypatch):
         def build_catalog(self, **kwargs):
             assert kwargs["workspace_id"] == "ws-1"
             assert kwargs["domain_id"] == 3
-            assert kwargs["vertical_norm"] == "generic"
+            assert "vertical_norm" not in kwargs
             assert kwargs["dry_run"] is True
             return {
                 "workspace_id": "ws-1",
@@ -760,14 +760,13 @@ def test_semantic_catalog_build_write_mode(client, monkeypatch):
         def build_catalog(self, **kwargs):
             assert kwargs["workspace_id"] == "ws-1"
             assert kwargs["domain_id"] == 9
-            assert kwargs["vertical_norm"] == "sales"
+            assert "vertical_norm" not in kwargs
             assert kwargs["domain_name"] == "Sales Performance"
             assert kwargs["dry_run"] is False
             assert kwargs["table_limit"] == 1200
             return {
                 "workspace_id": "ws-1",
                 "domain_id": 9,
-                "vertical_norm": "sales",
                 "dry_run": False,
                 "concepts_upserted": 24,
             }
@@ -778,7 +777,6 @@ def test_semantic_catalog_build_write_mode(client, monkeypatch):
         json={
             "workspace_id": "ws-1",
             "domain_id": 9,
-            "vertical_norm": "sales",
             "domain_name": "Sales Performance",
             "dry_run": False,
             "table_limit": 1200,
@@ -790,18 +788,10 @@ def test_semantic_catalog_build_write_mode(client, monkeypatch):
     assert resp.json["result"]["concepts_upserted"] == 24
 
 
-def test_semantic_catalog_build_normalizes_legacy_vertical_to_generic(client, monkeypatch):
+def test_semantic_catalog_build_rejects_removed_vertical_field(client, monkeypatch):
     class _FakeBuilder:
         def build_catalog(self, **kwargs):
-            assert kwargs["workspace_id"] == "ws-1"
-            assert kwargs["domain_id"] == 4
-            assert kwargs["vertical_norm"] == "generic"
-            return {
-                "workspace_id": "ws-1",
-                "domain_id": 4,
-                "vertical_norm": "generic",
-                "dry_run": True,
-            }
+            raise AssertionError("build_catalog should not be called")
 
     monkeypatch.setattr(admin_routes, "SemanticCatalogBuilder", _FakeBuilder)
     resp = client.post(
@@ -809,8 +799,9 @@ def test_semantic_catalog_build_normalizes_legacy_vertical_to_generic(client, mo
         json={"domain_id": 4, "vertical_norm": "education"},
         headers=_headers(monkeypatch),
     )
-    assert resp.status_code == 200
-    assert resp.json["result"]["vertical_norm"] == "generic"
+    assert resp.status_code == 400
+    errors = resp.json["details"]["errors"]
+    assert any(error.get("loc") == ["vertical_norm"] for error in errors)
 
 
 def test_semantic_catalog_build_allows_workspace_admin(client, monkeypatch):
@@ -840,7 +831,7 @@ def test_semantic_catalog_build_allows_workspace_admin(client, monkeypatch):
 
 def test_vector_rebuild_all(client, monkeypatch):
     class _FakeSemanticSvc:
-        def rebuild_semantic_concept_index(self, vertical_norm=None):
+        def rebuild_semantic_concept_index(self):
             return {"conceptPoints": 10, "aliasPoints": 5}
 
     class _FakeEmbeddingSvc:
@@ -848,7 +839,7 @@ def test_vector_rebuild_all(client, monkeypatch):
             return {"tablesIndexed": 3, "columnsIndexed": 20}
 
     class _FakeDomainVectorSvc:
-        def reindex_domains(self, workspace_id=None, vertical_norm=None, force=False, json_fallback_path=None):
+        def reindex_domains(self, workspace_id=None, force=False, json_fallback_path=None):
             return {"upserted": 8, "skipped": 0}
 
     monkeypatch.setattr(admin_routes, "SemanticConceptEmbeddingService", _FakeSemanticSvc)
@@ -857,7 +848,7 @@ def test_vector_rebuild_all(client, monkeypatch):
 
     resp = client.post(
         "/api/v1/admin/vector/rebuild-all",
-        json={"vertical_norm": "education", "force": True},
+        json={"force": True},
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 200
@@ -867,22 +858,22 @@ def test_vector_rebuild_all(client, monkeypatch):
     assert "embeddings" in data["results"]
     assert "domain_vectors" in data["results"]
     assert data["errors"] == {}
+    assert "vertical_norm" not in data
 
 
 def test_vector_semantic_concepts_rebuild_allows_workspace_admin(client, monkeypatch):
     class _FakeSemanticSvc:
-        def rebuild_semantic_concept_index(self, vertical_norm=None):
-            assert vertical_norm == "education"
+        def rebuild_semantic_concept_index(self):
             return {"conceptPoints": 10, "aliasPoints": 5}
 
     monkeypatch.setattr(admin_routes, "SemanticConceptEmbeddingService", _FakeSemanticSvc)
     resp = client.post(
         "/api/v1/admin/vector/semantic-concepts/rebuild",
-        json={"vertical_norm": "education"},
+        json={},
         headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
     )
     assert resp.status_code == 200
-    assert resp.json["vertical_norm"] == "education"
+    assert "vertical_norm" not in resp.json
     assert resp.json["result"]["conceptPoints"] == 10
 
 
@@ -921,9 +912,8 @@ def test_vector_embeddings_rebuild_allows_workspace_admin(client, monkeypatch):
 
 def test_vector_domains_reindex_allows_workspace_admin(client, monkeypatch):
     class _FakeDomainVectorSvc:
-        def reindex_domains(self, workspace_id=None, vertical_norm=None, force=False, json_fallback_path=None):
+        def reindex_domains(self, workspace_id=None, force=False, json_fallback_path=None):
             assert workspace_id == "ws-1"
-            assert vertical_norm == "education"
             assert force is True
             assert json_fallback_path is None
             return {"upserted": 8, "skipped": 0}
@@ -931,7 +921,7 @@ def test_vector_domains_reindex_allows_workspace_admin(client, monkeypatch):
     monkeypatch.setattr(admin_routes, "DomainVectorIndexService", _FakeDomainVectorSvc)
     resp = client.post(
         "/api/v1/admin/vector/domains/reindex",
-        json={"vertical_norm": "education", "force": True},
+        json={"force": True},
         headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
     )
     assert resp.status_code == 200

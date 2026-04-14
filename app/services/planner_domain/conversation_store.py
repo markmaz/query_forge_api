@@ -105,7 +105,6 @@ def build_conversation_state(
     *,
     workspace_id: str,
     user_id: str,
-    vertical_norm: str,
     prompt: str,
     trace_id: str,
     plan_json_v2: Mapping[str, Any],
@@ -114,7 +113,6 @@ def build_conversation_state(
     return {
         "workspace_id": workspace_id,
         "user_id": user_id,
-        "vertical_norm": str(vertical_norm or "generic").strip().lower() or "generic",
         "last_prompt": str(prompt or "").strip(),
         "trace_id": str(trace_id or "").strip(),
         "plan_json_v2": dict(plan_json_v2 or {}),

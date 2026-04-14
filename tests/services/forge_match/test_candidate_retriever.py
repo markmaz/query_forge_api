@@ -76,7 +76,6 @@ def test_retrieve_applies_shared_pipeline_rerank() -> None:
         workspace_id="ws-1",
         source_record=source,
         top_n=5,
-        vertical_norm="education",
     )
 
     assert rows[0]["column_id"] == 202
@@ -142,7 +141,6 @@ def test_retrieve_preferred_domain_is_soft_bias_not_hard_filter() -> None:
         workspace_id="ws-1",
         source_record=source,
         top_n=5,
-        vertical_norm="education",
         domain_id=15,
     )
 
@@ -207,14 +205,12 @@ def test_retrieve_preferred_domain_does_not_change_scores() -> None:
         workspace_id="ws-1",
         source_record=source,
         top_n=5,
-        vertical_norm="education",
         domain_id=15,
     )
     rows_without_domain = retriever.retrieve(
         workspace_id="ws-1",
         source_record=source,
         top_n=5,
-        vertical_norm="education",
     )
 
     assert rows[0]["column_id"] == rows_without_domain[0]["column_id"]
@@ -274,7 +270,6 @@ def test_retrieve_hydrates_vector_only_candidates_even_when_lexical_rows_exist()
         workspace_id="ws-1",
         source_record=source,
         top_n=5,
-        vertical_norm="education",
     )
 
     assert rows[0]["column_id"] == 402

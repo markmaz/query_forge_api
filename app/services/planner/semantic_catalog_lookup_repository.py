@@ -10,7 +10,6 @@ from app.ports.sql_executor import ForgeQueryPort
 from app.services.planner.semantic_retrieval_helpers import (
     build_in_clause,
 )
-from app.services.semantic.vertical_norm import normalize_semantic_vertical
 
 
 class SemanticCatalogLookupRepository:
@@ -18,8 +17,7 @@ class SemanticCatalogLookupRepository:
         self._sql = sql or ForgeMetaSQL()
         self._relationship_fk_target_cache: Optional[str] = None
 
-    def load_concepts(self, *, vertical_norm: str) -> List[Dict[str, Any]]:
-        vertical = normalize_semantic_vertical(vertical_norm)
+    def load_concepts(self) -> List[Dict[str, Any]]:
         return self._sql.execute_query_mappings(
             """
             SELECT
@@ -28,19 +26,15 @@ class SemanticCatalogLookupRepository:
               name,
               COALESCE(description, '') AS description,
               LOWER(COALESCE(semantic_type, 'other')) AS semantic_type,
-              LOWER(COALESCE(vertical_norm, 'generic')) AS vertical_norm,
               LOWER(COALESCE(`status`, 'active')) AS `status`
             FROM semantic_concept
-            WHERE LOWER(COALESCE(vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
-            ORDER BY
-              CASE WHEN LOWER(COALESCE(vertical_norm, 'generic')) = :vertical_norm THEN 0 ELSE 1 END,
-              id ASC
+            WHERE 1 = 1
+            ORDER BY id ASC
             """,
-            {"vertical_norm": vertical},
+            {},
         )
 
-    def load_aliases(self, *, vertical_norm: str) -> List[Dict[str, Any]]:
-        params = {"vertical_norm": normalize_semantic_vertical(vertical_norm)}
+    def load_aliases(self) -> List[Dict[str, Any]]:
         try:
             return self._sql.execute_query_mappings(
                 """
@@ -50,10 +44,10 @@ class SemanticCatalogLookupRepository:
                   COALESCE(weight, 1.0) AS weight,
                   LOWER(COALESCE(match_kind, 'contains')) AS match_kind
                 FROM semantic_concept_alias
-                WHERE LOWER(COALESCE(vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
+                WHERE 1 = 1
                 ORDER BY id ASC
                 """,
-                params,
+                {},
             )
         except (OSError, RuntimeError, ValueError, SQLAlchemyError) as exc:
             if not _is_schema_compatibility_error(exc, "match_kind"):
@@ -66,14 +60,13 @@ class SemanticCatalogLookupRepository:
                   COALESCE(weight, 1.0) AS weight,
                   'contains' AS match_kind
                 FROM semantic_concept_alias
-                WHERE LOWER(COALESCE(vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
+                WHERE 1 = 1
                 ORDER BY id ASC
                 """,
-                params,
+                {},
             )
 
-    def load_relationships(self, *, vertical_norm: str) -> List[Dict[str, Any]]:
-        params = {"vertical_norm": normalize_semantic_vertical(vertical_norm)}
+    def load_relationships(self) -> List[Dict[str, Any]]:
         fk_target = self._get_relationship_fk_target()
         if fk_target == "semantic_registry":
             return self._sql.execute_query_mappings(
@@ -85,11 +78,10 @@ class SemanticCatalogLookupRepository:
                 FROM semantic_relationship sr
                 JOIN semantic_registry parent ON parent.id = sr.parent_concept_id
                 JOIN semantic_registry child ON child.id = sr.child_concept_id
-                WHERE LOWER(COALESCE(parent.vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
-                  AND LOWER(COALESCE(child.vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
+                WHERE 1 = 1
                 ORDER BY sr.id ASC
                 """,
-                params,
+                {},
             )
         return self._sql.execute_query_mappings(
             """
@@ -100,15 +92,13 @@ class SemanticCatalogLookupRepository:
             FROM semantic_relationship sr
             JOIN semantic_concept parent ON parent.id = sr.parent_concept_id
             JOIN semantic_concept child ON child.id = sr.child_concept_id
-            WHERE LOWER(COALESCE(parent.vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
-              AND LOWER(COALESCE(child.vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
+            WHERE 1 = 1
             ORDER BY sr.id ASC
             """,
-            params,
+            {},
         )
 
-    def load_concept_column_maps(self, *, vertical_norm: str) -> List[Dict[str, Any]]:
-        params = {"vertical_norm": normalize_semantic_vertical(vertical_norm)}
+    def load_concept_column_maps(self) -> List[Dict[str, Any]]:
         try:
             return self._sql.execute_query_mappings(
                 """
@@ -121,13 +111,13 @@ class SemanticCatalogLookupRepository:
                   COALESCE(m.weight, 1.0) AS weight
                 FROM workspace_column_semantic_concept_map m
                 JOIN semantic_concept sc ON sc.id = m.semantic_concept_id
-                WHERE LOWER(COALESCE(m.vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
+                WHERE 1 = 1
                 ORDER BY
                   CASE WHEN LOWER(COALESCE(m.relationship_kind, 'primary')) = 'primary' THEN 0 ELSE 1 END,
                   m.weight DESC,
                   m.id ASC
                 """,
-                params,
+                {},
             )
         except (OSError, RuntimeError, ValueError, SQLAlchemyError) as exc:
             if not _is_schema_compatibility_error(exc, "model_column_id"):
@@ -143,19 +133,18 @@ class SemanticCatalogLookupRepository:
                   COALESCE(m.weight, 1.0) AS weight
                 FROM workspace_column_semantic_concept_map m
                 JOIN semantic_concept sc ON sc.id = m.semantic_concept_id
-                WHERE LOWER(COALESCE(m.vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
+                WHERE 1 = 1
                 ORDER BY
                   CASE WHEN LOWER(COALESCE(m.relationship_kind, 'primary')) = 'primary' THEN 0 ELSE 1 END,
                   m.weight DESC,
                   m.id ASC
                 """,
-                params,
+                {},
             )
 
     def search_value_aliases(
         self,
         *,
-        vertical_norm: str,
         ngrams: Sequence[str],
         semantic_concept_ids: Sequence[int],
     ) -> List[Dict[str, Any]]:
@@ -164,10 +153,8 @@ class SemanticCatalogLookupRepository:
 
         rows: List[Dict[str, Any]] = []
         in_sql, in_params = build_in_clause("cid_", semantic_concept_ids)
-        vertical = normalize_semantic_vertical(vertical_norm)
         for ngram in ngrams:
             params = {
-                "vertical_norm": vertical,
                 "ngram": str(ngram or "").strip().lower(),
                 **in_params,
             }
@@ -183,8 +170,7 @@ class SemanticCatalogLookupRepository:
                       LOWER(COALESCE(va.match_kind, 'contains')) AS match_kind,
                       COALESCE(va.weight, 1.0) AS weight
                     FROM semantic_value_alias va
-                    WHERE LOWER(COALESCE(va.vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
-                      AND va.semantic_concept_id IN ({in_sql})
+                    WHERE va.semantic_concept_id IN ({in_sql})
                       AND (
                         (LOWER(COALESCE(va.match_kind, 'contains')) = 'exact' AND LOWER(va.alias_value) = :ngram)
                         OR
@@ -193,7 +179,6 @@ class SemanticCatalogLookupRepository:
                         (LOWER(COALESCE(va.match_kind, 'contains')) = 'prefix' AND :ngram LIKE CONCAT(LOWER(va.alias_value), '%'))
                       )
                     ORDER BY
-                      CASE WHEN LOWER(COALESCE(va.vertical_norm, 'generic')) = :vertical_norm THEN 0 ELSE 1 END,
                       va.weight DESC,
                       va.id ASC
                     """,

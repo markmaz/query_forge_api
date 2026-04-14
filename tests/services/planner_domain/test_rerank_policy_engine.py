@@ -15,8 +15,8 @@ class _FakePolicyService:
     def __init__(self, rows):
         self._rows = list(rows)
 
-    def get_applicable_policies(self, *, workspace_id: str, vertical_norm: str, base_domain_id: int):
-        del workspace_id, vertical_norm, base_domain_id
+    def get_applicable_policies(self, *, workspace_id: str, base_domain_id: int):
+        del workspace_id, base_domain_id
         return list(self._rows)
 
 
@@ -120,7 +120,6 @@ def test_capability_service_prefers_explicit_workspace_scope_over_global_scope()
     svc = PlannerDomainCapabilityService(sql=_SQL())
     out = svc.resolve_capabilities(
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=9,
         capabilities={"dimensions": [], "time_columns": [], "filter_columns": [], "domain_metrics": []},
         shortlisted_columns=[],
@@ -134,7 +133,6 @@ def test_capability_service_infers_calendar_capabilities() -> None:
     svc = PlannerDomainCapabilityService(sql=_EmptySQL())
     out = svc.resolve_capabilities(
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=6,
         capabilities={
             "dimensions": [
@@ -159,7 +157,6 @@ def test_capability_service_infers_birth_date_and_age_capabilities() -> None:
     svc = PlannerDomainCapabilityService(sql=_EmptySQL())
     out = svc.resolve_capabilities(
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=21,
         capabilities={
             "dimensions": [
@@ -220,7 +217,6 @@ def test_rerank_policy_engine_boosts_supported_domain_and_penalizes_missing_capa
     strong = engine.evaluate_candidate(
         prompt="Show me all the students enrolled at Barksdale Elementary",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=9,
         base_score=0.94,
         capabilities={
@@ -238,7 +234,6 @@ def test_rerank_policy_engine_boosts_supported_domain_and_penalizes_missing_capa
     weak = engine.evaluate_candidate(
         prompt="Show me all the students enrolled at Barksdale Elementary",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=15,
         base_score=1.02,
         capabilities={
@@ -287,7 +282,6 @@ def test_rerank_policy_engine_prefers_birth_date_domain_for_age_extreme_prompt()
     strong = engine.evaluate_candidate(
         prompt="Show me the eldest student",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=21,
         base_score=0.93,
         capabilities={
@@ -304,7 +298,6 @@ def test_rerank_policy_engine_prefers_birth_date_domain_for_age_extreme_prompt()
     weak = engine.evaluate_candidate(
         prompt="Show me the eldest student",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=15,
         base_score=1.01,
         capabilities={

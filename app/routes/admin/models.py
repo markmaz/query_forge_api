@@ -61,7 +61,6 @@ semantic_catalog_build_model = admin_ns.model(
     {
         "workspace_id": fields.String(required=False),
         "domain_id": fields.Integer(required=True),
-        "vertical_norm": fields.String(required=False, default="generic"),
         "domain_name": fields.String(required=False),
         "dry_run": fields.Boolean(required=False, default=True),
         "table_limit": fields.Integer(required=False, default=5000),

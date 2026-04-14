@@ -327,7 +327,7 @@ def test_analyze_session_persists_mappings_and_summary() -> None:
     assert len(sql.insert_calls) == 1
 
 
-def test_analyze_session_passes_vertical_norm_to_retriever() -> None:
+def test_analyze_session_calls_retriever_without_vertical_scope() -> None:
     sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
@@ -411,12 +411,11 @@ def test_analyze_session_passes_vertical_norm_to_retriever() -> None:
     out = svc.analyze_session(
         workspace_id="ws-1",
         session_id="sess-1",
-        vertical_norm="education",
         top_n=8,
     )
 
     assert out["status"] == "analyzed"
-    assert retriever.calls[0]["vertical_norm"] == "education"
+    assert "vertical_norm" not in retriever.calls[0]
 
 
 def test_analyze_session_workflow_prefers_birth_date_candidate_from_shared_pipeline() -> None:
@@ -534,7 +533,6 @@ def test_analyze_session_workflow_prefers_birth_date_candidate_from_shared_pipel
     out = svc.analyze_session(
         workspace_id="ws-1",
         session_id="sess-1",
-        vertical_norm="education",
         domain_id=15,
         top_n=8,
     )
@@ -668,7 +666,6 @@ def test_analyze_session_workflow_prefers_school_day_flag_candidate_from_shared_
     out = svc.analyze_session(
         workspace_id="ws-1",
         session_id="sess-1",
-        vertical_norm="education",
         top_n=8,
     )
 

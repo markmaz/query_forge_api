@@ -18,7 +18,6 @@ def _context(**request_overrides) -> PipelineContext:
         "session_id": "sess-1",
         "source_record_id": 10,
         "top_n": 8,
-        "vertical_norm": "education",
         **request_overrides,
     }
     return PipelineContext(
@@ -26,7 +25,6 @@ def _context(**request_overrides) -> PipelineContext:
         trace_id="trace-1",
         workspace_id="ws-1",
         user_id=None,
-        vertical_norm="education",
         request=request,
     )
 

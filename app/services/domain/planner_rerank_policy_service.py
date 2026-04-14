@@ -36,7 +36,6 @@ class PlannerRerankPolicyService:
         workspace_id: str,
         user_id: str,
         base_domain_id: Optional[int] = None,
-        vertical_norm: str = "generic",
         include_inactive: bool = False,
     ) -> Dict[str, Any]:
         domain_row = None
@@ -88,7 +87,6 @@ class PlannerRerankPolicyService:
         policies: List[Dict[str, Any]] = []
         for row in rows:
             payload = _json_safe_mapping(dict(row))
-            payload.pop("scope_vertical_norm", None)
             payload["scope_rank"] = _scope_rank(str(payload.get("scope_type") or ""))
             payload["is_inherited"] = bool(
                 base_domain_id is not None
@@ -105,7 +103,6 @@ class PlannerRerankPolicyService:
         )
         return {
             "workspace_id": str(workspace_id),
-            "vertical_norm": str(vertical_norm or "generic"),
             "base_domain_id": int(base_domain_id) if base_domain_id is not None else None,
             "domain_name": str((domain_row or {}).get("domain_name") or "").strip() or None,
             "can_edit": True,
@@ -116,10 +113,8 @@ class PlannerRerankPolicyService:
         self,
         *,
         workspace_id: str,
-        vertical_norm: str,
         base_domain_id: int,
     ) -> List[Dict[str, Any]]:
-        del vertical_norm
         try:
             rows = self._sql.execute_query_mappings(
                 """
@@ -164,7 +159,6 @@ class PlannerRerankPolicyService:
         policies: List[Dict[str, Any]] = []
         for row in rows:
             payload = _json_safe_mapping(dict(row))
-            payload.pop("scope_vertical_norm", None)
             try:
                 payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             except ForgeError:

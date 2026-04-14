@@ -297,7 +297,6 @@ def test_get_domain_candidates_uses_retrieval_policy_query_specs() -> None:
 
     out = svc._get_domain_candidates(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt="Show me the eldest student",
         provided_domain_id=None,
     )

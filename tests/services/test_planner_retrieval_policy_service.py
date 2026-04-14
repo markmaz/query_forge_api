@@ -13,7 +13,6 @@ def test_build_query_specs_for_age_extreme_prompt() -> None:
 
     specs = svc.build_query_specs(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt_signals=["student_listing", "age_extreme_prompt"],
         semantic_concept_keys=[],
     )
@@ -28,7 +27,6 @@ def test_build_query_specs_for_staff_work_context_prompt() -> None:
 
     specs = svc.build_query_specs(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt_signals=["staff_work_context_prompt"],
         semantic_concept_keys=[],
     )
@@ -41,7 +39,6 @@ def test_build_query_specs_for_adm_prompt() -> None:
 
     specs = svc.build_query_specs(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt_signals=["adm_prompt"],
         semantic_concept_keys=[],
     )
@@ -54,7 +51,6 @@ def test_build_query_specs_for_semantic_school_year_pattern() -> None:
 
     specs = svc.build_query_specs(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt_signals=[],
         semantic_concept_keys=["CURRENT_SCHOOL_YEAR"],
     )
@@ -71,7 +67,6 @@ def test_score_domain_name_bias_for_calendar_days_off_prompt() -> None:
 
     bias = svc.score_domain_name_bias(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt_signals=["calendar_days_off_prompt"],
         candidate_name="Academic Calendar And Scheduling",
     )
@@ -84,13 +79,11 @@ def test_score_domain_name_bias_for_staff_work_context_prompt() -> None:
 
     staff_bias = svc.score_domain_name_bias(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt_signals=["staff_work_context_prompt"],
         candidate_name="Staff & Assignments",
     )
     discipline_bias = svc.score_domain_name_bias(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt_signals=["staff_work_context_prompt"],
         candidate_name="Discipline",
     )
@@ -127,7 +120,6 @@ def test_retrieval_policy_service_prefers_workspace_rule_when_db_lookup_enabled(
 
     specs = svc.build_query_specs(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt_signals=["staff_work_context_prompt"],
         semantic_concept_keys=[],
     )
@@ -163,7 +155,6 @@ def test_retrieval_policy_service_falls_back_on_expected_db_lookup_errors() -> N
 
     specs = svc.build_query_specs(
         workspace_id="ws-1",
-        vertical_norm="education",
         prompt_signals=["staff_work_context_prompt"],
         semantic_concept_keys=[],
     )
@@ -184,4 +175,4 @@ def test_retrieval_policy_service_surfaces_unexpected_policy_parse_errors(monkey
     monkeypatch.setattr(retrieval_policy_service, "_parse_policy_rule", _boom)
 
     with pytest.raises(AssertionError, match="unexpected policy parse bug"):
-        svc.get_applicable_policies(workspace_id="ws-1", vertical_norm="education")
+        svc.get_applicable_policies(workspace_id="ws-1")

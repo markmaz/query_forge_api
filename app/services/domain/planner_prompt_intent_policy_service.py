@@ -283,152 +283,143 @@ class PlannerPromptIntentPolicyService:
         prompt: str,
         *,
         workspace_id: str | None = None,
-        vertical_norm: str | None = None,
     ) -> bool:
         text = str(prompt or "").strip()
         if text == "":
             return False
-        if self.matches_regex("aggregate_students", text, workspace_id=workspace_id, vertical_norm=vertical_norm):
+        if self.matches_regex("aggregate_students", text, workspace_id=workspace_id):
             return False
-        if self.matches_regex("list_students", text, workspace_id=workspace_id, vertical_norm=vertical_norm):
+        if self.matches_regex("list_students", text, workspace_id=workspace_id):
             return True
-        return self.matches_regex("mention_students", text, workspace_id=workspace_id, vertical_norm=vertical_norm)
+        return self.matches_regex("mention_students", text, workspace_id=workspace_id)
 
     def looks_like_list_schools(
         self,
         prompt: str,
         *,
         workspace_id: str | None = None,
-        vertical_norm: str | None = None,
     ) -> bool:
         text = str(prompt or "").strip()
         if text == "":
             return False
-        if self.matches_regex("aggregate_schools", text, workspace_id=workspace_id, vertical_norm=vertical_norm):
+        if self.matches_regex("aggregate_schools", text, workspace_id=workspace_id):
             return False
-        if self.matches_regex("list_schools", text, workspace_id=workspace_id, vertical_norm=vertical_norm):
+        if self.matches_regex("list_schools", text, workspace_id=workspace_id):
             return True
-        return self.matches_regex("mention_schools", text, workspace_id=workspace_id, vertical_norm=vertical_norm)
+        return self.matches_regex("mention_schools", text, workspace_id=workspace_id)
 
-    def prompt_mentions_students(self, prompt: str, *, workspace_id: str | None = None, vertical_norm: str | None = None) -> bool:
-        return self.matches_regex("mention_students", str(prompt or ""), workspace_id=workspace_id, vertical_norm=vertical_norm)
+    def prompt_mentions_students(self, prompt: str, *, workspace_id: str | None = None) -> bool:
+        return self.matches_regex("mention_students", str(prompt or ""), workspace_id=workspace_id)
 
     def prompt_mentions_school_or_district(
         self,
         prompt: str,
         *,
         workspace_id: str | None = None,
-        vertical_norm: str | None = None,
     ) -> bool:
         text = str(prompt or "")
-        return self.matches_regex("mention_schools", text, workspace_id=workspace_id, vertical_norm=vertical_norm) or self.matches_regex(
-            "district_terms", text, workspace_id=workspace_id, vertical_norm=vertical_norm
+        return self.matches_regex("mention_schools", text, workspace_id=workspace_id) or self.matches_regex(
+            "district_terms", text, workspace_id=workspace_id
         )
 
-    def prompt_has_subgroup(self, prompt: str, *, workspace_id: str | None = None, vertical_norm: str | None = None) -> bool:
-        return self.matches_regex("subgroup_terms", str(prompt or ""), workspace_id=workspace_id, vertical_norm=vertical_norm)
+    def prompt_has_subgroup(self, prompt: str, *, workspace_id: str | None = None) -> bool:
+        return self.matches_regex("subgroup_terms", str(prompt or ""), workspace_id=workspace_id)
 
-    def extract_subgroup_terms(self, prompt: str, *, workspace_id: str | None = None, vertical_norm: str | None = None) -> list[str]:
-        return _dedupe_text_items(
-            self.extract_regex_terms("subgroup_terms", str(prompt or ""), workspace_id=workspace_id, vertical_norm=vertical_norm)
-        )
+    def extract_subgroup_terms(self, prompt: str, *, workspace_id: str | None = None) -> list[str]:
+        return _dedupe_text_items(self.extract_regex_terms("subgroup_terms", str(prompt or ""), workspace_id=workspace_id))
 
-    def prompt_has_nativity(self, prompt: str, *, workspace_id: str | None = None, vertical_norm: str | None = None) -> bool:
-        return self.matches_substring("nativity_terms", str(prompt or "").lower(), workspace_id=workspace_id, vertical_norm=vertical_norm)
+    def prompt_has_nativity(self, prompt: str, *, workspace_id: str | None = None) -> bool:
+        return self.matches_substring("nativity_terms", str(prompt or "").lower(), workspace_id=workspace_id)
 
-    def prompt_has_calendar_days_off(self, prompt: str, *, workspace_id: str | None = None, vertical_norm: str | None = None) -> bool:
+    def prompt_has_calendar_days_off(self, prompt: str, *, workspace_id: str | None = None) -> bool:
         text = f" {str(prompt or '').strip().lower()} "
         if text.strip() == "":
             return False
-        return self.matches_substring("calendar_days_off_terms", text, workspace_id=workspace_id, vertical_norm=vertical_norm)
+        return self.matches_substring("calendar_days_off_terms", text, workspace_id=workspace_id)
 
-    def prompt_has_age_extreme(self, prompt: str, *, workspace_id: str | None = None, vertical_norm: str | None = None) -> bool:
+    def prompt_has_age_extreme(self, prompt: str, *, workspace_id: str | None = None) -> bool:
         text = f" {str(prompt or '').strip().lower()} "
         if text.strip() == "":
             return False
-        return self.matches_substring("age_extreme_terms", text, workspace_id=workspace_id, vertical_norm=vertical_norm)
+        return self.matches_substring("age_extreme_terms", text, workspace_id=workspace_id)
 
-    def prompt_has_birth_month_constraint(self, prompt: str, *, workspace_id: str | None = None, vertical_norm: str | None = None) -> bool:
+    def prompt_has_birth_month_constraint(self, prompt: str, *, workspace_id: str | None = None) -> bool:
         text = f" {str(prompt or '').strip().lower()} "
         if text.strip() == "":
             return False
-        if not self.matches_substring("birth_month_terms", text, workspace_id=workspace_id, vertical_norm=vertical_norm):
+        if not self.matches_substring("birth_month_terms", text, workspace_id=workspace_id):
             return False
-        return self.extract_named_month_number(text, workspace_id=workspace_id, vertical_norm=vertical_norm) is not None
+        return self.extract_named_month_number(text, workspace_id=workspace_id) is not None
 
-    def prompt_has_name_constraint(self, prompt: str, *, workspace_id: str | None = None, vertical_norm: str | None = None) -> bool:
-        return self.matches_substring("name_constraint_terms", str(prompt or "").lower(), workspace_id=workspace_id, vertical_norm=vertical_norm)
+    def prompt_has_name_constraint(self, prompt: str, *, workspace_id: str | None = None) -> bool:
+        return self.matches_substring("name_constraint_terms", str(prompt or "").lower(), workspace_id=workspace_id)
 
     def prompt_explicitly_requests_preferred_name(
         self,
         prompt: str,
         *,
         workspace_id: str | None = None,
-        vertical_norm: str | None = None,
     ) -> bool:
         text = f" {str(prompt or '').strip().lower()} "
         if text.strip() == "":
             return False
-        return self.matches_substring("explicit_preferred_name_terms", text, workspace_id=workspace_id, vertical_norm=vertical_norm)
+        return self.matches_substring("explicit_preferred_name_terms", text, workspace_id=workspace_id)
 
-    def prompt_has_adm_intent(self, prompt: str, *, workspace_id: str | None = None, vertical_norm: str | None = None) -> bool:
+    def prompt_has_adm_intent(self, prompt: str, *, workspace_id: str | None = None) -> bool:
         text = str(prompt or "").strip().lower()
         if text == "":
             return False
-        return self.matches_regex("adm_hint", text, workspace_id=workspace_id, vertical_norm=vertical_norm)
+        return self.matches_regex("adm_hint", text, workspace_id=workspace_id)
 
     def prompt_implies_staff_work_context(
         self,
         prompt: str,
         *,
         workspace_id: str | None = None,
-        vertical_norm: str | None = None,
     ) -> bool:
         text = str(prompt or "").strip().lower()
         if text == "":
             return False
-        if self.matches_regex("student_attend_hint", text, workspace_id=workspace_id, vertical_norm=vertical_norm) and not self.matches_regex(
-            "staff_work_hint", text, workspace_id=workspace_id, vertical_norm=vertical_norm
+        if self.matches_regex("student_attend_hint", text, workspace_id=workspace_id) and not self.matches_regex(
+            "staff_work_hint", text, workspace_id=workspace_id
         ):
             return False
-        return self.matches_regex("staff_work_hint", text, workspace_id=workspace_id, vertical_norm=vertical_norm)
+        return self.matches_regex("staff_work_hint", text, workspace_id=workspace_id)
 
     def prompt_implies_student_school_context(
         self,
         prompt: str,
         *,
         workspace_id: str | None = None,
-        vertical_norm: str | None = None,
     ) -> bool:
         text = str(prompt or "").strip().lower()
         if text == "":
             return False
-        if self.matches_regex("staff_work_hint", text, workspace_id=workspace_id, vertical_norm=vertical_norm) and not self.matches_regex(
-            "student_attend_hint", text, workspace_id=workspace_id, vertical_norm=vertical_norm
+        if self.matches_regex("staff_work_hint", text, workspace_id=workspace_id) and not self.matches_regex(
+            "student_attend_hint", text, workspace_id=workspace_id
         ):
             return False
-        return self.matches_regex("student_attend_hint", text, workspace_id=workspace_id, vertical_norm=vertical_norm)
+        return self.matches_regex("student_attend_hint", text, workspace_id=workspace_id)
 
     def prompt_has_city_state_pattern(
         self,
         prompt: str,
         *,
         workspace_id: str | None = None,
-        vertical_norm: str | None = None,
     ) -> bool:
         text = str(prompt or "").strip().lower()
         if text == "":
             return False
-        match = self.first_regex_match("city_state_abbr", text, workspace_id=workspace_id, vertical_norm=vertical_norm)
+        match = self.first_regex_match("city_state_abbr", text, workspace_id=workspace_id)
         if match is None:
             return False
         token = str(match.group(1) or "").strip().lower()
-        return token in set(self.substring_patterns("city_state_abbr", state_codes=True, workspace_id=workspace_id, vertical_norm=vertical_norm))
+        return token in set(self.substring_patterns("city_state_abbr", state_codes=True, workspace_id=workspace_id))
 
-    def extract_time_phrases(self, prompt: str, *, workspace_id: str | None = None, vertical_norm: str | None = None) -> list[str]:
+    def extract_time_phrases(self, prompt: str, *, workspace_id: str | None = None) -> list[str]:
         text = str(prompt or "").lower()
         phrases: list[str] = []
-        configured = self.substring_patterns("time_phrases", workspace_id=workspace_id, vertical_norm=vertical_norm)
+        configured = self.substring_patterns("time_phrases", workspace_id=workspace_id)
         for phrase in configured[:3]:
             if phrase in text:
                 phrases.append(phrase)
@@ -441,20 +432,19 @@ class PlannerPromptIntentPolicyService:
         text: str,
         *,
         workspace_id: str | None = None,
-        vertical_norm: str | None = None,
     ) -> Optional[int]:
         prompt_text = str(text or "").strip().lower()
         if prompt_text == "":
             return None
-        month_names = self.substring_patterns("month_names", workspace_id=workspace_id, vertical_norm=vertical_norm)
+        month_names = self.substring_patterns("month_names", workspace_id=workspace_id)
         month_map = {name: idx + 1 for idx, name in enumerate(month_names)}
         for name in month_names:
             if re.search(rf"\b{re.escape(name)}\b", prompt_text) is not None:
                 return month_map.get(name)
         return None
 
-    def matches_regex(self, action_key: str, text: str, *, workspace_id: str | None = None, vertical_norm: str | None = None) -> bool:
-        rule = self._get_rule_index(workspace_id=workspace_id, vertical_norm=vertical_norm).get(action_key)
+    def matches_regex(self, action_key: str, text: str, *, workspace_id: str | None = None) -> bool:
+        rule = self._get_rule_index(workspace_id=workspace_id).get(action_key)
         if rule is None:
             return False
         return any(re.search(pattern, text, flags=re.IGNORECASE) is not None for pattern in rule.regex_patterns)
@@ -465,9 +455,8 @@ class PlannerPromptIntentPolicyService:
         text: str,
         *,
         workspace_id: str | None = None,
-        vertical_norm: str | None = None,
     ) -> re.Match[str] | None:
-        rule = self._get_rule_index(workspace_id=workspace_id, vertical_norm=vertical_norm).get(action_key)
+        rule = self._get_rule_index(workspace_id=workspace_id).get(action_key)
         if rule is None:
             return None
         for pattern in rule.regex_patterns:
@@ -482,9 +471,8 @@ class PlannerPromptIntentPolicyService:
         text: str,
         *,
         workspace_id: str | None = None,
-        vertical_norm: str | None = None,
     ) -> list[str]:
-        rule = self._get_rule_index(workspace_id=workspace_id, vertical_norm=vertical_norm).get(action_key)
+        rule = self._get_rule_index(workspace_id=workspace_id).get(action_key)
         if rule is None:
             return []
         out: list[str] = []
@@ -492,8 +480,8 @@ class PlannerPromptIntentPolicyService:
             out.extend(match.group(0) for match in re.finditer(pattern, text, flags=re.IGNORECASE))
         return out
 
-    def matches_substring(self, action_key: str, text: str, *, workspace_id: str | None = None, vertical_norm: str | None = None) -> bool:
-        return any(token in text for token in self.substring_patterns(action_key, workspace_id=workspace_id, vertical_norm=vertical_norm))
+    def matches_substring(self, action_key: str, text: str, *, workspace_id: str | None = None) -> bool:
+        return any(token in text for token in self.substring_patterns(action_key, workspace_id=workspace_id))
 
     def substring_patterns(
         self,
@@ -501,9 +489,8 @@ class PlannerPromptIntentPolicyService:
         *,
         state_codes: bool = False,
         workspace_id: str | None = None,
-        vertical_norm: str | None = None,
     ) -> list[str]:
-        rule = self._get_rule_index(workspace_id=workspace_id, vertical_norm=vertical_norm).get(action_key)
+        rule = self._get_rule_index(workspace_id=workspace_id).get(action_key)
         if rule is None:
             return []
         return list(rule.state_codes if state_codes else rule.substring_patterns)
@@ -512,9 +499,7 @@ class PlannerPromptIntentPolicyService:
         self,
         *,
         workspace_id: str | None = None,
-        vertical_norm: str | None = None,
     ) -> dict[str, PlannerPromptIntentPolicyRule]:
-        del vertical_norm
         rows = [dict(item) for item in _SEED_POLICIES]
         if self._enable_db_lookup:
             db_rows = self._sql.execute_query_mappings(
@@ -546,7 +531,6 @@ class PlannerPromptIntentPolicyService:
         self,
         *,
         workspace_id: str,
-        vertical_norm: str = "generic",
         include_inactive: bool = False,
         include_seeded: bool = True,
     ) -> Dict[str, Any]:
@@ -581,7 +565,6 @@ class PlannerPromptIntentPolicyService:
         policies: list[dict[str, Any]] = []
         for row in rows:
             payload = _json_safe_mapping(dict(row))
-            payload.pop("scope_vertical_norm", None)
             payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             payload["is_seeded"] = bool(payload.get("_seeded"))
             payload["can_edit"] = not payload["is_seeded"]
@@ -590,7 +573,6 @@ class PlannerPromptIntentPolicyService:
 
         return {
             "workspace_id": str(workspace_id),
-            "vertical_norm": str(vertical_norm or "generic").strip().lower() or "generic",
             "can_edit": True,
             "policies": annotate_effective_scoped_rows(policies),
         }

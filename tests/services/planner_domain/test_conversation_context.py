@@ -19,8 +19,8 @@ class _MemoryConversationStore:
 
 
 class _CapsService:
-    def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
-        del workspace_id, user_id, vertical_norm
+    def get_domain_capabilities(self, *, workspace_id, user_id, domain_id):
+        del workspace_id, user_id
         assert domain_id == 5
         return {
             "domain_id": 5,
@@ -152,7 +152,6 @@ def test_plan_domain_conversation_followup_sort_preserves_prior_context() -> Non
     first = svc.plan(
         {
             "workspace_id": "ws-1",
-            "vertical_norm": "education",
             "base_domain_id": 5,
             "prompt": "show me the staff at barksdale elementary",
         },
@@ -214,7 +213,6 @@ def test_plan_domain_unknown_conversation_id_can_resume_from_client_seed() -> No
         "schema_version": 2,
         "trace_id": "trace-seed",
         "workspace_id": "ws-1",
-        "vertical_norm": "education",
         "base_domain_id": 5,
         "intent": "list",
         "selects": {

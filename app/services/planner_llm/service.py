@@ -86,12 +86,11 @@ class PlannerLLMCandidateRetriever:
         self,
         *,
         workspace_id: str,
-        vertical: str,
         normalized_prompt: str,
         constraints: PlannerLLMConstraints,
     ) -> Dict[str, Any]:
         vector = self._model.encode([normalized_prompt], normalize=True)[0]
-        concept_candidates = self._search_concepts(vector=vector, vertical=vertical, limit=max(20, constraints.max_concepts * 4))
+        concept_candidates = self._search_concepts(vector=vector, limit=max(20, constraints.max_concepts * 4))
         domain_candidates = self._search_domains(vector=vector, workspace_id=workspace_id, limit=max(8, constraints.max_domains * 6))
         domain_tables = self._load_domain_tables(workspace_id=workspace_id, domain_ids=[d["domain_id"] for d in domain_candidates])
         allow_workspace_table_ids = sorted(
@@ -122,12 +121,10 @@ class PlannerLLMCandidateRetriever:
             "columns": column_candidates,
         }
 
-    def _search_concepts(self, *, vector: Sequence[float], vertical: str, limit: int) -> List[Dict[str, Any]]:
-        vertical_norm = _norm_vertical(vertical)
+    def _search_concepts(self, *, vector: Sequence[float], limit: int) -> List[Dict[str, Any]]:
         query_filter = qdrant_models.Filter(
             must=[
                 qdrant_models.FieldCondition(key="type", match=qdrant_models.MatchAny(any=["concept", "alias"])),
-                qdrant_models.FieldCondition(key="vertical_norm", match=qdrant_models.MatchAny(any=[vertical_norm, "generic"])),
             ]
         )
         hits = self._concept_qdrant.search(
@@ -428,11 +425,9 @@ class PlannerLLMService:
         t0 = perf_counter()
 
         normalized_prompt = normalize_prompt_for_planner(req.prompt)
-        vertical = "generic"
-        registry_version = self._cache.get_registry_version(vertical=vertical)
+        registry_version = self._cache.get_registry_version()
         cache_key = self._cache.build_cache_key(
             workspace_id=req.workspace_id,
-            vertical=vertical,
             normalized_prompt=normalized_prompt,
             constraints=req.constraints.model_dump(mode="json"),
             registry_version=registry_version,
@@ -458,10 +453,9 @@ class PlannerLLMService:
                     "llm_resolution": dict(self._llm_runtime_meta),
                 }
             logger.info(
-                "planner_llm trace_id=%s cache_hit=true workspace_id=%s vertical=%s timings_ms=%s",
+                "planner_llm trace_id=%s cache_hit=true workspace_id=%s timings_ms=%s",
                 trace_id,
                 req.workspace_id,
-                vertical,
                 response["timings_ms"],
             )
             return response
@@ -469,7 +463,6 @@ class PlannerLLMService:
         t_candidates = perf_counter()
         candidates = self._retriever.retrieve(
             workspace_id=req.workspace_id,
-            vertical=vertical,
             normalized_prompt=normalized_prompt,
             constraints=req.constraints,
         )
@@ -513,7 +506,6 @@ class PlannerLLMService:
             self._cache.set(
                 cache_key=cache_key,
                 workspace_id=req.workspace_id,
-                vertical=vertical,
                 normalized_prompt=normalized_prompt,
                 constraints=req.constraints.model_dump(mode="json"),
                 registry_version=registry_version,
@@ -550,10 +542,9 @@ class PlannerLLMService:
                 "llm_resolution": dict(self._llm_runtime_meta),
             }
         logger.info(
-            "planner_llm trace_id=%s cache_hit=false workspace_id=%s vertical=%s valid=%s timings_ms=%s",
+            "planner_llm trace_id=%s cache_hit=false workspace_id=%s valid=%s timings_ms=%s",
             trace_id,
             req.workspace_id,
-            vertical,
             validation_payload["is_valid"],
             response["timings_ms"],
         )
@@ -791,15 +782,6 @@ def _normalize_expr_agg(value: Any) -> Optional[str]:
     if token in {"count", "count_distinct", "sum", "avg", "min", "max"}:
         return token
     return None
-
-
-def _norm_vertical(vertical: str) -> str:
-    value = str(vertical or "generic").strip().lower()
-    if value in {"education", "healthcare", "generic"}:
-        return value
-    return "generic"
-
-
 def _column_key(workspace_table_id: int, column_name: str) -> str:
     return f"wt{int(workspace_table_id)}.{str(column_name).strip().lower()}"
 

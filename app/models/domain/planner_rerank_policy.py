@@ -260,7 +260,7 @@ class PlannerDomainCapabilityUpsertRequest(BaseModel):
 
 
 class PlannerRerankPolicyCandidateCreateRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     id: Optional[int] = Field(default=None, ge=1)
     candidate_key: str = Field(min_length=1, max_length=150)
@@ -288,7 +288,7 @@ class PlannerRerankPolicyCandidateCreateRequest(BaseModel):
 
 
 class PlannerRerankPolicyCandidateSuggestRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     prompt: str = Field(min_length=1, max_length=4000)
     expected_base_domain_id: int = Field(ge=1)
@@ -488,14 +488,13 @@ class PlannerRerankPolicyCandidate(SemanticBase):
     __tablename__ = "planner_rerank_policy_candidate"
     __table_args__ = (
         Index("idx_prpc_status", "review_status"),
-        Index("idx_prpc_scope", "workspace_id", "vertical_norm"),
+        Index("idx_prpc_scope", "workspace_id"),
     )
 
     id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
     candidate_key: Mapped[str] = mapped_column(String(150), nullable=False)
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)
     workspace_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    vertical_norm: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     candidate_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     rationale_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
     confidence: Mapped[Optional[Decimal]] = mapped_column(DECIMAL(5, 4), nullable=True)

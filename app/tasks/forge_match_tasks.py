@@ -29,7 +29,6 @@ def analyze_forge_match_session_task(
     session_id: str,
     top_n: int = 8,
     domain_id: int | None = None,
-    vertical_norm: str | None = None,
     force: bool = False,
     llm_id: int | None = None,
 ) -> dict:
@@ -42,7 +41,6 @@ def analyze_forge_match_session_task(
             session_id=session_id,
             top_n=top_n,
             domain_id=domain_id,
-            vertical_norm=vertical_norm,
             force=force,
             job_id=job_id,
             llm_id=llm_id,

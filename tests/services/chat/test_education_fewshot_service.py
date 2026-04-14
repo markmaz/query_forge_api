@@ -11,11 +11,11 @@ def test_fewshot_uses_only_upvoted_education_feedback() -> None:
     sql = FakeForgeQueryPort()
     sql.query_mappings_responses = [
         [
-            {
-                "normalized_prompt": "Show me students by school",
-                "prompt_text": "show students by school",
-                "response_json": {"plan_json_v2": {"vertical_norm": "education"}},
-            },
+                {
+                    "normalized_prompt": "Show me students by school",
+                    "prompt_text": "show students by school",
+                    "response_json": {"route": "plan_domain"},
+                },
             {
                 "normalized_prompt": "Tell me a joke",
                 "prompt_text": "Tell me a joke",

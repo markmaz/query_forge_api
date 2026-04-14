@@ -39,7 +39,6 @@ def test_plan_finalization_service_persists_state_and_sets_trace_metadata():
     out = svc.finalize(
         workspace_id="ws-1",
         user_id="user-1",
-        vertical_norm="education",
         normalized_prompt="show students",
         trace_id="trace-1",
         conversation_id="conv-1",
@@ -80,7 +79,6 @@ def test_plan_finalization_service_tolerates_conversation_store_backend_failures
     out = svc.finalize(
         workspace_id="ws-1",
         user_id="user-1",
-        vertical_norm="education",
         normalized_prompt="show students",
         trace_id="trace-1",
         conversation_id="conv-1",
@@ -119,7 +117,6 @@ def test_plan_finalization_service_surfaces_unexpected_conversation_store_errors
         svc.finalize(
             workspace_id="ws-1",
             user_id="user-1",
-            vertical_norm="education",
             normalized_prompt="show students",
             trace_id="trace-1",
             conversation_id="conv-1",

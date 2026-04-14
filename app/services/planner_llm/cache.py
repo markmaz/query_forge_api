@@ -23,14 +23,12 @@ class PlannerLLMCache:
     def build_cache_key(
         *,
         workspace_id: str,
-        vertical: str,
         normalized_prompt: str,
         constraints: Dict[str, Any],
         registry_version: str,
     ) -> str:
         payload = {
             "workspace_id": str(workspace_id),
-            "vertical": str(vertical),
             "normalized_prompt": str(normalized_prompt),
             "constraints": constraints,
             "registry_version": str(registry_version),
@@ -38,17 +36,15 @@ class PlannerLLMCache:
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-    def get_registry_version(self, *, vertical: str) -> str:
+    def get_registry_version(self) -> str:
         rows = self._sql.execute_query_mappings(
             """
             SELECT
               COALESCE(MAX(UNIX_TIMESTAMP(updated_at)), 0) AS max_ts,
               COUNT(*) AS concept_count
             FROM semantic_concept
-            WHERE vertical_norm IN (:vertical, 'generic')
-              AND `status` = 'active'
-            """,
-            {"vertical": str(vertical or "generic").strip().lower() or "generic"},
+            WHERE `status` = 'active'
+            """
         )
         row = rows[0] if rows else {}
         max_ts = int(row.get("max_ts") or 0)
@@ -93,7 +89,6 @@ class PlannerLLMCache:
         *,
         cache_key: str,
         workspace_id: str,
-        vertical: str,
         normalized_prompt: str,
         constraints: Dict[str, Any],
         registry_version: str,
@@ -109,7 +104,6 @@ class PlannerLLMCache:
                 INSERT INTO planner_cache (
                   cache_key,
                   workspace_id,
-                  vertical,
                   normalized_prompt,
                   constraints_json,
                   registry_version,
@@ -124,7 +118,6 @@ class PlannerLLMCache:
                 VALUES (
                   :cache_key,
                   :workspace_id,
-                  :vertical,
                   :normalized_prompt,
                   :constraints_json,
                   :registry_version,
@@ -149,7 +142,6 @@ class PlannerLLMCache:
                 {
                     "cache_key": cache_key,
                     "workspace_id": str(workspace_id),
-                    "vertical": str(vertical),
                     "normalized_prompt": str(normalized_prompt),
                     "constraints_json": json.dumps(constraints, ensure_ascii=True),
                     "registry_version": str(registry_version),

@@ -178,22 +178,21 @@ def test_seed_uses_generic_compatibility_set() -> None:
     concept_keys = {str((call.params or {}).get("concept_key") or "") for call in concept_calls}
     alias_keys = {str((call.params or {}).get("alias_key") or "") for call in alias_calls}
 
-    assert result["vertical_norm"] == "generic"
     assert "STUDENT_ID" in concept_keys
     assert "SCHOOL_YEAR" in concept_keys
     assert "DATE" in concept_keys
     assert "k_school" in alias_keys
-    assert all((call.params or {}).get("vertical_norm") == "generic" for call in concept_calls)
-    assert all((call.params or {}).get("vertical_norm") == "generic" for call in alias_calls)
+    assert all("vertical_norm" not in (call.params or {}) for call in concept_calls)
+    assert all("vertical_norm" not in (call.params or {}) for call in alias_calls)
 
 
-def test_seed_returns_generic_vertical_norm() -> None:
+def test_seed_no_longer_returns_vertical_norm() -> None:
     sql = FakeForgeQueryPort()
     svc = SemanticConceptService(sql=sql)
 
     result = svc.seed()
 
-    assert result["vertical_norm"] == "generic"
+    assert "vertical_norm" not in result
 
 
 def test_list_concept_keys_reads_without_vertical_filter() -> None:

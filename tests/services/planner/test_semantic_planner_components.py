@@ -11,8 +11,7 @@ from app.services.planner.semantic_retrieval_service import SemanticRetrievalSer
 
 
 class _Repo:
-    def load_concepts(self, *, vertical_norm: str):
-        assert vertical_norm == "generic"
+    def load_concepts(self):
         return [
             {"id": 1, "concept_key": "DOMAIN_SALES_PERFORMANCE", "name": "Sales Performance", "description": "", "semantic_type": "domain"},
             {"id": 2, "concept_key": "TOTAL_NET_AMOUNT", "name": "Total Net Amount", "description": "", "semantic_type": "metric"},
@@ -27,8 +26,7 @@ class _Repo:
             {"id": 11, "concept_key": "ORDER_DATE", "name": "Order Date", "description": "", "semantic_type": "time_field"},
         ]
 
-    def load_aliases(self, *, vertical_norm: str):
-        assert vertical_norm == "generic"
+    def load_aliases(self):
         return [
             {"concept_key": "TOTAL_NET_AMOUNT", "alias_key": "sales", "weight": 1.0, "match_kind": "exact"},
             {"concept_key": "TOTAL_GROSS_AMOUNT", "alias_key": "sales", "weight": 1.0, "match_kind": "exact"},
@@ -39,8 +37,7 @@ class _Repo:
             {"concept_key": "ACTIVE_TERRITORY_FLAG", "alias_key": "active territories", "weight": 1.0, "match_kind": "contains"},
         ]
 
-    def load_relationships(self, *, vertical_norm: str):
-        assert vertical_norm == "generic"
+    def load_relationships(self):
         rows = []
         for child in (
             "TOTAL_NET_AMOUNT",
@@ -65,8 +62,7 @@ class _Repo:
         )
         return rows
 
-    def load_concept_column_maps(self, *, vertical_norm: str):
-        assert vertical_norm == "generic"
+    def load_concept_column_maps(self):
         return [
             {"semantic_concept_id": 5, "concept_key": "ACCOUNT_NAME", "model_column_id": 201, "relationship_kind": "primary", "weight": 1.0},
             {"semantic_concept_id": 6, "concept_key": "ACCOUNT_ID", "model_column_id": 202, "relationship_kind": "primary", "weight": 1.0},
@@ -80,8 +76,8 @@ class _Repo:
     def load_suggestion_scores(self):
         return {"TOTAL_NET_AMOUNT": 5, "TOTAL_GROSS_AMOUNT": 5}
 
-    def search_value_aliases(self, *, vertical_norm: str, ngrams, semantic_concept_ids):
-        del vertical_norm, ngrams, semantic_concept_ids
+    def search_value_aliases(self, *, ngrams, semantic_concept_ids):
+        del ngrams, semantic_concept_ids
         return []
 
 
@@ -122,22 +118,19 @@ def _retrieve(prompt: str) -> object:
         workspace_id="ws-1",
         base_domain_id=3,
         base_domain_name="Sales Performance",
-        vertical_norm="generic",
         capabilities_compact=_capabilities(),
     )
 
-
-def test_retrieve_normalizes_legacy_education_vertical_to_generic() -> None:
+def test_retrieve_returns_compact_candidate_payload_without_vertical_dimension() -> None:
     svc = SemanticRetrievalService(repository=_Repo())
     candidates = svc.retrieve(
         prompt="Show total net amount by territory",
         workspace_id="ws-1",
         base_domain_id=3,
         base_domain_name="Sales Performance",
-        vertical_norm="education",
         capabilities_compact=_capabilities(),
     )
-    assert candidates.vertical_norm == "generic"
+    assert "vertical_norm" not in candidates.model_dump(mode="json")
 
 
 def test_a_clear_aggregate_case() -> None:
@@ -215,11 +208,11 @@ def test_d_no_time_inference_when_not_requested() -> None:
         candidates=candidates,
         trace_id="trace-1",
         workspace_id="ws-1",
-        vertical_norm="generic",
         base_domain_id=3,
         base_domain_name="Sales Performance",
     )
     assert compiled.plan_json_v2["time"] == {}
+    assert "vertical_norm" not in compiled.plan_json_v2
 
 
 def test_e_filter_vs_dimension_separation() -> None:
@@ -270,8 +263,7 @@ def test_f_invalid_model_output_rejected_with_clarification() -> None:
 
 
 class _RepoAliasWeightedExact(_Repo):
-    def load_aliases(self, *, vertical_norm: str):
-        assert vertical_norm == "generic"
+    def load_aliases(self):
         return [
             {"concept_key": "TOTAL_NET_AMOUNT", "alias_key": "sales", "weight": 10.0, "match_kind": "exact"},
             {"concept_key": "TOTAL_GROSS_AMOUNT", "alias_key": "sales", "weight": 1.0, "match_kind": "exact"},
@@ -282,8 +274,7 @@ class _RepoAliasWeightedExact(_Repo):
 
 
 class _RepoAliasPrefixBeatsContains(_Repo):
-    def load_aliases(self, *, vertical_norm: str):
-        assert vertical_norm == "generic"
+    def load_aliases(self):
         return [
             {"concept_key": "TOTAL_NET_AMOUNT", "alias_key": "sale", "weight": 2.0, "match_kind": "prefix"},
             {"concept_key": "TOTAL_GROSS_AMOUNT", "alias_key": "sales", "weight": 3.0, "match_kind": "contains"},
@@ -293,8 +284,7 @@ class _RepoAliasPrefixBeatsContains(_Repo):
 
 
 class _RepoAliasRegex(_Repo):
-    def load_aliases(self, *, vertical_norm: str):
-        assert vertical_norm == "generic"
+    def load_aliases(self):
         return [
             {"concept_key": "TOTAL_NET_AMOUNT", "alias_key": r"\bsales\b", "weight": 1.5, "match_kind": "regex"},
             {"concept_key": "TOTAL_GROSS_AMOUNT", "alias_key": "revenue", "weight": 2.0, "match_kind": "contains"},
@@ -308,7 +298,6 @@ def _retrieve_with_repo(prompt: str, repo: object) -> object:
         workspace_id="ws-1",
         base_domain_id=3,
         base_domain_name="Sales Performance",
-        vertical_norm="generic",
         capabilities_compact=_capabilities(),
     )
 
@@ -344,7 +333,6 @@ def test_j_group_by_account_does_not_fall_back_to_account_type_filter_hint() -> 
         workspace_id="ws-1",
         base_domain_id=3,
         base_domain_name="Sales Performance",
-        vertical_norm="generic",
         capabilities_compact=_capabilities_without_account_dimension(),
     )
     assert candidates.lexical_hints.get("account") != ["ACCOUNT_TYPE"]
@@ -374,7 +362,7 @@ class _FallbackSql:
 
 def test_k_repository_falls_back_when_model_column_id_is_missing() -> None:
     repo = SemanticCatalogLookupRepository(sql=_FallbackSql())
-    rows = repo.load_concept_column_maps(vertical_norm="generic")
+    rows = repo.load_concept_column_maps()
 
     assert rows == [
         {
@@ -389,8 +377,7 @@ def test_k_repository_falls_back_when_model_column_id_is_missing() -> None:
 
 
 class _FatalRepo(_Repo):
-    def load_relationships(self, *, vertical_norm: str):
-        del vertical_norm
+    def load_relationships(self):
         raise RuntimeError("semantic relationship query failed")
 
 
@@ -401,7 +388,6 @@ def test_l_retrieval_falls_back_when_repository_fails() -> None:
         workspace_id="ws-1",
         base_domain_id=3,
         base_domain_name="Sales Performance",
-        vertical_norm="generic",
         capabilities_compact=_capabilities(),
     )
 

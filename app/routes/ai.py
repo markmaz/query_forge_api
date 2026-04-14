@@ -86,16 +86,6 @@ def _trim_description(value: object) -> str:
     return text
 
 
-def _resolve_vertical_norm(body: dict) -> str:
-    vertical_default = (
-        str(current_app.config.get("SEMANTIC_VERTICAL_DEFAULT") or "generic").strip().lower() or "generic"
-    )
-    vertical_input = body.pop("vertical_norm", None)
-    if vertical_input is None:
-        vertical_input = body.pop("verticalNorm", None)
-    return str(vertical_input or vertical_default).strip().lower() or vertical_default
-
-
 def _selected_domain_id(suggest_request: SuggestRequest) -> int | None:
     selected_domain_id = (
         suggest_request.domainContext.selectedDomainId
@@ -130,13 +120,11 @@ def _inject_mode_placeholders(sqljson: dict, *, mode: str) -> dict:
 def _plan_response_as_suggest(
     *,
     suggest_request: SuggestRequest,
-    vertical_norm: str,
     debug: bool,
 ) -> SuggestAPIResponse:
     semantic_result = PlanService().plan(
         {
             "workspace_id": suggest_request.workspaceId,
-            "vertical_norm": vertical_norm,
             "prompt": suggest_request.prompt,
             "domain_id": _selected_domain_id(suggest_request),
             "debug": debug,
@@ -325,7 +313,6 @@ class AISuggest(Resource):
         body["workspaceId"] = workspace_id
 
         try:
-            vertical_norm = _resolve_vertical_norm(body)
             debug = bool(body.pop("debug", False))
             suggest_request = SuggestRequest.model_validate(body)
         except ValidationError as exc:
@@ -335,7 +322,6 @@ class AISuggest(Resource):
         try:
             result = _plan_response_as_suggest(
                 suggest_request=suggest_request,
-                vertical_norm=vertical_norm,
                 debug=debug,
             )
             return result.model_dump(mode="json"), 200, DEPRECATION_HEADERS
@@ -515,7 +501,6 @@ class AISuggestSemanticAdapter(Resource):
         if not isinstance(body, dict):
             body = {}
 
-        vertical_norm = _resolve_vertical_norm(body)
         debug = bool(body.pop("debug", False))
         body["workspaceId"] = workspace_id
 
@@ -527,7 +512,6 @@ class AISuggestSemanticAdapter(Resource):
         try:
             payload = _plan_response_as_suggest(
                 suggest_request=suggest_request,
-                vertical_norm=vertical_norm,
                 debug=debug,
             )
             return payload.model_dump(mode="json"), 200, DEPRECATION_HEADERS

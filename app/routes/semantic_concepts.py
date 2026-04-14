@@ -96,8 +96,6 @@ concept_column_map_patch_model = semantic_concept_column_maps_ns.clone(
 def _strip_semantic_vertical_fields(value: Any) -> Any:
     if isinstance(value, dict):
         cleaned = dict(value)
-        cleaned.pop("vertical", None)
-        cleaned.pop("vertical_norm", None)
         if "rows" in cleaned and isinstance(cleaned["rows"], list):
             cleaned["rows"] = [_strip_semantic_vertical_fields(row) for row in cleaned["rows"]]
         return cleaned
@@ -180,7 +178,7 @@ class SemanticConceptRebuildIndex(Resource):
     @semantic_concepts_ns.expect(rebuild_index_model, validate=False)
     def post(self):
         _require_admin()
-        result = SemanticConceptEmbeddingService().rebuild_semantic_concept_index(vertical_norm="generic")
+        result = SemanticConceptEmbeddingService().rebuild_semantic_concept_index()
         return {"result": _strip_semantic_vertical_fields(result)}, 200
 
 
