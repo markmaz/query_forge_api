@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Connection, URL
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.engine.result import Result
+from sqlalchemy.pool import QueuePool
 
 API_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -12,6 +21,8 @@ DEFAULT_PAYLOAD_PATH = REPO_ROOT / "docs/plans/2026-04-14-planner-policy-seed-im
 
 if str(API_ROOT) not in sys.path:
     sys.path.insert(0, str(API_ROOT))
+
+load_dotenv(API_ROOT / ".env")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -109,10 +120,7 @@ def seed_policies(
             summary["processed"] += len(payloads)
         return summary
 
-    from app.adapters.mysql_sql_executor import ForgeMetaSQL
-
-    sql = ForgeMetaSQL()
-    with sql.transaction() as tx:
+    with _transaction() as tx:
         for family in families:
             family_key = str(family.get("family_key") or "").strip()
             if family_key == "":
@@ -132,6 +140,88 @@ def seed_policies(
                 summary["processed"] += 1
             summary["families"].append(family_summary)
     return summary
+
+
+def _resolve_db_uri() -> str:
+    direct_uri = str(os.getenv("DB_URI") or "").strip()
+    if direct_uri:
+        return direct_uri
+
+    host = str(os.getenv("DB_HOST") or "").strip()
+    user = str(os.getenv("DB_USER") or "").strip()
+    password = str(os.getenv("DB_PASSWORD") or "")
+    database = str(os.getenv("DB_NAME") or "").strip()
+    port_raw = str(os.getenv("DB_PORT") or "").strip()
+    port = int(port_raw) if port_raw else 3306
+
+    missing = [name for name, value in (("DB_HOST", host), ("DB_USER", user), ("DB_NAME", database)) if not value]
+    if missing:
+        raise RuntimeError(
+            "Missing database configuration for planner policy seeding: "
+            + ", ".join(missing)
+        )
+
+    return str(
+        URL.create(
+            "mysql+pymysql",
+            username=user,
+            password=password,
+            host=host,
+            port=port,
+            database=database,
+        )
+    )
+
+
+def _build_engine():
+    return create_engine(
+        _resolve_db_uri(),
+        poolclass=QueuePool,
+        pool_size=int(os.getenv("POOL_SIZE", "5")),
+        max_overflow=int(os.getenv("MAX_OVERFLOW", "5")),
+        pool_timeout=int(os.getenv("POOL_TIMEOUT", "30")),
+        pool_recycle=int(os.getenv("POOL_RECYCLE", "1800")),
+        pool_pre_ping=True,
+    )
+
+
+class _SeedExecResult:
+    def __init__(self, *, rowcount: int, lastrowid: Any) -> None:
+        self.rowcount = int(rowcount or 0)
+        self.lastrowid = lastrowid
+
+
+class _SeedTransaction:
+    def __init__(self, conn: Connection) -> None:
+        self._conn = conn
+
+    def execute_query_mappings(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        result: Result = self._conn.execute(text(query), params or {})
+        return [dict(row) for row in result.mappings().all()]
+
+    def execute_write(self, query: str, params: Optional[Dict[str, Any]] = None) -> int:
+        result = self._conn.execute(text(query), params or {})
+        return int(result.rowcount or 0)
+
+    def execute_insert(self, query: str, params: Optional[Dict[str, Any]] = None) -> _SeedExecResult:
+        result = self._conn.execute(text(query), params or {})
+        return _SeedExecResult(rowcount=int(result.rowcount or 0), lastrowid=result.lastrowid)
+
+
+@contextmanager
+def _transaction():
+    engine = _build_engine()
+    conn = engine.connect()
+    tx = conn.begin()
+    try:
+        yield _SeedTransaction(conn)
+        tx.commit()
+    except SQLAlchemyError:
+        tx.rollback()
+        raise
+    finally:
+        conn.close()
+        engine.dispose()
 
 
 def _upsert_policy_row(*, tx: Any, table_name: str, payload: Mapping[str, Any]) -> str:
