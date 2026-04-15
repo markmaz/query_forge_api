@@ -5,6 +5,7 @@ import pytest
 
 import app.decorators.security as security
 import app.services.rbac_service as rbac_service
+from app.config import _parse_allowed_origins
 
 
 def _call_token_required(monkeypatch, get_effective_roles_side_effect):
@@ -74,3 +75,53 @@ def test_token_required_surfaces_unexpected_effective_role_load_errors(monkeypat
 
     with pytest.raises(AssertionError, match="unexpected effective role bug"):
         _call_token_required(monkeypatch, _get_effective_roles)
+
+
+def test_parse_allowed_origins_supports_csv_and_deduplicates() -> None:
+    assert _parse_allowed_origins(
+        "https://app.example.com, https://admin.example.com/",
+        "https://app.example.com",
+        "*",
+        " ",
+    ) == ("https://app.example.com", "https://admin.example.com")
+
+
+def test_token_required_options_reflects_allowed_origin() -> None:
+    app = Flask(__name__)
+    app.config["FRONTEND_ALLOWED_ORIGINS"] = ["https://app.example.com"]
+
+    @security.token_required
+    def _secured():
+        return {"ok": True}
+
+    with app.test_request_context(
+        "/secured",
+        method="OPTIONS",
+        headers={"Origin": "https://app.example.com"},
+    ):
+        response, status = _secured()
+
+    assert status == 200
+    assert response.headers["Access-Control-Allow-Origin"] == "https://app.example.com"
+    assert response.headers["Access-Control-Allow-Credentials"] == "true"
+    assert response.headers["Vary"] == "Origin"
+
+
+def test_token_required_options_does_not_emit_wildcard_for_disallowed_origin() -> None:
+    app = Flask(__name__)
+    app.config["FRONTEND_ALLOWED_ORIGINS"] = ["https://app.example.com"]
+
+    @security.token_required
+    def _secured():
+        return {"ok": True}
+
+    with app.test_request_context(
+        "/secured",
+        method="OPTIONS",
+        headers={"Origin": "https://evil.example.com"},
+    ):
+        response, status = _secured()
+
+    assert status == 200
+    assert "Access-Control-Allow-Origin" not in response.headers
+    assert response.headers["Access-Control-Allow-Credentials"] == "true"

@@ -1,7 +1,7 @@
 import functools
 from typing import Any, Dict, List, Tuple
 
-from flask import g, make_response, request
+from flask import current_app, g, make_response, request
 
 from app.exceptions.forge_error import ForgeError
 from app.services.auth_service import AuthService
@@ -11,6 +11,19 @@ from app.utils.jwt_claims import claim_is_admin, get_roles_from_claim
 auth_service = AuthService()
 workspace_access_service = WorkspaceAccessService()
 RBAC_FALLBACK_ERRORS = (ImportError, OSError, RuntimeError, TypeError, ValueError)
+
+
+def _get_allowed_frontend_origins() -> set[str]:
+    origins = current_app.config.get("FRONTEND_ALLOWED_ORIGINS") or []
+    return {
+        str(origin).strip().rstrip("/")
+        for origin in origins
+        if str(origin).strip() and str(origin).strip() != "*"
+    }
+
+
+def _normalize_request_origin() -> str:
+    return str(request.headers.get("Origin") or "").strip().rstrip("/")
 
 
 def _extract_user_context(payload: Dict[str, Any]) -> Tuple[str, str, bool, List[str]]:
@@ -51,7 +64,11 @@ def token_required(f):
     def decorated_function(*args, **kwargs):
         if request.method == "OPTIONS":
             response = make_response()
-            response.headers.add("Access-Control-Allow-Origin", "*")
+            request_origin = _normalize_request_origin()
+            allowed_origins = _get_allowed_frontend_origins()
+            if request_origin and request_origin in allowed_origins:
+                response.headers["Access-Control-Allow-Origin"] = request_origin
+                response.headers["Vary"] = "Origin"
             response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
             # Include X-Workspace-ID since this app uses it.
             response.headers.add("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Workspace-ID")
