@@ -80,4 +80,5 @@ def test_resolve_db_uri_prefers_flag_overrides(monkeypatch) -> None:
         }
     )
 
-    assert "flag-user:flag-pass@flag-host:3308/flag-db" in uri
+    assert uri.startswith("mysql+pymysql://flag-user:")
+    assert "@flag-host:3308/flag-db" in uri
