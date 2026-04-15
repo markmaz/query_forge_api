@@ -13,7 +13,6 @@ from app.routes.request_helpers import int_arg
 from app.services.semantic.semantic_mapping_service import SemanticMappingService
 
 from .schemas import register_mapping_models
-from .service import semantic_feature_service
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +26,6 @@ class SemanticMappingsCollection(Resource):
     @require_access("semantic")
     @semantic_mappings_ns.doc(
         params={
-            "vertical": "Filter by vertical scope",
             "workspace_id": "Filter by workspace",
             "concept_key": "Filter by concept_key",
             "model_column_id": "Filter by model_column_id",
@@ -40,10 +38,7 @@ class SemanticMappingsCollection(Resource):
     )
     def get(self):
         try:
-            result = semantic_feature_service.build_mapping_service(
-                mapping_service_factory=SemanticMappingService
-            ).list_mappings(
-                vertical=request.args.get("vertical") or None,
+            result = SemanticMappingService().list_mappings(
                 workspace_id=request.args.get("workspace_id") or None,
                 concept_key=request.args.get("concept_key") or None,
                 model_column_id=_optional_int(request.args.get("model_column_id"), "model_column_id"),
@@ -66,9 +61,7 @@ class SemanticMappingsCollection(Resource):
     def post(self):
         try:
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            row = semantic_feature_service.build_mapping_service(
-                mapping_service_factory=SemanticMappingService
-            ).create_mapping(body)
+            row = SemanticMappingService().create_mapping(body)
             return {"row": row}, 201
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -83,9 +76,7 @@ class SemanticMappingsById(Resource):
     @require_access("semantic", role="admin")
     def delete(self, mapping_id: int):
         try:
-            semantic_feature_service.build_mapping_service(mapping_service_factory=SemanticMappingService).delete_mapping(
-                mapping_id
-            )
+            SemanticMappingService().delete_mapping(mapping_id)
             return {"deleted": True, "id": mapping_id}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code

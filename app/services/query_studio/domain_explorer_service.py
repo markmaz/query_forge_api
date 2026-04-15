@@ -427,7 +427,7 @@ def _parse_json_list(value: Any) -> List[Any]:
         return []
     try:
         parsed = json.loads(text)
-    except Exception:
+    except (TypeError, ValueError, json.JSONDecodeError):
         return []
     return parsed if isinstance(parsed, list) else []
 

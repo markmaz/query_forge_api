@@ -5,12 +5,14 @@ from app.services.planner.semantic_grounding_service import SemanticGroundingSer
 
 
 class _FakeRetrievalService:
+    def __init__(self) -> None:
+        self.calls = []
+
     def retrieve(self, **kwargs):
-        del kwargs
+        self.calls.append(dict(kwargs))
         return SemanticCandidatePayload(
             prompt="students by county",
             workspace_id="ws-1",
-            vertical_norm="education",
             base_domain_id=6,
             base_domain_key="ENROLLMENT",
             metric_candidates=[
@@ -39,8 +41,11 @@ class _FakeRetrievalService:
 
 
 class _FakeValueAliasResolver:
-    def resolve(self, *, prompt: str, vertical_norm: str):
-        del prompt, vertical_norm
+    def __init__(self) -> None:
+        self.calls = []
+
+    def resolve(self, *, prompt: str):
+        self.calls.append({"prompt": prompt})
         return [
             {
                 "concept_key": "COUNTRY",
@@ -51,15 +56,16 @@ class _FakeValueAliasResolver:
 
 
 def test_build_grounding_bundle_combines_candidates_and_alias_constraints() -> None:
+    retrieval = _FakeRetrievalService()
+    resolver = _FakeValueAliasResolver()
     svc = SemanticGroundingService(
-        retrieval_service=_FakeRetrievalService(),
-        value_alias_resolver=_FakeValueAliasResolver(),
+        retrieval_service=retrieval,
+        value_alias_resolver=resolver,
     )
 
     out = svc.build_grounding_bundle(
         prompt="students by county not born in the US",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=6,
         base_domain_name="Enrollment",
         capabilities_compact={"dimensions": [], "filter_columns": [], "time_columns": []},
@@ -71,3 +77,49 @@ def test_build_grounding_bundle_combines_candidates_and_alias_constraints() -> N
     assert debug["candidate_summary"]["metric_count"] == 1
     assert debug["candidate_summary"]["dimension_count"] == 1
     assert debug["candidate_summary"]["metrics"] == ["ENROLLMENT_COUNT"]
+    assert "vertical_norm" not in retrieval.calls[0]
+    assert resolver.calls[0]["prompt"] == "students by county not born in the US"
+
+
+class _RaisingRetrievalService:
+    def retrieve(self, **kwargs):
+        del kwargs
+        raise RuntimeError("semantic retrieval unavailable")
+
+
+class _RaisingAliasResolver:
+    def resolve(self, *, prompt: str):
+        del prompt
+        raise RuntimeError("alias resolution unavailable")
+
+
+def test_build_grounding_bundle_marks_candidate_retrieval_failure() -> None:
+    svc = SemanticGroundingService(
+        retrieval_service=_RaisingRetrievalService(),
+        value_alias_resolver=_FakeValueAliasResolver(),
+    )
+
+    out = svc.build_grounding_bundle(
+        prompt="students by county",
+        workspace_id="ws-1",
+        base_domain_id=6,
+        base_domain_name="Enrollment",
+        capabilities_compact={"dimensions": [], "filter_columns": [], "time_columns": []},
+    )
+
+    assert out.candidates is None
+    assert out.warnings == ["candidate_retrieval_failed"]
+    assert out.alias_constraints
+
+
+def test_resolve_alias_constraints_returns_empty_on_resolver_failure() -> None:
+    svc = SemanticGroundingService(
+        retrieval_service=_FakeRetrievalService(),
+        value_alias_resolver=_RaisingAliasResolver(),
+    )
+
+    out = svc.resolve_alias_constraints(
+        prompt="students by county",
+    )
+
+    assert out == []

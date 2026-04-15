@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.routes.domain_routes as domain_routes
+import app.features.domains.shared as domain_routes
 from app.exceptions.forge_error import ForgeError
 
 
@@ -329,6 +329,11 @@ def test_domain_time_policy_put_success(client, auth_headers, monkeypatch):
                 "default_grain": "quarter",
                 "allow_relative_ranges": True,
                 "relative_map": {"this_quarter": "current_fiscal_quarter"},
+                "semester": {
+                    "labels": {"spring": "Spring", "fall": "Fall", "year_round": "Summer"},
+                    "month_ranges": {"spring": [1, 5], "fall": [8, 12], "year_round": [6, 7]},
+                    "indicator_columns": {"fall": "wt24.is_fall_term"},
+                },
             }
         },
     )
@@ -353,15 +358,13 @@ def test_domain_time_policy_put_service_error(client, auth_headers, monkeypatch)
 
 def test_planner_rerank_policies_get_success(client, auth_headers, monkeypatch):
     class _Svc:
-        def list_policies(self, *, workspace_id: str, user_id: str, base_domain_id, vertical_norm: str, include_inactive: bool):
+        def list_policies(self, *, workspace_id: str, user_id: str, base_domain_id, include_inactive: bool):
             assert workspace_id == "ws-1"
             assert user_id == "user-1"
             assert base_domain_id == 9
-            assert vertical_norm == "education"
             assert include_inactive is True
             return {
                 "workspace_id": workspace_id,
-                "vertical_norm": vertical_norm,
                 "base_domain_id": base_domain_id,
                 "domain_name": "Student Enrollment",
                 "can_edit": True,
@@ -376,7 +379,7 @@ def test_planner_rerank_policies_get_success(client, auth_headers, monkeypatch):
 
     monkeypatch.setattr(domain_routes, "PlannerRerankPolicyService", _Svc)
     resp = client.get(
-        "/api/v1/domains/planner-rerank-policies?base_domain_id=9&vertical_norm=education&include_inactive=true",
+        "/api/v1/domains/planner-rerank-policies?base_domain_id=9&include_inactive=true",
         headers=auth_headers,
     )
     assert resp.status_code == 200
@@ -470,16 +473,14 @@ def test_planner_rerank_policies_put_service_error(client, auth_headers, monkeyp
 
 def test_planner_domain_capabilities_get_success(client, auth_headers, monkeypatch):
     class _Svc:
-        def list_capabilities(self, *, workspace_id: str, user_id: str, base_domain_id: int, vertical_norm: str, include_inactive: bool):
+        def list_capabilities(self, *, workspace_id: str, user_id: str, base_domain_id: int, include_inactive: bool):
             assert workspace_id == "ws-1"
             assert user_id == "user-1"
             assert base_domain_id == 9
-            assert vertical_norm == "education"
             assert include_inactive is True
             return {
                 "workspace_id": workspace_id,
                 "base_domain_id": base_domain_id,
-                "vertical_norm": vertical_norm,
                 "domain_name": "Student Enrollment",
                 "can_edit": True,
                 "capabilities": [
@@ -489,7 +490,7 @@ def test_planner_domain_capabilities_get_success(client, auth_headers, monkeypat
 
     monkeypatch.setattr(domain_routes, "PlannerDomainCapabilityService", _Svc)
     resp = client.get(
-        "/api/v1/domains/planner-domain-capabilities?base_domain_id=9&vertical_norm=education&include_inactive=true",
+        "/api/v1/domains/planner-domain-capabilities?base_domain_id=9&include_inactive=true",
         headers=auth_headers,
     )
     assert resp.status_code == 200
@@ -544,14 +545,12 @@ def test_planner_domain_capabilities_delete_success(client, auth_headers, monkey
 
 def test_planner_rerank_policy_candidates_get_success(client, auth_headers, monkeypatch):
     class _Svc:
-        def list_candidates(self, *, workspace_id: str, review_status, vertical_norm):
+        def list_candidates(self, *, workspace_id: str, review_status):
             assert workspace_id == "ws-1"
             assert review_status == "pending"
-            assert vertical_norm == "education"
             return {
                 "workspace_id": workspace_id,
                 "review_status": review_status,
-                "vertical_norm": vertical_norm,
                 "candidates": [
                     {"id": 4, "candidate_key": "candidate_1", "review_status": "pending"}
                 ],
@@ -559,7 +558,7 @@ def test_planner_rerank_policy_candidates_get_success(client, auth_headers, monk
 
     monkeypatch.setattr(domain_routes, "PlannerRerankPolicyCandidateService", _Svc)
     resp = client.get(
-        "/api/v1/domains/planner-rerank-policy-candidates?review_status=pending&vertical_norm=education",
+        "/api/v1/domains/planner-rerank-policy-candidates?review_status=pending",
         headers=auth_headers,
     )
     assert resp.status_code == 200
@@ -595,6 +594,34 @@ def test_planner_rerank_policy_candidates_post_success(client, auth_headers, mon
     )
     assert resp.status_code == 201
     assert resp.json["candidate_id"] == 21
+
+
+def test_planner_rerank_policy_candidates_post_rejects_removed_vertical_field(client, auth_headers, monkeypatch):
+    class _Svc:
+        def create_candidate(self, *, workspace_id: str, payload):
+            del workspace_id, payload
+            raise AssertionError("service should not be called")
+
+    monkeypatch.setattr(domain_routes, "PlannerRerankPolicyCandidateService", _Svc)
+    resp = client.post(
+        "/api/v1/domains/planner-rerank-policy-candidates",
+        headers=auth_headers,
+        json={
+            "candidate": {
+                "candidate_key": "candidate_1",
+                "vertical_norm": "education",
+                "candidate_policy": {
+                    "version": 1,
+                    "when_signals_all": ["student_listing"],
+                    "prefer_capabilities": ["STUDENT_IDENTITY"],
+                    "boost": 0.2,
+                    "max_effect": 0.2,
+                },
+            }
+        },
+    )
+    assert resp.status_code == 400
+    assert any(error.get("loc") == ["vertical_norm"] for error in resp.json["details"]["errors"])
 
 
 def test_planner_rerank_policy_candidates_put_success(client, auth_headers, monkeypatch):
@@ -700,12 +727,33 @@ def test_planner_rerank_policy_candidate_suggest_success(client, auth_headers, m
                 "prompt": "Show me all the students enrolled at Barksdale Elementary",
                 "expected_base_domain_id": 9,
                 "observed_base_domain_id": 15,
-                "vertical_norm": "generic",
             }
         },
     )
     assert resp.status_code == 201
     assert resp.json["candidate"]["candidate_id"] == 41
+
+
+def test_planner_rerank_policy_candidate_suggest_rejects_removed_vertical_field(client, auth_headers, monkeypatch):
+    class _Svc:
+        def suggest_candidate(self, *, workspace_id: str, user_id: str, payload):
+            del workspace_id, user_id, payload
+            raise AssertionError("service should not be called")
+
+    monkeypatch.setattr(domain_routes, "PlannerRerankPolicyCandidateSuggestionService", _Svc)
+    resp = client.post(
+        "/api/v1/domains/planner-rerank-policy-candidates/suggest",
+        headers=auth_headers,
+        json={
+            "suggestion": {
+                "prompt": "Show me all the students enrolled at Barksdale Elementary",
+                "expected_base_domain_id": 9,
+                "vertical_norm": "education",
+            }
+        },
+    )
+    assert resp.status_code == 400
+    assert any(error.get("loc") == ["vertical_norm"] for error in resp.json["details"]["errors"])
 
 
 def test_planner_rerank_policy_candidate_suggest_returns_validation_error(client, auth_headers, monkeypatch):
@@ -722,7 +770,6 @@ def test_planner_rerank_policy_candidate_suggest_returns_validation_error(client
             "suggestion": {
                 "prompt": "How many days off are there in December?",
                 "expected_base_domain_id": 6,
-                "vertical_norm": "education",
             }
         },
     )

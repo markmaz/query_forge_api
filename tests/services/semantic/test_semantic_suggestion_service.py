@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.exceptions.forge_error import ForgeError
 from app.services.semantic.semantic_suggestion_service import SemanticSuggestionService
@@ -49,12 +50,22 @@ class _FailingLabeler:
         return [None for _ in cards], ["schema_validation_error:json_parse_error" for _ in cards]
 
 
+class _AssignmentRecorder:
+    def __init__(self) -> None:
+        self.upsert_calls: List[Dict[str, Any]] = []
+        self.ensure_calls: List[Dict[str, Any]] = []
+
+    def upsert_primary_semantics(self, **kwargs: Any) -> None:
+        self.upsert_calls.append(dict(kwargs))
+
+    def ensure_mapping(self, **kwargs: Any) -> None:
+        self.ensure_calls.append(dict(kwargs))
+
+
 def _run_row(status: str = "created") -> Dict[str, Any]:
     return {
         "id": 1,
         "workspace_id": None,
-        "vertical": "education",
-        "vertical_norm": "education",
         "status": status,
         "params_json": '{"page_size": 100}',
         "total_columns": 0,
@@ -144,6 +155,113 @@ def test_execution_flow_with_mocked_llm() -> None:
     run = svc.execute_run(1)
     assert run["status"] == "completed"
     assert any("INSERT INTO semantic_suggestion_item" in call.query for call in sql.write_calls)
+
+
+def test_create_run_rejects_unknown_fields() -> None:
+    sql = FakeForgeQueryPort()
+    svc = SemanticSuggestionService(sql=sql)
+
+    with pytest.raises(ForgeError, match="Unsupported field: vertical"):
+        svc.create_run({"vertical": "global"})
+
+def test_execute_run_uses_generic_matcher_surface() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [_run_row(status="created")],
+        [
+            {
+                "total": 1,
+                "valid_items": 1,
+                "invalid_items": 0,
+                "auto_approved_items": 1,
+                "approved_items": 0,
+                "rejected_items": 0,
+                "applied_items": 0,
+                "failed_apply_items": 0,
+            }
+        ],
+        [_run_row(status="completed")],
+    ]
+
+    cards = [
+        {
+            "workspaceColumnId": 10,
+            "workspaceTableId": 2,
+            "tableName": "students",
+            "columnName": "first_name",
+            "dataType": "STRING",
+            "description": "student first name",
+            "samples": ["Alice"],
+            "signals": {},
+        }
+    ]
+    outputs = [
+        {
+            "concept_key": "student.first_name",
+            "semantic_type": "attribute",
+            "sub_type": "attribute.student.first_name",
+            "entity": "student",
+            "granularity_rank": 0,
+            "filter_allowed": True,
+            "group_by_allowed": True,
+            "aggregation_allowed": False,
+            "is_identifier": False,
+            "is_metric": False,
+            "display_priority": 10,
+            "sensitive": False,
+            "confidence": 0.95,
+            "reasons": ["sample values are names"],
+        }
+    ]
+    matcher_calls: List[str] = []
+
+    class _Matcher:
+        def load_known_concepts(self) -> List[Dict[str, Any]]:
+            matcher_calls.append("known")
+            return []
+
+        def load_alias_rules(self) -> List[Dict[str, Any]]:
+            matcher_calls.append("alias")
+            return []
+
+        def enforce_canonical_if_strong(
+            self,
+            *,
+            card: Dict[str, Any],
+            proposal: Dict[str, Any],
+            known_concepts: List[Dict[str, Any]],
+            alias_rules: List[Dict[str, Any]],
+        ) -> tuple[Dict[str, Any], List[str]]:
+            del card, known_concepts, alias_rules
+            matcher_calls.append("canonical")
+            return proposal, []
+
+    svc = SemanticSuggestionService(
+        sql=sql,
+        card_service=_StubCardService(cards),
+        labeler=_StubLabeler(outputs),
+        matcher=_Matcher(),  # type: ignore[arg-type]
+        batch_size=10,
+    )
+
+    run = svc.execute_run(1)
+
+    assert run["status"] == "completed"
+    assert matcher_calls == ["known", "alias", "canonical"]
+
+def test_resolve_concept_id_uses_generic_lookup() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [[{"id": 500}]]
+    svc = SemanticSuggestionService(sql=sql)
+
+    concept_id = svc._resolve_concept_id(
+        concept_key="student.first_name",
+        concept_source="llm",
+    )
+
+    assert concept_id == 500
+    assert sql.query_mappings_calls
+    assert (sql.query_mappings_calls[0].params or {}) == {"concept_key": "student.first_name"}
 
 
 def test_cannot_approve_invalid_item() -> None:
@@ -323,3 +441,348 @@ def test_llm_raw_json_saved_on_schema_failure() -> None:
     assert "attempt1" in llm_raw
     assert "attempt2" in llm_raw
     assert "schema_validation_error:json_parse_error" in llm_raw
+
+
+def test_execute_run_tolerates_matcher_lookup_sql_failures() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [_run_row(status="created")],
+        [
+            {
+                "total": 1,
+                "valid_items": 0,
+                "invalid_items": 1,
+                "auto_approved_items": 0,
+                "approved_items": 0,
+                "rejected_items": 0,
+                "applied_items": 0,
+                "failed_apply_items": 0,
+            }
+        ],
+        [_run_row(status="completed")],
+    ]
+
+    cards = [
+        {
+            "workspaceColumnId": 22,
+            "workspaceTableId": 2,
+            "tableName": "students",
+            "columnName": "student_name",
+            "dataType": "STRING",
+            "description": "name",
+            "samples": [],
+            "signals": {},
+        }
+    ]
+
+    class _Matcher:
+        def load_known_concepts(self) -> List[Dict[str, Any]]:
+            raise SQLAlchemyError("lookup failed")
+
+        def load_alias_rules(self) -> List[Dict[str, Any]]:
+            return []
+
+        def enforce_canonical_if_strong(
+            self,
+            *,
+            card: Dict[str, Any],
+            proposal: Dict[str, Any],
+            known_concepts: List[Dict[str, Any]],
+            alias_rules: List[Dict[str, Any]],
+        ) -> tuple[Dict[str, Any], List[str]]:
+            del card, known_concepts, alias_rules
+            return proposal, []
+
+    svc = SemanticSuggestionService(
+        sql=sql,
+        card_service=_StubCardService(cards),
+        labeler=_FailingLabeler(),
+        matcher=_Matcher(),  # type: ignore[arg-type]
+        batch_size=10,
+    )
+
+    run = svc.execute_run(1)
+
+    assert run["status"] == "completed"
+    assert any("INSERT INTO semantic_suggestion_item" in call.query for call in sql.write_calls)
+
+
+def test_execute_run_surfaces_unexpected_matcher_errors() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [_run_row(status="created")],
+    ]
+
+    class _Matcher:
+        def load_known_concepts(self) -> List[Dict[str, Any]]:
+            raise TypeError("bad matcher wiring")
+
+        def load_alias_rules(self) -> List[Dict[str, Any]]:
+            return []
+
+    svc = SemanticSuggestionService(
+        sql=sql,
+        card_service=_StubCardService([]),
+        labeler=_StubLabeler([]),
+        matcher=_Matcher(),  # type: ignore[arg-type]
+        batch_size=10,
+    )
+
+    with pytest.raises(ForgeError, match="Suggestion run execution failed"):
+        svc.execute_run(1)
+
+    failed_status_updates = [
+        call
+        for call in sql.write_calls
+        if "UPDATE semantic_suggestion_run" in call.query and (call.params or {}).get("status") == "failed"
+    ]
+    assert failed_status_updates
+    assert "bad matcher wiring" in str((failed_status_updates[-1].params or {}).get("error_message"))
+
+
+def test_execute_run_surfaces_unexpected_assertion_errors() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [_run_row(status="created")],
+    ]
+
+    class _Matcher:
+        def load_known_concepts(self) -> List[Dict[str, Any]]:
+            raise AssertionError("unexpected matcher bug")
+
+        def load_alias_rules(self) -> List[Dict[str, Any]]:
+            return []
+
+    svc = SemanticSuggestionService(
+        sql=sql,
+        card_service=_StubCardService([]),
+        labeler=_StubLabeler([]),
+        matcher=_Matcher(),  # type: ignore[arg-type]
+        batch_size=10,
+    )
+
+    with pytest.raises(AssertionError, match="unexpected matcher bug"):
+        svc.execute_run(1)
+
+    failed_status_updates = [
+        call
+        for call in sql.write_calls
+        if "UPDATE semantic_suggestion_run" in call.query and (call.params or {}).get("status") == "failed"
+    ]
+    assert not failed_status_updates
+
+
+def test_apply_approved_marks_item_failed_for_expected_apply_errors() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [_run_row(status="completed")],
+        [
+            {
+                "id": 11,
+                "run_id": 1,
+                "workspace_column_id": 44,
+                "workspace_table_id": 3,
+                "table_name": "students",
+                "column_name": "student_id",
+                "data_type": "STRING",
+                "description": "id",
+                "samples_json": "[]",
+                "signals_json": "{}",
+                "llm_raw_json": "{}",
+                "proposed_concept_key": "student.id",
+                "proposed_concept_id": None,
+                "proposed_semantic_type": "identifier",
+                "proposed_sub_type": None,
+                "proposed_entity": "student",
+                "proposed_granularity_rank": 0,
+                "proposed_filter_allowed": 1,
+                "proposed_group_by_allowed": 1,
+                "proposed_aggregation_allowed": 0,
+                "proposed_is_identifier": 1,
+                "proposed_is_metric": 0,
+                "proposed_display_priority": 0,
+                "proposed_sensitive": 0,
+                "confidence": 0.9,
+                "reasons_json": "[]",
+                "warnings_json": "[]",
+                "validation_errors_json": "[]",
+                "is_valid": 1,
+                "decision_status": "approved",
+                "decision_reason": None,
+                "applied_at": None,
+                "created_at": "2026-02-01",
+                "updated_at": "2026-02-01",
+            }
+        ],
+        [
+            {
+                "total": 1,
+                "valid_items": 1,
+                "invalid_items": 0,
+                "auto_approved_items": 0,
+                "approved_items": 1,
+                "rejected_items": 0,
+                "applied_items": 0,
+                "failed_apply_items": 1,
+            }
+        ],
+        [_run_row(status="completed")],
+        [_run_row(status="completed")],
+    ]
+
+    svc = SemanticSuggestionService(sql=sql)
+
+    def _fail_registry(*, run: Dict[str, Any], item: Dict[str, Any]) -> int:
+        del run, item
+        raise SQLAlchemyError("duplicate key")
+
+    svc._upsert_registry = _fail_registry  # type: ignore[assignment]
+
+    run = svc.apply_approved(1)
+
+    assert run["status"] == "completed"
+    failed_item_updates = [
+        call
+        for call in sql.write_calls
+        if "UPDATE semantic_suggestion_item" in call.query and (call.params or {}).get("reason") == "duplicate key"
+    ]
+    assert failed_item_updates
+
+
+def test_apply_approved_surfaces_unexpected_apply_errors() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [_run_row(status="completed")],
+        [
+            {
+                "id": 11,
+                "run_id": 1,
+                "workspace_column_id": 44,
+                "workspace_table_id": 3,
+                "table_name": "students",
+                "column_name": "student_id",
+                "data_type": "STRING",
+                "description": "id",
+                "samples_json": "[]",
+                "signals_json": "{}",
+                "llm_raw_json": "{}",
+                "proposed_concept_key": "student.id",
+                "proposed_concept_id": None,
+                "proposed_semantic_type": "identifier",
+                "proposed_sub_type": None,
+                "proposed_entity": "student",
+                "proposed_granularity_rank": 0,
+                "proposed_filter_allowed": 1,
+                "proposed_group_by_allowed": 1,
+                "proposed_aggregation_allowed": 0,
+                "proposed_is_identifier": 1,
+                "proposed_is_metric": 0,
+                "proposed_display_priority": 0,
+                "proposed_sensitive": 0,
+                "confidence": 0.9,
+                "reasons_json": "[]",
+                "warnings_json": "[]",
+                "validation_errors_json": "[]",
+                "is_valid": 1,
+                "decision_status": "approved",
+                "decision_reason": None,
+                "applied_at": None,
+                "created_at": "2026-02-01",
+                "updated_at": "2026-02-01",
+            }
+        ],
+    ]
+
+    svc = SemanticSuggestionService(sql=sql)
+
+    def _fail_registry(*, run: Dict[str, Any], item: Dict[str, Any]) -> int:
+        del run, item
+        raise TypeError("broken apply path")
+
+    svc._upsert_registry = _fail_registry  # type: ignore[assignment]
+
+    with pytest.raises(TypeError, match="broken apply path"):
+        svc.apply_approved(1)
+
+    failed_item_updates = [
+        call
+        for call in sql.write_calls
+        if "UPDATE semantic_suggestion_item" in call.query and (call.params or {}).get("reason") == "broken apply path"
+    ]
+    assert not failed_item_updates
+
+
+def test_apply_approved_uses_generic_registry_and_assignment_paths() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [_run_row(status="completed")],
+        [
+            {
+                "id": 11,
+                "run_id": 1,
+                "workspace_column_id": 44,
+                "workspace_table_id": 3,
+                "table_name": "students",
+                "column_name": "student_id",
+                "data_type": "STRING",
+                "description": "id",
+                "samples_json": "[]",
+                "signals_json": "{}",
+                "llm_raw_json": "{}",
+                "proposed_concept_key": "student.id",
+                "proposed_concept_id": 123,
+                "proposed_semantic_type": "identifier",
+                "proposed_sub_type": None,
+                "proposed_entity": "student",
+                "proposed_granularity_rank": 0,
+                "proposed_filter_allowed": 1,
+                "proposed_group_by_allowed": 1,
+                "proposed_aggregation_allowed": 0,
+                "proposed_is_identifier": 1,
+                "proposed_is_metric": 0,
+                "proposed_display_priority": 0,
+                "proposed_sensitive": 0,
+                "confidence": 0.9,
+                "reasons_json": "[]",
+                "warnings_json": "[]",
+                "validation_errors_json": "[]",
+                "is_valid": 1,
+                "decision_status": "approved",
+                "decision_reason": None,
+                "applied_at": None,
+                "created_at": "2026-02-01",
+                "updated_at": "2026-02-01",
+            }
+        ],
+        [
+            {
+                "semantic_type": "identifier",
+                "sub_type": None,
+                "entity": "student",
+                "description": "id",
+                "granularity_rank": 0,
+                "filter_allowed": 1,
+                "group_by_allowed": 1,
+                "aggregation_allowed": 0,
+                "is_identifier": 1,
+                "is_metric": 0,
+                "display_priority": 0,
+                "sensitive": 0,
+            }
+        ],
+        [{"id": 901}],
+        [{"total": 1, "valid_items": 1, "invalid_items": 0, "auto_approved_items": 0, "approved_items": 0, "rejected_items": 0, "applied_items": 1, "failed_apply_items": 0}],
+        [_run_row(status="completed")],
+        [_run_row(status="applied")],
+    ]
+    assignment = _AssignmentRecorder()
+    svc = SemanticSuggestionService(sql=sql, assignment_service=assignment)
+
+    run = svc.apply_approved(1)
+
+    assert run["status"] == "applied"
+    registry_writes = [call for call in sql.write_calls if "INSERT INTO semantic_registry" in call.query]
+    assert registry_writes
+    assert assignment.ensure_calls
+    assert "vertical" not in (registry_writes[0].params or {})
+    assert "vertical_norm" not in assignment.ensure_calls[0]

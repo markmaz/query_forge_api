@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.services.analytics.metadata_sync_service import MetadataSyncService
 
 
@@ -247,3 +249,101 @@ def test_sync_propagates_workspace_llm_context_to_enricher():
 
     assert enricher.enrich.call_args[1]["workspace_id"] == "ws-9"
     assert enricher.enrich.call_args[1]["llm_id"] == 42
+
+
+def test_sync_profiles_falls_back_on_expected_runtime_errors():
+    registry, _executor = _make_registry()
+    provider = _make_provider()
+    writer = MagicMock()
+    writer.upsert_tables.return_value = {"tables_upserted": 1, "name_to_id": {"orders": 1}}
+    writer.upsert_columns.return_value = {"columns_upserted": 1, "cols_by_table_id": {1: {"id"}}}
+    profiler = MagicMock()
+    profiler.profile_and_persist.side_effect = RuntimeError("temporary profiling outage")
+
+    svc = MetadataSyncService(registry=registry, writer=writer, profiler=profiler)
+
+    with patch(
+        "app.services.analytics.metadata_sync_service.MetadataProviderFactory.create",
+        return_value=provider,
+    ):
+        result = svc.sync_workspace_source_metadata(
+            datasource_name="primary",
+            catalog=None,
+            schema="sales",
+            run_profiling=True,
+        )
+
+    assert result["profiling"] == {}
+
+
+def test_sync_profiles_surfaces_unexpected_failures():
+    registry, _executor = _make_registry()
+    provider = _make_provider()
+    writer = MagicMock()
+    writer.upsert_tables.return_value = {"tables_upserted": 1, "name_to_id": {"orders": 1}}
+    writer.upsert_columns.return_value = {"columns_upserted": 1, "cols_by_table_id": {1: {"id"}}}
+    profiler = MagicMock()
+    profiler.profile_and_persist.side_effect = AssertionError("unexpected profiling bug")
+
+    svc = MetadataSyncService(registry=registry, writer=writer, profiler=profiler)
+
+    with patch(
+        "app.services.analytics.metadata_sync_service.MetadataProviderFactory.create",
+        return_value=provider,
+    ):
+        with pytest.raises(AssertionError, match="unexpected profiling bug"):
+            svc.sync_workspace_source_metadata(
+                datasource_name="primary",
+                catalog=None,
+                schema="sales",
+                run_profiling=True,
+            )
+
+
+def test_sync_enrichment_falls_back_on_expected_runtime_errors():
+    registry, _executor = _make_registry()
+    provider = _make_provider()
+    writer = MagicMock()
+    writer.upsert_tables.return_value = {"tables_upserted": 1, "name_to_id": {"orders": 1}}
+    writer.upsert_columns.return_value = {"columns_upserted": 1, "cols_by_table_id": {1: {"id"}}}
+    enricher = MagicMock()
+    enricher.enrich.side_effect = RuntimeError("temporary enrichment outage")
+
+    svc = MetadataSyncService(registry=registry, writer=writer, enricher=enricher)
+
+    with patch(
+        "app.services.analytics.metadata_sync_service.MetadataProviderFactory.create",
+        return_value=provider,
+    ):
+        result = svc.sync_workspace_source_metadata(
+            datasource_name="primary",
+            catalog=None,
+            schema="sales",
+            run_enrichment=True,
+        )
+
+    assert result["enrichment"] == {}
+
+
+def test_sync_enrichment_surfaces_unexpected_failures():
+    registry, _executor = _make_registry()
+    provider = _make_provider()
+    writer = MagicMock()
+    writer.upsert_tables.return_value = {"tables_upserted": 1, "name_to_id": {"orders": 1}}
+    writer.upsert_columns.return_value = {"columns_upserted": 1, "cols_by_table_id": {1: {"id"}}}
+    enricher = MagicMock()
+    enricher.enrich.side_effect = AssertionError("unexpected enrichment bug")
+
+    svc = MetadataSyncService(registry=registry, writer=writer, enricher=enricher)
+
+    with patch(
+        "app.services.analytics.metadata_sync_service.MetadataProviderFactory.create",
+        return_value=provider,
+    ):
+        with pytest.raises(AssertionError, match="unexpected enrichment bug"):
+            svc.sync_workspace_source_metadata(
+                datasource_name="primary",
+                catalog=None,
+                schema="sales",
+                run_enrichment=True,
+            )

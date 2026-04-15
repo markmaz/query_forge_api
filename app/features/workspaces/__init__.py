@@ -1,1 +1,3 @@
-from .register import register as register
+from .routes import register
+
+__all__ = ["register"]

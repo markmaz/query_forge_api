@@ -58,38 +58,11 @@ def test_share_to_workspace_inserts_acl(monkeypatch):
     assert sql.writes
 
 
-def test_share_to_user_updates_acl():
-    sql = FakeSQL(mappings_queue=[[{"id": "q1"}], [{"id": "acl1", "permission": "READ"}]])
-    svc = SavedQueryShareService(workspace_id="ws", user_id="user", sql=sql)
-
-    out = svc.share_to_user(query_id="q1", shared_with_user_id="user-2", can_edit=True)
-
-    assert out["aclId"] == "acl1"
-    assert out["permission"] == "WRITE"
-    assert "UPDATE saved_query_acl" in sql.writes[0][0]
-
-
-def test_unshare_invalid_kind_raises():
-    sql = FakeSQL(mappings_queue=[[{"id": "q1"}]])
-    svc = SavedQueryShareService(workspace_id="ws", user_id="user", sql=sql)
-
-    with pytest.raises(ForgeError):
-        svc.unshare(query_id="q1", share_kind="bad")
-
-
-def test_unshare_user_requires_shared_with_user_id():
-    sql = FakeSQL(mappings_queue=[[{"id": "q1"}]])
-    svc = SavedQueryShareService(workspace_id="ws", user_id="user", sql=sql)
-
-    with pytest.raises(ForgeError):
-        svc.unshare(query_id="q1", share_kind="USER", shared_with_user_id=None)
-
-
 def test_unshare_workspace_success():
     sql = FakeSQL(mappings_queue=[[{"id": "q1"}]], write_returns=[1])
     svc = SavedQueryShareService(workspace_id="ws", user_id="user", sql=sql)
 
-    out = svc.unshare(query_id="q1", share_kind="WORKSPACE")
+    out = svc.unshare(query_id="q1")
 
     assert out["removed"] is True
     assert out["shareKind"] == "WORKSPACE"

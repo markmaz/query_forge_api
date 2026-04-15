@@ -28,6 +28,7 @@ import logging
 from typing import Any
 
 from sqlalchemy import and_, or_, text
+from valkey.exceptions import ValkeyError
 
 from app.models.rbac import FEATURE_KEYS, GLOBAL_ROLES, ROLE_DEFINITIONS, Role, UserRole, WorkspaceFeature
 
@@ -37,6 +38,7 @@ ROLE_CACHE_TTL = 60       # seconds
 FEATURE_CACHE_TTL = 120   # seconds — entitlements change less often
 ROLE_CACHE_PREFIX = "qf:roles:user:"
 FEATURE_CACHE_PREFIX = "qf:features:workspace:"
+CACHE_BACKEND_ERRORS = (OSError, ValkeyError)
 
 
 def _role_cache_key(user_id: str, workspace_id: str | None) -> str:
@@ -78,7 +80,7 @@ def get_user_roles(user_id: str, workspace_id: str | None = None) -> set[str]:
         cached = client.smembers(cache_key)
         if cached:
             return set(cached)
-    except Exception as exc:
+    except CACHE_BACKEND_ERRORS as exc:
         logger.debug("Role cache read failed (non-fatal): %s", exc)
 
     query = (
@@ -108,7 +110,7 @@ def get_user_roles(user_id: str, workspace_id: str | None = None) -> set[str]:
             # Cache empty set with a placeholder so we don't hit DB again
             client.sadd(cache_key, "__empty__")
         client.expire(cache_key, ROLE_CACHE_TTL)
-    except Exception as exc:
+    except CACHE_BACKEND_ERRORS as exc:
         logger.debug("Role cache write failed (non-fatal): %s", exc)
 
     return roles
@@ -124,7 +126,7 @@ def invalidate_user_roles(user_id: str, workspace_id: str | None = None) -> None
         keys = list(client.keys(pattern))
         if keys:
             client.delete(*keys)
-    except Exception as exc:
+    except CACHE_BACKEND_ERRORS as exc:
         logger.debug("Role cache invalidation failed (non-fatal): %s", exc)
 
 
@@ -195,7 +197,7 @@ def get_workspace_features(workspace_id: str) -> set[str]:
             features = set(cached)
             features.discard("__empty__")
             return features
-    except Exception as exc:
+    except CACHE_BACKEND_ERRORS as exc:
         logger.debug("Feature cache read failed (non-fatal): %s", exc)
 
     rows = WorkspaceFeature.query.filter_by(
@@ -210,7 +212,7 @@ def get_workspace_features(workspace_id: str) -> set[str]:
         else:
             client.sadd(cache_key, "__empty__")
         client.expire(cache_key, FEATURE_CACHE_TTL)
-    except Exception as exc:
+    except CACHE_BACKEND_ERRORS as exc:
         logger.debug("Feature cache write failed (non-fatal): %s", exc)
 
     return features
@@ -220,7 +222,7 @@ def invalidate_workspace_features(workspace_id: str) -> None:
     """Call after any workspace feature entitlement change."""
     try:
         _valkey().delete(f"{FEATURE_CACHE_PREFIX}{workspace_id}")
-    except Exception as exc:
+    except CACHE_BACKEND_ERRORS as exc:
         logger.debug("Feature cache invalidation failed (non-fatal): %s", exc)
 
 

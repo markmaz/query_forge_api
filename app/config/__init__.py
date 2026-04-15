@@ -8,14 +8,14 @@ load_dotenv()
 def _env_int(name: str, default: int) -> int:
     try:
         return int(os.getenv(name, str(default)))
-    except Exception:
+    except (TypeError, ValueError):
         return int(default)
 
 
 def _env_float(name: str, default: float) -> float:
     try:
         return float(os.getenv(name, str(default)))
-    except Exception:
+    except (TypeError, ValueError):
         return float(default)
 
 DB_HOST =  os.getenv("DB_HOST")
@@ -65,7 +65,7 @@ MIN_PASSWORD_LENGTH=os.getenv("MIN_PASSWORD_LENGTH")
 SMTP_USERNAME=os.getenv("SMTP_USERNAME")
 SMTP_PASSWORD=os.getenv("SMTP_PASSWORD")
 SMTP_SERVER=os.getenv("SMTP_SERVER")
-SMTP_PORT=os.getenv("SMPT_PORT")
+SMTP_PORT=os.getenv("SMTP_PORT")
 DEFAULT_MAIL_SENDER=os.getenv("DEFAULT_MAIL_SENDER")
 INVITE_URL=os.getenv("INVITE_URL")
 PASSWORD_RESET_URL=os.getenv("PASSWORD_RESET_URL")

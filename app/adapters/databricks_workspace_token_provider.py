@@ -15,7 +15,7 @@ class DatabricksWorkspaceTokenProvider(BaseForgeTokenManager):
     def __init__(
         self,
         workspace_host: str,
-        workspace_id: str,
+        workspace_id: Optional[str] = None,
         *,
         client_id: Optional[str] = None,
         client_secret: Optional[str] = None,
@@ -26,6 +26,7 @@ class DatabricksWorkspaceTokenProvider(BaseForgeTokenManager):
     ):
         load_dotenv()
 
+        del workspace_id
         self._workspace_host = workspace_host
         resolved_token_url = _resolve_token_url(
             workspace_host=workspace_host,

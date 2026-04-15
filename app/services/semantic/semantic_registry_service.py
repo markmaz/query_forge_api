@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Dict, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
@@ -29,7 +31,6 @@ BOOL_FIELDS = {
 }
 INT_FIELDS = {"granularity_rank", "display_priority"}
 WRITEABLE_FIELDS = {
-    "vertical",
     "concept_key",
     "semantic_type",
     "sub_type",
@@ -44,6 +45,7 @@ WRITEABLE_FIELDS = {
     "display_priority",
     "sensitive",
 }
+WRITE_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
 
 
 class SemanticRegistryService:
@@ -53,7 +55,6 @@ class SemanticRegistryService:
     def list_entries(
         self,
         *,
-        vertical: Optional[str] = None,
         q: Optional[str] = None,
         semantic_type: Optional[str] = None,
         entity: Optional[str] = None,
@@ -66,11 +67,6 @@ class SemanticRegistryService:
 
         where = []
         params: Dict[str, Any] = {"limit": size_val, "offset": offset}
-
-        vertical_norm = _normalize_vertical(vertical)
-        if vertical_norm is not None:
-            where.append("sr.vertical_norm = :vertical_norm")
-            params["vertical_norm"] = vertical_norm
 
         if semantic_type is not None and str(semantic_type).strip() != "":
             st = str(semantic_type).strip().lower()
@@ -92,8 +88,6 @@ class SemanticRegistryService:
             f"""
             SELECT
               sr.id,
-              sr.vertical,
-              sr.vertical_norm,
               sr.concept_key,
               sr.semantic_type,
               sr.sub_type,
@@ -140,8 +134,6 @@ class SemanticRegistryService:
             """
             SELECT
               sr.id,
-              sr.vertical,
-              sr.vertical_norm,
               sr.concept_key,
               sr.semantic_type,
               sr.sub_type,
@@ -173,7 +165,6 @@ class SemanticRegistryService:
             result = self._sql.execute_insert(
                 """
                 INSERT INTO semantic_registry (
-                  vertical,
                   concept_key,
                   semantic_type,
                   sub_type,
@@ -188,7 +179,6 @@ class SemanticRegistryService:
                   display_priority,
                   `sensitive`
                 ) VALUES (
-                  :vertical,
                   :concept_key,
                   :semantic_type,
                   :sub_type,
@@ -206,7 +196,7 @@ class SemanticRegistryService:
                 """,
                 data,
             )
-        except Exception as exc:
+        except WRITE_FALLBACK_ERRORS as exc:
             _raise_write_error(exc)
 
         if result.lastrowid:
@@ -216,15 +206,11 @@ class SemanticRegistryService:
             """
             SELECT id
             FROM semantic_registry
-            WHERE vertical_norm = :vertical_norm
-              AND concept_key = :concept_key
+            WHERE concept_key = :concept_key
             ORDER BY id DESC
             LIMIT 1
             """,
-            {
-                "vertical_norm": _normalize_vertical(data.get("vertical")) or "__global__",
-                "concept_key": data["concept_key"],
-            },
+            {"concept_key": data["concept_key"]},
         )
         if not rows:
             raise ForgeError("Failed to create semantic_registry entry", status_code=500)
@@ -248,7 +234,7 @@ class SemanticRegistryService:
                 """,
                 data,
             )
-        except Exception as exc:
+        except WRITE_FALLBACK_ERRORS as exc:
             _raise_write_error(exc)
             return self.get_entry(row_id)
 
@@ -292,7 +278,7 @@ class SemanticRegistryService:
             self._validate_semantic_type(st)
             data["semantic_type"] = st
 
-        for key, max_len in (("vertical", 50), ("sub_type", 200), ("entity", 100)):
+        for key, max_len in (("sub_type", 200), ("entity", 100)):
             if key in data and data[key] is not None:
                 val = str(data[key]).strip()
                 data[key] = val or None
@@ -311,7 +297,6 @@ class SemanticRegistryService:
                 data[field] = _coerce_bool(data[field], field=field)
 
         if not partial:
-            data.setdefault("vertical", None)
             data.setdefault("sub_type", None)
             data.setdefault("entity", None)
             data.setdefault("description", None)
@@ -348,21 +333,10 @@ class SemanticRegistryService:
             raise ForgeError(f"semantic_type must be one of: {allowed}", status_code=400)
 
 
-def _normalize_vertical(value: Optional[str]) -> Optional[str]:
-    if value is None:
-        return None
-    text = str(value).strip()
-    if text == "":
-        return None
-    if text.lower() in {"global", "__global__", "null"}:
-        return "__global__"
-    return text
-
-
 def _coerce_positive_int(value: Any, *, field: str) -> int:
     try:
         as_int = int(value)
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         raise ForgeError(f"{field} must be a positive integer", status_code=400) from exc
     if as_int <= 0:
         raise ForgeError(f"{field} must be a positive integer", status_code=400)

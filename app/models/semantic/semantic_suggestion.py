@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import Computed, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.mysql import BIGINT, DECIMAL, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -14,19 +14,12 @@ from app.models.semantic.semantic_registry import SemanticBase
 class SemanticSuggestionRun(SemanticBase):
     __tablename__ = "semantic_suggestion_run"
     __table_args__ = (
-        Index("idx_sem_suggestion_run_vertical", "vertical_norm"),
         Index("idx_sem_suggestion_run_status", "status"),
         Index("idx_sem_suggestion_run_workspace_status", "workspace_id", "status"),
     )
 
     id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
     workspace_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    vertical: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    vertical_norm: Mapped[str] = mapped_column(
-        String(50),
-        Computed("IFNULL(vertical, '__global__')", persisted=True),
-        nullable=False,
-    )
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'created'"))
     params_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     total_columns: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))

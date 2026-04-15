@@ -11,6 +11,7 @@ from app.ports.sql_executor import ForgeQueryPort
 
 _YEAR_RE = re.compile(r"^\d{4}$")
 _NUMERIC_RE = re.compile(r"^-?\d+(\.\d+)?$")
+JSON_PARSE_ERRORS = (json.JSONDecodeError,)
 
 
 class SemanticCardService:
@@ -169,7 +170,7 @@ def _parse_json_any(value: Any) -> Any:
             return None
         try:
             return json.loads(text)
-        except Exception:
+        except JSON_PARSE_ERRORS:
             return None
     return None
 
@@ -189,7 +190,7 @@ def _derive_signals(samples: List[Any], stats: Optional[Dict[str, Any]]) -> Dict
             if key in stats and stats[key] is not None:
                 try:
                     unique_ratio_estimate = float(stats[key])
-                except Exception:
+                except (TypeError, ValueError):
                     unique_ratio_estimate = None
                 break
 
@@ -215,18 +216,18 @@ def _is_year_or_date(value: str) -> bool:
         else:
             datetime.fromisoformat(value)
         return True
-    except Exception:
+    except ValueError:
         pass
 
     for fmt in ("%Y-%m-%d", "%m/%d/%Y"):
         try:
             datetime.strptime(value, fmt)
             return True
-        except Exception:
+        except ValueError:
             continue
 
     try:
         date.fromisoformat(value)
         return True
-    except Exception:
+    except ValueError:
         return False

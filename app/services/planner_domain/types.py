@@ -15,7 +15,6 @@ class PlanDomainRequest(BaseModel):
     conversation_id: Optional[str] = None
     context_seed_plan_json_v2: Optional[Dict[str, Any]] = None
     context_seed_last_prompt: Optional[str] = None
-    vertical_norm: str = "generic"
     base_domain_id: Optional[int] = None
     debug: bool = False
     allow_unknown_conversation: bool = False
@@ -93,7 +92,6 @@ class PlanConversationContext:
     conversation_id: str
     prior_prompt: str
     prior_plan_json_v2: Dict[str, Any]
-    prior_vertical_norm: str
     followup_mode: bool
     seeded_from_client: bool
 
@@ -104,7 +102,6 @@ class PlanDomainNextActionsRequest(BaseModel):
     workspace_id: str = Field(min_length=1)
     prompt: str = Field(min_length=1)
     plan_json_v2: Dict[str, Any]
-    vertical_norm: str = "generic"
     base_domain_id: Optional[int] = None
     conversation_id: Optional[str] = None
     trace_id: Optional[str] = None

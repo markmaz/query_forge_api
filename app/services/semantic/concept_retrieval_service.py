@@ -25,13 +25,11 @@ class ConceptRetrievalService:
         self,
         *,
         prompt: str,
-        vertical_norm: str,
         max_concepts: int,
         deterministic_matches: Optional[Sequence[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         query_text = (prompt or "").strip()
         limit = max(1, min(100, int(max_concepts) * 4))
-        vertical = _norm_vertical(vertical_norm)
 
         vector = self._model.encode([query_text], normalize=True)[0]
         query_filter = qdrant_models.Filter(
@@ -39,10 +37,6 @@ class ConceptRetrievalService:
                 qdrant_models.FieldCondition(
                     key="type",
                     match=qdrant_models.MatchAny(any=["concept", "alias"]),
-                ),
-                qdrant_models.FieldCondition(
-                    key="vertical_norm",
-                    match=qdrant_models.MatchAny(any=[vertical, "generic"]),
                 ),
             ]
         )
@@ -94,19 +88,12 @@ class ConceptRetrievalService:
             "query_text": query_text,
             "hits": hits,
         }
-
-
-def _norm_vertical(vertical_norm: str) -> str:
-    value = str(vertical_norm or "generic").strip().lower()
-    return value or "generic"
-
-
 def _to_int_or_none(value: Any) -> Optional[int]:
     if value is None:
         return None
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 

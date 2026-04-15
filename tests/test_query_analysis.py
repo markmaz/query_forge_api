@@ -308,7 +308,7 @@ def test_run_query_uses_saved_query_title_alias(monkeypatch):
         _FakeWorkspaceBuilder,
     )
     monkeypatch.setattr(
-        "app.services.query_forge_service.QueryForgeService",
+        "app.services.query_forge.service.QueryForgeService",
         _FakeQueryForgeService,
     )
     monkeypatch.setattr(
@@ -365,7 +365,7 @@ def test_run_query_allows_global_saved_queries(monkeypatch):
         "app.services.workspace_inventory.workspace_context.WorkspaceSqlContextBuilder",
         _FakeWorkspaceBuilder,
     )
-    monkeypatch.setattr("app.services.query_forge_service.QueryForgeService", _FakeQueryForgeService)
+    monkeypatch.setattr("app.services.query_forge.service.QueryForgeService", _FakeQueryForgeService)
     monkeypatch.setattr("app.services.domain_resolver.DomainResolver", lambda workspace_id: {"workspace_id": workspace_id})
 
     result = query_analysis_routes._run_query("query-2", "ws-1")

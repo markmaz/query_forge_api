@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Dict, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import METADATA_SOURCE_MODE
 from app.exceptions.forge_error import ForgeError
@@ -32,7 +34,6 @@ class SemanticConceptService:
     def list_concepts(
         self,
         *,
-        vertical: Optional[str] = None,
         q: Optional[str] = None,
         semantic_type: Optional[str] = None,
         page: int = 1,
@@ -44,11 +45,6 @@ class SemanticConceptService:
 
         where = []
         params: Dict[str, Any] = {"limit": size_val, "offset": offset}
-
-        vertical_norm = _normalize_vertical(vertical)
-        if vertical_norm is not None:
-            where.append("vertical_norm = :vertical_norm")
-            params["vertical_norm"] = vertical_norm
 
         if semantic_type is not None and str(semantic_type).strip() != "":
             where.append("semantic_type = :semantic_type")
@@ -62,7 +58,7 @@ class SemanticConceptService:
         rows = self._sql.execute_query_mappings(
             f"""
             SELECT
-              id, vertical_norm, concept_key, name, description, semantic_type, sub_type, entity,
+              id, concept_key, name, description, semantic_type, sub_type, entity,
               granularity_rank, filter_allowed, group_by_allowed, aggregation_allowed,
               is_identifier, is_metric, display_priority, `sensitive` AS `sensitive`, `status` AS `status`,
               created_at, updated_at
@@ -89,24 +85,14 @@ class SemanticConceptService:
             "page_size": size_val,
         }
 
-    def list_concept_keys(self, *, vertical: Optional[str] = None) -> Dict[str, Any]:
-        where = []
-        params: Dict[str, Any] = {}
-
-        vertical_norm = _normalize_vertical(vertical)
-        if vertical_norm is not None:
-            where.append("vertical_norm = :vertical_norm")
-            params["vertical_norm"] = vertical_norm
-
-        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+    def list_concept_keys(self) -> Dict[str, Any]:
         rows = self._sql.execute_query_mappings(
-            f"""
+            """
             SELECT DISTINCT concept_key
             FROM semantic_concept
-            {where_sql}
             ORDER BY concept_key ASC
             """,
-            params,
+            {},
         )
         concept_keys = [str(row.get("concept_key") or "").strip() for row in rows]
         return {"concept_keys": [key for key in concept_keys if key]}
@@ -117,18 +103,18 @@ class SemanticConceptService:
             result = self._sql.execute_insert(
                 """
                 INSERT INTO semantic_concept (
-                  vertical_norm, concept_key, name, description, semantic_type, sub_type, entity,
+                  concept_key, name, description, semantic_type, sub_type, entity,
                   granularity_rank, filter_allowed, group_by_allowed, aggregation_allowed,
                   is_identifier, is_metric, display_priority, `sensitive`, `status`
                 ) VALUES (
-                  :vertical_norm, :concept_key, :name, :description, :semantic_type, :sub_type, :entity,
+                  :concept_key, :name, :description, :semantic_type, :sub_type, :entity,
                   :granularity_rank, :filter_allowed, :group_by_allowed, :aggregation_allowed,
                   :is_identifier, :is_metric, :display_priority, :sensitive, :status
                 )
                 """,
                 data,
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "concept")
 
         if not result.lastrowid:
@@ -151,7 +137,7 @@ class SemanticConceptService:
                 """,
                 data,
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "concept")
             affected = 0
         if int(affected or 0) <= 0:
@@ -163,7 +149,7 @@ class SemanticConceptService:
         rows = self._sql.execute_query_mappings(
             """
             SELECT
-              id, vertical_norm, concept_key, name, description, semantic_type, sub_type, entity,
+              id, concept_key, name, description, semantic_type, sub_type, entity,
               granularity_rank, filter_allowed, group_by_allowed, aggregation_allowed,
               is_identifier, is_metric, display_priority, `sensitive` AS `sensitive`, `status` AS `status`,
               created_at, updated_at
@@ -187,7 +173,7 @@ class SemanticConceptService:
                 """,
                 {"id": concept_id},
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "concept")
             affected = 0
         if int(affected or 0) <= 0:
@@ -196,17 +182,11 @@ class SemanticConceptService:
     def list_aliases(
         self,
         *,
-        vertical: Optional[str] = None,
         concept_key: Optional[str] = None,
         q: Optional[str] = None,
     ) -> Dict[str, Any]:
         where = []
         params: Dict[str, Any] = {}
-
-        vertical_norm = _normalize_vertical(vertical)
-        if vertical_norm is not None:
-            where.append("vertical_norm = :vertical_norm")
-            params["vertical_norm"] = vertical_norm
 
         if concept_key is not None and str(concept_key).strip() != "":
             where.append("concept_key = :concept_key")
@@ -219,7 +199,7 @@ class SemanticConceptService:
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         rows = self._sql.execute_query_mappings(
             f"""
-            SELECT id, vertical_norm, alias_key, concept_key, match_kind, weight, created_at
+            SELECT id, alias_key, concept_key, match_kind, weight, created_at
             FROM semantic_concept_alias
             {where_sql}
             ORDER BY weight DESC, id ASC
@@ -230,19 +210,19 @@ class SemanticConceptService:
 
     def create_alias(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         data = _normalize_alias_payload(payload)
-        self._ensure_concept_exists(vertical_norm=data["vertical_norm"], concept_key=data["concept_key"])
+        self._ensure_concept_exists(concept_key=data["concept_key"])
         try:
             result = self._sql.execute_insert(
                 """
                 INSERT INTO semantic_concept_alias (
-                  vertical_norm, alias_key, concept_key, match_kind, weight
+                  alias_key, concept_key, match_kind, weight
                 ) VALUES (
-                  :vertical_norm, :alias_key, :concept_key, :match_kind, :weight
+                  :alias_key, :concept_key, :match_kind, :weight
                 )
                 """,
                 data,
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "alias")
 
         if not result.lastrowid:
@@ -250,7 +230,7 @@ class SemanticConceptService:
 
         rows = self._sql.execute_query_mappings(
             """
-            SELECT id, vertical_norm, alias_key, concept_key, match_kind, weight, created_at
+            SELECT id, alias_key, concept_key, match_kind, weight, created_at
             FROM semantic_concept_alias
             WHERE id = :id
             LIMIT 1
@@ -263,7 +243,7 @@ class SemanticConceptService:
         alias_id = _as_pos_int(alias_id, "alias_id")
         rows = self._sql.execute_query_mappings(
             """
-            SELECT id, vertical_norm, alias_key, concept_key, match_kind, weight, created_at
+            SELECT id, alias_key, concept_key, match_kind, weight, created_at
             FROM semantic_concept_alias
             WHERE id = :id
             LIMIT 1
@@ -279,11 +259,8 @@ class SemanticConceptService:
         data = _normalize_alias_patch_payload(payload)
         if not data:
             return self.get_alias(alias_id)
-        if "vertical_norm" in data and "concept_key" in data:
-            self._ensure_concept_exists(vertical_norm=data["vertical_norm"], concept_key=data["concept_key"])
-        elif "concept_key" in data:
-            current = self.get_alias(alias_id)
-            self._ensure_concept_exists(vertical_norm=current["vertical_norm"], concept_key=data["concept_key"])
+        if "concept_key" in data:
+            self._ensure_concept_exists(concept_key=data["concept_key"])
         set_parts = [f"{k} = :{k}" for k in data.keys()]
         data["id"] = alias_id
         try:
@@ -295,7 +272,7 @@ class SemanticConceptService:
                 """,
                 data,
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "alias")
             affected = 0
         if int(affected or 0) <= 0:
@@ -312,7 +289,7 @@ class SemanticConceptService:
                 """,
                 {"id": alias_id},
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "alias")
             affected = 0
         if int(affected or 0) <= 0:
@@ -321,7 +298,6 @@ class SemanticConceptService:
     def list_value_aliases(
         self,
         *,
-        vertical: Optional[str] = None,
         semantic_concept_id: Optional[int] = None,
         q: Optional[str] = None,
         page: int = 1,
@@ -333,10 +309,6 @@ class SemanticConceptService:
         where = []
         params: Dict[str, Any] = {"limit": size_val, "offset": offset}
 
-        vertical_norm = _normalize_vertical(vertical)
-        if vertical_norm is not None:
-            where.append("va.vertical_norm = :vertical_norm")
-            params["vertical_norm"] = vertical_norm
         if semantic_concept_id is not None:
             where.append("va.semantic_concept_id = :semantic_concept_id")
             params["semantic_concept_id"] = _as_pos_int(semantic_concept_id, "semantic_concept_id")
@@ -349,7 +321,6 @@ class SemanticConceptService:
             f"""
             SELECT
               va.id,
-              va.vertical_norm,
               va.semantic_concept_id,
               sc.concept_key,
               sc.name AS concept_name,
@@ -389,14 +360,14 @@ class SemanticConceptService:
             result = self._sql.execute_insert(
                 """
                 INSERT INTO semantic_value_alias (
-                  vertical_norm, semantic_concept_id, canonical_value, alias_value, match_kind, weight
+                  semantic_concept_id, canonical_value, alias_value, match_kind, weight
                 ) VALUES (
-                  :vertical_norm, :semantic_concept_id, :canonical_value, :alias_value, :match_kind, :weight
+                  :semantic_concept_id, :canonical_value, :alias_value, :match_kind, :weight
                 )
                 """,
                 data,
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "value_alias")
         if not result.lastrowid:
             raise ForgeError("failed to create value_alias", status_code=500)
@@ -408,7 +379,6 @@ class SemanticConceptService:
             """
             SELECT
               va.id,
-              va.vertical_norm,
               va.semantic_concept_id,
               sc.concept_key,
               sc.name AS concept_name,
@@ -446,7 +416,7 @@ class SemanticConceptService:
                 """,
                 data,
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "value_alias")
             affected = 0
         if int(affected or 0) <= 0:
@@ -463,7 +433,7 @@ class SemanticConceptService:
                 """,
                 {"id": value_alias_id},
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "value_alias")
             affected = 0
         if int(affected or 0) <= 0:
@@ -472,7 +442,6 @@ class SemanticConceptService:
     def list_concept_column_maps(
         self,
         *,
-        vertical: Optional[str] = None,
         semantic_concept_id: Optional[int] = None,
         workspace_column_id: Optional[int] = None,
         relationship_kind: Optional[str] = None,
@@ -488,10 +457,6 @@ class SemanticConceptService:
         where = []
         params: Dict[str, Any] = {"limit": size_val, "offset": offset}
 
-        vertical_norm = _normalize_vertical(vertical)
-        if vertical_norm is not None:
-            where.append("m.vertical_norm = :vertical_norm")
-            params["vertical_norm"] = vertical_norm
         if semantic_concept_id is not None:
             where.append("m.semantic_concept_id = :semantic_concept_id")
             params["semantic_concept_id"] = _as_pos_int(semantic_concept_id, "semantic_concept_id")
@@ -531,7 +496,6 @@ class SemanticConceptService:
             f"""
             SELECT
               m.id,
-              m.vertical_norm,
               m.semantic_concept_id,
               sc.concept_key,
               sc.name AS concept_name,
@@ -576,14 +540,14 @@ class SemanticConceptService:
             result = self._sql.execute_insert(
                 """
                 INSERT INTO workspace_column_semantic_concept_map (
-                  vertical_norm, semantic_concept_id, workspace_column_id, relationship_kind, weight
+                  semantic_concept_id, workspace_column_id, relationship_kind, weight
                 ) VALUES (
-                  :vertical_norm, :semantic_concept_id, :workspace_column_id, :relationship_kind, :weight
+                  :semantic_concept_id, :workspace_column_id, :relationship_kind, :weight
                 )
                 """,
                 data,
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "concept_column_map")
         if not result.lastrowid:
             raise ForgeError("failed to create concept_column_map", status_code=500)
@@ -599,7 +563,6 @@ class SemanticConceptService:
             f"""
             SELECT
               m.id,
-              m.vertical_norm,
               m.semantic_concept_id,
               sc.concept_key,
               sc.name AS concept_name,
@@ -641,7 +604,7 @@ class SemanticConceptService:
                 """,
                 data,
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "concept_column_map")
             affected = 0
         if int(affected or 0) <= 0:
@@ -658,7 +621,7 @@ class SemanticConceptService:
                 """,
                 {"id": map_id},
             )
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             _raise_write_error(exc, "concept_column_map")
             affected = 0
         if int(affected or 0) <= 0:
@@ -668,16 +631,11 @@ class SemanticConceptService:
         self,
         *,
         workspace_id: Optional[str] = None,
-        vertical_norm: Optional[str] = None,
         dry_run: bool = False,
     ) -> Dict[str, Any]:
         workspace = _normalize_workspace(workspace_id)
-        vertical = _normalize_vertical(vertical_norm)
 
-        params: Dict[str, Any] = {
-            "workspace_id": workspace,
-            "vertical_norm": vertical,
-        }
+        params: Dict[str, Any] = {"workspace_id": workspace}
         workspace_join = ""
         if workspace is not None:
             workspace_join = (
@@ -697,14 +655,7 @@ class SemanticConceptService:
                 sc.concept_key,
                 ROW_NUMBER() OVER (
                   PARTITION BY wc.id
-                  ORDER BY
-                    CASE
-                      WHEN :vertical_norm IS NOT NULL AND m.vertical_norm = :vertical_norm THEN 0
-                      WHEN m.vertical_norm = 'generic' THEN 1
-                      ELSE 2
-                    END,
-                    m.weight DESC,
-                    m.id ASC
+                  ORDER BY m.weight DESC, m.id ASC
                 ) AS rn
               FROM workspace_column_semantic_concept_map m
               JOIN semantic_concept sc
@@ -716,7 +667,6 @@ class SemanticConceptService:
               {workspace_join}
               WHERE m.relationship_kind = 'primary'
                 AND wc.semantic_concept_key IS NULL
-                AND (:vertical_norm IS NULL OR m.vertical_norm IN (:vertical_norm, 'generic'))
             )
             SELECT COUNT(*) AS total
             FROM ranked
@@ -728,7 +678,6 @@ class SemanticConceptService:
         if bool(dry_run):
             return {
                 "workspace_id": workspace,
-                "vertical_norm": vertical,
                 "dry_run": True,
                 "candidates": candidates,
                 "updated": 0,
@@ -743,14 +692,7 @@ class SemanticConceptService:
                 sc.concept_key,
                 ROW_NUMBER() OVER (
                   PARTITION BY wc.id
-                  ORDER BY
-                    CASE
-                      WHEN :vertical_norm IS NOT NULL AND m.vertical_norm = :vertical_norm THEN 0
-                      WHEN m.vertical_norm = 'generic' THEN 1
-                      ELSE 2
-                    END,
-                    m.weight DESC,
-                    m.id ASC
+                  ORDER BY m.weight DESC, m.id ASC
                 ) AS rn
               FROM workspace_column_semantic_concept_map m
               JOIN semantic_concept sc
@@ -762,7 +704,6 @@ class SemanticConceptService:
               {workspace_join}
               WHERE m.relationship_kind = 'primary'
                 AND wc.semantic_concept_key IS NULL
-                AND (:vertical_norm IS NULL OR m.vertical_norm IN (:vertical_norm, 'generic'))
             )
             UPDATE workspace_column wc
             JOIN ranked r
@@ -779,28 +720,26 @@ class SemanticConceptService:
         )
         return {
             "workspace_id": workspace,
-            "vertical_norm": vertical,
             "dry_run": False,
             "candidates": candidates,
             "updated": int(updated or 0),
         }
 
-    def seed(self, vertical: str) -> Dict[str, Any]:
-        return self._seed.ensure_seeded(vertical)
+    def seed(self) -> Dict[str, Any]:
+        return self._seed.ensure_seeded()
 
-    def _ensure_concept_exists(self, *, vertical_norm: str, concept_key: str) -> None:
+    def _ensure_concept_exists(self, *, concept_key: str) -> None:
         rows = self._sql.execute_query_mappings(
             """
             SELECT id
             FROM semantic_concept
-            WHERE vertical_norm = :vertical_norm
-              AND concept_key = :concept_key
+            WHERE concept_key = :concept_key
             LIMIT 1
             """,
-            {"vertical_norm": vertical_norm, "concept_key": concept_key},
+            {"concept_key": concept_key},
         )
         if not rows:
-            raise ForgeError("concept_key not found for vertical", status_code=400)
+            raise ForgeError("concept_key not found", status_code=400)
 
     def _ensure_concept_id_exists(self, concept_id: int) -> None:
         rows = self._sql.execute_query_mappings(
@@ -845,15 +784,6 @@ class SemanticConceptService:
         return "wc.id"
 
 
-def _normalize_vertical(value: Optional[str]) -> Optional[str]:
-    if value is None:
-        return None
-    text = str(value).strip().lower()
-    if text == "":
-        return None
-    return text
-
-
 def _normalize_workspace(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
@@ -866,7 +796,7 @@ def _normalize_workspace(value: Optional[str]) -> Optional[str]:
 def _as_pos_int(value: Any, field: str) -> int:
     try:
         out = int(value)
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         raise ForgeError(f"{field} must be a positive integer", status_code=400) from exc
     if out <= 0:
         raise ForgeError(f"{field} must be a positive integer", status_code=400)
@@ -892,7 +822,6 @@ def _normalize_concept_payload(payload: Dict[str, Any], *, partial: bool) -> Dic
         raise ForgeError("invalid json body", status_code=400)
 
     allowed = {
-        "vertical_norm",
         "concept_key",
         "name",
         "description",
@@ -912,12 +841,10 @@ def _normalize_concept_payload(payload: Dict[str, Any], *, partial: bool) -> Dic
     out = {k: v for k, v in payload.items() if k in allowed}
 
     if not partial:
-        for req in ("vertical_norm", "concept_key", "name", "semantic_type"):
+        for req in ("concept_key", "name", "semantic_type"):
             if not str(out.get(req) or "").strip():
                 raise ForgeError(f"{req} is required", status_code=400)
 
-    if "vertical_norm" in out:
-        out["vertical_norm"] = str(out["vertical_norm"] or "").strip().lower()
     if "concept_key" in out:
         out["concept_key"] = normalize_concept_key(str(out["concept_key"] or ""))
     if "name" in out:
@@ -968,7 +895,7 @@ def _normalize_alias_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise ForgeError("invalid json body", status_code=400)
 
-    for req in ("vertical_norm", "alias_key", "concept_key"):
+    for req in ("alias_key", "concept_key"):
         if not str(payload.get(req) or "").strip():
             raise ForgeError(f"{req} is required", status_code=400)
 
@@ -978,11 +905,10 @@ def _normalize_alias_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         weight = float(payload.get("weight", 1.0))
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         raise ForgeError("weight must be numeric", status_code=400) from exc
 
     return {
-        "vertical_norm": str(payload.get("vertical_norm") or "").strip().lower(),
         "alias_key": str(payload.get("alias_key") or "").strip().lower(),
         "concept_key": normalize_concept_key(str(payload.get("concept_key") or "")),
         "match_kind": match_kind,
@@ -993,10 +919,8 @@ def _normalize_alias_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 def _normalize_alias_patch_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise ForgeError("invalid json body", status_code=400)
-    allowed = {"vertical_norm", "alias_key", "concept_key", "match_kind", "weight"}
+    allowed = {"alias_key", "concept_key", "match_kind", "weight"}
     out = {k: v for k, v in payload.items() if k in allowed}
-    if "vertical_norm" in out:
-        out["vertical_norm"] = str(out["vertical_norm"] or "").strip().lower()
     if "alias_key" in out:
         out["alias_key"] = str(out["alias_key"] or "").strip().lower()
     if "concept_key" in out:
@@ -1009,7 +933,7 @@ def _normalize_alias_patch_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if "weight" in out:
         try:
             out["weight"] = float(out["weight"])
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             raise ForgeError("weight must be numeric", status_code=400) from exc
     return out
 
@@ -1017,14 +941,12 @@ def _normalize_alias_patch_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 def _normalize_value_alias_payload(payload: Dict[str, Any], *, partial: bool) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise ForgeError("invalid json body", status_code=400)
-    allowed = {"vertical_norm", "semantic_concept_id", "canonical_value", "alias_value", "match_kind", "weight"}
+    allowed = {"semantic_concept_id", "canonical_value", "alias_value", "match_kind", "weight"}
     out = {k: v for k, v in payload.items() if k in allowed}
     if not partial:
-        for req in ("vertical_norm", "semantic_concept_id", "canonical_value", "alias_value"):
+        for req in ("semantic_concept_id", "canonical_value", "alias_value"):
             if not str(out.get(req) or "").strip():
                 raise ForgeError(f"{req} is required", status_code=400)
-    if "vertical_norm" in out:
-        out["vertical_norm"] = str(out["vertical_norm"] or "").strip().lower()
     if "semantic_concept_id" in out:
         out["semantic_concept_id"] = _as_pos_int(out["semantic_concept_id"], "semantic_concept_id")
     if "canonical_value" in out:
@@ -1039,7 +961,7 @@ def _normalize_value_alias_payload(payload: Dict[str, Any], *, partial: bool) ->
     if "weight" in out:
         try:
             out["weight"] = float(out["weight"])
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             raise ForgeError("weight must be numeric", status_code=400) from exc
     if not partial:
         out.setdefault("match_kind", "contains")
@@ -1050,16 +972,12 @@ def _normalize_value_alias_payload(payload: Dict[str, Any], *, partial: bool) ->
 def _normalize_concept_column_map_payload(payload: Dict[str, Any], *, partial: bool) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise ForgeError("invalid json body", status_code=400)
-    allowed = {"vertical_norm", "semantic_concept_id", "workspace_column_id", "relationship_kind", "weight"}
+    allowed = {"semantic_concept_id", "workspace_column_id", "relationship_kind", "weight"}
     out = {k: v for k, v in payload.items() if k in allowed}
     if not partial:
-        for req in ("vertical_norm", "semantic_concept_id"):
+        for req in ("semantic_concept_id", "workspace_column_id"):
             if not str(out.get(req) or "").strip():
                 raise ForgeError(f"{req} is required", status_code=400)
-        if not str(out.get("workspace_column_id") or "").strip():
-            raise ForgeError("workspace_column_id is required", status_code=400)
-    if "vertical_norm" in out:
-        out["vertical_norm"] = str(out["vertical_norm"] or "").strip().lower()
     if "semantic_concept_id" in out:
         out["semantic_concept_id"] = _as_pos_int(out["semantic_concept_id"], "semantic_concept_id")
     if "workspace_column_id" in out:
@@ -1072,7 +990,7 @@ def _normalize_concept_column_map_payload(payload: Dict[str, Any], *, partial: b
     if "weight" in out:
         try:
             out["weight"] = float(out["weight"])
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             raise ForgeError("weight must be numeric", status_code=400) from exc
     if not partial:
         out.setdefault("relationship_kind", "primary")
@@ -1115,7 +1033,7 @@ def _norm_value_alias_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def _norm_concept_column_map_row(row: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(row)
-    for key in ("id", "semantic_concept_id", "model_column_id", "workspace_column_id"):
+    for key in ("id", "model_column_id", "semantic_concept_id", "workspace_column_id"):
         if out.get(key) is not None:
             out[key] = int(out[key])
     if out.get("weight") is not None:

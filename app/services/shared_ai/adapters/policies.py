@@ -12,6 +12,7 @@ from app.services.shared_ai.artifacts import Candidate, CapabilityMapArtifact, P
 from app.services.shared_ai.context import PipelineContext
 
 FORGE_MATCH_PREFERRED_DOMAIN_BONUS = 0.08
+NUMERIC_PARSE_ERRORS = (TypeError, ValueError)
 
 
 class CandidatePolicyRerankAdapter(Protocol):
@@ -39,7 +40,6 @@ class PolicyDrivenRerankAdapter:
         capability_map: CapabilityMapArtifact,
     ) -> RerankedCandidatesArtifact:
         workspace_id = str(context.workspace_id or "").strip()
-        vertical_norm = str(context.vertical_norm or "generic")
         reranked: list[Candidate] = []
         effects: list[dict[str, Any]] = []
 
@@ -56,7 +56,6 @@ class PolicyDrivenRerankAdapter:
             if workspace_id and base_domain_id > 0:
                 policies = self._policies.get_applicable_policies(
                     workspace_id=workspace_id,
-                    vertical_norm=vertical_norm,
                     base_domain_id=base_domain_id,
                 )
                 for row in policies:
@@ -187,7 +186,7 @@ def _candidate_base_score(candidate: Candidate) -> float:
         try:
             if raw is not None:
                 return float(raw)
-        except Exception:
+        except NUMERIC_PARSE_ERRORS:
             continue
     return 0.0
 
@@ -226,7 +225,7 @@ def _preferred_domain_id(context: PipelineContext) -> int | None:
         return None
     try:
         parsed = int(raw)
-    except Exception:
+    except NUMERIC_PARSE_ERRORS:
         return None
     return parsed if parsed > 0 else None
 

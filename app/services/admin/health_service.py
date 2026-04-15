@@ -7,6 +7,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 import requests
 import valkey
+from requests import RequestException
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.celery_app import celery
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
@@ -59,7 +61,7 @@ class AdminHealthService:
             if rows and rows[0][0] == 1:
                 return {"status": "ok", "latency_ms": latency_ms}
             return {"status": "error", "latency_ms": latency_ms, "error": "unexpected result"}
-        except Exception as exc:
+        except (SQLAlchemyError, OSError, RuntimeError, ValueError) as exc:
             latency_ms = int((time.perf_counter() - start) * 1000)
             logger.exception("MySQL health check failed")
             return {"status": "error", "latency_ms": latency_ms, "error": str(exc)}
@@ -77,7 +79,7 @@ class AdminHealthService:
                 "model": self._vllm_model,
                 "upstream": resp.json(),
             }
-        except Exception as exc:
+        except (RequestException, OSError, ValueError) as exc:
             latency_ms = int((time.perf_counter() - start) * 1000)
             logger.exception("vLLM health check failed")
             return {"status": "error", "latency_ms": latency_ms, "error": str(exc)}
@@ -91,7 +93,7 @@ class AdminHealthService:
             if resp.status_code == 200:
                 return {"status": "ok", "latency_ms": latency_ms}
             return {"status": "error", "latency_ms": latency_ms, "error": f"HTTP {resp.status_code}"}
-        except Exception as exc:
+        except (RequestException, OSError) as exc:
             latency_ms = int((time.perf_counter() - start) * 1000)
             logger.exception("Qdrant health check failed")
             return {"status": "error", "latency_ms": latency_ms, "error": str(exc)}
@@ -125,14 +127,14 @@ class AdminHealthService:
             pong = client.ping()
             out["valkey"]["ping_ok"] = bool(pong)
             out["valkey"]["ping_response"] = str(pong)
-        except Exception as exc:
+        except (valkey.ValkeyError, OSError, ValueError) as exc:
             out["valkey"]["error"] = str(exc)
 
         try:
             with celery.connection_for_write() as conn:
                 conn.ensure_connection(max_retries=0)
             out["celery"]["broker_connect_ok"] = True
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             out["celery"]["broker_error"] = str(exc)
 
         try:
@@ -141,11 +143,18 @@ class AdminHealthService:
             workers = sorted(str(name) for name in ping_map.keys())
             out["celery"]["worker_ping_ok"] = bool(workers)
             out["celery"]["workers"] = workers
-        except Exception as exc:
+        except (AttributeError, OSError, RuntimeError, ValueError) as exc:
             out["celery"]["worker_error"] = str(exc)
 
-        out["ok"] = bool(out["valkey"]["ping_ok"] and out["celery"]["broker_connect_ok"])
-        out["status"] = "ok" if out["ok"] else "error"
+        core_ok = bool(out["valkey"]["ping_ok"] and out["celery"]["broker_connect_ok"])
+        workers_ok = bool(out["celery"]["worker_ping_ok"])
+        out["ok"] = bool(core_ok and workers_ok)
+        if out["ok"]:
+            out["status"] = "ok"
+        elif core_ok:
+            out["status"] = "degraded"
+        else:
+            out["status"] = "error"
         return out
 
 
@@ -165,5 +174,5 @@ def _mask_broker_url(raw_url: str) -> str:
         else:
             masked_creds = "***"
         return urlunsplit((parts.scheme, f"{masked_creds}@{host_part}", parts.path, parts.query, parts.fragment))
-    except Exception:
+    except ValueError:
         return text

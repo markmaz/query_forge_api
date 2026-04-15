@@ -7,6 +7,8 @@ from app.exceptions.forge_error import ForgeError
 from app.services.tenancy.datasource_resolver_service import WorkspaceDatasourceResolverService
 from app.services.workspace_service import WorkspaceService
 
+RESOLVER_WRAP_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+
 
 class WorkspaceExternalLinkService:
     """Builds external console links for the datasource bound to a workspace."""
@@ -24,7 +26,7 @@ class WorkspaceExternalLinkService:
             resolved = self._resolver.resolve_for_workspace(workspace_id=ws, require_active=True)
         except ForgeError:
             raise
-        except Exception as exc:
+        except RESOLVER_WRAP_ERRORS as exc:
             raise ForgeError("Failed to resolve workspace datasource", status_code=500, details={"workspace_id": ws, "error": str(exc)})
 
         if resolved is None:

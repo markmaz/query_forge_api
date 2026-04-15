@@ -10,6 +10,7 @@ from app.services.analytics.model_catalog_writer import ModelCatalogWriter
 logger = logging.getLogger(__name__)
 
 _SYNC_BATCH_SIZE = 50
+OPTIONAL_STAGE_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
 def _chunk(xs: list[dict], n: int = _SYNC_BATCH_SIZE) -> list[list[dict]]:
@@ -129,7 +130,6 @@ class MetadataSyncService:
                 _emit_progress()
 
             col_result = self._writer.upsert_columns(
-                table_id_by_name=batch_name_to_id,
                 columns=batch_columns,
                 origin=executor.get_dialect(),
                 overwrite_descriptions=overwrite_descriptions,
@@ -194,7 +194,7 @@ class MetadataSyncService:
                     options=profiling_options or {},
                     progress_callback=_on_profiling_progress,
                 )
-            except Exception:
+            except OPTIONAL_STAGE_FALLBACK_ERRORS:
                 logger.exception(
                     "MetadataSyncService: profiling failed for %s/%s",
                     datasource_name, schema,
@@ -233,7 +233,7 @@ class MetadataSyncService:
                     llm_id=llm_id,
                     progress_callback=_on_enrichment_progress,
                 )
-            except Exception:
+            except OPTIONAL_STAGE_FALLBACK_ERRORS:
                 logger.exception(
                     "MetadataSyncService: enrichment failed for %s/%s",
                     datasource_name, schema,

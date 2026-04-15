@@ -25,8 +25,21 @@ from urllib import request as urllib_request
 from urllib.error import URLError
 
 import certifi
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.exceptions.forge_error import ForgeError
 
 logger = logging.getLogger(__name__)
+
+DELIVERY_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError)
+DESTINATION_RESOLUTION_FALLBACK_ERRORS = (
+    ForgeError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    SQLAlchemyError,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +101,7 @@ class EmailDeliveryChannel(BaseDeliveryChannel):
                     reply_to=reply_to,
                 )
             return True, f"Alert emailed to {len(recipients)} recipient(s)."
-        except Exception as exc:
+        except DELIVERY_FALLBACK_ERRORS as exc:
             logger.exception("Email alert delivery failed")
             return False, str(exc)
 
@@ -136,7 +149,7 @@ class SlackDeliveryChannel(BaseDeliveryChannel):
                 return False, f"Slack responded: {resp.status} {response_text}"
         except URLError as exc:
             return False, f"Slack webhook error: {exc}"
-        except Exception as exc:
+        except DELIVERY_FALLBACK_ERRORS as exc:
             logger.exception("Slack delivery error")
             return False, str(exc)
 
@@ -193,7 +206,7 @@ class TeamsDeliveryChannel(BaseDeliveryChannel):
                 return False, f"Teams responded: {resp.status} {resp.read().decode()}"
         except URLError as exc:
             return False, f"Teams webhook error: {exc}"
-        except Exception as exc:
+        except DELIVERY_FALLBACK_ERRORS as exc:
             logger.exception("Teams delivery error")
             return False, str(exc)
 
@@ -258,7 +271,7 @@ class GenericWebhookDeliveryChannel(BaseDeliveryChannel):
                 return False, f"Webhook responded: {resp.status} {response_text}"
         except URLError as exc:
             return False, f"Webhook error: {exc}"
-        except Exception as exc:
+        except DELIVERY_FALLBACK_ERRORS as exc:
             logger.exception("Generic webhook delivery error")
             return False, str(exc)
 
@@ -282,7 +295,7 @@ def _resolve(config: dict, workspace_id: int) -> dict:
         try:
             from app.skills.destination_resolver import resolve_channel_config
             return resolve_channel_config(config, ws_id)
-        except Exception as exc:
+        except DESTINATION_RESOLUTION_FALLBACK_ERRORS as exc:
             logger.error("Failed to resolve destination_id=%s: %s", config.get("destination_id"), exc)
             raise
     return config

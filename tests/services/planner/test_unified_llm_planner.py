@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 import app.services.planner_domain.service as planner_domain_service_module
+import app.services.planner.unified_llm_planner as unified_llm_planner
 from app.services.planner.unified_llm_planner import build_plan_and_slots
 from app.services.planner_domain.llm_planning_service import LLMPlanningService
 from app.services.planner_domain.service import PlannerDomainService
@@ -21,8 +24,8 @@ class _FakeLLM:
 
 
 class _FakeCapabilitiesService:
-    def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
-        del workspace_id, user_id, vertical_norm
+    def get_domain_capabilities(self, *, workspace_id, user_id, domain_id):
+        del workspace_id, user_id
         assert domain_id == 6
         return {
             "domain_id": 6,
@@ -80,7 +83,6 @@ def test_unified_planner_valid_json_returns_slot_hints_and_plan():
         prompt="Show students by county",
         normalized_prompt="Show students by county",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=6,
         domain_name="Enrollment",
         capabilities_compact={"dimensions": [{"column_key": "wt20.county_fips_code"}], "filter_columns": []},
@@ -103,7 +105,6 @@ def test_unified_planner_extracts_json_wrapped_in_text():
         prompt="Show students by county",
         normalized_prompt="Show students by county",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=6,
         domain_name="Enrollment",
         capabilities_compact={"dimensions": [{"column_key": "wt20.county_fips_code"}], "filter_columns": []},
@@ -128,7 +129,6 @@ def test_unified_planner_retries_once_when_first_json_invalid():
         prompt="Show students by county",
         normalized_prompt="Show students by county",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=6,
         domain_name="Enrollment",
         capabilities_compact={"dimensions": [{"column_key": "wt20.county_fips_code"}], "filter_columns": []},
@@ -142,6 +142,30 @@ def test_unified_planner_retries_once_when_first_json_invalid():
     assert out["repaired"] is True
 
 
+def test_unified_planner_surfaces_unexpected_parse_failures(monkeypatch):
+    payload = _valid_unified_payload()
+    fake_llm = _FakeLLM([{"parsed": payload, "content": json.dumps(payload), "raw_text": json.dumps(payload)}])
+
+    def _boom(_raw: str):
+        raise RuntimeError("parse bug")
+
+    monkeypatch.setattr(unified_llm_planner, "parse_json_strict", _boom)
+
+    with pytest.raises(RuntimeError, match="parse bug"):
+        build_plan_and_slots(
+            prompt="Show students by county",
+            normalized_prompt="Show students by county",
+            workspace_id="ws-1",
+            base_domain_id=6,
+            domain_name="Enrollment",
+            capabilities_compact={"dimensions": [{"column_key": "wt20.county_fips_code"}], "filter_columns": []},
+            conversation_context={},
+            trace_id="trace-3b",
+            llm_client=fake_llm,
+            max_tokens=256,
+        )
+
+
 def test_unified_pipeline_invalid_columns_are_repaired(monkeypatch):
     monkeypatch.setattr(planner_domain_service_module, "PLANNER_UNIFIED_LLM", True)
     monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_ENABLED", False)
@@ -153,7 +177,6 @@ def test_unified_pipeline_invalid_columns_are_repaired(monkeypatch):
         prompt,
         normalized_prompt,
         workspace_id,
-        vertical_norm,
         base_domain_id,
         domain_name,
         capabilities,
@@ -167,7 +190,6 @@ def test_unified_pipeline_invalid_columns_are_repaired(monkeypatch):
             prompt,
             normalized_prompt,
             workspace_id,
-            vertical_norm,
             base_domain_id,
             domain_name,
             capabilities,

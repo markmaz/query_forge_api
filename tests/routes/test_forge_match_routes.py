@@ -87,6 +87,7 @@ def test_forge_match_analyze_route(client, monkeypatch):
         def analyze_session(self, **kwargs):
             assert kwargs["session_id"] == "sess-1"
             assert kwargs["top_n"] == 8
+            assert "vertical_norm" not in kwargs
             return {
                 "session_id": "sess-1",
                 "workspace_id": "ws-1",
@@ -140,6 +141,7 @@ def test_forge_match_analyze_start_route(client, monkeypatch):
     class _Svc:
         def start_analyze_session_job(self, **kwargs):
             assert kwargs["session_id"] == "sess-1"
+            assert "vertical_norm" not in kwargs
             return {
                 "job_id": "job-1",
                 "session_id": "sess-1",
@@ -159,6 +161,7 @@ def test_forge_match_analyze_start_route(client, monkeypatch):
     assert resp.status_code == 202
     assert resp.json["job_id"] == "job-1"
     assert called["kwargs"]["task_id"] == "job-1"
+    assert "vertical_norm" not in called["kwargs"]["kwargs"]
 
 
 def test_forge_match_analyze_start_route_enqueue_failure_returns_503(client, monkeypatch):

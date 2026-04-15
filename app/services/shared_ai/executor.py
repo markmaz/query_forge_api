@@ -10,6 +10,8 @@ from app.services.shared_ai.graph import PipelineDefinition, incoming_edges, out
 from app.services.shared_ai.node import BasePipelineNode
 from app.services.shared_ai.tracing import build_trace_entry
 
+NODE_EXECUTION_WRAP_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+
 
 class PipelineExecutor:
     def execute(self, definition: PipelineDefinition, context: PipelineContext) -> PipelineContext:
@@ -60,7 +62,7 @@ class PipelineExecutor:
                     context = node.run(context)
                 except MissingArtifactError:
                     raise
-                except Exception as exc:  # pragma: no cover - covered via wrapped error assertion
+                except NODE_EXECUTION_WRAP_ERRORS as exc:  # pragma: no cover - covered via wrapped error assertion
                     elapsed_ms = int((perf_counter() - started) * 1000)
                     context.timings_ms[node_name] = elapsed_ms
                     summary = _trace_summary(node=node, context=context)

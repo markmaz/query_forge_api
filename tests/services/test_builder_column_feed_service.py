@@ -82,14 +82,3 @@ def test_list_available_columns_sql_does_not_reference_legacy_model_or_exists_co
     assert "wt.exists_in_dbx" not in rows_sql
     assert "wc.model_column_id" not in count_sql
     assert "wc.model_column_id" not in rows_sql
-
-
-def test_list_domain_tables_sql_does_not_reference_exists_in_dbx() -> None:
-    sql = FakeForgeQueryPort()
-    sql.query_mappings_responses = [[]]
-    service = BuilderColumnFeedService(sql=sql)
-    service.list_domain_tables(workspace_id="ws1", user_id="u1", domain_id=None)
-
-    assert len(sql.query_mappings_calls) == 1
-    query = sql.query_mappings_calls[0].query.lower()
-    assert "wt.exists_in_dbx" not in query

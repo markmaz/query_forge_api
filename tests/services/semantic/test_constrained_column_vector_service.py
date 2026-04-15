@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+import pytest
+
 from app.services.semantic.constrained_column_vector_service import ConstrainedColumnVectorService
 from tests._support.fakes import FakeForgeQueryPort
 
@@ -93,3 +95,20 @@ def test_constrained_vector_search_applies_domain_workspace_table_filter() -> No
     assert out["hits"][0]["model_column_id"] == 101
     values = _match_any_values(qdrant.last_filter)
     assert values == [101]
+
+
+def test_constrained_vector_search_surfaces_unexpected_model_column_id_errors() -> None:
+    class _BadInt:
+        def __int__(self) -> int:
+            raise AssertionError("unexpected model column parse bug")
+
+    svc = ConstrainedColumnVectorService(qdrant=_FakeQdrant([]), model=_FakeModel())
+
+    with pytest.raises(AssertionError, match="unexpected model column parse bug"):
+        svc.search(
+            prompt="students by grade",
+            workspace_id="ws-1",
+            candidate_columns=[{"model_column_id": _BadInt(), "weight": 1.0}],
+            concept_hits=[],
+            max_columns=10,
+        )

@@ -39,13 +39,11 @@ class ModelCatalogWriter:
 
     def upsert_columns(
         self,
-        table_id_by_name: dict[str, int],
         columns: list[dict],
         origin: str,
         overwrite_descriptions: bool = False,
     ) -> dict[str, Any]:
         return self._gateway.upsert_columns(
-            table_id_by_name=table_id_by_name,
             columns=columns,
             origin=origin,
             overwrite_descriptions=overwrite_descriptions,

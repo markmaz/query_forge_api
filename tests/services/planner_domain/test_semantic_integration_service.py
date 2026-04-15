@@ -34,7 +34,7 @@ def test_semantic_integration_service_accepts_injected_grounding_service() -> No
 def test_resolve_alias_constraints_returns_empty_when_disabled(monkeypatch) -> None:
     monkeypatch.setattr(sem_mod, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", False)
     svc = SemanticIntegrationService()
-    result = svc.resolve_alias_constraints(prompt="students born in US", vertical_norm="education")
+    result = svc.resolve_alias_constraints(prompt="students born in US")
     assert result == []
 
 
@@ -45,7 +45,7 @@ def test_resolve_alias_constraints_delegates_to_grounding_service(monkeypatch) -
         {"kind": "value", "text": "US", "op": "eq", "value_hint": "United States", "notes": None}
     ]
     svc = SemanticIntegrationService(semantic_grounding_service=mock_grounding)
-    result = svc.resolve_alias_constraints(prompt="students born in US", vertical_norm="education")
+    result = svc.resolve_alias_constraints(prompt="students born in US")
     assert len(result) == 1
     assert result[0]["value_hint"] == "United States"
     mock_grounding.resolve_alias_constraints.assert_called_once()
@@ -57,7 +57,7 @@ def test_resolve_alias_constraints_deduplicates(monkeypatch) -> None:
     mock_grounding = MagicMock()
     mock_grounding.resolve_alias_constraints.return_value = [constraint, constraint]
     svc = SemanticIntegrationService(semantic_grounding_service=mock_grounding)
-    result = svc.resolve_alias_constraints(prompt="test", vertical_norm="education")
+    result = svc.resolve_alias_constraints(prompt="test")
     assert len(result) == 1
 
 
@@ -66,7 +66,7 @@ def test_resolve_alias_constraints_resilient_to_grounding_error(monkeypatch) -> 
     mock_grounding = MagicMock()
     mock_grounding.resolve_alias_constraints.side_effect = RuntimeError("boom")
     svc = SemanticIntegrationService(semantic_grounding_service=mock_grounding)
-    result = svc.resolve_alias_constraints(prompt="test", vertical_norm="education")
+    result = svc.resolve_alias_constraints(prompt="test")
     assert result == []
 
 
@@ -92,7 +92,6 @@ def test_resolve_semester_indicator_columns_infers_spring_from_column_name(monke
     svc = SemanticIntegrationService()
     result = svc.resolve_semester_indicator_columns(
         workspace_id="ws-1",
-        vertical_norm="education",
         capabilities=caps,
     )
     assert result.get("spring") == "wt1.is_spring_block"
@@ -112,7 +111,6 @@ def test_resolve_semester_indicator_columns_infers_all_three(monkeypatch) -> Non
     svc = SemanticIntegrationService()
     result = svc.resolve_semester_indicator_columns(
         workspace_id="ws-1",
-        vertical_norm="education",
         capabilities=caps,
     )
     assert result.get("spring") == "wt1.is_spring"
@@ -149,10 +147,39 @@ def test_resolve_semester_indicator_columns_uses_semantic_concepts(monkeypatch) 
     svc = SemanticIntegrationService()
     result = svc.resolve_semester_indicator_columns(
         workspace_id="ws-1",
-        vertical_norm="education",
         capabilities=caps,
     )
     assert result.get("spring") == "wt1.spring_flag"
+
+
+def test_resolve_semester_indicator_columns_keeps_inferred_values_when_semantic_lookup_fails(monkeypatch) -> None:
+    monkeypatch.setattr(sem_mod, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
+
+    class _FailingSql:
+        def execute_query_mappings(self, query, params):
+            del query, params
+            raise RuntimeError("semantic lookup unavailable")
+
+    monkeypatch.setattr(sem_mod, "ForgeMetaSQL", lambda: _FailingSql())
+
+    caps: Dict[str, Any] = {
+        "filter_columns": [
+            {"column_key": "wt1.is_spring", "column_name": "is_spring", "filterable": True},
+            {"column_key": "wt1.is_fall", "column_name": "is_fall", "filterable": True},
+        ],
+        "dimensions": [],
+        "time_columns": [],
+    }
+    svc = SemanticIntegrationService()
+    result = svc.resolve_semester_indicator_columns(
+        workspace_id="ws-1",
+        capabilities=caps,
+    )
+
+    assert result == {
+        "spring": "wt1.is_spring",
+        "fall": "wt1.is_fall",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +194,6 @@ def test_normalize_semantic_value_alias_filters_disabled_returns_passthrough(mon
     result_plan, issues, debug = svc.normalize_semantic_value_alias_filters(
         plan_json=plan,
         workspace_id="ws-1",
-        vertical_norm="education",
         capabilities={},
     )
     assert result_plan == plan
@@ -182,7 +208,6 @@ def test_normalize_semantic_value_alias_filters_empty_filters_passthrough(monkey
     result_plan, issues, debug = svc.normalize_semantic_value_alias_filters(
         plan_json=plan,
         workspace_id="ws-1",
-        vertical_norm="education",
         capabilities={},
     )
     assert issues == []
@@ -227,7 +252,6 @@ def test_normalize_semantic_value_alias_filters_applies_alias_map(monkeypatch) -
     result_plan, issues, debug = svc.normalize_semantic_value_alias_filters(
         plan_json=plan,
         workspace_id="ws-1",
-        vertical_norm="education",
         capabilities=caps,
     )
     assert result_plan["filters"][0]["value"] == "Black"
@@ -275,8 +299,41 @@ def test_normalize_semantic_value_alias_filters_coerces_boolean(monkeypatch) -> 
     result_plan, issues, debug = svc.normalize_semantic_value_alias_filters(
         plan_json=plan,
         workspace_id="ws-1",
-        vertical_norm="generic",
         capabilities=caps,
     )
     assert result_plan["filters"][0]["value"] is False
     assert debug["applied"] == 1
+
+
+def test_normalize_semantic_value_alias_filters_returns_passthrough_when_lookup_fails(monkeypatch) -> None:
+    monkeypatch.setattr(sem_mod, "QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED", True)
+
+    class _FailingSql:
+        def execute_query_mappings(self, query, params):
+            del query, params
+            raise RuntimeError("semantic alias lookup unavailable")
+
+    monkeypatch.setattr(sem_mod, "ForgeMetaSQL", lambda: _FailingSql())
+
+    plan: Dict[str, Any] = {
+        "filters": [{"column_key": "wt24.race_ethnicity", "op": "=", "value": "African American"}]
+    }
+    caps: Dict[str, Any] = {
+        "filter_columns": [
+            {
+                "column_key": "wt24.race_ethnicity",
+                "filterable": True,
+                "workspace_column_id": 1004,
+            }
+        ]
+    }
+    svc = SemanticIntegrationService()
+    result_plan, issues, debug = svc.normalize_semantic_value_alias_filters(
+        plan_json=plan,
+        workspace_id="ws-1",
+        capabilities=caps,
+    )
+
+    assert result_plan == plan
+    assert issues == []
+    assert debug["applied"] == 0

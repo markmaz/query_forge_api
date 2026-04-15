@@ -4,13 +4,12 @@ from app.services.semantic.concept_to_column_service import ConceptToColumnServi
 from app.services.semantic.constrained_column_vector_service import ConstrainedColumnVectorService
 from app.services.semantic.deterministic_matcher import DeterministicMatcher
 from app.services.semantic.domain_selection_service import DomainSelectionService
-from app.services.semantic.plan_service import PlanService
+from app.services.semantic.plan import PlanService
 from app.services.semantic.semantic_assignment_service import SemanticAssignmentService
 from app.services.semantic.semantic_concept_matcher import SemanticConceptMatcher
 from app.services.semantic.semantic_concept_service import SemanticConceptService
 from app.services.semantic.semantic_card_service import SemanticCardService
 from app.services.semantic.semantic_llm_labeler import SemanticLLMLabeler
-from app.services.semantic.semantic_mapping_service import SemanticMappingService
 from app.services.semantic.value_alias_resolution_service import ValueAliasResolutionService
 from app.services.semantic.semantic_postprocess import (
     apply_deterministic_overrides,
@@ -42,7 +41,6 @@ __all__ = [
     "ConceptSeedService",
     "SemanticLLMLabeler",
     "SemanticRegistryService",
-    "SemanticMappingService",
     "SemanticRelationshipService",
     "SemanticSuggestionService",
     "ValueAliasResolutionService",

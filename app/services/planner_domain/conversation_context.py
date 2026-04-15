@@ -39,18 +39,6 @@ def normalize_plan_prompt(prompt: str) -> str:
     return text
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _norm_vertical(vertical_norm: str) -> str:
-    token = str(vertical_norm or "generic").strip().lower()
-    if token in {"education", "healthcare", "generic"}:
-        return token
-    return "generic"
-
-
 def _norm_key(value: Any) -> str:
     return str(value or "").strip().lower()
 
@@ -117,7 +105,6 @@ def _plan_conversation_context_from_state(
         conversation_id=str(conversation_id or "").strip(),
         prior_prompt=prior_prompt,
         prior_plan_json_v2=prior_plan,
-        prior_vertical_norm=_norm_vertical(str(state.get("vertical_norm") or "generic")),
         followup_mode=followup_mode,
         seeded_from_client=bool(seeded_from_client),
     )
@@ -127,20 +114,16 @@ def _bootstrap_conversation_state_from_seed(
     *,
     workspace_id: str,
     user_id: str,
-    vertical_norm: str,
     seed_plan_json_v2: Mapping[str, Any],
     seed_last_prompt: str,
 ) -> Dict[str, Any]:
     plan = dict(seed_plan_json_v2 or {})
-    normalized_vertical = _norm_vertical(vertical_norm)
-    plan_vertical = _norm_vertical(str(plan.get("vertical_norm") or normalized_vertical))
     prompt = seed_last_prompt
     if prompt == "":
         prompt = str(((plan.get("debug") or {}).get("normalized_prompt") or "")).strip()
     return {
         "workspace_id": workspace_id,
         "user_id": user_id,
-        "vertical_norm": plan_vertical,
         "last_prompt": prompt,
         "trace_id": str(plan.get("trace_id") or "").strip(),
         "plan_json_v2": plan,

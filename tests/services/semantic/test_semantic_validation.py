@@ -180,3 +180,30 @@ def test_metric_samples_empty_not_invalid_if_numeric_type() -> None:
     )
     assert "metric_sample_mismatch" not in result["validation_errors"]
     assert "metric_samples_missing" not in result["warnings"]
+
+
+def test_validate_semantic_suggestion_surfaces_unexpected_confidence_parse_errors() -> None:
+    class _BadFloat:
+        def __float__(self) -> float:
+            raise AssertionError("unexpected confidence parse bug")
+
+    with pytest.raises(AssertionError, match="unexpected confidence parse bug"):
+        validate_semantic_suggestion(
+            output={
+                "concept_key": "STUDENT_ID",
+                "semantic_type": "identifier",
+                "sub_type": None,
+                "entity": "student",
+                "granularity_rank": 0,
+                "filter_allowed": True,
+                "group_by_allowed": True,
+                "aggregation_allowed": True,
+                "is_identifier": True,
+                "is_metric": False,
+                "display_priority": 0,
+                "sensitive": False,
+                "confidence": _BadFloat(),
+                "reasons": ["id-like"],
+            },
+            card={"signals": {}},
+        )

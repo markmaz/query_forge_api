@@ -9,6 +9,7 @@ from app.config import VALKEY_CONFIG
 from app.exceptions.forge_error import ForgeError
 
 logger = logging.getLogger(__name__)
+RATE_LIMIT_FALLBACK_ERRORS = (redis.RedisError, OSError, RuntimeError, TypeError, ValueError)
 
 
 class RateLimitService:
@@ -37,7 +38,7 @@ class RateLimitService:
         key_id = str(identifier or "unknown").strip() or "unknown"
         try:
             count, ttl = self.increment(scope=scope, identifier=key_id, window_s=window_s)
-        except Exception:
+        except RATE_LIMIT_FALLBACK_ERRORS:
             # Fail-open if Valkey is unavailable so auth does not hard fail.
             logger.warning("rate_limit_unavailable scope=%s identifier=%s", scope, key_id, exc_info=True)
             return

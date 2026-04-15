@@ -1,27 +1,28 @@
 from importlib import import_module
 
-FEATURE_REGISTRAR_MODULES = [
-    "app.features.auth.register",
-    "app.features.users.register",
-    "app.features.workspaces.register",
-    "app.features.admin.register",
-    "app.features.catalog.register",
-    "app.features.skills.register",
-    "app.features.query_engine.register",
-    "app.features.saved_queries.register",
-    "app.features.forge_match.register",
-    "app.features.planner.register",
-    "app.features.ai.register",
-    "app.features.exports.register",
-    "app.features.semantic.register",
-    "app.features.ingestion.register",
-    "app.features.vector.register",
-    "app.features.data_catalog.register",
-    "app.features.data_environment.register",
+FEATURE_MODULES = [
+    "app.features.auth.routes",
+    "app.features.users.routes",
+    "app.features.workspaces.routes",
+    "app.features.admin.routes",
+    "app.features.catalog.routes",
+    "app.features.domains.routes",
+    "app.features.skills.routes",
+    "app.features.query_engine.routes",
+    "app.features.saved_queries.routes",
+    "app.features.forge_match.routes",
+    "app.features.planner.routes",
+    "app.features.ai.routes",
+    "app.features.exports.routes",
+    "app.features.semantic.routes",
+    "app.features.ingestion.routes",
+    "app.features.vector.routes",
+    "app.features.data_catalog.routes",
+    "app.features.data_environment.routes",
 ]
 
 
 def register_features(api):
-    for module_name in FEATURE_REGISTRAR_MODULES:
+    for module_name in FEATURE_MODULES:
         registrar = import_module(module_name).register
         registrar(api)

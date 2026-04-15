@@ -6,7 +6,7 @@ from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import METADATA_SOURCE_MODE
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
-from app.services.semantic.semantic_registry_service import _coerce_positive_int, _normalize_vertical
+from app.services.semantic.semantic_registry_service import _coerce_positive_int
 
 
 class SemanticMappingService:
@@ -33,11 +33,6 @@ class SemanticMappingService:
 
         where = []
         params: Dict[str, Any] = {"limit": size_val, "offset": offset}
-
-        vertical_norm = _normalize_vertical(vertical)
-        if vertical_norm is not None:
-            where.append("sr.vertical_norm = :vertical_norm")
-            params["vertical_norm"] = vertical_norm
 
         workspace_norm = _normalize_workspace(workspace_id)
         if workspace_norm is not None:
@@ -83,8 +78,6 @@ class SemanticMappingService:
               scm.confidence_score,
               scm.created_at,
               sr.concept_key,
-              sr.vertical,
-              sr.vertical_norm,
               sr.semantic_type,
               sr.entity
             FROM semantic_column_map scm
@@ -130,8 +123,6 @@ class SemanticMappingService:
               scm.confidence_score,
               scm.created_at,
               sr.concept_key,
-              sr.vertical,
-              sr.vertical_norm,
               sr.semantic_type,
               sr.entity
             FROM semantic_column_map scm
@@ -201,12 +192,11 @@ class SemanticMappingService:
         if not key:
             raise ForgeError("concept_key is required", status_code=400)
 
-        vertical_norm = _normalize_vertical(vertical) or "__global__"
+        del vertical
         workspace_norm = _normalize_workspace(workspace_id) or "__global__"
 
         params: Dict[str, Any] = {
             "concept_key": key,
-            "vertical_norm": vertical_norm,
             "workspace_norm": workspace_norm,
         }
 
@@ -224,14 +214,11 @@ class SemanticMappingService:
               scm.confidence_score,
               scm.created_at,
               sr.concept_key,
-              sr.vertical,
-              sr.vertical_norm,
               sr.semantic_type,
               sr.entity
             FROM semantic_column_map scm
             JOIN semantic_registry sr ON sr.id = scm.semantic_registry_id
             WHERE LOWER(sr.concept_key) = :concept_key
-              AND sr.vertical_norm = :vertical_norm
               AND scm.workspace_norm IN (:workspace_norm, '__global__')
             """,
             params,
@@ -310,8 +297,6 @@ class SemanticMappingService:
               scm.confidence_score,
               scm.created_at,
               sr.concept_key,
-              sr.vertical,
-              sr.vertical_norm,
               sr.semantic_type,
               sr.entity
             FROM semantic_column_map scm

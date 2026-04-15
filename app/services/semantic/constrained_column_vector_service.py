@@ -11,6 +11,7 @@ from app.infra.qdrant_client import QdrantClientWrapper
 from app.ports.sql_executor import ForgeQueryPort
 
 COLUMN_COLLECTION_NAME = QDRANT_COLUMN_COLLECTION_V2 or QDRANT_COLUMN_COLLECTION or "column_catalog_v2"
+INT_PARSE_ERRORS = (TypeError, ValueError)
 
 
 class ConstrainedColumnVectorService:
@@ -39,7 +40,7 @@ class ConstrainedColumnVectorService:
         for row in candidate_columns:
             try:
                 model_column_id = int(row.get("model_column_id"))
-            except Exception:
+            except INT_PARSE_ERRORS:
                 continue
             existing = candidate_by_id.get(model_column_id)
             if existing is None or float(existing.get("weight") or 0.0) < float(row.get("weight") or 0.0):
@@ -152,7 +153,7 @@ def _to_int_or_none(value: Any) -> Optional[int]:
         return None
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 

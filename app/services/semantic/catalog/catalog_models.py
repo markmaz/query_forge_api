@@ -99,7 +99,7 @@ class ColumnEnrichment(BaseModel):
     def _clamp_confidence(cls, value: Any) -> float:
         try:
             number = float(value)
-        except Exception:
+        except (TypeError, ValueError):
             return 0.0
         return max(0.0, min(1.0, number))
 
@@ -110,7 +110,6 @@ class EnrichedColumnProfile(BaseModel):
 
 
 class ConceptUpsert(BaseModel):
-    vertical_norm: str
     concept_key: str
     name: str
     description: str
@@ -127,9 +126,7 @@ class ConceptUpsert(BaseModel):
     sensitive: bool = False
     status: str = "active"
 
-
 class AliasUpsert(BaseModel):
-    vertical_norm: str
     alias_key: str
     concept_key: str
     match_kind: str = "exact"
@@ -143,7 +140,6 @@ class RelationshipUpsert(BaseModel):
 
 
 class ValueAliasUpsert(BaseModel):
-    vertical_norm: str
     semantic_concept_id: int
     canonical_value: str
     alias_value: str
@@ -162,7 +158,6 @@ class SemanticCatalogBuildResult(BaseModel):
     workspace_id: str
     domain_id: Optional[int] = None
     domain_name: Optional[str] = None
-    vertical_norm: str
     profile_count: int = 0
     enriched_count: int = 0
     concepts_upserted: int = 0
@@ -176,7 +171,6 @@ class SemanticCatalogBuildResult(BaseModel):
     alias_preview: List[Dict[str, Any]] = Field(default_factory=list)
     relationship_preview: List[Dict[str, Any]] = Field(default_factory=list)
     index_preview: List[Dict[str, Any]] = Field(default_factory=list)
-
 
 class SemanticEnrichmentBatchResponse(BaseModel):
     items: List[ColumnEnrichment]

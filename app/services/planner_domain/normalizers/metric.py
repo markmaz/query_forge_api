@@ -216,7 +216,7 @@ def _normalize_top_bottom_ranking_in_plan(
     ranking_kind = str(match.group("kind") or "").strip().lower()
     try:
         requested_limit = int(match.group("limit") or 0)
-    except Exception:
+    except (TypeError, ValueError):
         requested_limit = 0
     if requested_limit <= 0:
         return plan, [], []

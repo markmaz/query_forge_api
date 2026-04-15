@@ -14,10 +14,8 @@ from app.models.semantic.semantic_registry import SemanticBase
 PLANNER_RERANK_SCOPE_TYPES = frozenset(
     {
         "global",
-        "vertical",
         "workspace",
         "global_domain",
-        "vertical_domain",
         "workspace_domain",
     }
 )
@@ -25,14 +23,26 @@ PLANNER_RERANK_SCOPE_TYPES = frozenset(
 PLANNER_RERANK_SIGNAL_KEYS = frozenset(
     {
         "student_listing",
+        "school_listing",
         "student_aggregate",
         "staff_listing",
         "staff_aggregate",
         "school_aggregate",
+        "staff_work_context_prompt",
+        "student_school_context_prompt",
+        "adm_prompt",
         "age_extreme_prompt",
         "birth_month_prompt",
         "calendar_days_off_prompt",
         "school_literal_present",
+        "school_or_district_prompt",
+        "city_state_prompt",
+        "nativity_prompt",
+        "name_constraint_prompt",
+        "canonical_name_preference_prompt",
+        "explicit_preferred_name_request",
+        "explicit_school_key_request",
+        "explicit_staff_classification_request",
         "district_literal_present",
         "time_constraint_present",
         "status_enrolled",
@@ -162,7 +172,7 @@ class PlannerRerankPolicyRule(BaseModel):
 
 
 class PlannerRerankPolicyUpsertRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     id: Optional[int] = Field(default=None, ge=1)
     policy_key: str = Field(min_length=1, max_length=150)
@@ -170,14 +180,13 @@ class PlannerRerankPolicyUpsertRequest(BaseModel):
     description: Optional[str] = None
     scope_type: str = Field(min_length=1, max_length=32)
     scope_workspace_id: Optional[str] = Field(default=None, max_length=128)
-    scope_vertical_norm: Optional[str] = Field(default=None, max_length=64)
     scope_base_domain_id: Optional[int] = Field(default=None, ge=1)
     priority: int = Field(default=100)
     is_active: bool = True
     stop_on_match: bool = False
     policy_json: PlannerRerankPolicyRule
 
-    @field_validator("policy_key", "name", "description", "scope_workspace_id", "scope_vertical_norm", mode="before")
+    @field_validator("policy_key", "name", "description", "scope_workspace_id", mode="before")
     @classmethod
     def _clean_text(cls, value: Any) -> Optional[str]:
         if value is None:
@@ -195,12 +204,11 @@ class PlannerRerankPolicyUpsertRequest(BaseModel):
 
 
 class PlannerDomainCapabilityUpsertRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     id: Optional[int] = Field(default=None, ge=1)
     scope_type: str = Field(min_length=1, max_length=32)
     scope_workspace_id: Optional[str] = Field(default=None, max_length=128)
-    scope_vertical_norm: Optional[str] = Field(default=None, max_length=64)
     base_domain_id: int = Field(ge=1)
     capability_key: str = Field(min_length=1, max_length=100)
     support_level: str = Field(default="direct", min_length=1, max_length=32)
@@ -210,7 +218,7 @@ class PlannerDomainCapabilityUpsertRequest(BaseModel):
     notes: Optional[str] = None
     is_active: bool = True
 
-    @field_validator("scope_workspace_id", "scope_vertical_norm", "source_ref", "notes", mode="before")
+    @field_validator("scope_workspace_id", "source_ref", "notes", mode="before")
     @classmethod
     def _clean_optional_text(cls, value: Any) -> Optional[str]:
         if value is None:
@@ -252,18 +260,17 @@ class PlannerDomainCapabilityUpsertRequest(BaseModel):
 
 
 class PlannerRerankPolicyCandidateCreateRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     id: Optional[int] = Field(default=None, ge=1)
     candidate_key: str = Field(min_length=1, max_length=150)
     source_type: str = Field(default="ai_recommendation", min_length=1, max_length=50)
     workspace_id: Optional[str] = Field(default=None, max_length=128)
-    vertical_norm: Optional[str] = Field(default=None, max_length=64)
     candidate_policy: PlannerRerankPolicyRule
     rationale_json: Optional[dict[str, Any]] = None
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
-    @field_validator("candidate_key", "workspace_id", "vertical_norm", mode="before")
+    @field_validator("candidate_key", "workspace_id", mode="before")
     @classmethod
     def _clean_candidate_text(cls, value: Any) -> Optional[str]:
         if value is None:
@@ -281,17 +288,16 @@ class PlannerRerankPolicyCandidateCreateRequest(BaseModel):
 
 
 class PlannerRerankPolicyCandidateSuggestRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     prompt: str = Field(min_length=1, max_length=4000)
-    vertical_norm: Optional[str] = Field(default=None, max_length=64)
     expected_base_domain_id: int = Field(ge=1)
     observed_base_domain_id: Optional[int] = Field(default=None, ge=1)
     candidate_key: Optional[str] = Field(default=None, max_length=150)
     notes: Optional[str] = None
     llm_id: Optional[int] = Field(default=None, ge=1)
 
-    @field_validator("prompt", "vertical_norm", "candidate_key", "notes", mode="before")
+    @field_validator("prompt", "candidate_key", "notes", mode="before")
     @classmethod
     def _clean_suggest_text(cls, value: Any) -> Optional[str]:
         if value is None:
@@ -328,20 +334,19 @@ class PlannerRerankPolicyCandidateSuggestionLLMResponse(BaseModel):
 
 
 class PlannerRerankPolicyCandidateApproveRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=255)
     description: Optional[str] = None
     scope_type: str = Field(min_length=1, max_length=32)
     scope_workspace_id: Optional[str] = Field(default=None, max_length=128)
-    scope_vertical_norm: Optional[str] = Field(default=None, max_length=64)
     scope_base_domain_id: Optional[int] = Field(default=None, ge=1)
     priority: int = Field(default=100)
     is_active: bool = True
     stop_on_match: bool = False
     policy_key: Optional[str] = Field(default=None, max_length=150)
 
-    @field_validator("name", "description", "scope_workspace_id", "scope_vertical_norm", "policy_key", mode="before")
+    @field_validator("name", "description", "scope_workspace_id", "policy_key", mode="before")
     @classmethod
     def _clean_approval_text(cls, value: Any) -> Optional[str]:
         if value is None:
@@ -400,19 +405,17 @@ class PlannerDomainCapability(SemanticBase):
             "base_domain_id",
             "capability_key",
             "scope_workspace_id",
-            "scope_vertical_norm",
             "source_ref",
             name="uidx_domain_capability_scope",
         ),
         Index("idx_pdc_domain", "base_domain_id"),
         Index("idx_pdc_capability", "capability_key"),
-        Index("idx_pdc_scope", "scope_workspace_id", "scope_vertical_norm"),
+        Index("idx_pdc_scope", "scope_workspace_id"),
     )
 
     id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
     scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
     scope_workspace_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    scope_vertical_norm: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     base_domain_id: Mapped[int] = mapped_column(BIGINT(unsigned=True), nullable=False)
     capability_key: Mapped[str] = mapped_column(String(100), nullable=False)
     support_level: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'direct'"))
@@ -436,11 +439,10 @@ class PlannerRerankPolicy(SemanticBase):
         UniqueConstraint(
             "policy_key",
             "scope_workspace_id",
-            "scope_vertical_norm",
             "scope_base_domain_id",
             name="uidx_rerank_policy_scope",
         ),
-        Index("idx_prp_scope", "scope_workspace_id", "scope_vertical_norm", "scope_base_domain_id"),
+        Index("idx_prp_scope", "scope_workspace_id", "scope_base_domain_id"),
         Index("idx_prp_priority", "priority"),
         Index("idx_prp_active", "is_active"),
     )
@@ -451,7 +453,6 @@ class PlannerRerankPolicy(SemanticBase):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
     scope_workspace_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    scope_vertical_norm: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     scope_base_domain_id: Mapped[Optional[int]] = mapped_column(BIGINT(unsigned=True), nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("100"))
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
@@ -487,14 +488,13 @@ class PlannerRerankPolicyCandidate(SemanticBase):
     __tablename__ = "planner_rerank_policy_candidate"
     __table_args__ = (
         Index("idx_prpc_status", "review_status"),
-        Index("idx_prpc_scope", "workspace_id", "vertical_norm"),
+        Index("idx_prpc_scope", "workspace_id"),
     )
 
     id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
     candidate_key: Mapped[str] = mapped_column(String(150), nullable=False)
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)
     workspace_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    vertical_norm: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     candidate_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     rationale_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
     confidence: Mapped[Optional[Decimal]] = mapped_column(DECIMAL(5, 4), nullable=True)

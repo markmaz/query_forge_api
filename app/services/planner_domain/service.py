@@ -6,6 +6,8 @@ from time import perf_counter
 from typing import Any, Dict, List, Mapping, Optional
 
 from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
+from valkey.exceptions import ValkeyError
 
 from app.config.llm_resolver import build_llm_client_for_role
 from app.config import (
@@ -46,7 +48,6 @@ from app.services.planner_domain.conversation_store import (
 )
 from app.services.planner_domain.conversation_context import (
     _bootstrap_conversation_state_from_seed,
-    _norm_vertical,
     _plan_conversation_context_from_state,
     normalize_plan_prompt,
 )
@@ -91,7 +92,8 @@ from app.services.vector import DomainVectorIndexService
 
 logger = logging.getLogger(__name__)
 
-
+CONVERSATION_STORE_FALLBACK_ERRORS = (OSError, ValkeyError)
+OPTIONAL_TIME_POLICY_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, ValueError, SQLAlchemyError)
 class PlannerDomainService:
     def __init__(
         self,
@@ -268,7 +270,7 @@ class PlannerDomainService:
                 user_id=str(user_id),
                 conversation_id=conversation_id,
             )
-        except Exception as exc:
+        except CONVERSATION_STORE_FALLBACK_ERRORS as exc:
             logger.warning("planner_domain conversation load failed conversation_id=%s err=%s", conversation_id, exc)
             prior_state = None
         if req.conversation_id and prior_state is None:
@@ -277,7 +279,6 @@ class PlannerDomainService:
                 prior_state = _bootstrap_conversation_state_from_seed(
                     workspace_id=req.workspace_id,
                     user_id=str(user_id),
-                    vertical_norm=req.vertical_norm,
                     seed_plan_json_v2=seed_plan,
                     seed_last_prompt=seed_last_prompt,
                 )
@@ -318,26 +319,21 @@ class PlannerDomainService:
 
         t_prompt_norm = perf_counter()
         normalized_prompt = normalize_plan_prompt(req.prompt)
-        vertical = _norm_vertical(req.vertical_norm)
-        if context is not None and vertical == "generic" and context.prior_vertical_norm in {"education", "healthcare"}:
-            vertical = context.prior_vertical_norm
         _add_pipeline_step(
             profile_steps=pipeline_profile_steps,
             enabled=profile_enabled,
-            step="normalize_prompt_and_vertical",
-            label="Normalize prompt and effective vertical",
+            step="normalize_prompt",
+            label="Normalize prompt and planner context",
             started_at=t_prompt_norm,
         )
         pipeline_trace["normalized_prompt"] = normalized_prompt
-        pipeline_trace["vertical_norm"] = vertical
         _append_pipeline_trace_step(
             trace=pipeline_trace,
             enabled=trace_capture_enabled,
-            step="normalize_prompt_and_vertical",
+            step="normalize_prompt",
             data={
                 "prompt": req.prompt,
                 "normalized_prompt": normalized_prompt,
-                "vertical_norm": vertical,
                 "conversation_context_used": context is not None,
                 "followup_mode": bool(context and context.followup_mode),
             },
@@ -358,7 +354,6 @@ class PlannerDomainService:
         ) = self._domain_selection.select_domain_and_shortlist(
             workspace_id=req.workspace_id,
             user_id=str(user_id),
-            vertical_norm=vertical,
             prompt=normalized_prompt,
             provided_domain_id=effective_domain_id,
         )
@@ -383,7 +378,6 @@ class PlannerDomainService:
         capabilities_full = DomainSelectionService.full_capabilities_for_execution(capabilities)
         semester_indicator_columns = self._semantic_integration.resolve_semester_indicator_columns(
             workspace_id=req.workspace_id,
-            vertical_norm=vertical,
             capabilities=capabilities_full,
         )
         timings["capabilities"] = _add_pipeline_step(
@@ -421,7 +415,7 @@ class PlannerDomainService:
                 policy_obj = policy_resp.get("policy") if isinstance(policy_resp, Mapping) else None
                 if isinstance(policy_obj, Mapping):
                     domain_time_policy = dict(policy_obj)
-            except Exception as exc:
+            except OPTIONAL_TIME_POLICY_FALLBACK_ERRORS as exc:
                 logger.warning(
                     "planner_domain time_policy_load_failed workspace_id=%s domain_id=%s trace_id=%s err=%s",
                     req.workspace_id,
@@ -439,6 +433,7 @@ class PlannerDomainService:
         semantic_grounding_bundle = None
         semantic_value_alias_constraints: List[Dict[str, Any]] = []
         semantic_grounding_debug: Optional[Dict[str, Any]] = None
+        projection_policy_debug: Optional[Dict[str, Any]] = None
         if QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED:
             semantic_capabilities = self._domain_selection.compact_capabilities_for_llm(
                 capabilities=capabilities,
@@ -446,11 +441,16 @@ class PlannerDomainService:
                 prompt=normalized_prompt,
                 slot_hints=None,
                 fast_mode=fast_mode,
+                workspace_id=req.workspace_id,
+                include_projection_policy_debug=bool(req.debug),
             )
+            if req.debug:
+                raw_projection_debug = semantic_capabilities.pop("projection_policy_debug", None)
+                if isinstance(raw_projection_debug, Mapping):
+                    projection_policy_debug = dict(raw_projection_debug)
             semantic_grounding_bundle = self._semantic_integration.build_grounding_bundle(
                 prompt=normalized_prompt,
                 workspace_id=req.workspace_id,
-                vertical_norm=vertical,
                 base_domain_id=int(selected_domain_id),
                 base_domain_name=selected_domain_name,
                 capabilities_compact=semantic_capabilities,
@@ -465,7 +465,6 @@ class PlannerDomainService:
             prompt=req.prompt,
             normalized_prompt=normalized_prompt,
             workspace_id=req.workspace_id,
-            vertical_norm=vertical,
             base_domain_id=selected_domain_id,
             domain_name=selected_domain_name,
             capabilities=capabilities,
@@ -499,7 +498,6 @@ class PlannerDomainService:
             capabilities_llm=capabilities_llm,
             trace_id=trace_id,
             workspace_id=req.workspace_id,
-            vertical_norm=vertical,
             base_domain_id=selected_domain_id,
             base_domain_name=selected_domain_name,
             prompt=normalized_prompt,
@@ -626,6 +624,7 @@ class PlannerDomainService:
                 explanation_summary_trace=explanation_summary_trace,
                 next_actions_trace=next_actions_trace,
                 technical_details=technical_details,
+                projection_policy_debug=projection_policy_debug,
                 shared_pipeline=shared_pipeline,
                 profile_enabled=profile_enabled,
                 pipeline_profile=pipeline_profile_steps,
@@ -654,7 +653,6 @@ class PlannerDomainService:
         return self._finalization.finalize(
             workspace_id=req.workspace_id,
             user_id=str(user_id),
-            vertical_norm=vertical,
             normalized_prompt=normalized_prompt,
             trace_id=trace_id,
             conversation_id=conversation_id,
@@ -737,7 +735,6 @@ class PlannerDomainService:
             workspace_id=req.workspace_id,
             user_id=str(user_id),
             domain_id=domain_id,
-            vertical_norm=_norm_vertical(req.vertical_norm),
         )
         capabilities_full = DomainSelectionService.full_capabilities_for_execution(capabilities=capabilities)
         selected_domain_name = str(plan_json.get("domain_name") or f"domain_{domain_id}").strip() or f"domain_{domain_id}"

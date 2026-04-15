@@ -2,7 +2,16 @@ from __future__ import annotations
 
 import json
 
-from app.services.semantic.catalog.catalog_models import ColumnProfile
+import pytest
+
+import app.services.semantic.catalog.column_profile_builder as column_profile_builder
+from app.services.semantic.catalog.catalog_models import (
+    AliasUpsert,
+    ColumnProfile,
+    ConceptUpsert,
+    SemanticCatalogBuildResult,
+    ValueAliasUpsert,
+)
 from app.services.semantic.catalog.column_profile_builder import ColumnProfileBuilder
 from app.services.semantic.catalog.semantic_catalog_builder import SemanticCatalogBuilder
 from app.services.semantic.catalog.semantic_enrichment_service import SemanticEnrichmentService
@@ -30,6 +39,12 @@ class _FailingLLM:
     def enrich_batch(self, **kwargs):
         del kwargs
         raise RuntimeError("llm unavailable")
+
+
+class _AssertionFailingLLM:
+    def enrich_batch(self, **kwargs):
+        del kwargs
+        raise AssertionError("unexpected llm enrichment bug")
 
 
 def test_column_profile_builder_infers_flags_and_stats() -> None:
@@ -88,13 +103,42 @@ def test_semantic_enrichment_service_falls_back_to_heuristics_when_llm_fails() -
     enriched = svc.enrich_profiles(
         profiles=profiles,
         workspace_id="ws-test",
-        vertical_norm="generic",
         domain_name="Sales Performance",
     )
 
     assert len(enriched) == 1
     assert enriched[0].enrichment.semantic_type in {"measure", "metric"}
     assert "sum" in enriched[0].enrichment.default_aggregations
+
+
+def test_semantic_enrichment_service_surfaces_unexpected_llm_errors() -> None:
+    profiles = [
+        ColumnProfile(
+            workspace_table_id=1,
+            workspace_column_id=1,
+            table_name="fct_sales",
+            column_name="sales_amount",
+            data_type="DECIMAL(18,2)",
+            nullable=False,
+            distinct_count=300,
+            row_count=1000,
+            sample_values=["100.0", "200.0"],
+            is_identifier=False,
+            is_numeric=True,
+            is_date_like=False,
+            is_enum_like=False,
+            is_dimension_candidate=False,
+            is_measure_candidate=True,
+        )
+    ]
+    svc = SemanticEnrichmentService(llm_adapter=_AssertionFailingLLM(), enable_llm=True, batch_size=5)
+
+    with pytest.raises(AssertionError, match="unexpected llm enrichment bug"):
+        svc.enrich_profiles(
+            profiles=profiles,
+            workspace_id="ws-test",
+            domain_name="Sales Performance",
+        )
 
 
 def test_semantic_catalog_builder_sales_example_generates_expected_derived_metrics_dry_run() -> None:
@@ -176,7 +220,6 @@ def test_semantic_catalog_builder_sales_example_generates_expected_derived_metri
     result = builder.run_sales_performance_example(
         workspace_id="ws_1",
         domain_id=3,
-        vertical_norm="generic",
         dry_run=True,
     )
 
@@ -186,3 +229,90 @@ def test_semantic_catalog_builder_sales_example_generates_expected_derived_metri
     assert "DISCOUNT_RATE" in keys
     assert result.derived_metrics_created >= 3
     assert result.relationships_upserted > 0
+
+
+def test_semantic_catalog_builder_no_longer_emits_vertical_norm() -> None:
+    profiles = [
+        ColumnProfile(
+            workspace_table_id=10,
+            workspace_column_id=1,
+            table_name="fct_sales",
+            column_name="sales_amount",
+            data_type="DECIMAL",
+            nullable=False,
+            is_numeric=True,
+            is_measure_candidate=True,
+        )
+    ]
+
+    builder = SemanticCatalogBuilder(
+        profile_builder=_ProfileStub(profiles),
+        enrichment_service=SemanticEnrichmentService(enable_llm=False),
+    )
+    result = builder.build_catalog(
+        workspace_id="ws_1",
+        domain_id=3,
+        domain_name="Sales Performance",
+        dry_run=True,
+    )
+
+    assert "vertical_norm" not in result.model_dump(mode="json")
+    assert all("vertical_norm" not in row for row in result.concept_preview)
+
+
+def test_semantic_catalog_models_drop_vertical_norm_fields() -> None:
+    concept = ConceptUpsert(
+        concept_key="STUDENT_ID",
+        name="Student Id",
+        description="Student identifier.",
+        semantic_type="identifier",
+    )
+    legacy_alias = AliasUpsert(
+        alias_key="student id",
+        concept_key="STUDENT_ID",
+    )
+    legacy_value_alias = ValueAliasUpsert(
+        semantic_concept_id=42,
+        canonical_value="A",
+        alias_value="A",
+    )
+    result = SemanticCatalogBuildResult(
+        workspace_id="ws-1",
+        domain_id=3,
+    )
+
+    assert "vertical_norm" not in concept.model_dump(mode="json")
+    assert "vertical_norm" not in legacy_alias.model_dump(mode="json")
+    assert "vertical_norm" not in legacy_value_alias.model_dump(mode="json")
+    assert "vertical_norm" not in result.model_dump(mode="json")
+
+
+def test_to_int_first_ignores_invalid_numeric_values() -> None:
+    assert column_profile_builder._to_int_first({"row_count": "not-a-number"}, keys=("row_count",)) is None
+
+
+def test_to_int_first_surfaces_unexpected_int_errors() -> None:
+    class _BadInt:
+        def __int__(self) -> int:
+            raise RuntimeError("bad int conversion")
+
+    with pytest.raises(RuntimeError, match="bad int conversion"):
+        column_profile_builder._to_int_first({"row_count": _BadInt()}, keys=("row_count",))
+
+
+def test_looks_like_date_surfaces_unexpected_parser_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _BrokenDateTime:
+        @staticmethod
+        def fromisoformat(value: str):
+            del value
+            raise RuntimeError("broken iso parser")
+
+        @staticmethod
+        def strptime(value: str, fmt: str):
+            del value, fmt
+            raise RuntimeError("broken strptime parser")
+
+    monkeypatch.setattr(column_profile_builder, "datetime", _BrokenDateTime)
+
+    with pytest.raises(RuntimeError, match="broken iso parser"):
+        column_profile_builder._looks_like_date("2026-01-01")

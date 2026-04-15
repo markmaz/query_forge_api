@@ -40,7 +40,7 @@ _PIPELINE_PROFILE_TIMESTAMP_RE = re.compile(r"^(?P<timestamp>\d{4}-\d{2}-\d{2}\s
 def _to_int(value: Any) -> Optional[int]:
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -82,7 +82,7 @@ def _pipeline_profile_logger() -> logging.Logger:
         handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s - %(message)s"))
         profile_logger.addHandler(handler)
         _PROFILE_LOGGER_INITIALIZED = True
-    except Exception as exc:
+    except (OSError, ValueError) as exc:
         logger.warning("planner_domain timing profile logger init failed err=%s", exc)
     return profile_logger
 
@@ -108,7 +108,7 @@ def _pipeline_trace_logger() -> logging.Logger:
         handler.setFormatter(logging.Formatter("%(message)s"))
         trace_logger.addHandler(handler)
         _TRACE_LOGGER_INITIALIZED = True
-    except Exception as exc:
+    except (OSError, ValueError) as exc:
         logger.warning("planner_domain pipeline trace logger init failed err=%s", exc)
     return trace_logger
 
@@ -213,7 +213,7 @@ def _emit_pipeline_profile_log(
             ms = int(row.get("ms") or 0)
             lines.append(f"{idx}. {label}: {ms}ms")
         _pipeline_profile_logger().info("\n".join(lines))
-    except Exception as exc:
+    except (OSError, TypeError, ValueError) as exc:
         logger.warning("planner_domain timing profile emit failed trace_id=%s err=%s", trace_id, exc)
 
 
@@ -227,7 +227,7 @@ def _emit_pipeline_trace_log(
     try:
         payload = _sanitize_pipeline_trace_value(trace_payload)
         _pipeline_trace_logger().info(json.dumps(payload, ensure_ascii=True, separators=(",", ":")))
-    except Exception as exc:
+    except (OSError, TypeError, ValueError) as exc:
         logger.warning(
             "planner_domain pipeline trace emit failed trace_id=%s err=%s",
             trace_payload.get("trace_id"),
@@ -291,7 +291,7 @@ def _read_pipeline_profile_from_log(
     try:
         with open(log_path, encoding="utf-8") as handle:
             lines = handle.read().splitlines()
-    except Exception as exc:
+    except OSError as exc:
         raise ForgeError(
             "Failed to read pipeline profile log",
             status_code=500,
@@ -345,7 +345,7 @@ def _read_pipeline_trace_from_log(
     try:
         with open(log_path, encoding="utf-8") as handle:
             lines = handle.read().splitlines()
-    except Exception:
+    except OSError:
         logger.exception("Failed to read pipeline trace log")
         return None
 
@@ -355,7 +355,7 @@ def _read_pipeline_trace_from_log(
             continue
         try:
             parsed = json.loads(text)
-        except Exception:
+        except json.JSONDecodeError:
             continue
         if not isinstance(parsed, dict):
             continue
@@ -381,7 +381,7 @@ def _list_pipeline_profiles_from_log(*, limit: int = 50) -> List[Dict[str, Any]]
     try:
         with open(log_path, encoding="utf-8") as handle:
             lines = handle.read().splitlines()
-    except Exception:
+    except OSError:
         logger.exception("Failed to read pipeline profile log for listing")
         return []
 
@@ -536,7 +536,6 @@ class PipelineTraceService:
                         "request_context": {
                             "workspace_id": str(body.get("workspace_id") or ""),
                             "conversation_id": str(body.get("conversation_id") or ""),
-                            "vertical_norm": str(body.get("vertical_norm") or ""),
                             "base_domain_id": body.get("base_domain_id"),
                             "profile_pipeline": bool(body.get("profile_pipeline")),
                             "profile_pipeline_data": bool(body.get("profile_pipeline_data")),

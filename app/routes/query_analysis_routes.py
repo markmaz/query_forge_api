@@ -29,11 +29,13 @@ import json
 import logging
 import time
 
+import requests
 from flask import request
 from flask_restx import Namespace, Resource, fields
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
+from app.exceptions.forge_error import ForgeError
 from app.routes.request_helpers import extract_workspace_id
 from app.skills.analysis_utils import (
     MAX_SAMPLE_ROWS,
@@ -117,7 +119,7 @@ class QueryAnalyze(Resource):
         except ValueError as exc:
             obs.log(error_type="not_found")
             return {"error": str(exc)}, 404
-        except Exception as exc:
+        except (ForgeError, RuntimeError) as exc:
             logger.exception("Query execution failed for analysis query_id=%s", query_id)
             obs.log(error_type="query_error")
             return {"error": f"Query execution failed: {exc}"}, 500
@@ -157,7 +159,7 @@ class QueryAnalyze(Resource):
                 max_tokens=600,
             )
             obs.llm_ms = int((time.monotonic() - t0) * 1000)
-        except Exception as exc:
+        except (ForgeError, requests.RequestException, RuntimeError, ValueError) as exc:
             logger.warning("LLM analysis failed for query_id=%s: %s", query_id, exc)
             obs.log(error_type="llm_error")
             return {"error": f"AI analysis unavailable: {exc}"}, 502
@@ -254,7 +256,7 @@ class QueryAnalyzeInline(Resource):
                 max_tokens=600,
             )
             obs.llm_ms = int((time.monotonic() - t0) * 1000)
-        except Exception as exc:
+        except (ForgeError, requests.RequestException, RuntimeError, ValueError) as exc:
             logger.warning("LLM inline analysis failed: %s", exc)
             obs.log(error_type="llm_error")
             return {"error": f"AI analysis unavailable: {exc}"}, 502
@@ -310,11 +312,8 @@ class _Observability:
 
 
 def _check_llm_available(workspace_id: str) -> bool:
-    try:
-        from app.services.tenancy.workspace_llm_service import WorkspaceLLMService
-        return WorkspaceLLMService().get_llm_for_role(workspace_id, "default") is not None
-    except Exception:
-        return False
+    from app.services.tenancy.workspace_llm_service import WorkspaceLLMService
+    return WorkspaceLLMService().get_llm_for_role(workspace_id, "default") is not None
 
 
 def _run_query(query_id: str, workspace_id: str) -> dict:
@@ -331,7 +330,7 @@ def _run_query(query_id: str, workspace_id: str) -> dict:
     import json as _json
     from app.adapters.mysql_sql_executor import ForgeMetaSQL
     from app.services.domain_resolver import DomainResolver
-    from app.services.query_forge_service import QueryForgeService
+    from app.services.query_forge.service import QueryForgeService
     from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 
     rows_q = ForgeMetaSQL().execute_query_mappings(
@@ -354,7 +353,7 @@ def _run_query(query_id: str, workspace_id: str) -> dict:
         executor=ctx.sql_exec,
         domain_resolver=DomainResolver(workspace_id=workspace_id),
     )
-    result = svc.run(raw_query=sql_json, mode="export", limit=500, offset=0)
+    result = svc.run(sql_json, mode="export", limit=500, offset=0)
 
     columns = result.columns or []
     rows = result.rows or []
@@ -384,24 +383,21 @@ def _get_cache(workspace_id: str, query_id: str, hash_val: str) -> dict | None:
         )
         raw = client.get(_cache_key(workspace_id, query_id, hash_val))
         return json.loads(raw) if raw else None
-    except Exception as exc:
+    except (json.JSONDecodeError, OSError, ValueError) as exc:
         logger.debug("Cache read failed (non-fatal): %s", exc)
         return None
 
 
 def _set_cache(workspace_id: str, query_id: str, hash_val: str, data: dict) -> None:
-    try:
-        import valkey
-        from app.config import VALKEY_ADDRESS, VALKEY_PORT
-        client = valkey.Valkey(
-            host=str(VALKEY_ADDRESS or "localhost"),
-            port=int(VALKEY_PORT or 6379),
-            db=0, decode_responses=True, socket_timeout=1.0,
-        )
-        client.setex(
-            _cache_key(workspace_id, query_id, hash_val),
-            CACHE_TTL_SECONDS,
-            json.dumps(data),
-        )
-    except Exception as exc:
-        logger.debug("Cache write failed (non-fatal): %s", exc)
+    import valkey
+    from app.config import VALKEY_ADDRESS, VALKEY_PORT
+    client = valkey.Valkey(
+        host=str(VALKEY_ADDRESS or "localhost"),
+        port=int(VALKEY_PORT or 6379),
+        db=0, decode_responses=True, socket_timeout=1.0,
+    )
+    client.setex(
+        _cache_key(workspace_id, query_id, hash_val),
+        CACHE_TTL_SECONDS,
+        json.dumps(data),
+    )

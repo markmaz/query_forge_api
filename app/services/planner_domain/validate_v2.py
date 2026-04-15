@@ -286,7 +286,6 @@ def _normalize_plan(plan_json: Dict[str, Any]) -> Dict[str, Any]:
         "schema_version": 2,
         "trace_id": str(src.get("trace_id") or ""),
         "workspace_id": str(src.get("workspace_id") or ""),
-        "vertical_norm": str(src.get("vertical_norm") or "generic").strip().lower() or "generic",
         "base_domain_id": _to_int(src.get("base_domain_id")),
         "domain_name": (str(src.get("domain_name") or "").strip() or None),
         "intent": str(src.get("intent") or "list").strip().lower() or "list",
@@ -332,7 +331,7 @@ def _norm_metric_id(row: Mapping[str, Any]) -> str:
 def _to_int(value: Any) -> Optional[int]:
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 

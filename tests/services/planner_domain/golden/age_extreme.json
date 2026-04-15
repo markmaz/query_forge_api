@@ -87,16 +87,18 @@
   "domain_ranking": [
     {
       "domain_id": 8,
-      "score": 1.23,
-      "base_score": 1.23,
-      "semantic_score": 0.13,
+      "score": 1.19,
+      "base_score": 1.19,
+      "semantic_score": 0.09,
       "vector_score": 1.0,
       "policy_adjustment": 0.0,
       "rerank_signals": [
         "age_extreme_prompt",
+        "canonical_name_preference_prompt",
         "listing_intent",
         "needs_student_identity",
-        "student_listing"
+        "student_listing",
+        "student_school_context_prompt"
       ],
       "domain_capabilities": {
         "present": [
@@ -106,9 +108,9 @@
       },
       "policy_effects": [],
       "rerank_summary": {
-        "base_score": 1.23,
+        "base_score": 1.19,
         "policy_adjustment": 0.0,
-        "final_score": 1.23
+        "final_score": 1.19
       },
       "column_shortlist_count": 2,
       "dimension_count": 2,
@@ -117,9 +119,11 @@
   ],
   "rerank_signals": [
     "age_extreme_prompt",
+    "canonical_name_preference_prompt",
     "listing_intent",
     "needs_student_identity",
-    "student_listing"
+    "student_listing",
+    "student_school_context_prompt"
   ],
   "column_shortlist_count": 2,
   "slot_hints": {
@@ -169,17 +173,16 @@
       "base_domain_key": "DOMAIN_PROGRAMS_COHORTS_AND_STUDENT_SERVICES",
       "semantic_source": "semantic_catalog+filter_capability_fallback",
       "metric_count": 0,
-      "dimension_count": 1,
-      "filter_count": 1,
+      "dimension_count": 2,
+      "filter_count": 0,
       "time_count": 0,
       "value_count": 0,
       "metrics": [],
       "dimensions": [
-        "K_STUDENT"
-      ],
-      "filters": [
+        "STUDENT_UNIQUE_ID",
         "BIRTH_DATE"
       ],
+      "filters": [],
       "times": []
     }
   },
@@ -206,8 +209,8 @@
     "candidate_summary": {
       "domain_count": 5,
       "metric_count": 0,
-      "dimension_count": 1,
-      "filter_count": 1,
+      "dimension_count": 2,
+      "filter_count": 0,
       "time_count": 0,
       "value_count": 0,
       "base_domain_key": "DOMAIN_PROGRAMS_COHORTS_AND_STUDENT_SERVICES"
@@ -400,11 +403,34 @@
       "endpoint": ""
     }
   },
+  "projection_policy": {
+    "prompt_signals": [
+      "age_extreme_prompt",
+      "canonical_name_preference_prompt",
+      "listing_intent",
+      "needs_student_identity",
+      "student_listing",
+      "student_school_context_prompt"
+    ],
+    "matched_policies": [
+      "student_listing_identity_projection"
+    ],
+    "projection_mode": "prepend",
+    "required_concept_keys": [
+      "STUDENT_ID",
+      "STUDENT_FIRST_NAME",
+      "STUDENT_LAST_NAME"
+    ],
+    "excluded_concept_keys": [],
+    "required_column_names": [],
+    "excluded_column_names": [],
+    "required_filter_concept_keys": [],
+    "required_join_tables": []
+  },
   "shared_pipeline": {
     "domain_selection": {
       "pipeline_name": "planner_domain_selection_pipeline",
-      "trace_id": "planner_domain_selection:ws-1:education",
-      "vertical_norm": "education",
+      "trace_id": "planner_domain_selection:ws-1",
       "timings_ms": {
         "normalize_text": 0,
         "resolve_capabilities": 0,
@@ -426,9 +452,11 @@
           "source_text": "show me the oldest student",
           "signals": [
             "age_extreme_prompt",
+            "canonical_name_preference_prompt",
             "listing_intent",
             "needs_student_identity",
-            "student_listing"
+            "student_listing",
+            "student_school_context_prompt"
           ]
         },
         "apply_policy_rerank": {
@@ -436,9 +464,11 @@
           "policy_effect_count": 0,
           "signals": [
             "age_extreme_prompt",
+            "canonical_name_preference_prompt",
             "listing_intent",
             "needs_student_identity",
-            "student_listing"
+            "student_listing",
+            "student_school_context_prompt"
           ]
         }
       },
@@ -477,9 +507,11 @@
             "source_text": "show me the oldest student",
             "signals": [
               "age_extreme_prompt",
+              "canonical_name_preference_prompt",
               "listing_intent",
               "needs_student_identity",
-              "student_listing"
+              "student_listing",
+              "student_school_context_prompt"
             ]
           },
           "lineage": [
@@ -495,9 +527,11 @@
             "policy_effect_count": 0,
             "signals": [
               "age_extreme_prompt",
+              "canonical_name_preference_prompt",
               "listing_intent",
               "needs_student_identity",
-              "student_listing"
+              "student_listing",
+              "student_school_context_prompt"
             ]
           },
           "lineage": [
@@ -524,8 +558,8 @@
       "label": "Load and prepare conversation context"
     },
     {
-      "step": "normalize_prompt_and_vertical",
-      "label": "Normalize prompt and effective vertical"
+      "step": "normalize_prompt",
+      "label": "Normalize prompt and planner context"
     },
     {
       "step": "domain_selection",

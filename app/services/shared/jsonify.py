@@ -5,6 +5,8 @@ from decimal import Decimal
 from typing import Any, Iterable
 from uuid import UUID
 
+BYTE_DECODE_FALLBACK_ERRORS = (UnicodeDecodeError,)
+
 
 def serialize_cell(value: Any) -> Any:
     if value is None:
@@ -18,7 +20,7 @@ def serialize_cell(value: Any) -> Any:
     if isinstance(value, (bytes, bytearray)):
         try:
             return value.decode("utf-8")
-        except Exception:
+        except BYTE_DECODE_FALLBACK_ERRORS:
             return str(value)
     if isinstance(value, dict):
         return serialize_record(value)

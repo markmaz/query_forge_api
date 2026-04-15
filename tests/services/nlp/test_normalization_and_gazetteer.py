@@ -29,3 +29,69 @@ def test_gazetteer_tags_known_school_and_district(tmp_path: Path) -> None:
     labeled = {(ent.label_, ent.text.lower()) for ent in doc.ents}
     assert ("ORG_SCHOOL", "holden elementary") in labeled
     assert ("ORG_DISTRICT", "davidson county schools") in labeled
+
+
+def test_build_entity_ruler_ignores_expected_overwrite_ents_errors() -> None:
+    class _FakeRuler:
+        def add_patterns(self, patterns):
+            self.patterns = list(patterns)
+
+    class _CompatNer:
+        @property
+        def overwrite_ents(self):
+            return True
+
+        @overwrite_ents.setter
+        def overwrite_ents(self, value):
+            raise ValueError("compat setter failure")
+
+    class _FakeNlp:
+        pipe_names = ["ner"]
+
+        def __init__(self):
+            self._pipes = {"ner": _CompatNer(), "entity_ruler": _FakeRuler()}
+
+        def get_pipe(self, name):
+            return self._pipes[name]
+
+        def add_pipe(self, name, before=None, config=None):
+            return self._pipes["entity_ruler"]
+
+    nlp = _FakeNlp()
+    ruler = build_entity_ruler(nlp, [{"label": "ORG_SCHOOL", "pattern": [{"LOWER": "holden"}], "id": "Holden"}])
+
+    assert isinstance(ruler, _FakeRuler)
+    assert len(ruler.patterns) == 1
+
+
+def test_build_entity_ruler_surfaces_unexpected_overwrite_ents_errors() -> None:
+    class _FakeRuler:
+        def add_patterns(self, patterns):
+            self.patterns = list(patterns)
+
+    class _BrokenNer:
+        @property
+        def overwrite_ents(self):
+            return True
+
+        @overwrite_ents.setter
+        def overwrite_ents(self, value):
+            raise AssertionError("unexpected setter bug")
+
+    class _FakeNlp:
+        pipe_names = ["ner"]
+
+        def __init__(self):
+            self._pipes = {"ner": _BrokenNer(), "entity_ruler": _FakeRuler()}
+
+        def get_pipe(self, name):
+            return self._pipes[name]
+
+        def add_pipe(self, name, before=None, config=None):
+            return self._pipes["entity_ruler"]
+
+    with pytest.raises(AssertionError, match="unexpected setter bug"):
+        build_entity_ruler(
+            _FakeNlp(),
+            [{"label": "ORG_SCHOOL", "pattern": [{"LOWER": "holden"}], "id": "Holden"}],
+        )

@@ -14,6 +14,8 @@ from app.config import (
 )
 from app.ports.sql_executor import ForgeQueryPort
 
+FEWSHOT_LOOKUP_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+
 
 class EducationFewshotService:
     def __init__(
@@ -84,7 +86,7 @@ class EducationFewshotService:
                 """,
                 {"workspace_id": workspace_id, "scan_limit": self._scan_limit},
             )
-        except Exception:
+        except FEWSHOT_LOOKUP_FALLBACK_ERRORS:
             return []
 
 
@@ -104,7 +106,7 @@ def _parse_json_obj(value: Any) -> Optional[Dict[str, Any]]:
     if isinstance(value, (bytes, bytearray)):
         try:
             value = bytes(value).decode("utf-8", errors="ignore")
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             return None
     if isinstance(value, str):
         text = value.strip()
@@ -112,7 +114,7 @@ def _parse_json_obj(value: Any) -> Optional[Dict[str, Any]]:
             return None
         try:
             parsed = json.loads(text)
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             return None
         if isinstance(parsed, dict):
             return parsed
@@ -128,11 +130,6 @@ def _is_education_payload(payload: Optional[Mapping[str, Any]]) -> bool:
     route = str(payload.get("route") or "").strip().lower()
     if route in {"plan_domain", "education_pipeline"}:
         return True
-    plan = payload.get("plan_json_v2")
-    if isinstance(plan, Mapping):
-        vertical = str(plan.get("vertical_norm") or "").strip().lower()
-        if vertical == "education":
-            return True
     return False
 
 

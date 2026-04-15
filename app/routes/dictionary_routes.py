@@ -4,8 +4,10 @@ import io
 import logging
 
 import pandas as pd
+from pandas.errors import EmptyDataError, ParserError
 from flask import request
-from flask_restx import Namespace, Resource
+from flask_restx import Namespace
+from flask_restx import Resource
 
 from app.decorators.security import token_required
 from app.decorators.rbac import require_access
@@ -61,7 +63,7 @@ def _parse_file(file_storage) -> list[dict]:
             raise ForgeError("Unsupported file type — use .csv or .xlsx", status_code=400)
     except ForgeError:
         raise
-    except Exception as exc:
+    except (EmptyDataError, ParserError, UnicodeDecodeError, ValueError, TypeError) as exc:
         raise ForgeError(f"File parse error: {exc}", status_code=400) from exc
 
     # Normalize column headers
@@ -85,20 +87,14 @@ class DictionaryTables(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
-        try:
-            workspace_id = _workspace_id()
-            q = (request.args.get("q") or "").strip() or None
-            limit = _parse_int(request.args.get("limit"), 500, "limit")
-            offset = _parse_int(request.args.get("offset"), 0, "offset")
-            result = DictionaryService().list_tables(
-                workspace_id=workspace_id, q=q, limit=limit, offset=offset
-            )
-            return result, 200
-        except ForgeError as exc:
-            return _error(exc)
-        except Exception:
-            logger.exception("GET /dictionary/tables failed")
-            return {"error": "Failed to fetch tables"}, 500
+        workspace_id = _workspace_id()
+        q = (request.args.get("q") or "").strip() or None
+        limit = _parse_int(request.args.get("limit"), 500, "limit")
+        offset = _parse_int(request.args.get("offset"), 0, "offset")
+        result = DictionaryService().list_tables(
+            workspace_id=workspace_id, q=q, limit=limit, offset=offset
+        )
+        return result, 200
 
 
 # ---------------------------------------------------------------------------
@@ -110,23 +106,17 @@ class DictionaryTableDetail(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def patch(self, table_id: int):
-        try:
-            workspace_id = _workspace_id()
-            body = request.get_json(silent=True) or {}
-            patch = {}
-            if "description" in body:
-                patch["description"] = body["description"]
-            if not patch:
-                raise ForgeError("No patchable fields in request body", status_code=400)
-            result = DictionaryService().patch_table(
-                workspace_id=workspace_id, table_id=table_id, patch=patch
-            )
-            return result, 200
-        except ForgeError as exc:
-            return _error(exc)
-        except Exception:
-            logger.exception("PATCH /dictionary/tables/%s failed", table_id)
-            return {"error": "Failed to update table"}, 500
+        workspace_id = _workspace_id()
+        body = request.get_json(silent=True) or {}
+        patch = {}
+        if "description" in body:
+            patch["description"] = body["description"]
+        if not patch:
+            raise ForgeError("No patchable fields in request body", status_code=400)
+        result = DictionaryService().patch_table(
+            workspace_id=workspace_id, table_id=table_id, patch=patch
+        )
+        return result, 200
 
 
 # ---------------------------------------------------------------------------
@@ -138,27 +128,21 @@ class DictionaryColumns(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
-        try:
-            workspace_id = _workspace_id()
-            wtid_raw = (request.args.get("workspace_table_id") or "").strip()
-            if not wtid_raw:
-                raise ForgeError("workspace_table_id is required", status_code=400)
-            workspace_table_id = _parse_int(wtid_raw, 0, "workspace_table_id")
-            q = (request.args.get("q") or "").strip() or None
-            active_only_raw = (request.args.get("active_only") or "true").strip().lower()
-            active_only = active_only_raw not in ("false", "0", "no")
-            result = DictionaryService().list_columns(
-                workspace_id=workspace_id,
-                workspace_table_id=workspace_table_id,
-                q=q,
-                active_only=active_only,
-            )
-            return result, 200
-        except ForgeError as exc:
-            return _error(exc)
-        except Exception:
-            logger.exception("GET /dictionary/columns failed")
-            return {"error": "Failed to fetch columns"}, 500
+        workspace_id = _workspace_id()
+        wtid_raw = (request.args.get("workspace_table_id") or "").strip()
+        if not wtid_raw:
+            raise ForgeError("workspace_table_id is required", status_code=400)
+        workspace_table_id = _parse_int(wtid_raw, 0, "workspace_table_id")
+        q = (request.args.get("q") or "").strip() or None
+        active_only_raw = (request.args.get("active_only") or "true").strip().lower()
+        active_only = active_only_raw not in ("false", "0", "no")
+        result = DictionaryService().list_columns(
+            workspace_id=workspace_id,
+            workspace_table_id=workspace_table_id,
+            q=q,
+            active_only=active_only,
+        )
+        return result, 200
 
 
 @dictionary_ns.route("/columns/search")
@@ -166,23 +150,17 @@ class DictionaryColumnsSearch(Resource):
     @token_required
     @require_access("catalog")
     def get(self):
-        try:
-            workspace_id = _workspace_id()
-            q = (request.args.get("q") or "").strip()
-            if not q:
-                raise ForgeError("q is required", status_code=400)
-            limit = _parse_int(request.args.get("limit"), 200, "limit")
-            active_only_raw = (request.args.get("active_only") or "true").strip().lower()
-            active_only = active_only_raw not in ("false", "0", "no")
-            result = DictionaryService().search_columns(
-                workspace_id=workspace_id, q=q, limit=limit, active_only=active_only
-            )
-            return result, 200
-        except ForgeError as exc:
-            return _error(exc)
-        except Exception:
-            logger.exception("GET /dictionary/columns/search failed")
-            return {"error": "Failed to search columns"}, 500
+        workspace_id = _workspace_id()
+        q = (request.args.get("q") or "").strip()
+        if not q:
+            raise ForgeError("q is required", status_code=400)
+        limit = _parse_int(request.args.get("limit"), 200, "limit")
+        active_only_raw = (request.args.get("active_only") or "true").strip().lower()
+        active_only = active_only_raw not in ("false", "0", "no")
+        result = DictionaryService().search_columns(
+            workspace_id=workspace_id, q=q, limit=limit, active_only=active_only
+        )
+        return result, 200
 
 
 # ---------------------------------------------------------------------------
@@ -194,36 +172,30 @@ class DictionaryColumn(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def patch(self, column_id: int):
-        try:
-            workspace_id = _workspace_id()
-            body = request.get_json(silent=True) or {}
-            patch = {}
-            if "description" in body:
-                patch["description"] = body["description"]
-            if "data_type" in body:
-                patch["data_type"] = body["data_type"]
-            if "is_active" in body:
-                patch["is_active"] = bool(body["is_active"])
-            if "semantic_type" in body:
-                patch["semantic_type"] = body["semantic_type"] or None
-            if "semantic_entity" in body:
-                patch["semantic_entity"] = body["semantic_entity"] or None
-            if "semantic_sub_type" in body:
-                patch["semantic_sub_type"] = body["semantic_sub_type"] or None
-            if "semantic_confidence" in body:
-                raw = body["semantic_confidence"]
-                patch["semantic_confidence"] = float(raw) if raw is not None else None
-            if not patch:
-                raise ForgeError("No patchable fields in request body", status_code=400)
-            result = DictionaryService().patch_column(
-                workspace_id=workspace_id, column_id=column_id, patch=patch
-            )
-            return result, 200
-        except ForgeError as exc:
-            return _error(exc)
-        except Exception:
-            logger.exception("PATCH /dictionary/columns/%s failed", column_id)
-            return {"error": "Failed to update column"}, 500
+        workspace_id = _workspace_id()
+        body = request.get_json(silent=True) or {}
+        patch = {}
+        if "description" in body:
+            patch["description"] = body["description"]
+        if "data_type" in body:
+            patch["data_type"] = body["data_type"]
+        if "is_active" in body:
+            patch["is_active"] = bool(body["is_active"])
+        if "semantic_type" in body:
+            patch["semantic_type"] = body["semantic_type"] or None
+        if "semantic_entity" in body:
+            patch["semantic_entity"] = body["semantic_entity"] or None
+        if "semantic_sub_type" in body:
+            patch["semantic_sub_type"] = body["semantic_sub_type"] or None
+        if "semantic_confidence" in body:
+            raw = body["semantic_confidence"]
+            patch["semantic_confidence"] = float(raw) if raw is not None else None
+        if not patch:
+            raise ForgeError("No patchable fields in request body", status_code=400)
+        result = DictionaryService().patch_column(
+            workspace_id=workspace_id, column_id=column_id, patch=patch
+        )
+        return result, 200
 
 
 # ---------------------------------------------------------------------------
@@ -235,28 +207,22 @@ class DictionaryColumnsImport(Resource):
     @token_required
     @require_access("catalog", role="admin")
     def post(self):
-        try:
-            workspace_id = _workspace_id()
-            full_replace_raw = (request.args.get("fullReplace") or "false").strip().lower()
-            full_replace = full_replace_raw in ("true", "1", "yes")
+        workspace_id = _workspace_id()
+        full_replace_raw = (request.args.get("fullReplace") or "false").strip().lower()
+        full_replace = full_replace_raw in ("true", "1", "yes")
 
-            file_storage = request.files.get("file")
-            if not file_storage:
-                raise ForgeError("file is required", status_code=400)
+        file_storage = request.files.get("file")
+        if not file_storage:
+            raise ForgeError("file is required", status_code=400)
 
-            rows = _parse_file(file_storage)
+        rows = _parse_file(file_storage)
 
-            if full_replace and not rows:
-                raise ForgeError(
-                    "Cannot use fullReplace with an empty file", status_code=400
-                )
-
-            result = DictionaryService().import_columns(
-                workspace_id=workspace_id, rows=rows, full_replace=full_replace
+        if full_replace and not rows:
+            raise ForgeError(
+                "Cannot use fullReplace with an empty file", status_code=400
             )
-            return result, 200
-        except ForgeError as exc:
-            return _error(exc)
-        except Exception:
-            logger.exception("POST /dictionary/columns/import failed")
-            return {"error": "Import failed"}, 500
+
+        result = DictionaryService().import_columns(
+            workspace_id=workspace_id, rows=rows, full_replace=full_replace
+        )
+        return result, 200

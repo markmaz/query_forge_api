@@ -107,7 +107,7 @@ class DomainEmbeddingService:
 
                 try:
                     payload = build_domain_payload(row, table_rows, workspace_table_ids)
-                except Exception as exc:
+                except (TypeError, ValueError) as exc:
                     domain_id = row.get("domain_id")
                     logger.exception("Failed to build payload for domain %s", domain_id)
                     errors.append(f"domain_id={domain_id}: {exc}")
@@ -272,7 +272,7 @@ def _parse_json_value(value: Any) -> Any:
             return None
         try:
             return json.loads(raw)
-        except Exception:
+        except json.JSONDecodeError:
             return None
     return None
 

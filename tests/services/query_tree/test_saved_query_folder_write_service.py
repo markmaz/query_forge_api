@@ -29,6 +29,26 @@ def test_create_folder_success(monkeypatch) -> None:
     assert sql.write_calls
 
 
+def test_create_folder_duplicate(monkeypatch) -> None:
+    sql = FakeForgeQueryPort()
+    sql.write_exceptions = [IntegrityError("dup", None, None)]
+    service = SavedQueryFolderWriteService(workspace_id="ws1", user_id="user1", sql=sql)
+    monkeypatch.setattr(service, "_normalize_parent_id", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(ForgeError, match="Folder already exists"):
+        service.create_folder(name="Dup")
+
+
+def test_create_folder_surfaces_unexpected_write_errors(monkeypatch) -> None:
+    sql = FakeForgeQueryPort()
+    sql.write_exceptions = [AssertionError("unexpected insert failure")]
+    service = SavedQueryFolderWriteService(workspace_id="ws1", user_id="user1", sql=sql)
+    monkeypatch.setattr(service, "_normalize_parent_id", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(AssertionError, match="unexpected insert failure"):
+        service.create_folder(name="Broken")
+
+
 def test_rename_move_delete_folder(monkeypatch) -> None:
     sql = FakeForgeQueryPort()
     sql.write_responses = [1, 1, 1]

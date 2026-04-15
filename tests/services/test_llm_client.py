@@ -136,6 +136,29 @@ def test_chat_json_with_trace_timeout_returns_gateway_timeout(monkeypatch) -> No
     assert exc.value.details["timeout_seconds"] == 1
 
 
+def test_chat_json_with_trace_surfaces_unexpected_client_errors(monkeypatch) -> None:
+    class _BrokenClient:
+        def __init__(self, *args, **kwargs):
+            del args, kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            del exc_type, exc, tb
+            return False
+
+        def post(self, url, json=None, headers=None):
+            del url, json, headers
+            raise AssertionError("unexpected client failure")
+
+    monkeypatch.setattr(httpx, "Client", _BrokenClient)
+    client = LLMClient(endpoint="http://localhost:8000", model="qwen25-7b", timeout_seconds=1)
+
+    with pytest.raises(AssertionError, match="unexpected client failure"):
+        client.chat_json_with_trace(system_prompt="sys", user_prompt="usr", response_format=True)
+
+
 def test_llm_client_normalizes_endpoint_with_leading_equals() -> None:
     client = LLMClient(endpoint="==http://localhost:8000", model="qwen25-7b", timeout_seconds=1)
     assert client._chat_url() == "http://localhost:8000/v1/chat/completions"
@@ -184,6 +207,44 @@ def test_chat_json_with_trace_uses_max_completion_tokens_for_gpt5(monkeypatch) -
     assert sent.get("max_completion_tokens") == 123
     assert "max_tokens" not in sent
     assert "temperature" not in sent
+
+
+def test_chat_json_with_trace_ignores_invalid_max_tokens(monkeypatch) -> None:
+    captured = {}
+
+    class _CaptureClient:
+        def __init__(self, *args, **kwargs):
+            del args, kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            del exc_type, exc, tb
+            return False
+
+        def post(self, url, json=None, headers=None):
+            captured["url"] = url
+            captured["json"] = dict(json or {})
+            captured["headers"] = headers
+
+            class _Resp:
+                status_code = 200
+                text = '{"choices":[{"message":{"content":"{\\"ok\\":true}"}}]}'
+
+                @staticmethod
+                def json():
+                    return {"choices": [{"message": {"content": '{"ok":true}'}}]}
+
+            return _Resp()
+
+    monkeypatch.setattr(httpx, "Client", _CaptureClient)
+    client = LLMClient(endpoint="http://localhost:8000/v1/chat/completions", model="qwen25-7b", timeout_seconds=5)
+    out = client.chat_json_with_trace(system_prompt="sys", user_prompt="usr", response_format=True, max_tokens="abc")
+    assert out.get("parsed") == {"ok": True}
+    sent = dict(captured.get("json") or {})
+    assert "max_tokens" not in sent
+    assert "max_completion_tokens" not in sent
 
 
 def test_fallback_chat_endpoint_uses_messages_not_prompt() -> None:
@@ -299,3 +360,74 @@ def test_chat_json_with_trace_accepts_json_schema_response_format(monkeypatch) -
     assert out.get("parsed") == {"ok": True}
     sent = dict(captured.get("json") or {})
     assert sent.get("response_format") == schema_format
+
+
+def test_chat_json_with_trace_falls_back_when_primary_response_json_is_invalid(monkeypatch) -> None:
+    class _CaptureClient:
+        def __init__(self, *args, **kwargs):
+            del args, kwargs
+            self.calls = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            del exc_type, exc, tb
+            return False
+
+        def post(self, url, json=None, headers=None):
+            del url, json, headers
+            self.calls += 1
+            if self.calls == 1:
+                class _Resp:
+                    status_code = 200
+                    text = "not-json"
+
+                    @staticmethod
+                    def json():
+                        raise ValueError("invalid response json")
+
+                return _Resp()
+
+            class _Resp:
+                status_code = 200
+                text = '{"content":"{\\"ok\\":true}"}'
+
+                @staticmethod
+                def json():
+                    return {"content": '{"ok":true}'}
+
+            return _Resp()
+
+    monkeypatch.setattr(httpx, "Client", _CaptureClient)
+    client = LLMClient(endpoint="http://localhost:8000", model="qwen25-7b", timeout_seconds=5)
+    out = client.chat_json_with_trace(system_prompt="sys", user_prompt="usr", response_format=True)
+    assert out.get("parsed") == {"ok": True}
+    assert out.get("error") is None
+
+
+def test_fallback_simple_with_trace_handles_non_mapping_json_body() -> None:
+    class _FallbackClient:
+        def post(self, url, json=None, headers=None):
+            del url, json, headers
+
+            class _Resp:
+                status_code = 200
+                text = '["not","a","mapping"]'
+
+                @staticmethod
+                def json():
+                    return ["not", "a", "mapping"]
+
+            return _Resp()
+
+    client = LLMClient(endpoint="https://api.openai.com/v1/chat/completions", model="gpt-5", timeout_seconds=5)
+    trace = client._fallback_simple_with_trace(  # noqa: SLF001
+        client=_FallbackClient(),
+        system_prompt="sys",
+        user_prompt="usr",
+        max_tokens=77,
+        response_format=True,
+    )
+    assert trace.get("error") == "missing_content"
+    assert trace.get("parsed") is None

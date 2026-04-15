@@ -42,7 +42,6 @@ class PlannerDomainRerankPolicyEngine:
         *,
         prompt: str,
         workspace_id: str,
-        vertical_norm: str,
         base_domain_id: int,
         base_score: float,
         capabilities: Mapping[str, Any],
@@ -53,7 +52,6 @@ class PlannerDomainRerankPolicyEngine:
         signal_set = set(signals)
         capability_view = self._capabilities.resolve_capabilities(
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             base_domain_id=base_domain_id,
             capabilities=capabilities,
             shortlisted_columns=shortlisted_columns,
@@ -62,7 +60,6 @@ class PlannerDomainRerankPolicyEngine:
 
         policies = self._policies.get_applicable_policies(
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             base_domain_id=base_domain_id,
         )
         policy_effects: List[Dict[str, Any]] = []

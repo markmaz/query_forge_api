@@ -13,6 +13,7 @@ _IDENT_RE = re.compile(r"^[A-Za-z0-9_]+$")
 _ID_LIKE_PATTERNS = ("id", "_id", "guid", "uuid", "k_", "sk_", "pk_", "_key", "identifier")
 _COMPLEX_TYPES = {"blob", "binary", "json", "geometry"}
 _STRING_TYPES = {"varchar", "char", "tinytext", "text", "mediumtext", "longtext"}
+METADATA_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
 def _safe_ident(s: str) -> str:
@@ -41,6 +42,7 @@ class MySQLMetadataProvider(MetadataProvider):
         self._executor = executor
 
     def list_tables(self, catalog: str | None, schema: str) -> list[dict]:
+        del catalog
         db = _safe_ident(schema)
         sql = f"""
 SELECT TABLE_NAME AS table_name, TABLE_TYPE AS table_type, TABLE_COMMENT AS comment
@@ -64,6 +66,7 @@ ORDER BY TABLE_NAME
         schema: str,
         table_names: list[str] | None = None,
     ) -> list[dict]:
+        del catalog
         db = _safe_ident(schema)
         table_filter = ""
         if table_names:
@@ -92,6 +95,7 @@ ORDER BY TABLE_NAME, ORDINAL_POSITION
 
     def list_schemas(self, catalog: str | None) -> list[str]:
         # MySQL has no catalog concept; the catalog parameter is intentionally ignored.
+        del catalog
         sql = (
             "SELECT schema_name "
             "FROM information_schema.schemata "
@@ -147,7 +151,7 @@ ORDER BY TABLE_NAME, ORDINAL_POSITION
                     "sample_row_count": sample_row_count,
                 })
 
-        except Exception as exc:
+        except METADATA_FALLBACK_ERRORS as exc:
             logger.exception(
                 "MySQLMetadataProvider.profile_table_columns failed for %s", table_ref
             )
@@ -183,7 +187,7 @@ ORDER BY TABLE_NAME, ORDINAL_POSITION
                     )
                 top_rows = self._executor.execute(value_sql)
                 result[cn]["top_values"] = [str(r.get("val", "")) for r in top_rows]
-            except Exception as exc:
+            except METADATA_FALLBACK_ERRORS as exc:
                 logger.warning(
                     "MySQL value sampling failed for %s.%s: %s", table_ref, cn, exc
                 )

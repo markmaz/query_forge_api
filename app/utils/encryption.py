@@ -4,6 +4,8 @@ import logging
 import os
 from typing import Optional
 
+from cryptography.fernet import InvalidToken
+
 logger = logging.getLogger(__name__)
 
 _fernet = None
@@ -24,7 +26,7 @@ def _get_fernet():
     try:
         _fernet = Fernet(key.encode() if isinstance(key, str) else key)
         return _fernet
-    except Exception:
+    except (TypeError, ValueError):
         logger.error("Invalid %s; secret encryption disabled", _PRIMARY_ENV_VAR)
         return None
 
@@ -44,7 +46,7 @@ def encrypt_api_key(plaintext: Optional[str]) -> Optional[str]:
         return text
     try:
         return f.encrypt(text.encode()).decode()
-    except Exception:
+    except (TypeError, ValueError):
         logger.exception("Failed to encrypt API key")
         return None
 
@@ -59,7 +61,7 @@ def decrypt_api_key(ciphertext: Optional[str]) -> Optional[str]:
         return text  # stored unencrypted
     try:
         return f.decrypt(text.encode()).decode()
-    except Exception:
+    except (InvalidToken, TypeError, ValueError):
         logger.exception("Failed to decrypt API key")
         return None
 

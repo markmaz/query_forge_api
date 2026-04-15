@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Mapping, Optional, Protocol, Sequence
 
 import httpx
@@ -40,13 +40,21 @@ _MAX_SUMMARY_LEN = 5000
 _MAX_SUMMARY_LINES = 28
 _ALLOWED_ROLES = {"user", "assistant", "system"}
 _DEFAULT_HISTORY_LIMIT = 80
-_IN_MEMORY_CONV_STORE: Dict[str, str] = {}
+_MAX_IN_MEMORY_CONVERSATIONS = 500
+_IN_MEMORY_CONV_STORE: Dict[str, Any] = {}
 _valkey_client: Any = None
 
 try:
     import valkey  # type: ignore
-except Exception:  # pragma: no cover
+    from valkey.exceptions import ValkeyError
+except ImportError:  # pragma: no cover
     valkey = None
+    ValkeyError = None  # type: ignore[assignment]
+
+
+JSON_PARSE_ERRORS = (TypeError, ValueError, json.JSONDecodeError)
+VALKEY_BACKEND_ERRORS = ((OSError, ValkeyError) if ValkeyError is not None else (OSError,))
+STORE_FALLBACK_ERRORS = ((ForgeError,) + VALKEY_BACKEND_ERRORS + (RuntimeError, ValueError))
 
 
 class ChatMessage(BaseModel):
@@ -89,7 +97,7 @@ class MinimalChatRequest(BaseModel):
     def _validate_max_tokens(cls, value: int) -> int:
         try:
             parsed = int(value)
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             raise ValueError("max_tokens must be an integer") from exc
         if parsed <= 0:
             raise ValueError("max_tokens must be > 0")
@@ -100,7 +108,7 @@ class MinimalChatRequest(BaseModel):
     def _validate_temperature(cls, value: float) -> float:
         try:
             parsed = float(value)
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             raise ValueError("temperature must be numeric") from exc
         if parsed < 0 or parsed > 2:
             raise ValueError("temperature must be between 0 and 2")
@@ -140,14 +148,14 @@ class ConversationStore(Protocol):
         user_id: str,
         conversation_id: str,
         messages: Sequence[Mapping[str, Any]],
-        qf_ttl_seconds: int,
     ) -> None:
         ...
 
 
 class HybridConversationStore:
-    def __init__(self, *, namespace: str = "minimal") -> None:
+    def __init__(self, *, namespace: str = "minimal", default_ttl_seconds: int = 43200) -> None:
         self._namespace = str(namespace or "minimal").strip().lower() or "minimal"
+        self._default_ttl_seconds = max(60, int(default_ttl_seconds or 43200))
 
     def get_messages(self, *, workspace_id: str, user_id: str, conversation_id: str) -> Optional[List[Dict[str, str]]]:
         convo = self.get_conversation(workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id)
@@ -162,7 +170,6 @@ class HybridConversationStore:
         user_id: str,
         conversation_id: str,
         messages: Sequence[Mapping[str, Any]],
-        qf_ttl_seconds: int,
     ) -> None:
         now_iso = _utc_now_iso()
         existing = self.get_conversation(workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id) or {}
@@ -182,7 +189,6 @@ class HybridConversationStore:
             user_id=user_id,
             conversation_id=conversation_id,
             conversation=convo,
-            qf_ttl_seconds=qf_ttl_seconds,
         )
 
     def get_conversation(self, *, workspace_id: str, user_id: str, conversation_id: str) -> Optional[Dict[str, Any]]:
@@ -197,7 +203,7 @@ class HybridConversationStore:
             return None
         try:
             raw = json.loads(payload)
-        except Exception:
+        except JSON_PARSE_ERRORS:
             logger.debug("forge insights conversation payload parse failed key=%s", key)
             return None
         if isinstance(raw, list):
@@ -213,7 +219,6 @@ class HybridConversationStore:
         user_id: str,
         conversation_id: str,
         conversation: Mapping[str, Any],
-        qf_ttl_seconds: int,
     ) -> None:
         key = _conversation_store_key(
             namespace=self._namespace,
@@ -223,7 +228,7 @@ class HybridConversationStore:
         )
         convo = _normalize_conversation_record(conversation, conversation_id=conversation_id)
         payload = json.dumps(convo, separators=(",", ":"))
-        self._write(key, payload, qf_ttl_seconds)
+        self._write(key, payload)
 
     def list_conversations(
         self,
@@ -282,9 +287,10 @@ class HybridConversationStore:
                         token = str(item or "")
                     if token:
                         keys.append(token)
-            except Exception:
+            except VALKEY_BACKEND_ERRORS:
                 logger.debug("forge insights valkey scan failed", exc_info=True)
         if not keys:
+            _purge_expired_in_memory_entries()
             keys.extend([k for k in _IN_MEMORY_CONV_STORE.keys() if str(k).startswith(prefix)])
         return list(dict.fromkeys(keys))
 
@@ -297,19 +303,19 @@ class HybridConversationStore:
                     return value.decode("utf-8", errors="ignore")
                 if isinstance(value, str):
                     return value
-            except Exception:
+            except VALKEY_BACKEND_ERRORS:
                 logger.debug("forge insights valkey read failed", exc_info=True)
-        return _IN_MEMORY_CONV_STORE.get(key)
+        return _read_in_memory_value(key)
 
-    def _write(self, key: str, value: str, qf_ttl_seconds: int) -> None:
+    def _write(self, key: str, value: str) -> None:
         client = _get_valkey_client()
         if client is not None:
             try:
-                client.setex(key, int(qf_ttl_seconds), value)
+                client.setex(key, int(self._default_ttl_seconds), value)
                 return
-            except Exception:
+            except VALKEY_BACKEND_ERRORS:
                 logger.debug("forge insights valkey write failed", exc_info=True)
-        _IN_MEMORY_CONV_STORE[key] = value
+        _write_in_memory_value(key, value, ttl_seconds=self._default_ttl_seconds)
 
     def _delete(self, key: str) -> bool:
         client = _get_valkey_client()
@@ -317,7 +323,7 @@ class HybridConversationStore:
         if client is not None:
             try:
                 deleted = bool(int(client.delete(key) or 0))
-            except Exception:
+            except VALKEY_BACKEND_ERRORS:
                 logger.debug("forge insights valkey delete failed", exc_info=True)
         if key in _IN_MEMORY_CONV_STORE:
             _IN_MEMORY_CONV_STORE.pop(key, None)
@@ -350,12 +356,15 @@ class MinimalChatService:
         self._feature_name = str(feature_name or "MinimalChat").strip() or "MinimalChat"
         self._conversation_prefix = str(conversation_prefix or "conv_").strip() or "conv_"
         self._conversation_namespace = str(conversation_namespace or "minimal").strip().lower() or "minimal"
-        self._conversation_store = conversation_store or HybridConversationStore(namespace=self._conversation_namespace)
 
         default_ttl = QF_FORGE_INSIGHTS_CONVERSATION_TTL_SECONDS
         if self._conversation_namespace == "minimal":
             default_ttl = QF_MINIMAL_CHAT_CONVERSATION_TTL_SECONDS
         self._conversation_ttl_seconds = max(60, int(conversation_ttl_seconds or default_ttl or 43200))
+        self._conversation_store = conversation_store or HybridConversationStore(
+            namespace=self._conversation_namespace,
+            default_ttl_seconds=self._conversation_ttl_seconds,
+        )
         self._max_history_messages = max(10, int(max_history_messages or QF_FORGE_INSIGHTS_MAX_HISTORY_MESSAGES or _DEFAULT_HISTORY_LIMIT))
         self._max_context_chars = max(2000, int(max_context_chars or QF_FORGE_INSIGHTS_MAX_CONTEXT_CHARS or 24000))
         self._summary_enabled = bool(QF_FORGE_INSIGHTS_SUMMARY_ENABLED if summary_enabled is None else summary_enabled)
@@ -452,7 +461,6 @@ class MinimalChatService:
             user_id=user_id,
             conversation_id=conversation_id,
             conversation=updated_conversation,
-            qf_ttl_seconds=self._conversation_ttl_seconds,
         )
 
         if req.debug:
@@ -509,7 +517,7 @@ class MinimalChatService:
         try:
             with httpx.Client(timeout=self._timeout_seconds) as client:
                 resp = client.post(chat_url, json=dict(payload))
-        except Exception as exc:
+        except httpx.HTTPError as exc:
             log_llm_exception(
                 logger,
                 client_name=client_name,
@@ -541,7 +549,7 @@ class MinimalChatService:
 
         try:
             body = resp.json()
-        except Exception as exc:
+        except JSON_PARSE_ERRORS as exc:
             raise ForgeError(
                 "Malformed provider response",
                 status_code=502,
@@ -580,7 +588,6 @@ class MinimalChatService:
         user_id: str,
         conversation_id: str,
         conversation: Mapping[str, Any],
-        qf_ttl_seconds: int,
     ) -> None:
         save_conv = getattr(self._conversation_store, "save_conversation", None)
         if callable(save_conv):
@@ -589,7 +596,6 @@ class MinimalChatService:
                 user_id=user_id,
                 conversation_id=conversation_id,
                 conversation=conversation,
-                qf_ttl_seconds=qf_ttl_seconds,
             )
             return
         save_messages = getattr(self._conversation_store, "save_messages", None)
@@ -599,7 +605,6 @@ class MinimalChatService:
                 user_id=user_id,
                 conversation_id=conversation_id,
                 messages=list(conversation.get("messages") or []),
-                qf_ttl_seconds=qf_ttl_seconds,
             )
             return
         raise ForgeError("Conversation store does not support saving", status_code=500)
@@ -610,7 +615,7 @@ class MinimalChatService:
             return []
         try:
             rows = list_fn(workspace_id=workspace_id, user_id=user_id, limit=limit)
-        except Exception:
+        except STORE_FALLBACK_ERRORS:
             logger.exception("forge insights list conversations failed")
             return []
         out: List[Dict[str, Any]] = []
@@ -624,7 +629,7 @@ class MinimalChatService:
         if callable(delete_fn):
             try:
                 return bool(delete_fn(workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id))
-            except Exception:
+            except STORE_FALLBACK_ERRORS:
                 logger.exception("forge insights delete conversation failed")
                 return False
         return False
@@ -706,7 +711,7 @@ def _normalize_usage(usage: Any) -> Dict[str, int]:
 def _to_nonneg_int(value: Any) -> int:
     try:
         parsed = int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return 0
     return parsed if parsed >= 0 else 0
 
@@ -923,7 +928,7 @@ def _get_valkey_client() -> Any:
         return None
     try:
         _valkey_client = valkey.StrictValkey(host=host, port=port, decode_responses=True)
-    except Exception:
+    except VALKEY_BACKEND_ERRORS:
         logger.debug("forge insights valkey init failed", exc_info=True)
         _valkey_client = None
     return _valkey_client
@@ -940,6 +945,95 @@ def _safe_validation_errors(exc: ValidationError) -> List[Dict[str, Any]]:
             item["ctx"] = {str(k): str(v) for k, v in item["ctx"].items()}
         rows.append(item)
     return rows
+
+
+def _read_in_memory_value(key: str) -> Optional[str]:
+    _purge_expired_in_memory_entries()
+    raw = _IN_MEMORY_CONV_STORE.get(key)
+    if raw is None:
+        return None
+    entry = _normalize_in_memory_entry(raw)
+    if entry is None:
+        _IN_MEMORY_CONV_STORE.pop(key, None)
+        return None
+    if _is_in_memory_entry_expired(entry):
+        _IN_MEMORY_CONV_STORE.pop(key, None)
+        return None
+    return str(entry.get("value") or "")
+
+
+def _write_in_memory_value(key: str, value: str, *, ttl_seconds: int) -> None:
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(seconds=max(1, int(ttl_seconds or 1)))
+    _IN_MEMORY_CONV_STORE[key] = {
+        "value": value,
+        "stored_at": now.isoformat().replace("+00:00", "Z"),
+        "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+    }
+    _trim_in_memory_store(max_entries=_MAX_IN_MEMORY_CONVERSATIONS)
+
+
+def _purge_expired_in_memory_entries() -> None:
+    expired_keys = [
+        key
+        for key, raw in list(_IN_MEMORY_CONV_STORE.items())
+        if (entry := _normalize_in_memory_entry(raw)) is None or _is_in_memory_entry_expired(entry)
+    ]
+    for key in expired_keys:
+        _IN_MEMORY_CONV_STORE.pop(key, None)
+
+
+def _trim_in_memory_store(*, max_entries: int) -> None:
+    _purge_expired_in_memory_entries()
+    overflow = len(_IN_MEMORY_CONV_STORE) - max(1, int(max_entries or 1))
+    if overflow <= 0:
+        return
+    ranked: List[tuple[datetime, str]] = []
+    for key, raw in list(_IN_MEMORY_CONV_STORE.items()):
+        entry = _normalize_in_memory_entry(raw)
+        if entry is None:
+            ranked.append((datetime.min.replace(tzinfo=timezone.utc), key))
+            continue
+        stored_at = _parse_utc_datetime(entry.get("stored_at")) or datetime.min.replace(tzinfo=timezone.utc)
+        ranked.append((stored_at, key))
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    for _, key in ranked[:overflow]:
+        _IN_MEMORY_CONV_STORE.pop(key, None)
+
+
+def _normalize_in_memory_entry(raw: Any) -> Optional[Dict[str, str]]:
+    if isinstance(raw, str):
+        return {"value": raw, "stored_at": "", "expires_at": ""}
+    if not isinstance(raw, Mapping):
+        return None
+    value = raw.get("value")
+    if not isinstance(value, str):
+        return None
+    return {
+        "value": value,
+        "stored_at": str(raw.get("stored_at") or ""),
+        "expires_at": str(raw.get("expires_at") or ""),
+    }
+
+
+def _is_in_memory_entry_expired(entry: Mapping[str, Any]) -> bool:
+    expires_at = _parse_utc_datetime(entry.get("expires_at"))
+    if expires_at is None:
+        return False
+    return expires_at <= datetime.now(timezone.utc)
+
+
+def _parse_utc_datetime(value: Any) -> Optional[datetime]:
+    token = str(value or "").strip()
+    if token == "":
+        return None
+    try:
+        parsed = datetime.fromisoformat(token.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 __all__ = ["MinimalChatService", "ForgeInsightsChatService", "MinimalChatRequest", "ChatMessage"]

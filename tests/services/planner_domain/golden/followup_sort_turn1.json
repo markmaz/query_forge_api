@@ -156,10 +156,12 @@
       "vector_score": 1.0,
       "policy_adjustment": 0.0,
       "rerank_signals": [
+        "canonical_name_preference_prompt",
         "listing_intent",
         "needs_school_filter",
         "school_literal_present",
-        "staff_listing"
+        "staff_listing",
+        "staff_work_context_prompt"
       ],
       "domain_capabilities": {
         "present": [
@@ -181,10 +183,12 @@
     }
   ],
   "rerank_signals": [
+    "canonical_name_preference_prompt",
     "listing_intent",
     "needs_school_filter",
     "school_literal_present",
-    "staff_listing"
+    "staff_listing",
+    "staff_work_context_prompt"
   ],
   "column_shortlist_count": 4,
   "slot_hints": {
@@ -466,11 +470,34 @@
       "endpoint": ""
     }
   },
+  "projection_policy": {
+    "prompt_signals": [
+      "canonical_name_preference_prompt",
+      "listing_intent",
+      "needs_school_filter",
+      "school_literal_present",
+      "staff_listing",
+      "staff_work_context_prompt"
+    ],
+    "matched_policies": [
+      "human_school_filter_projection"
+    ],
+    "projection_mode": "prepend",
+    "required_concept_keys": [
+      "SCHOOL_NAME"
+    ],
+    "excluded_concept_keys": [
+      "SCHOOL_ID"
+    ],
+    "required_column_names": [],
+    "excluded_column_names": [],
+    "required_filter_concept_keys": [],
+    "required_join_tables": []
+  },
   "shared_pipeline": {
     "domain_selection": {
       "pipeline_name": "planner_domain_selection_pipeline",
-      "trace_id": "planner_domain_selection:ws-1:education",
-      "vertical_norm": "education",
+      "trace_id": "planner_domain_selection:ws-1",
       "timings_ms": {
         "normalize_text": 0,
         "resolve_capabilities": 0,
@@ -491,20 +518,24 @@
         "extract_signals": {
           "source_text": "show me the staff at barksdale elementary",
           "signals": [
+            "canonical_name_preference_prompt",
             "listing_intent",
             "needs_school_filter",
             "school_literal_present",
-            "staff_listing"
+            "staff_listing",
+            "staff_work_context_prompt"
           ]
         },
         "apply_policy_rerank": {
           "candidate_count": 1,
           "policy_effect_count": 0,
           "signals": [
+            "canonical_name_preference_prompt",
             "listing_intent",
             "needs_school_filter",
             "school_literal_present",
-            "staff_listing"
+            "staff_listing",
+            "staff_work_context_prompt"
           ]
         }
       },
@@ -542,10 +573,12 @@
           "summary": {
             "source_text": "show me the staff at barksdale elementary",
             "signals": [
+              "canonical_name_preference_prompt",
               "listing_intent",
               "needs_school_filter",
               "school_literal_present",
-              "staff_listing"
+              "staff_listing",
+              "staff_work_context_prompt"
             ]
           },
           "lineage": [
@@ -560,10 +593,12 @@
             "candidate_count": 1,
             "policy_effect_count": 0,
             "signals": [
+              "canonical_name_preference_prompt",
               "listing_intent",
               "needs_school_filter",
               "school_literal_present",
-              "staff_listing"
+              "staff_listing",
+              "staff_work_context_prompt"
             ]
           },
           "lineage": [
@@ -590,8 +625,8 @@
       "label": "Load and prepare conversation context"
     },
     {
-      "step": "normalize_prompt_and_vertical",
-      "label": "Normalize prompt and effective vertical"
+      "step": "normalize_prompt",
+      "label": "Normalize prompt and planner context"
     },
     {
       "step": "domain_selection",

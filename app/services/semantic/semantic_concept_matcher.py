@@ -7,18 +7,18 @@ from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.semantic.semantic_llm_schema import normalize_concept_key
 
+NUMERIC_PARSE_ERRORS = (TypeError, ValueError)
+
 
 class SemanticConceptMatcher:
     def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
         self._sql = sql or ForgeMetaSQL()
 
-    def load_known_concepts(self, vertical_norm: str) -> List[Dict[str, Any]]:
-        vertical = _norm_vertical(vertical_norm)
+    def load_known_concepts(self) -> List[Dict[str, Any]]:
         rows = self._sql.execute_query_mappings(
             """
             SELECT
               id,
-              vertical_norm,
               concept_key,
               semantic_type,
               sub_type,
@@ -34,10 +34,8 @@ class SemanticConceptMatcher:
               `sensitive` AS `sensitive`
             FROM semantic_concept
             WHERE `status` = 'active'
-              AND vertical_norm IN (:vertical, 'generic')
-            ORDER BY CASE WHEN vertical_norm = :vertical THEN 0 ELSE 1 END, concept_key
+            ORDER BY concept_key
             """,
-            {"vertical": vertical},
         )
         out: List[Dict[str, Any]] = []
         for row in rows:
@@ -51,30 +49,26 @@ class SemanticConceptMatcher:
             out.append(item)
         return out
 
-    def load_alias_rules(self, vertical_norm: str) -> List[Dict[str, Any]]:
-        vertical = _norm_vertical(vertical_norm)
+    def load_alias_rules(self) -> List[Dict[str, Any]]:
         return self._sql.execute_query_mappings(
             """
-            SELECT alias_key, concept_key, match_kind, weight, vertical_norm
+            SELECT alias_key, concept_key, match_kind, weight
             FROM semantic_concept_alias
-            WHERE vertical_norm IN (:vertical, 'generic')
-            ORDER BY CASE WHEN vertical_norm = :vertical THEN 0 ELSE 1 END, weight DESC, id ASC
+            ORDER BY weight DESC, id ASC
             """,
-            {"vertical": vertical},
         )
 
     def match_by_alias(
         self,
         card: Dict[str, Any],
         *,
-        vertical_norm: str,
         alias_rules: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[Optional[Dict[str, Any]], List[str]]:
         col = str(card.get("columnName") or "").strip().lower()
         if not col:
             return None, []
 
-        rows = alias_rules if alias_rules is not None else self.load_alias_rules(vertical_norm)
+        rows = alias_rules if alias_rules is not None else self.load_alias_rules()
 
         best_candidate: Optional[Dict[str, Any]] = None
         best_score = -1.0
@@ -88,7 +82,7 @@ class SemanticConceptMatcher:
             match_kind = str(row.get("match_kind") or "exact").strip().lower()
             try:
                 weight = float(row.get("weight") or 0.0)
-            except Exception:
+            except NUMERIC_PARSE_ERRORS:
                 weight = 0.0
 
             matched = False
@@ -142,11 +136,11 @@ class SemanticConceptMatcher:
         self,
         *,
         card: Dict[str, Any],
-        vertical_norm: str,
         known_concepts: Optional[List[Dict[str, Any]]] = None,
         alias_rules: Optional[List[Dict[str, Any]]] = None,
         alias_conf_threshold: float = 0.75,
     ) -> Tuple[Optional[Dict[str, Any]], List[str]]:
+        del known_concepts
         # Priority order: deterministic > alias(weighted) > llm > fallback.
         deterministic, det_notes = self._deterministic_identifier_candidate(card=card)
         if deterministic is not None:
@@ -154,7 +148,6 @@ class SemanticConceptMatcher:
 
         alias_candidate, alias_notes = self.match_by_alias(
             card=card,
-            vertical_norm=vertical_norm,
             alias_rules=alias_rules,
         )
         if alias_candidate and float(alias_candidate.get("confidence") or 0.0) >= float(alias_conf_threshold):
@@ -185,33 +178,31 @@ class SemanticConceptMatcher:
 
         return None, det_notes + alias_notes
 
-    def match_by_heuristics(self, card: Dict[str, Any], *, vertical_norm: str) -> Tuple[Optional[str], List[str]]:
-        vertical = _norm_vertical(vertical_norm)
+    def match_by_heuristics(self, card: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
         col = str(card.get("columnName") or "").strip().lower()
         desc = str(card.get("description") or "").strip().lower()
         samples = card.get("samples") if isinstance(card.get("samples"), list) else []
 
-        if vertical == "education":
-            if col == "k_student" or (_contains(col, "student") and _has_any(col, ["id", "key"])):
-                return "STUDENT_ID", ["heuristic_match:student_id"]
-            if col == "k_school" or (_contains(col, "school") and _has_any(col, ["id", "key"])):
-                return "SCHOOL_ID", ["heuristic_match:school_id"]
-            if col == "k_lea" or ((_contains(col, "lea") or _contains(col, "district")) and _has_any(col, ["id", "key"])):
-                return "LEA_ID", ["heuristic_match:lea_id"]
-            if col == "k_course" or (_contains(col, "course") and _has_any(col, ["id", "key"])):
-                return "COURSE_ID", ["heuristic_match:course_id"]
-            if _contains(col, "section") and _has_any(col, ["id", "key"]):
-                return "SECTION_ID", ["heuristic_match:section_id"]
-            if _contains(col, "school_year") or (_samples_are_year(samples) and "academic year" in desc):
-                return "SCHOOL_YEAR", ["heuristic_match:school_year"]
-            if _contains(col, "county"):
-                return "COUNTY", ["heuristic_match:county"]
-            if _contains(col, "city"):
-                return "CITY", ["heuristic_match:city"]
-            if _contains(col, "zip") or _contains(col, "postal"):
-                return "ZIP_CODE", ["heuristic_match:zip_code"]
-            if _contains(col, "state_course_code"):
-                return "STATE_COURSE_CODE", ["heuristic_match:state_course_code"]
+        if col == "k_student" or (_contains(col, "student") and _has_any(col, ["id", "key"])):
+            return "STUDENT_ID", ["heuristic_match:student_id"]
+        if col == "k_school" or (_contains(col, "school") and _has_any(col, ["id", "key"])):
+            return "SCHOOL_ID", ["heuristic_match:school_id"]
+        if col == "k_lea" or ((_contains(col, "lea") or _contains(col, "district")) and _has_any(col, ["id", "key"])):
+            return "LEA_ID", ["heuristic_match:lea_id"]
+        if col == "k_course" or (_contains(col, "course") and _has_any(col, ["id", "key"])):
+            return "COURSE_ID", ["heuristic_match:course_id"]
+        if _contains(col, "section") and _has_any(col, ["id", "key"]):
+            return "SECTION_ID", ["heuristic_match:section_id"]
+        if _contains(col, "school_year") or (_samples_are_year(samples) and "academic year" in desc):
+            return "SCHOOL_YEAR", ["heuristic_match:school_year"]
+        if _contains(col, "county"):
+            return "COUNTY", ["heuristic_match:county"]
+        if _contains(col, "city"):
+            return "CITY", ["heuristic_match:city"]
+        if _contains(col, "zip") or _contains(col, "postal"):
+            return "ZIP_CODE", ["heuristic_match:zip_code"]
+        if _contains(col, "state_course_code"):
+            return "STATE_COURSE_CODE", ["heuristic_match:state_course_code"]
 
         return None, []
 
@@ -219,7 +210,6 @@ class SemanticConceptMatcher:
         self,
         card: Dict[str, Any],
         proposal: Dict[str, Any],
-        vertical_norm: str,
         known_concepts: Optional[List[Dict[str, Any]]] = None,
         alias_rules: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[Dict[str, Any], List[str]]:
@@ -234,7 +224,6 @@ class SemanticConceptMatcher:
 
         alias_candidate, alias_notes = self.match_by_alias(
             card,
-            vertical_norm=vertical_norm,
             alias_rules=alias_rules,
         )
         if alias_candidate:
@@ -254,10 +243,10 @@ class SemanticConceptMatcher:
             notes.extend(alias_notes)
             return out, notes
 
-        known = known_concepts if known_concepts is not None else self.load_known_concepts(vertical_norm)
+        known = known_concepts if known_concepts is not None else self.load_known_concepts()
         known_map = {normalize_concept_key(c["concept_key"]): c for c in known}
 
-        heuristic_key, heuristic_notes = self.match_by_heuristics(card, vertical_norm=vertical_norm)
+        heuristic_key, heuristic_notes = self.match_by_heuristics(card)
         if heuristic_key and heuristic_key in known_map:
             out["concept_key"] = heuristic_key
             out["concept_source"] = "deterministic"
@@ -359,13 +348,6 @@ class SemanticConceptMatcher:
         if "tenant" in col:
             return "TENANT_CODE"
         return None
-
-
-def _norm_vertical(vertical_norm: str) -> str:
-    value = str(vertical_norm or "generic").strip().lower()
-    return value or "generic"
-
-
 def _contains(text: str, needle: str) -> bool:
     return needle in text
 
@@ -384,7 +366,7 @@ def _samples_are_year(samples: List[Any]) -> bool:
 def _clamp_float(value: Any) -> float:
     try:
         out = float(value)
-    except Exception:
+    except NUMERIC_PARSE_ERRORS:
         out = 0.0
     return max(0.0, min(1.0, out))
 

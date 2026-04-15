@@ -51,5 +51,5 @@ class SkillRegistry:
             try:
                 importlib.import_module(full_name)
                 logger.debug("SkillRegistry: discovered %s", full_name)
-            except Exception:
+            except ImportError:
                 logger.exception("SkillRegistry.autodiscover: failed to import %s", full_name)

@@ -14,6 +14,8 @@ from app.nlp.tier2_spacy.schema import Tier2Entities, Tier2Extraction, empty_ext
 from app.nlp.tier2_spacy.slot_assigner import assign_slots
 
 logger = logging.getLogger(__name__)
+TIER2_INFERENCE_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+TIER2_MODEL_LOAD_ERRORS = (ImportError, OSError, ValueError)
 
 
 @dataclass
@@ -58,7 +60,7 @@ def run_tier2(prompt: str) -> Tier2Extraction:
                 str(key): float(value)
                 for key, value in dict(getattr(doc, "cats", {}) or {}).items()
             }
-        except Exception:
+        except TIER2_INFERENCE_ERRORS:
             logger.exception("Tier2 spaCy inference failed")
             warnings.append("tier2_inference_error")
 
@@ -132,6 +134,6 @@ def _load_model() -> Optional[_LoadedModel]:
             add_school_district_ruler(nlp, _GAZETTEER_PATTERNS_PATH)
             _MODEL_CACHE = _LoadedModel(nlp=nlp, model_version=model_path)
             return _MODEL_CACHE
-        except Exception:
+        except TIER2_MODEL_LOAD_ERRORS:
             logger.exception("Failed to load Tier2 spaCy model path=%s", model_path)
             return None

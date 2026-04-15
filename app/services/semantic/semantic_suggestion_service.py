@@ -6,12 +6,13 @@ import logging
 from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import (
     SEMANTIC_AUTO_APPROVE_MAX_ERRORS,
     SEMANTIC_AUTO_APPROVE_THRESHOLD,
     SEMANTIC_LLM_BATCH_SIZE,
-    SEMANTIC_VERTICAL_DEFAULT,
 )
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
@@ -24,7 +25,12 @@ from app.services.semantic.semantic_validation import validate_semantic_suggesti
 
 RUN_STATUSES = {"created", "running", "completed", "failed", "applied"}
 ITEM_DECISIONS = {"pending", "auto_approved", "approved", "rejected", "applied", "failed_apply"}
+CREATE_RUN_FIELDS = frozenset({"workspace_id", "workspace_table_id", "page_size"})
 logger = logging.getLogger(__name__)
+SEMANTIC_MATCHER_FALLBACK_ERRORS = (ForgeError, SQLAlchemyError)
+SEMANTIC_APPLY_ITEM_FALLBACK_ERRORS = (ForgeError, SQLAlchemyError)
+JSON_PARSE_ERRORS = (json.JSONDecodeError,)
+RUN_EXECUTION_WRAP_ERRORS = (ForgeError, SQLAlchemyError, OSError, RuntimeError, TypeError, ValueError)
 
 
 class SemanticSuggestionService:
@@ -83,8 +89,8 @@ class SemanticSuggestionService:
     def create_run(self, payload: Dict[str, Any], *, created_by: Optional[str] = None) -> Dict[str, Any]:
         if not isinstance(payload, dict):
             raise ForgeError("Invalid JSON body", status_code=400)
+        _reject_unknown_fields(payload, allowed_fields=CREATE_RUN_FIELDS)
 
-        vertical = _normalize_optional_text(payload.get("vertical"), max_len=50) or SEMANTIC_VERTICAL_DEFAULT
         workspace_id = _normalize_optional_text(payload.get("workspace_id"), max_len=100)
         workspace_table_id = _normalize_optional_int(payload.get("workspace_table_id"), field="workspace_table_id")
         page_size = _normalize_optional_int(payload.get("page_size"), field="page_size") or 200
@@ -98,13 +104,11 @@ class SemanticSuggestionService:
             """
             INSERT INTO semantic_suggestion_run (
               workspace_id,
-              vertical,
               status,
               params_json,
               created_by
             ) VALUES (
               :workspace_id,
-              :vertical,
               'created',
               :params_json,
               :created_by
@@ -112,7 +116,6 @@ class SemanticSuggestionService:
             """,
             {
                 "workspace_id": workspace_id,
-                "vertical": vertical,
                 "params_json": json.dumps(params),
                 "created_by": _normalize_optional_text(created_by, max_len=128),
             },
@@ -133,16 +136,15 @@ class SemanticSuggestionService:
         page_size = _normalize_optional_int(params.get("page_size"), field="page_size") or 200
         page_size = max(1, min(page_size, 1000))
         processed_columns = 0
-        vertical_norm = _normalize_vertical_norm(run.get("vertical"))
         workspace_id = str(run.get("workspace_id") or "").strip()
 
         self._set_run_status(run_id, status="running")
         try:
             try:
-                known_concepts = self._matcher.load_known_concepts(vertical_norm)
-                alias_rules = self._matcher.load_alias_rules(vertical_norm)
-            except Exception:
-                logger.exception("Failed to load known concepts/aliases for vertical=%s", vertical_norm)
+                known_concepts = self._matcher.load_known_concepts()
+                alias_rules = self._matcher.load_alias_rules()
+            except SEMANTIC_MATCHER_FALLBACK_ERRORS:
+                logger.exception("Failed to load known concepts/aliases for semantic suggestion run=%s", run_id)
                 known_concepts = []
                 alias_rules = []
             total_columns = self._cards.count_columns(workspace_table_id=workspace_table_id)
@@ -188,7 +190,6 @@ class SemanticSuggestionService:
                         if hasattr(self._matcher, "resolve_pre_llm"):
                             pre_output, _pre_notes = self._matcher.resolve_pre_llm(
                                 card=card,
-                                vertical_norm=vertical_norm,
                                 known_concepts=known_concepts,
                                 alias_rules=alias_rules,
                                 alias_conf_threshold=0.75,
@@ -202,7 +203,7 @@ class SemanticSuggestionService:
                     if unresolved_cards:
                         llm_outputs, llm_errors = self._label_cards(
                             cards=unresolved_cards,
-                            vertical=run.get("vertical"),
+                            vertical=None,
                             known_concepts=known_concepts,
                             workspace_id=workspace_id,
                             llm_id=llm_id,
@@ -222,7 +223,6 @@ class SemanticSuggestionService:
                             output=output,
                             label_error=label_error,
                             llm_raw=llm_raw if isinstance(llm_raw, dict) else None,
-                            vertical_norm=vertical_norm,
                             known_concepts=known_concepts,
                             alias_rules=alias_rules,
                         )
@@ -247,7 +247,7 @@ class SemanticSuggestionService:
                 current_card=None,
             )
             self._set_run_status(run_id, status="completed")
-        except Exception as exc:
+        except RUN_EXECUTION_WRAP_ERRORS as exc:
             self._update_run_progress(
                 run_id=int(run_id),
                 params=params,
@@ -269,8 +269,6 @@ class SemanticSuggestionService:
             SELECT
               id,
               workspace_id,
-              vertical,
-              vertical_norm,
               status,
               params_json,
               total_columns,
@@ -490,7 +488,7 @@ class SemanticSuggestionService:
                     """,
                     {"id": int(item["id"])},
                 )
-            except Exception as exc:
+            except SEMANTIC_APPLY_ITEM_FALLBACK_ERRORS as exc:
                 self._sql.execute_write(
                     """
                     UPDATE semantic_suggestion_item
@@ -515,7 +513,6 @@ class SemanticSuggestionService:
         output: Optional[Dict[str, Any]],
         label_error: Optional[str],
         llm_raw: Optional[Dict[str, Any]],
-        vertical_norm: str,
         known_concepts: List[Dict[str, Any]],
         alias_rules: List[Dict[str, Any]],
     ) -> None:
@@ -551,7 +548,6 @@ class SemanticSuggestionService:
             matched_output, matcher_notes = self._matcher.enforce_canonical_if_strong(
                 card=card,
                 proposal=processed_output,
-                vertical_norm=vertical_norm,
                 known_concepts=known_concepts,
                 alias_rules=alias_rules,
             )
@@ -567,7 +563,6 @@ class SemanticSuggestionService:
             concept_key = str(validated.get("concept_key") or "").strip()
             concept_id = self._resolve_concept_id(
                 concept_key=concept_key,
-                vertical_norm=vertical_norm,
                 concept_source=concept_source,
             )
             validated["concept_key_raw"] = str(raw_concept_key) if raw_concept_key is not None else None
@@ -717,7 +712,7 @@ class SemanticSuggestionService:
             },
         )
 
-    def _resolve_concept_id(self, *, concept_key: str, vertical_norm: str, concept_source: str) -> Optional[int]:
+    def _resolve_concept_id(self, *, concept_key: str, concept_source: str) -> Optional[int]:
         key = str(concept_key or "").strip()
         if not key or concept_source == "fallback":
             return None
@@ -726,11 +721,9 @@ class SemanticSuggestionService:
             SELECT id
             FROM semantic_concept
             WHERE concept_key = :concept_key
-              AND vertical_norm IN (:vertical_norm, 'generic')
-            ORDER BY CASE WHEN vertical_norm = :vertical_norm THEN 0 ELSE 1 END
             LIMIT 1
             """,
-            {"concept_key": key, "vertical_norm": _normalize_vertical_norm(vertical_norm)},
+            {"concept_key": key},
         )
         if not rows:
             return None
@@ -739,7 +732,7 @@ class SemanticSuggestionService:
             return None
         try:
             return int(row_id)
-        except Exception:
+        except (TypeError, ValueError):
             return None
 
     def _upsert_registry(self, *, run: Dict[str, Any], item: Dict[str, Any]) -> int:
@@ -747,13 +740,11 @@ class SemanticSuggestionService:
         if not concept_key:
             raise ForgeError("Missing proposed_concept_key", status_code=400)
 
-        vertical_norm = _normalize_vertical_norm(run.get("vertical"))
-        registry_source = self._resolve_registry_source(item=item, vertical_norm=vertical_norm)
+        registry_source = self._resolve_registry_source(item=item)
 
         self._sql.execute_write(
             """
             INSERT INTO semantic_registry (
-              vertical,
               concept_key,
               semantic_type,
               sub_type,
@@ -768,7 +759,6 @@ class SemanticSuggestionService:
               display_priority,
               `sensitive`
             ) VALUES (
-              :vertical,
               :concept_key,
               :semantic_type,
               :sub_type,
@@ -798,11 +788,6 @@ class SemanticSuggestionService:
               `sensitive` = VALUES(`sensitive`)
             """,
             {
-                "vertical": (
-                    None
-                    if _normalize_vertical_norm(registry_source["vertical"]) == "__global__"
-                    else _normalize_vertical_norm(registry_source["vertical"])
-                ),
                 "concept_key": concept_key,
                 "semantic_type": registry_source["semantic_type"],
                 "sub_type": registry_source["sub_type"],
@@ -823,12 +808,10 @@ class SemanticSuggestionService:
             """
             SELECT id
             FROM semantic_registry
-            WHERE vertical_norm = :vertical_norm
-              AND concept_key = :concept_key
+            WHERE concept_key = :concept_key
             LIMIT 1
             """,
             {
-                "vertical_norm": _normalize_vertical_norm(registry_source["vertical"]),
                 "concept_key": concept_key,
             },
         )
@@ -900,24 +883,19 @@ class SemanticSuggestionService:
         )
 
         if concept_id is not None:
-            vertical_norm = _normalize_vertical_norm(run.get("vertical"))
-            if vertical_norm == "__global__":
-                vertical_norm = "generic"
             self._assignment.ensure_mapping(
                 workspace_column_id=int(item["workspace_column_id"]),
                 semantic_concept_id=concept_id,
                 relationship_kind="primary",
                 weight=max(0.0, float(confidence or 0.0)),
-                vertical_norm=vertical_norm,
             )
 
-    def _resolve_registry_source(self, *, item: Dict[str, Any], vertical_norm: str) -> Dict[str, Any]:
+    def _resolve_registry_source(self, *, item: Dict[str, Any]) -> Dict[str, Any]:
         concept_id = item.get("proposed_concept_id")
         if concept_id is not None:
             rows = self._sql.execute_query_mappings(
                 """
                 SELECT
-                  vertical_norm,
                   semantic_type,
                   sub_type,
                   entity,
@@ -939,7 +917,6 @@ class SemanticSuggestionService:
             if rows:
                 concept = rows[0]
                 return {
-                    "vertical": concept.get("vertical_norm") or vertical_norm,
                     "semantic_type": concept.get("semantic_type") or item.get("proposed_semantic_type") or "attribute",
                     "sub_type": concept.get("sub_type"),
                     "entity": concept.get("entity"),
@@ -956,7 +933,6 @@ class SemanticSuggestionService:
 
         fallback_type = item.get("proposed_semantic_type") or "attribute"
         return {
-            "vertical": vertical_norm,
             "semantic_type": fallback_type,
             "sub_type": item.get("proposed_sub_type"),
             "entity": item.get("proposed_entity"),
@@ -1092,6 +1068,10 @@ class SemanticSuggestionService:
     @staticmethod
     def _normalize_item_row(row: Dict[str, Any]) -> Dict[str, Any]:
         out = dict(row)
+        if out.get("workspace_column_id") is None and out.get("model_column_id") is not None:
+            out["workspace_column_id"] = out.get("model_column_id")
+        if out.get("workspace_table_id") is None and out.get("model_table_id") is not None:
+            out["workspace_table_id"] = out.get("model_table_id")
         int_fields = {
             "id",
             "run_id",
@@ -1147,11 +1127,13 @@ def _normalize_optional_text(value: Any, *, max_len: int) -> Optional[str]:
     return text
 
 
-def _normalize_vertical_norm(value: Any) -> str:
-    text = str(value or "").strip().lower()
-    if text in {"", "global", "__global__", "null", "none"}:
-        return "__global__"
-    return text
+def _reject_unknown_fields(payload: Dict[str, Any], *, allowed_fields: frozenset[str]) -> None:
+    unknown_fields = sorted(set(payload) - allowed_fields)
+    if not unknown_fields:
+        return
+    if len(unknown_fields) == 1:
+        raise ForgeError(f"Unsupported field: {unknown_fields[0]}", status_code=400)
+    raise ForgeError(f"Unsupported fields: {', '.join(unknown_fields)}", status_code=400)
 
 
 def _normalize_optional_int(value: Any, *, field: str) -> Optional[int]:
@@ -1159,14 +1141,14 @@ def _normalize_optional_int(value: Any, *, field: str) -> Optional[int]:
         return None
     try:
         return int(value)
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         raise ForgeError(f"{field} must be an integer", status_code=400) from exc
 
 
 def _require_positive_int(value: Any, *, field: str) -> int:
     try:
         out = int(value)
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         raise ForgeError(f"{field} must be a positive integer", status_code=400) from exc
     if out <= 0:
         raise ForgeError(f"{field} must be a positive integer", status_code=400)
@@ -1191,7 +1173,7 @@ def _parse_json_any(value: Any) -> Any:
             return None
         try:
             return json.loads(text)
-        except Exception:
+        except JSON_PARSE_ERRORS:
             return None
     return value
 
@@ -1225,7 +1207,7 @@ def _format_exception_for_run(exc: Exception) -> str:
         if details:
             try:
                 details_text = json.dumps(_to_jsonable(details), ensure_ascii=True)
-            except Exception:
+            except (TypeError, ValueError):
                 details_text = str(details)
             return f"{message} | details={details_text}"[:8000]
         return message[:8000]

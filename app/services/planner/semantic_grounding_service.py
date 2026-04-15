@@ -4,6 +4,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.services.planner.semantic_candidate_models import SemanticCandidatePayload
 from app.services.planner.semantic_retrieval_service import SemanticRetrievalService
 from app.services.semantic.value_alias_resolution_service import ValueAliasResolutionService
@@ -59,7 +61,6 @@ class SemanticGroundingService:
         *,
         prompt: str,
         workspace_id: str,
-        vertical_norm: str,
         base_domain_id: int,
         base_domain_name: Optional[str],
         capabilities_compact: Mapping[str, Any],
@@ -71,10 +72,7 @@ class SemanticGroundingService:
         alias_constraints: List[Dict[str, Any]] = []
 
         if include_alias_constraints:
-            alias_constraints = self.resolve_alias_constraints(
-                prompt=prompt,
-                vertical_norm=vertical_norm,
-            )
+            alias_constraints = self.resolve_alias_constraints(prompt=prompt)
 
         if include_candidates:
             try:
@@ -83,10 +81,9 @@ class SemanticGroundingService:
                     workspace_id=workspace_id,
                     base_domain_id=int(base_domain_id),
                     base_domain_name=base_domain_name,
-                    vertical_norm=vertical_norm,
                     capabilities_compact=capabilities_compact,
                 )
-            except Exception as exc:
+            except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
                 logger.warning("semantic grounding candidate retrieval failed err=%s", exc)
                 warnings.append("candidate_retrieval_failed")
 
@@ -100,11 +97,12 @@ class SemanticGroundingService:
         self,
         *,
         prompt: str,
-        vertical_norm: str,
     ) -> List[Dict[str, Any]]:
         try:
-            rows = self._value_alias_resolver.resolve(prompt=prompt, vertical_norm=vertical_norm)
-        except Exception as exc:
+            rows = self._value_alias_resolver.resolve(
+                prompt=prompt,
+            )
+        except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
             logger.warning("semantic grounding alias resolution failed err=%s", exc)
             return []
         return _rows_to_alias_constraints(rows)

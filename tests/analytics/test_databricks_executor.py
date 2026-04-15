@@ -115,3 +115,55 @@ def test_get_bearer_token_returns_static_token():
         )
 
     assert executor.get_bearer_token() == "token-123"
+
+
+def test_execute_wraps_expected_delegate_errors():
+    with patch("app.adapters.analytics.databricks_executor.DatabricksForgeQueryPort") as mock_delegate:
+        mock_delegate.return_value.execute_query_mappings.side_effect = RuntimeError("driver failed")
+        executor = DatabricksSQLExecutor(
+            host="https://adb-1.azuredatabricks.net",
+            token="t",
+            http_path="/sql/1.0/warehouses/w1",
+        )
+
+        with pytest.raises(RuntimeError, match="Analytics query execution failed"):
+            executor.execute("SELECT 1")
+
+
+def test_execute_surfaces_unexpected_delegate_errors():
+    with patch("app.adapters.analytics.databricks_executor.DatabricksForgeQueryPort") as mock_delegate:
+        mock_delegate.return_value.execute_query_mappings.side_effect = AssertionError("unexpected delegate bug")
+        executor = DatabricksSQLExecutor(
+            host="https://adb-1.azuredatabricks.net",
+            token="t",
+            http_path="/sql/1.0/warehouses/w1",
+        )
+
+        with pytest.raises(AssertionError, match="unexpected delegate bug"):
+            executor.execute("SELECT 1")
+
+
+def test_test_connection_wraps_expected_delegate_errors():
+    with patch("app.adapters.analytics.databricks_executor.DatabricksForgeQueryPort") as mock_delegate:
+        mock_delegate.return_value.execute_query_mappings.side_effect = RuntimeError("ping failed")
+        executor = DatabricksSQLExecutor(
+            host="https://adb-1.azuredatabricks.net",
+            token="t",
+            http_path="/sql/1.0/warehouses/w1",
+        )
+
+        with pytest.raises(RuntimeError, match="Analytics datasource connection test failed"):
+            executor.test_connection()
+
+
+def test_test_connection_surfaces_unexpected_delegate_errors():
+    with patch("app.adapters.analytics.databricks_executor.DatabricksForgeQueryPort") as mock_delegate:
+        mock_delegate.return_value.execute_query_mappings.side_effect = AssertionError("unexpected ping bug")
+        executor = DatabricksSQLExecutor(
+            host="https://adb-1.azuredatabricks.net",
+            token="t",
+            http_path="/sql/1.0/warehouses/w1",
+        )
+
+        with pytest.raises(AssertionError, match="unexpected ping bug"):
+            executor.test_connection()

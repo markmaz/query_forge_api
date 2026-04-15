@@ -14,6 +14,7 @@ _IDENT_RE = re.compile(r"^[A-Za-z0-9_]+$")
 _ID_LIKE_PATTERNS = ("id", "_id", "guid", "uuid", "k_", "sk_", "pk_", "_key", "identifier")
 _COMPLEX_TYPES = {"binary", "blob", "variant", "map", "array", "struct"}
 _STRING_TYPES = {"string", "varchar", "char", "text", "nvarchar", "nchar"}
+METADATA_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
 def _is_id_like(col_name: str) -> bool:
@@ -137,7 +138,7 @@ ORDER BY table_name, ordinal_position
         try:
             rows = self._executor.execute(sql)
             names = self._extract_schema_names(rows)
-        except Exception:
+        except METADATA_FALLBACK_ERRORS:
             logger.warning(
                 "list_schemas: information_schema query failed; falling back to SHOW SCHEMAS",
                 exc_info=True,
@@ -230,7 +231,7 @@ FROM (
                     "sample_row_count": sample_row_count,
                 })
 
-        except Exception as exc:
+        except METADATA_FALLBACK_ERRORS as exc:
             logger.exception("profile_table_columns: error sampling %s", table_ref)
             for col in columns:
                 result[col["column_name"]]["sample_error"] = str(exc)[:500]
@@ -275,7 +276,7 @@ LIMIT {per_col_limit}
 """
                 top_rows = self._executor.execute(value_sql)
                 result[cname]["top_values"] = [str(r.get("val", "")) for r in top_rows]
-            except Exception as exc:
+            except METADATA_FALLBACK_ERRORS as exc:
                 logger.warning(
                     "profile_table_columns: value sampling failed for %s.%s: %s",
                     table_ref, cname, exc,

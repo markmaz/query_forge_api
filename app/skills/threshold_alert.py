@@ -29,11 +29,18 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.exceptions.forge_error import ForgeError
 from app.skills.base import BaseSkill, SkillContext
 from app.skills.delivery import DeliveryPayload, get_channel
 from app.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
+
+AI_EXPECTATION_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError)
+ALERT_STATE_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+DELIVERY_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError)
 
 
 @SkillRegistry.register
@@ -393,7 +400,7 @@ class ThresholdAlertSkill(BaseSkill):
                 "message": verdict.get("reason", prompt),
                 "prompt": prompt,
             }
-        except Exception as exc:
+        except AI_EXPECTATION_FALLBACK_ERRORS as exc:
             logger.warning("AI expectation evaluation failed: %s", exc)
             return {
                 "type": "ai_expectation",
@@ -462,6 +469,7 @@ class ThresholdAlertSkill(BaseSkill):
         last_state: Dict[str, Any],
         context: SkillContext,
     ) -> bool:
+        del conditions_failed
         alert_mode = cfg.get("alert_mode", "on_change")
 
         if all_passed:
@@ -496,7 +504,7 @@ class ThresholdAlertSkill(BaseSkill):
                 if isinstance(state, str):
                     state = json.loads(state)
                 return state or {}
-        except Exception as exc:
+        except ALERT_STATE_FALLBACK_ERRORS as exc:
             logger.warning("Could not load last alert state for skill %s: %s", context.skill_id, exc)
         return {}
 
@@ -510,7 +518,7 @@ class ThresholdAlertSkill(BaseSkill):
                 "UPDATE query_skills SET last_alert_state = :state WHERE id = :id",
                 {"state": json.dumps(state), "id": context.skill_id},
             )
-        except Exception as exc:
+        except ALERT_STATE_FALLBACK_ERRORS as exc:
             logger.warning("Could not save alert state for skill %s: %s", context.skill_id, exc)
 
     def _get_acknowledged_at(self, context: SkillContext) -> Optional[datetime]:
@@ -522,8 +530,8 @@ class ThresholdAlertSkill(BaseSkill):
             )
             if rows and rows[0].get("alert_acknowledged_at"):
                 return rows[0]["alert_acknowledged_at"]
-        except Exception:
-            pass
+        except ALERT_STATE_FALLBACK_ERRORS:
+            logger.warning("Could not load alert acknowledgement for skill %s", context.skill_id)
         return None
 
     def _extract_column_values(
@@ -556,7 +564,7 @@ class ThresholdAlertSkill(BaseSkill):
                 success, message = channel.send(payload, ch_config)
                 results.append({"channel": ch_type, "success": success, "message": message})
                 logger.info("Alert delivery %s via %s: %s", "OK" if success else "FAIL", ch_type, message)
-            except Exception as exc:
+            except DELIVERY_FALLBACK_ERRORS as exc:
                 results.append({"channel": ch_type, "success": False, "message": str(exc)})
         return results
 
@@ -637,8 +645,8 @@ class ThresholdAlertSkill(BaseSkill):
             )
             if rows and rows[0].get("name"):
                 return str(rows[0]["name"])
-        except Exception:
-            pass
+        except ALERT_STATE_FALLBACK_ERRORS:
+            logger.warning("Could not resolve skill name for skill %s", context.skill_id)
         return context.skill_id
 
     def _aggregate_column(

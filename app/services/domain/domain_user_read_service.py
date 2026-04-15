@@ -4,12 +4,14 @@ from typing import Any, Dict, List, Optional
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.metadata.mode import effective_metadata_mode, normalize_metadata_mode
 from app.services.shared.jsonify import serialize_result_rows
 
 
 class UserDomainReadService:
     def __init__(self, *, sql: Optional[ForgeQueryPort] = None, metadata_mode: Optional[str] = None) -> None:
-        del metadata_mode
+        self._configured_metadata_mode = normalize_metadata_mode(metadata_mode)
+        self._effective_metadata_mode = effective_metadata_mode(metadata_mode)
         self._sql = sql or ForgeMetaSQL()
 
     def list_domain_users(self, *, workspace_id: str, domain_id: int) -> List[Dict[str, Any]]:

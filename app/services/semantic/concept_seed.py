@@ -11,10 +11,9 @@ class ConceptSeedService:
     def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
         self._sql = sql or ForgeMetaSQL()
 
-    def ensure_seeded(self, vertical_norm: str) -> Dict[str, Any]:
-        vertical = _normalize_vertical(vertical_norm)
-        concepts = _seed_concepts(vertical)
-        aliases = _seed_aliases(vertical)
+    def ensure_seeded(self) -> Dict[str, Any]:
+        concepts = _seed_concepts()
+        aliases = _seed_aliases()
 
         concept_written = 0
         alias_written = 0
@@ -23,7 +22,6 @@ class ConceptSeedService:
             self._sql.execute_write(
                 """
                 INSERT INTO semantic_concept (
-                  vertical_norm,
                   concept_key,
                   name,
                   description,
@@ -40,7 +38,6 @@ class ConceptSeedService:
                   `sensitive`,
                   `status`
                 ) VALUES (
-                  :vertical_norm,
                   :concept_key,
                   :name,
                   :description,
@@ -81,13 +78,11 @@ class ConceptSeedService:
             self._sql.execute_write(
                 """
                 INSERT INTO semantic_concept_alias (
-                  vertical_norm,
                   alias_key,
                   concept_key,
                   match_kind,
                   weight
                 ) VALUES (
-                  :vertical_norm,
                   :alias_key,
                   :concept_key,
                   :match_kind,
@@ -102,33 +97,24 @@ class ConceptSeedService:
             alias_written += 1
 
         return {
-            "vertical_norm": vertical,
             "concepts_processed": concept_written,
             "aliases_processed": alias_written,
         }
-
-
-def _normalize_vertical(vertical_norm: str) -> str:
-    value = str(vertical_norm or "generic").strip().lower()
-    return value or "generic"
-
-
-def _seed_concepts(vertical: str) -> List[Dict[str, Any]]:
-    if vertical == "education":
-        return [
-            _concept(vertical, "STUDENT_ID", "Student ID", "Unique student identifier.", "identifier", None, "student", 0, True, True, False, True, False),
-            _concept(vertical, "SCHOOL_ID", "School ID", "Unique school identifier.", "identifier", None, "school", 0, True, True, False, True, False),
-            _concept(vertical, "LEA_ID", "LEA ID", "Unique local education agency identifier.", "identifier", None, "lea", 0, True, True, False, True, False),
-            _concept(vertical, "COURSE_ID", "Course ID", "Unique course identifier.", "identifier", None, "course", 0, True, True, False, True, False),
-            _concept(vertical, "SECTION_ID", "Section ID", "Unique section identifier.", "identifier", None, "section", 0, True, True, False, True, False),
-            _concept(vertical, "COURSE_CODE", "Course Code", "Assigned course code.", "reference", None, "course", 0, True, True, False, False, False),
-            _concept(vertical, "STATE_COURSE_CODE", "State Course Code", "State-assigned course code.", "reference", None, "course", 0, True, True, False, False, False),
-            _concept(vertical, "SCHOOL_YEAR", "School Year", "Academic school year.", "time", "time.year", None, 0, True, True, False, False, False),
-            _concept(vertical, "ENROLLMENT_COUNT", "Enrollment Count", "Count of enrolled students.", "metric", "measure.count", "student", 1, False, False, True, False, True),
-            _concept(vertical, "STUDENT_GRADE_LEVEL", "Student Grade Level", "Student grade level dimension.", "dimension", "group_by.grade", "student", 1, True, True, False, False, False),
-            _concept(vertical, "TERM", "Term", "Academic term.", "time", "time.term", None, 1, True, True, False, False, False),
+def _seed_concepts() -> List[Dict[str, Any]]:
+    return _dedupe_concepts(
+        [
+            _concept("STUDENT_ID", "Student ID", "Unique student identifier.", "identifier", None, "student", 0, True, True, False, True, False),
+            _concept("SCHOOL_ID", "School ID", "Unique school identifier.", "identifier", None, "school", 0, True, True, False, True, False),
+            _concept("LEA_ID", "LEA ID", "Unique local education agency identifier.", "identifier", None, "lea", 0, True, True, False, True, False),
+            _concept("COURSE_ID", "Course ID", "Unique course identifier.", "identifier", None, "course", 0, True, True, False, True, False),
+            _concept("SECTION_ID", "Section ID", "Unique section identifier.", "identifier", None, "section", 0, True, True, False, True, False),
+            _concept("COURSE_CODE", "Course Code", "Assigned course code.", "reference", None, "course", 0, True, True, False, False, False),
+            _concept("STATE_COURSE_CODE", "State Course Code", "State-assigned course code.", "reference", None, "course", 0, True, True, False, False, False),
+            _concept("SCHOOL_YEAR", "School Year", "Academic school year.", "time", "time.year", None, 0, True, True, False, False, False),
+            _concept("ENROLLMENT_COUNT", "Enrollment Count", "Count of enrolled students.", "metric", "measure.count", "student", 1, False, False, True, False, True),
+            _concept("STUDENT_GRADE_LEVEL", "Student Grade Level", "Student grade level dimension.", "dimension", "group_by.grade", "student", 1, True, True, False, False, False),
+            _concept("TERM", "Term", "Academic term.", "time", "time.term", None, 1, True, True, False, False, False),
             _concept(
-                vertical,
                 "SEMESTER_SPRING_FLAG",
                 "Semester Spring Flag",
                 "Boolean indicator for spring semester rows.",
@@ -143,7 +129,6 @@ def _seed_concepts(vertical: str) -> List[Dict[str, Any]]:
                 False,
             ),
             _concept(
-                vertical,
                 "SEMESTER_FALL_FLAG",
                 "Semester Fall Flag",
                 "Boolean indicator for fall semester rows.",
@@ -158,7 +143,6 @@ def _seed_concepts(vertical: str) -> List[Dict[str, Any]]:
                 False,
             ),
             _concept(
-                vertical,
                 "SEMESTER_YEAR_ROUND_FLAG",
                 "Semester Year Round Flag",
                 "Boolean indicator for year-round semester rows.",
@@ -172,79 +156,72 @@ def _seed_concepts(vertical: str) -> List[Dict[str, Any]]:
                 False,
                 False,
             ),
-            _concept(vertical, "CITY", "City", "City geography.", "geography", "geography.city", None, 1, True, True, False, False, False),
-            _concept(vertical, "COUNTY", "County", "County geography.", "geography", "geography.county", None, 2, True, True, False, False, False),
-            _concept(vertical, "STATE", "State", "State geography.", "geography", "geography.state", None, 3, True, True, False, False, False),
-            _concept(vertical, "ZIP_CODE", "ZIP Code", "Zip/postal code geography.", "geography", "geography.zip", None, 0, True, True, False, False, False),
-            _concept(vertical, "COURSE_TITLE", "Course Title", "Course title attribute.", "attribute", None, "course", 0, True, True, False, False, False),
-            _concept(vertical, "COURSE_DESCRIPTION", "Course Description", "Course description attribute.", "attribute", None, "course", 0, True, True, False, False, False),
-            _concept(vertical, "SCHOOL_NAME", "School Name", "School name attribute.", "attribute", None, "school", 0, True, True, False, False, False),
+            _concept("CITY", "City", "City geography.", "geography", "geography.city", None, 1, True, True, False, False, False),
+            _concept("COUNTY", "County", "County geography.", "geography", "geography.county", None, 2, True, True, False, False, False),
+            _concept("STATE", "State", "State geography.", "geography", "geography.state", None, 3, True, True, False, False, False),
+            _concept("ZIP_CODE", "ZIP Code", "Zip/postal code geography.", "geography", "geography.zip", None, 0, True, True, False, False, False),
+            _concept("COURSE_TITLE", "Course Title", "Course title attribute.", "attribute", None, "course", 0, True, True, False, False, False),
+            _concept("COURSE_DESCRIPTION", "Course Description", "Course description attribute.", "attribute", None, "course", 0, True, True, False, False, False),
+            _concept("SCHOOL_NAME", "School Name", "School name attribute.", "attribute", None, "school", 0, True, True, False, False, False),
         ]
-
-    if vertical == "generic":
-        return [
-            _concept(vertical, "CITY", "City", "City geography.", "geography", "geography.city", None, 1, True, True, False, False, False),
-            _concept(vertical, "STATE", "State", "State geography.", "geography", "geography.state", None, 3, True, True, False, False, False),
-            _concept(vertical, "DATE", "Date", "Calendar date.", "time", "time.date", None, 2, True, True, False, False, False),
+        + [
+            _concept("CITY", "City", "City geography.", "geography", "geography.city", None, 1, True, True, False, False, False),
+            _concept("STATE", "State", "State geography.", "geography", "geography.state", None, 3, True, True, False, False, False),
+            _concept("DATE", "Date", "Calendar date.", "time", "time.date", None, 2, True, True, False, False, False),
         ]
+    )
 
-    return []
 
-
-def _seed_aliases(vertical: str) -> List[Dict[str, Any]]:
-    if vertical != "education":
-        return []
-
+def _seed_aliases() -> List[Dict[str, Any]]:
     return [
-        _alias(vertical, "k_student", "STUDENT_ID", "exact", 1.0),
-        _alias(vertical, "k_student", "STUDENT_ID", "normalized", 0.95),
-        _alias(vertical, "^k_student$", "STUDENT_ID", "regex", 0.95),
-        _alias(vertical, "student_id", "STUDENT_ID", "exact", 1.0),
-        _alias(vertical, "student_id", "STUDENT_ID", "normalized", 0.95),
-        _alias(vertical, "student", "STUDENT_ID", "suffix", 0.75),
-        _alias(vertical, "student enrollment", "ENROLLMENT_COUNT", "exact", 1.4),
-        _alias(vertical, "enrolled students", "ENROLLMENT_COUNT", "contains", 1.25),
-        _alias(vertical, "enrollment", "ENROLLMENT_COUNT", "contains", 1.2),
-        _alias(vertical, "grade level", "STUDENT_GRADE_LEVEL", "contains", 1.2),
-        _alias(vertical, "grade", "STUDENT_GRADE_LEVEL", "contains", 0.95),
-        _alias(vertical, "^(.+)_id$", "DYNAMIC_IDENTIFIER", "regex", 0.6),
-        _alias(vertical, "k_school", "SCHOOL_ID", "exact", 1.0),
-        _alias(vertical, "k_school", "SCHOOL_ID", "normalized", 0.95),
-        _alias(vertical, "^k_school$", "SCHOOL_ID", "regex", 0.95),
-        _alias(vertical, "school_id", "SCHOOL_ID", "exact", 1.0),
-        _alias(vertical, "school", "SCHOOL_ID", "prefix", 0.8),
-        _alias(vertical, "k_lea", "LEA_ID", "exact", 1.0),
-        _alias(vertical, "k_lea", "LEA_ID", "normalized", 0.95),
-        _alias(vertical, "^k_lea$", "LEA_ID", "regex", 0.95),
-        _alias(vertical, "lea_id", "LEA_ID", "exact", 1.0),
-        _alias(vertical, "k_course", "COURSE_ID", "exact", 1.0),
-        _alias(vertical, "^k_(.+)$", "DYNAMIC_IDENTIFIER", "regex", 0.65),
-        _alias(vertical, "course_id", "COURSE_ID", "exact", 1.0),
-        _alias(vertical, "course_code", "COURSE_CODE", "exact", 1.0),
-        _alias(vertical, "state_course_code", "STATE_COURSE_CODE", "exact", 1.0),
-        _alias(vertical, "school_year", "SCHOOL_YEAR", "exact", 1.0),
-        _alias(vertical, "spring semester", "SEMESTER_SPRING_FLAG", "contains", 1.1),
-        _alias(vertical, "spring term", "SEMESTER_SPRING_FLAG", "contains", 1.1),
-        _alias(vertical, "is_spring", "SEMESTER_SPRING_FLAG", "contains", 1.1),
-        _alias(vertical, "is_spring_block", "SEMESTER_SPRING_FLAG", "exact", 1.25),
-        _alias(vertical, "fall semester", "SEMESTER_FALL_FLAG", "contains", 1.1),
-        _alias(vertical, "fall term", "SEMESTER_FALL_FLAG", "contains", 1.1),
-        _alias(vertical, "is_fall", "SEMESTER_FALL_FLAG", "contains", 1.1),
-        _alias(vertical, "is_fall_block", "SEMESTER_FALL_FLAG", "exact", 1.25),
-        _alias(vertical, "year round", "SEMESTER_YEAR_ROUND_FLAG", "contains", 1.1),
-        _alias(vertical, "year-round", "SEMESTER_YEAR_ROUND_FLAG", "contains", 1.1),
-        _alias(vertical, "is_year_round", "SEMESTER_YEAR_ROUND_FLAG", "contains", 1.1),
-        _alias(vertical, "is_year_round_block", "SEMESTER_YEAR_ROUND_FLAG", "exact", 1.25),
-        _alias(vertical, "name_of_county", "COUNTY", "contains", 0.95),
-        _alias(vertical, "county", "COUNTY", "contains", 0.9),
-        _alias(vertical, "city", "CITY", "contains", 0.9),
-        _alias(vertical, "zip", "ZIP_CODE", "contains", 0.9),
-        _alias(vertical, "postal", "ZIP_CODE", "contains", 0.85),
+        _alias("k_student", "STUDENT_ID", "exact", 1.0),
+        _alias("k_student", "STUDENT_ID", "normalized", 0.95),
+        _alias("^k_student$", "STUDENT_ID", "regex", 0.95),
+        _alias("student_id", "STUDENT_ID", "exact", 1.0),
+        _alias("student_id", "STUDENT_ID", "normalized", 0.95),
+        _alias("student", "STUDENT_ID", "suffix", 0.75),
+        _alias("student enrollment", "ENROLLMENT_COUNT", "exact", 1.4),
+        _alias("enrolled students", "ENROLLMENT_COUNT", "contains", 1.25),
+        _alias("enrollment", "ENROLLMENT_COUNT", "contains", 1.2),
+        _alias("grade level", "STUDENT_GRADE_LEVEL", "contains", 1.2),
+        _alias("grade", "STUDENT_GRADE_LEVEL", "contains", 0.95),
+        _alias("^(.+)_id$", "DYNAMIC_IDENTIFIER", "regex", 0.6),
+        _alias("k_school", "SCHOOL_ID", "exact", 1.0),
+        _alias("k_school", "SCHOOL_ID", "normalized", 0.95),
+        _alias("^k_school$", "SCHOOL_ID", "regex", 0.95),
+        _alias("school_id", "SCHOOL_ID", "exact", 1.0),
+        _alias("school", "SCHOOL_ID", "prefix", 0.8),
+        _alias("k_lea", "LEA_ID", "exact", 1.0),
+        _alias("k_lea", "LEA_ID", "normalized", 0.95),
+        _alias("^k_lea$", "LEA_ID", "regex", 0.95),
+        _alias("lea_id", "LEA_ID", "exact", 1.0),
+        _alias("k_course", "COURSE_ID", "exact", 1.0),
+        _alias("^k_(.+)$", "DYNAMIC_IDENTIFIER", "regex", 0.65),
+        _alias("course_id", "COURSE_ID", "exact", 1.0),
+        _alias("course_code", "COURSE_CODE", "exact", 1.0),
+        _alias("state_course_code", "STATE_COURSE_CODE", "exact", 1.0),
+        _alias("school_year", "SCHOOL_YEAR", "exact", 1.0),
+        _alias("spring semester", "SEMESTER_SPRING_FLAG", "contains", 1.1),
+        _alias("spring term", "SEMESTER_SPRING_FLAG", "contains", 1.1),
+        _alias("is_spring", "SEMESTER_SPRING_FLAG", "contains", 1.1),
+        _alias("is_spring_block", "SEMESTER_SPRING_FLAG", "exact", 1.25),
+        _alias("fall semester", "SEMESTER_FALL_FLAG", "contains", 1.1),
+        _alias("fall term", "SEMESTER_FALL_FLAG", "contains", 1.1),
+        _alias("is_fall", "SEMESTER_FALL_FLAG", "contains", 1.1),
+        _alias("is_fall_block", "SEMESTER_FALL_FLAG", "exact", 1.25),
+        _alias("year round", "SEMESTER_YEAR_ROUND_FLAG", "contains", 1.1),
+        _alias("year-round", "SEMESTER_YEAR_ROUND_FLAG", "contains", 1.1),
+        _alias("is_year_round", "SEMESTER_YEAR_ROUND_FLAG", "contains", 1.1),
+        _alias("is_year_round_block", "SEMESTER_YEAR_ROUND_FLAG", "exact", 1.25),
+        _alias("name_of_county", "COUNTY", "contains", 0.95),
+        _alias("county", "COUNTY", "contains", 0.9),
+        _alias("city", "CITY", "contains", 0.9),
+        _alias("zip", "ZIP_CODE", "contains", 0.9),
+        _alias("postal", "ZIP_CODE", "contains", 0.85),
     ]
 
 
 def _concept(
-    vertical: str,
     concept_key: str,
     name: str,
     description: str,
@@ -259,7 +236,6 @@ def _concept(
     is_metric: bool,
 ) -> Dict[str, Any]:
     return {
-        "vertical_norm": vertical,
         "concept_key": normalize_concept_key(concept_key),
         "name": name,
         "description": description,
@@ -278,11 +254,22 @@ def _concept(
     }
 
 
-def _alias(vertical: str, alias_key: str, concept_key: str, match_kind: str, weight: float) -> Dict[str, Any]:
+def _alias(alias_key: str, concept_key: str, match_kind: str, weight: float) -> Dict[str, Any]:
     return {
-        "vertical_norm": vertical,
         "alias_key": str(alias_key).strip().lower(),
         "concept_key": normalize_concept_key(concept_key),
         "match_kind": str(match_kind).strip().lower(),
         "weight": float(weight),
     }
+
+
+def _dedupe_concepts(concepts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    seen: set[str] = set()
+    out: List[Dict[str, Any]] = []
+    for concept in concepts:
+        key = str(concept.get("concept_key") or "").strip().upper()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(concept)
+    return out

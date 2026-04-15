@@ -111,3 +111,13 @@ def test_list_links_requires_workspace_id():
     with pytest.raises(ForgeError) as exc:
         WorkspaceExternalLinkService().list_links(workspace_id="")
     assert exc.value.status_code == 400
+
+
+def test_list_links_surfaces_unexpected_resolver_errors(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.tenancy.workspace_external_link_service.WorkspaceDatasourceResolverService.resolve_for_workspace",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected resolver bug")),
+    )
+
+    with pytest.raises(AssertionError, match="unexpected resolver bug"):
+        WorkspaceExternalLinkService().list_links(workspace_id="ws-1")

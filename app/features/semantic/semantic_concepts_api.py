@@ -14,7 +14,6 @@ from app.services.embedding.semantic_concept_embedding_service import SemanticCo
 from app.services.semantic.semantic_concept_service import SemanticConceptService
 
 from .schemas import register_concept_models
-from .service import semantic_feature_service
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +49,6 @@ class SemanticConceptCollection(Resource):
     @require_access("semantic")
     @semantic_concepts_ns.doc(
         params={
-            "vertical": "Filter by vertical",
             "q": "Search concept_key/name/description",
             "semantic_type": "Filter by semantic_type",
             "page": "Page number",
@@ -60,10 +58,7 @@ class SemanticConceptCollection(Resource):
     def get(self):
         try:
             return (
-                semantic_feature_service.build_concept_service(
-                    concept_service_factory=SemanticConceptService
-                ).list_concepts(
-                    vertical=request.args.get("vertical") or None,
+                SemanticConceptService().list_concepts(
                     q=request.args.get("q") or None,
                     semantic_type=request.args.get("semantic_type") or None,
                     page=int_arg("page", 1),
@@ -84,9 +79,7 @@ class SemanticConceptCollection(Resource):
         try:
             _require_admin()
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            row = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).create_concept(body)
+            row = SemanticConceptService().create_concept(body)
             return {"row": row}, 201
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -99,17 +92,9 @@ class SemanticConceptCollection(Resource):
 class SemanticConceptKeyCollection(Resource):
     @token_required
     @require_access("semantic")
-    @semantic_concepts_ns.doc(params={"vertical": "Filter by vertical"})
     def get(self):
         try:
-            return (
-                semantic_feature_service.build_concept_service(
-                    concept_service_factory=SemanticConceptService
-                ).list_concept_keys(
-                    vertical=request.args.get("vertical") or None,
-                ),
-                200,
-            )
+            return (SemanticConceptService().list_concept_keys(), 200)
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
@@ -123,9 +108,7 @@ class SemanticConceptById(Resource):
     @require_access("semantic")
     def get(self, concept_id: int):
         try:
-            row = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).get_concept(concept_id)
+            row = SemanticConceptService().get_concept(concept_id)
             return {"row": row}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -140,9 +123,7 @@ class SemanticConceptById(Resource):
         try:
             _require_admin()
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            row = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).patch_concept(concept_id, body)
+            row = SemanticConceptService().patch_concept(concept_id, body)
             return {"row": row}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -155,9 +136,7 @@ class SemanticConceptById(Resource):
     def delete(self, concept_id: int):
         try:
             _require_admin()
-            semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).delete_concept(concept_id)
+            SemanticConceptService().delete_concept(concept_id)
             return {}, 204
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -174,13 +153,7 @@ class SemanticConceptSeed(Resource):
     def post(self):
         try:
             _require_admin()
-            body = request.get_json(silent=True) or {}
-            vertical = str(body.get("vertical") or "").strip().lower()
-            if vertical == "":
-                raise ForgeError("vertical is required", status_code=400)
-            result = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).seed(vertical)
+            result = SemanticConceptService().seed()
             return {"result": result}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -197,10 +170,8 @@ class SemanticConceptRebuildIndex(Resource):
     def post(self):
         try:
             _require_admin()
-            body = request.get_json(silent=True) or {}
-            vertical_norm = str(body.get("vertical_norm") or "generic").strip().lower() or "generic"
-            result = SemanticConceptEmbeddingService().rebuild_semantic_concept_index(vertical_norm=vertical_norm)
-            return {"result": result, "vertical_norm": vertical_norm}, 200
+            result = SemanticConceptEmbeddingService().rebuild_semantic_concept_index()
+            return {"result": result}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
         except Exception:
@@ -217,11 +188,8 @@ class SemanticConceptBackfillPrimaryKeys(Resource):
         try:
             _require_admin()
             body = request.get_json(silent=True) or {}
-            result = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).backfill_primary_semantic_keys(
+            result = SemanticConceptService().backfill_primary_semantic_keys(
                 workspace_id=body.get("workspace_id"),
-                vertical_norm=body.get("vertical_norm"),
                 dry_run=bool(body.get("dry_run", True)),
             )
             return {"result": result}, 200
@@ -238,17 +206,13 @@ class SemanticConceptAliasCollection(Resource):
     @require_access("semantic")
     @semantic_concept_aliases_ns.doc(
         params={
-            "vertical": "Filter by vertical",
             "concept_key": "Filter by concept_key",
             "q": "Search aliases",
         }
     )
     def get(self):
         try:
-            result = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).list_aliases(
-                vertical=request.args.get("vertical") or None,
+            result = SemanticConceptService().list_aliases(
                 concept_key=request.args.get("concept_key") or None,
                 q=request.args.get("q") or None,
             )
@@ -266,9 +230,7 @@ class SemanticConceptAliasCollection(Resource):
         try:
             _require_admin()
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            row = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).create_alias(body)
+            row = SemanticConceptService().create_alias(body)
             return {"row": row}, 201
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -283,9 +245,7 @@ class SemanticConceptAliasById(Resource):
     @require_access("semantic")
     def get(self, alias_id: int):
         try:
-            row = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).get_alias(alias_id)
+            row = SemanticConceptService().get_alias(alias_id)
             return {"row": row}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -300,9 +260,7 @@ class SemanticConceptAliasById(Resource):
         try:
             _require_admin()
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            row = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).patch_alias(alias_id, body)
+            row = SemanticConceptService().patch_alias(alias_id, body)
             return {"row": row}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -315,9 +273,7 @@ class SemanticConceptAliasById(Resource):
     def delete(self, alias_id: int):
         try:
             _require_admin()
-            semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).delete_alias(alias_id)
+            SemanticConceptService().delete_alias(alias_id)
             return {}, 204
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -332,7 +288,6 @@ class SemanticValueAliasCollection(Resource):
     @require_access("semantic")
     @semantic_value_aliases_ns.doc(
         params={
-            "vertical": "Filter by vertical",
             "semantic_concept_id": "Filter by semantic_concept_id",
             "q": "Search alias/canonical values",
             "page": "Page number",
@@ -341,10 +296,7 @@ class SemanticValueAliasCollection(Resource):
     )
     def get(self):
         try:
-            result = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).list_value_aliases(
-                vertical=request.args.get("vertical") or None,
+            result = SemanticConceptService().list_value_aliases(
                 semantic_concept_id=_optional_int(request.args.get("semantic_concept_id"), "semantic_concept_id"),
                 q=request.args.get("q") or None,
                 page=int_arg("page", 1),
@@ -364,9 +316,7 @@ class SemanticValueAliasCollection(Resource):
         try:
             _require_admin()
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            row = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).create_value_alias(body)
+            row = SemanticConceptService().create_value_alias(body)
             return {"row": row}, 201
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -381,9 +331,7 @@ class SemanticValueAliasById(Resource):
     @require_access("semantic")
     def get(self, value_alias_id: int):
         try:
-            row = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).get_value_alias(value_alias_id)
+            row = SemanticConceptService().get_value_alias(value_alias_id)
             return {"row": row}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -398,9 +346,7 @@ class SemanticValueAliasById(Resource):
         try:
             _require_admin()
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            row = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).patch_value_alias(value_alias_id, body)
+            row = SemanticConceptService().patch_value_alias(value_alias_id, body)
             return {"row": row}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -413,9 +359,7 @@ class SemanticValueAliasById(Resource):
     def delete(self, value_alias_id: int):
         try:
             _require_admin()
-            semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).delete_value_alias(value_alias_id)
+            SemanticConceptService().delete_value_alias(value_alias_id)
             return {}, 204
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -430,7 +374,6 @@ class SemanticConceptColumnMapCollection(Resource):
     @require_access("semantic")
     @semantic_concept_column_maps_ns.doc(
         params={
-            "vertical": "Filter by vertical",
             "semantic_concept_id": "Filter by semantic_concept_id",
             "concept_key": "Filter by concept_key (contains, case-insensitive)",
             "workspace_column_id": "Filter by workspace_column_id",
@@ -443,10 +386,7 @@ class SemanticConceptColumnMapCollection(Resource):
     )
     def get(self):
         try:
-            result = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).list_concept_column_maps(
-                vertical=request.args.get("vertical") or None,
+            result = SemanticConceptService().list_concept_column_maps(
                 semantic_concept_id=_optional_int(request.args.get("semantic_concept_id"), "semantic_concept_id"),
                 concept_key=request.args.get("concept_key") or None,
                 workspace_column_id=_optional_int(request.args.get("workspace_column_id"), "workspace_column_id"),
@@ -470,9 +410,7 @@ class SemanticConceptColumnMapCollection(Resource):
         try:
             _require_admin()
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            row = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).create_concept_column_map(body)
+            row = SemanticConceptService().create_concept_column_map(body)
             return {"row": row}, 201
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -487,9 +425,7 @@ class SemanticConceptColumnMapById(Resource):
     @require_access("semantic")
     def get(self, map_id: int):
         try:
-            row = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).get_concept_column_map(map_id)
+            row = SemanticConceptService().get_concept_column_map(map_id)
             return {"row": row}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -504,9 +440,7 @@ class SemanticConceptColumnMapById(Resource):
         try:
             _require_admin()
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            row = semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).patch_concept_column_map(map_id, body)
+            row = SemanticConceptService().patch_concept_column_map(map_id, body)
             return {"row": row}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -519,9 +453,7 @@ class SemanticConceptColumnMapById(Resource):
     def delete(self, map_id: int):
         try:
             _require_admin()
-            semantic_feature_service.build_concept_service(
-                concept_service_factory=SemanticConceptService
-            ).delete_concept_column_map(map_id)
+            SemanticConceptService().delete_concept_column_map(map_id)
             return {}, 204
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code

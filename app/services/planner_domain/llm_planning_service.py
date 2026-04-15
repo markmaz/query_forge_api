@@ -63,7 +63,7 @@ def _norm_key(value: Any) -> str:
 def _to_int(value: Any) -> Optional[int]:
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -206,7 +206,6 @@ class LLMPlanningService:
         *,
         normalized_prompt: str,
         workspace_id: str,
-        vertical_norm: str,
         base_domain_id: int,
         conversation_context: Optional[PlanConversationContext] = None,
         fast_mode: bool = False,
@@ -214,7 +213,7 @@ class LLMPlanningService:
         system_prompt = build_system_prompt()
         composed_user = (
             f"{build_slot_developer_prompt()}\n\n"
-            f"{build_slot_user_prompt(normalized_prompt=normalized_prompt, workspace_id=workspace_id, vertical_norm=vertical_norm, base_domain_id=base_domain_id)}"
+            f"{build_slot_user_prompt(normalized_prompt=normalized_prompt, workspace_id=workspace_id, base_domain_id=base_domain_id)}"
         )
         if conversation_context is not None and conversation_context.followup_mode:
             composed_user = (
@@ -307,7 +306,6 @@ class LLMPlanningService:
         prompt: str,
         normalized_prompt: str,
         workspace_id: str,
-        vertical_norm: str,
         base_domain_id: int,
         domain_name: Optional[str],
         capabilities: Mapping[str, Any],
@@ -358,7 +356,6 @@ class LLMPlanningService:
                 prompt=prompt,
                 normalized_prompt=normalized_prompt,
                 workspace_id=workspace_id,
-                vertical_norm=vertical_norm,
                 base_domain_id=base_domain_id,
                 domain_name=domain_name,
                 capabilities_compact=dict(capabilities or {}),
@@ -377,7 +374,6 @@ class LLMPlanningService:
             prompt=prompt,
             normalized_prompt=normalized_prompt,
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             base_domain_id=base_domain_id,
             domain_name=domain_name,
             capabilities_compact=dict(capabilities or {}),
@@ -393,7 +389,6 @@ class LLMPlanningService:
         prompt: str,
         normalized_prompt: str,
         workspace_id: str,
-        vertical_norm: str,
         base_domain_id: int,
         domain_name: Optional[str],
         capabilities: Mapping[str, Any],
@@ -423,7 +418,6 @@ class LLMPlanningService:
             slots_local = self._call_llm_slots(
                 normalized_prompt=normalized_prompt,
                 workspace_id=workspace_id,
-                vertical_norm=vertical_norm,
                 base_domain_id=base_domain_id,
                 conversation_context=conversation_context,
                 fast_mode=fast_mode,
@@ -479,7 +473,6 @@ class LLMPlanningService:
             llm_local = self._call_llm_plan(
                 normalized_prompt=normalized_prompt,
                 workspace_id=workspace_id,
-                vertical_norm=vertical_norm,
                 base_domain_id=base_domain_id,
                 capabilities=capabilities_llm_local,
                 schema=schema,
@@ -550,7 +543,6 @@ class LLMPlanningService:
                     prompt=prompt,
                     normalized_prompt=normalized_prompt,
                     workspace_id=workspace_id,
-                    vertical_norm=vertical_norm,
                     base_domain_id=base_domain_id,
                     domain_name=domain_name,
                     capabilities=capabilities_llm,
@@ -717,7 +709,6 @@ class LLMPlanningService:
         *,
         normalized_prompt: str,
         workspace_id: str,
-        vertical_norm: str,
         base_domain_id: int,
         capabilities: Mapping[str, Any],
         schema: Dict[str, Any],
@@ -737,7 +728,6 @@ class LLMPlanningService:
         user_prompt = build_user_prompt(
             normalized_prompt=normalized_prompt,
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             base_domain={"domain_id": int(base_domain_id)},
             capabilities=capabilities,
             schema=schema,
@@ -811,7 +801,6 @@ class LLMPlanningService:
         raw_plan: Mapping[str, Any],
         trace_id: str,
         workspace_id: str,
-        vertical_norm: str,
         base_domain_id: int,
         base_domain_name: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -819,7 +808,6 @@ class LLMPlanningService:
         out["schema_version"] = 2
         out["trace_id"] = str(out.get("trace_id") or trace_id)
         out["workspace_id"] = workspace_id
-        out["vertical_norm"] = vertical_norm
         out["base_domain_id"] = int(base_domain_id)
         if str(base_domain_name or "").strip():
             out["domain_name"] = str(base_domain_name).strip()

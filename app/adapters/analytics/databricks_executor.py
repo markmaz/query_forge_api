@@ -9,6 +9,13 @@ from app.ports.sql_executor_abc import SQLExecutor
 
 logger = logging.getLogger(__name__)
 
+DATABRICKS_EXECUTION_ERRORS = (
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+
 
 class _StaticTokenPort:
     """Minimal token provider that returns a fixed token string."""
@@ -170,7 +177,7 @@ class DatabricksSQLExecutor(SQLExecutor):
         logger.debug("DatabricksSQLExecutor.execute: sql_len=%d", len(sql))
         try:
             return self._delegate.execute_query_mappings(sql, params)
-        except Exception as exc:
+        except DATABRICKS_EXECUTION_ERRORS as exc:
             # FIND-021: log the original driver exception internally but do NOT
             # include it in the raised message — driver exceptions often contain
             # the workspace hostname or HTTP path.
@@ -181,7 +188,7 @@ class DatabricksSQLExecutor(SQLExecutor):
         """Verify connectivity by running a lightweight ``SELECT 1``."""
         try:
             self._delegate.execute_query_mappings("SELECT 1 AS _ping")
-        except Exception as exc:
+        except DATABRICKS_EXECUTION_ERRORS as exc:
             # FIND-021: sanitized message — no hostname or connection details.
             logger.exception("DatabricksSQLExecutor.test_connection failed")
             raise RuntimeError("Analytics datasource connection test failed") from exc

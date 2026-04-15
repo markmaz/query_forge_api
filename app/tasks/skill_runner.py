@@ -30,11 +30,34 @@ from time import perf_counter
 from typing import Any, Dict, List, Optional
 
 from app.celery_app import celery
+from app.exceptions.forge_error import ForgeError
 
 logger = logging.getLogger(__name__)
 
 _SKILL_EXECUTE_ROW_CAP = 500
 _SKILL_META_KEY = "_qf_skill"
+WORKSPACE_CONFIG_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError)
+CONFIG_JSON_PARSE_ERRORS = (TypeError, ValueError, _json.JSONDecodeError)
+SCHEDULE_PARSE_ERRORS = (TypeError, ValueError)
+CRON_RUNTIME_FALLBACK_ERRORS = (ImportError, RuntimeError, TypeError, ValueError)
+SKILL_EXECUTION_FAILURE_ERRORS = (
+    ForgeError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+    _json.JSONDecodeError,
+    ImportError,
+)
+SKILL_DISPATCH_FAILURE_ERRORS = (
+    ForgeError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +187,7 @@ def _run_execute(
         )
         return result
 
-    except Exception as exc:
+    except SKILL_EXECUTION_FAILURE_ERRORS as exc:
         logger.exception("execute_skill failed skill_id=%s execution_id=%s", skill_id, execution_id)
         sql.execute_write(
             "UPDATE skill_executions SET status = 'failed', completed_at = :now, error_message = :err WHERE id = :id",
@@ -181,7 +204,7 @@ def _execute_skill_query(*, workspace_id: str, query_id: str) -> Dict[str, Any]:
     import json
     from app.adapters.mysql_sql_executor import ForgeMetaSQL
     from app.services.domain_resolver import DomainResolver
-    from app.services.query_forge_service import QueryForgeService
+    from app.services.query_forge.service import QueryForgeService
     from app.services.workspace_inventory.workspace_context import WorkspaceSqlContextBuilder
 
     sql = ForgeMetaSQL()
@@ -207,7 +230,7 @@ def _execute_skill_query(*, workspace_id: str, query_id: str) -> Dict[str, Any]:
         domain_resolver=DomainResolver(workspace_id=workspace_id),
     )
     started = perf_counter()
-    result = svc.run(raw_query=sql_json, mode="export", limit=_SKILL_EXECUTE_ROW_CAP, offset=0)
+    result = svc.run(sql_json, mode="export", limit=_SKILL_EXECUTE_ROW_CAP, offset=0)
     executed_at = datetime.now(timezone.utc)
     execution_time_ms = max(int((perf_counter() - started) * 1000), 0)
     rows = list(result.rows or [])
@@ -234,7 +257,7 @@ def _get_workspace_config(workspace_id: str) -> dict:
         from app.services.tenancy.workspace_llm_service import WorkspaceLLMService
         llm = WorkspaceLLMService().get_llm_for_role(workspace_id, "default")
         return {"llm": llm}
-    except Exception as exc:
+    except WORKSPACE_CONFIG_FALLBACK_ERRORS as exc:
         logger.warning("Could not load workspace LLM config for %s: %s", workspace_id, exc)
         return {}
 
@@ -243,7 +266,7 @@ def _extract_runtime_config(config_json: Any) -> Dict[str, Any]:
     if isinstance(config_json, str):
         try:
             config_json = _json.loads(config_json)
-        except Exception:
+        except CONFIG_JSON_PARSE_ERRORS:
             return {}
     if not isinstance(config_json, dict):
         return {}
@@ -417,7 +440,7 @@ def _run_dispatch_due() -> Dict[str, Any]:
             )
             dispatched.append({"skill_id": skill_id, "execution_id": execution_id})
             logger.info("Dispatched skill_id=%s (schedule_id=%s)", skill_id, schedule_id)
-        except Exception:
+        except SKILL_DISPATCH_FAILURE_ERRORS:
             logger.exception("dispatch_due: failed to dispatch skill_id=%s schedule_id=%s", skill_id, schedule_id)
 
     logger.info(
@@ -450,7 +473,7 @@ def _is_overdue_by_more_than_one_interval(
         one_interval_later = cron.get_next(datetime)
         now_naive = now.replace(tzinfo=None) if now.tzinfo else now
         return now_naive > one_interval_later.replace(tzinfo=None)
-    except Exception:
+    except CRON_RUNTIME_FALLBACK_ERRORS:
         return False
 
 
@@ -466,7 +489,7 @@ def _resolve_next_scheduled_run(
     if isinstance(base_dt, str):
         try:
             base_dt = datetime.fromisoformat(base_dt)
-        except Exception:
+        except SCHEDULE_PARSE_ERRORS:
             base_dt = None
     if base_dt is None:
         base_dt = datetime.now(timezone.utc)
@@ -476,7 +499,7 @@ def _resolve_next_scheduled_run(
         return None
     try:
         next_run_at = datetime.fromisoformat(str(upcoming[0]))
-    except Exception:
+    except SCHEDULE_PARSE_ERRORS:
         return None
     if next_run_at.tzinfo is not None:
         next_run_at = next_run_at.astimezone(timezone.utc).replace(tzinfo=None)

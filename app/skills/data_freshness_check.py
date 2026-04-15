@@ -28,11 +28,17 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.exceptions.forge_error import ForgeError
 from app.skills.base import BaseSkill, SkillContext, SkillResult
 from app.skills.delivery import DeliveryPayload, get_channel
 from app.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
+
+SNAPSHOT_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+DELIVERY_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError)
 
 
 @SkillRegistry.register
@@ -566,7 +572,7 @@ class DataFreshnessCheckSkill(BaseSkill):
                 skill_type=self.skill_type,
             ).first()
             return skill.last_alert_state if skill and skill.last_alert_state else None
-        except Exception as exc:
+        except SNAPSHOT_FALLBACK_ERRORS as exc:
             logger.warning("Could not load freshness snapshot: %s", exc)
             return None
 
@@ -583,7 +589,7 @@ class DataFreshnessCheckSkill(BaseSkill):
                 skill.last_alert_state = snapshot
                 db.session.add(skill)
                 db.session.commit()
-        except Exception as exc:
+        except SNAPSHOT_FALLBACK_ERRORS as exc:
             logger.warning("Could not save freshness snapshot: %s", exc)
 
     # ------------------------------------------------------------------
@@ -600,7 +606,7 @@ class DataFreshnessCheckSkill(BaseSkill):
                 channel = get_channel(ch_type)
                 success, message = channel.send(payload, ch_config)
                 results.append({"channel": ch_type, "success": success, "message": message})
-            except Exception as exc:
+            except DELIVERY_FALLBACK_ERRORS as exc:
                 results.append({"channel": ch_type, "success": False, "message": str(exc)})
         return results
 

@@ -124,12 +124,10 @@ DROP TABLE IF EXISTS `domain_embedding_state`;
 CREATE TABLE `domain_embedding_state` (
   `domain_id` bigint unsigned NOT NULL,
   `workspace_id` varchar(64) DEFAULT NULL,
-  `vertical_norm` varchar(50) NOT NULL DEFAULT 'generic',
   `domain_version` int NOT NULL,
   `embedding_hash` char(64) NOT NULL,
   `indexed_at` datetime NOT NULL,
   PRIMARY KEY (`domain_id`),
-  KEY `idx_domain_embedding_state_vertical` (`vertical_norm`),
   KEY `idx_domain_embedding_state_ws` (`workspace_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -213,6 +211,8 @@ CREATE TABLE `domain_time_policy` (
   `domain_id` bigint unsigned NOT NULL,
   `calendar_mode` varchar(16) NOT NULL DEFAULT 'calendar',
   `fiscal_year_start_month` tinyint unsigned DEFAULT NULL,
+  `school_year_start_month` tinyint unsigned DEFAULT NULL,
+  `school_year_end_month` tinyint unsigned DEFAULT NULL,
   `timezone` varchar(64) DEFAULT NULL,
   `week_start` varchar(16) NOT NULL DEFAULT 'monday',
   `default_time_concept_key` varchar(128) DEFAULT NULL,
@@ -221,6 +221,7 @@ CREATE TABLE `domain_time_policy` (
   `prefer_time_object_over_filter` tinyint(1) NOT NULL DEFAULT '1',
   `strict_mode` tinyint(1) NOT NULL DEFAULT '1',
   `relative_map` json DEFAULT NULL,
+  `semester_config` json DEFAULT NULL,
   `notes` text,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
@@ -560,7 +561,6 @@ CREATE TABLE `planner_cache` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `cache_key` char(64) NOT NULL,
   `workspace_id` varchar(64) NOT NULL,
-  `vertical` varchar(32) NOT NULL DEFAULT 'generic',
   `normalized_prompt` text NOT NULL,
   `constraints_json` longtext NOT NULL,
   `registry_version` varchar(64) NOT NULL,
@@ -573,7 +573,7 @@ CREATE TABLE `planner_cache` (
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `ux_planner_cache_key` (`cache_key`),
-  KEY `idx_planner_cache_lookup` (`workspace_id`,`vertical`,`registry_version`,`expires_at`)
+  KEY `idx_planner_cache_lookup` (`workspace_id`,`registry_version`,`expires_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 

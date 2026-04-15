@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from typing import Any, Dict
 
+import pytest
+
+from app.exceptions.forge_error import ForgeError
 from app.services.semantic.semantic_llm_labeler import SemanticLLMLabeler
 
 
@@ -88,3 +91,39 @@ def test_labeler_splits_on_context_limit() -> None:
     assert outputs[0]["concept_key"] == "K_SCHOOL"
     assert outputs[1]["concept_key"] == "SCHOOL_YEAR"
     assert llm.calls >= 3
+
+
+class _ForgeErrorLLM:
+    def chat_json_with_trace(self, *, system_prompt: str, user_prompt: str, response_format: bool = True) -> Dict[str, Any]:
+        del system_prompt, user_prompt, response_format
+        raise ForgeError("llm down", status_code=502)
+
+
+class _BrokenLLM:
+    def chat_json_with_trace(self, *, system_prompt: str, user_prompt: str, response_format: bool = True) -> Dict[str, Any]:
+        del system_prompt, user_prompt, response_format
+        raise RuntimeError("broken llm client")
+
+
+def test_labeler_tolerates_expected_llm_failures() -> None:
+    labeler = SemanticLLMLabeler(llm_client=_ForgeErrorLLM())
+
+    outputs, errors = labeler.label_cards(
+        cards=[{"modelColumnId": 1, "columnName": "k_school", "description": "School id", "samples": ["1001"]}],
+        vertical="education",
+        known_concepts=[],
+    )
+
+    assert outputs == [None]
+    assert errors == ["llm_call_error:llm down"]
+
+
+def test_labeler_surfaces_unexpected_llm_failures() -> None:
+    labeler = SemanticLLMLabeler(llm_client=_BrokenLLM())
+
+    with pytest.raises(RuntimeError, match="broken llm client"):
+        labeler.label_cards(
+            cards=[{"modelColumnId": 1, "columnName": "k_school", "description": "School id", "samples": ["1001"]}],
+            vertical="education",
+            known_concepts=[],
+        )

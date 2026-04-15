@@ -23,7 +23,13 @@ from app.models.domain.destinations import (
     WorkspaceDestination,
 )
 from app.skills.destination_resolver import resolve_channel_config, validate_destination_ref
-from app.skills.delivery import SlackDeliveryChannel, _ssl_context
+from app.skills.delivery import (
+    EmailDeliveryChannel,
+    GenericWebhookDeliveryChannel,
+    SlackDeliveryChannel,
+    TeamsDeliveryChannel,
+    _ssl_context,
+)
 
 
 def _destination_headers(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
@@ -186,6 +192,31 @@ def test_get_masked_config(app_with_key, slack_config):
     assert masked["webhook_url"] == "••••••"
 
 
+def test_get_masked_config_returns_empty_dict_for_expected_config_errors(app_with_key):
+    dest = WorkspaceDestination(
+        workspace_id=1,
+        name="Test",
+        destination_type="slack",
+        config_json_encrypted="placeholder",
+    )
+
+    with patch.object(dest, "get_config", side_effect=RuntimeError("config unavailable")):
+        assert dest.get_masked_config() == {}
+
+
+def test_get_masked_config_surfaces_unexpected_config_errors(app_with_key):
+    dest = WorkspaceDestination(
+        workspace_id=1,
+        name="Test",
+        destination_type="slack",
+        config_json_encrypted="placeholder",
+    )
+
+    with patch.object(dest, "get_config", side_effect=AssertionError("unexpected config bug")):
+        with pytest.raises(AssertionError, match="unexpected config bug"):
+            dest.get_masked_config()
+
+
 def test_to_dict_does_not_expose_plaintext(app_with_key, slack_config):
     dest = WorkspaceDestination(
         workspace_id=1, name="Finance", destination_type="slack",
@@ -196,6 +227,38 @@ def test_to_dict_does_not_expose_plaintext(app_with_key, slack_config):
     d = dest.to_dict()
     assert d["config"]["webhook_url"] == "••••••"
     assert "config_json_encrypted" not in d
+
+
+def test_get_usage_summary_returns_none_for_expected_usage_lookup_errors(app_with_key):
+    dest = WorkspaceDestination(
+        id=7,
+        workspace_id=1,
+        name="Finance",
+        destination_type="slack",
+        config_json_encrypted="placeholder",
+        usage_count=2,
+    )
+
+    with patch("app.models.domain.destinations._count_skills_using_destination", side_effect=RuntimeError("db unavailable")):
+        summary = dest.get_usage_summary()
+
+    assert summary["usage_count"] == 2
+    assert summary["skills_using_count"] is None
+
+
+def test_get_usage_summary_surfaces_unexpected_usage_lookup_errors(app_with_key):
+    dest = WorkspaceDestination(
+        id=7,
+        workspace_id=1,
+        name="Finance",
+        destination_type="slack",
+        config_json_encrypted="placeholder",
+        usage_count=2,
+    )
+
+    with patch("app.models.domain.destinations._count_skills_using_destination", side_effect=AssertionError("unexpected usage bug")):
+        with pytest.raises(AssertionError, match="unexpected usage bug"):
+            dest.get_usage_summary()
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +288,39 @@ def test_resolve_channel_config_with_destination_id(app_with_key):
         result = resolve_channel_config(config, workspace_id=1)
 
     assert result["webhook_url"] == "https://hooks.slack.com/real"
+
+
+def test_resolve_channel_config_ignores_expected_usage_record_errors(app_with_key):
+    mock_dest = MagicMock()
+    mock_dest.is_active = True
+    mock_dest.get_config.return_value = {"webhook_url": "https://hooks.slack.com/real"}
+    mock_dest.record_usage.side_effect = RuntimeError("usage write unavailable")
+
+    config = {"type": "slack", "destination_id": 5}
+
+    with patch("app.skills.destination_resolver.WorkspaceDestination") as MockModel, \
+         patch("app.skills.destination_resolver.db"), \
+         patch("app.skills.destination_resolver.logger.warning") as mock_log:
+        MockModel.query.filter_by.return_value.first.return_value = mock_dest
+        result = resolve_channel_config(config, workspace_id=1)
+
+    assert result["webhook_url"] == "https://hooks.slack.com/real"
+    mock_log.assert_called_once()
+
+
+def test_resolve_channel_config_surfaces_unexpected_usage_record_errors(app_with_key):
+    mock_dest = MagicMock()
+    mock_dest.is_active = True
+    mock_dest.get_config.return_value = {"webhook_url": "https://hooks.slack.com/real"}
+    mock_dest.record_usage.side_effect = AssertionError("unexpected usage bug")
+
+    config = {"type": "slack", "destination_id": 5}
+
+    with patch("app.skills.destination_resolver.WorkspaceDestination") as MockModel, \
+         patch("app.skills.destination_resolver.db"):
+        MockModel.query.filter_by.return_value.first.return_value = mock_dest
+        with pytest.raises(AssertionError, match="unexpected usage bug"):
+            resolve_channel_config(config, workspace_id=1)
 
 
 def test_resolve_raises_for_inactive_destination(app_with_key):
@@ -312,6 +408,21 @@ def test_count_skills_using_destination_queries_config_json():
     assert executed["params"] == {"ws": 9, "dest_id": "17"}
 
 
+def test_count_skills_using_destination_returns_zero_for_expected_query_errors():
+    with patch("app.models.domain.destinations.db") as mock_db:
+        mock_db.session.execute.side_effect = RuntimeError("query unavailable")
+        count = _count_skills_using_destination(17, 9)
+
+    assert count == 0
+
+
+def test_count_skills_using_destination_surfaces_unexpected_query_errors():
+    with patch("app.models.domain.destinations.db") as mock_db:
+        mock_db.session.execute.side_effect = AssertionError("unexpected query bug")
+        with pytest.raises(AssertionError, match="unexpected query bug"):
+            _count_skills_using_destination(17, 9)
+
+
 def test_destination_create_returns_clear_error_when_encryption_key_missing(client, app, monkeypatch):
     app.config["DESTINATION_ENCRYPTION_KEY"] = None
 
@@ -372,3 +483,86 @@ def test_slack_delivery_uses_certifi_ssl_context():
     assert captured["timeout"] == 10
     assert captured["context"] is not None
     assert captured["context"].get_ca_certs() == _ssl_context().get_ca_certs()
+
+
+def test_email_delivery_returns_failure_for_expected_runtime_errors():
+    channel = EmailDeliveryChannel()
+    payload = type(
+        "_Payload",
+        (),
+        {
+            "subject": "Test",
+            "detail_html": "<p>hello</p>",
+            "workspace_id": 1,
+        },
+    )()
+
+    with patch("app.email.mailer.get_logo", return_value="/tmp/logo.png"), \
+         patch("app.email.mailer.send_email", side_effect=RuntimeError("smtp unavailable")):
+        success, message = channel.send(payload, {"recipients": ["ops@example.com"]})
+
+    assert success is False
+    assert "smtp unavailable" in message
+
+
+def test_email_delivery_surfaces_unexpected_failures():
+    channel = EmailDeliveryChannel()
+    payload = type(
+        "_Payload",
+        (),
+        {
+            "subject": "Test",
+            "detail_html": "<p>hello</p>",
+            "workspace_id": 1,
+        },
+    )()
+
+    with patch("app.email.mailer.get_logo", side_effect=AssertionError("mailer bug")):
+        with pytest.raises(AssertionError, match="mailer bug"):
+            channel.send(payload, {"recipients": ["ops@example.com"]})
+
+
+def test_teams_delivery_returns_failure_for_expected_runtime_errors():
+    channel = TeamsDeliveryChannel()
+    with patch("app.skills.delivery.urllib_request.urlopen", side_effect=RuntimeError("teams offline")):
+        success, message = channel.send(
+            type(
+                "_Payload",
+                (),
+                {
+                    "subject": "Test",
+                    "detail_text": "hello",
+                    "conditions_failed": [],
+                    "query_name": "Test Query",
+                    "severity": "info",
+                    "workspace_id": 1,
+                },
+            )(),
+            {"webhook_url": "https://outlook.office.com/webhook/test"},
+        )
+
+    assert success is False
+    assert "teams offline" in message
+
+
+def test_generic_webhook_delivery_surfaces_unexpected_failures():
+    channel = GenericWebhookDeliveryChannel()
+    payload = type(
+        "_Payload",
+        (),
+        {
+            "subject": "Test",
+            "summary": "summary",
+            "detail_text": "hello",
+            "detail_html": "<p>hello</p>",
+            "query_name": "Test Query",
+            "workspace_id": 1,
+            "query_id": 7,
+            "conditions_failed": [],
+            "severity": "info",
+        },
+    )()
+
+    with patch("app.skills.delivery.urllib_request.urlopen", side_effect=AssertionError("webhook bug")):
+        with pytest.raises(AssertionError, match="webhook bug"):
+            channel.send(payload, {"url": "https://hooks.example.com/test"})

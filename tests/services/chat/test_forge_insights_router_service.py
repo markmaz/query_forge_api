@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+import app.services.chat.forge_insights_router_service as router_service
 from app.exceptions.forge_error import ForgeError
 from app.services.chat.forge_insights_router_service import ForgeInsightsRouterService
 
@@ -374,3 +375,97 @@ def test_router_domain_vector_match_routes_to_education_pipeline() -> None:
     assert out["route_decision"]["method"] == "domain_vector"
     assert out["route_decision"]["domain_vector_match"]["matched"] is True
     assert len(vector.calls) == 1
+
+
+def test_router_surfaces_unexpected_runtime_llm_resolution_errors() -> None:
+    svc = ForgeInsightsRouterService(
+        chat_service=_FakeChat(),
+        planner_domain_service=_FakePlanner(result={}),
+        execution_service=_FakeExecution(),
+        fewshot_service=_FakeFewshots(),
+        route_domain_vector_enabled=False,
+    )
+
+    def _broken_resolver(*, workspace_id: str) -> None:
+        del workspace_id
+        raise TypeError("broken llm resolver")
+
+    svc._resolve_runtime_llm = _broken_resolver  # type: ignore[assignment]
+
+    with pytest.raises(TypeError, match="broken llm resolver"):
+        svc._route_decision(prompt="hello there", workspace_id="ws-1", user_id="u1")
+
+
+def test_router_surfaces_unexpected_llm_chat_errors() -> None:
+    svc = ForgeInsightsRouterService(
+        chat_service=_FakeChat(),
+        planner_domain_service=_FakePlanner(result={}),
+        execution_service=_FakeExecution(),
+        llm_client=_FakeLLM(exc=TypeError("broken llm call")),
+        fewshot_service=_FakeFewshots(),
+        route_domain_vector_enabled=False,
+    )
+
+    with pytest.raises(TypeError, match="broken llm call"):
+        svc._route_decision(prompt="hello there", workspace_id="ws-1", user_id="u1")
+
+
+def test_router_surfaces_unexpected_confidence_parse_errors() -> None:
+    class _BadFloat:
+        def __float__(self) -> float:
+            raise RuntimeError("bad confidence conversion")
+
+    svc = ForgeInsightsRouterService(
+        chat_service=_FakeChat(),
+        planner_domain_service=_FakePlanner(result={}),
+        execution_service=_FakeExecution(),
+        llm_client=_FakeLLM(out={"route": "chat", "confidence": _BadFloat(), "reason": "chat"}),
+        fewshot_service=_FakeFewshots(),
+        route_domain_vector_enabled=False,
+    )
+
+    with pytest.raises(RuntimeError, match="bad confidence conversion"):
+        svc._route_decision(prompt="hello there", workspace_id="ws-1", user_id="u1")
+
+
+def test_router_domain_vector_init_falls_back_for_expected_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _BrokenVector:
+        def __init__(self) -> None:
+            raise ValueError("bad vector config")
+
+    monkeypatch.setattr(router_service, "DomainVectorIndexService", _BrokenVector)
+
+    svc = ForgeInsightsRouterService(
+        chat_service=_FakeChat(),
+        planner_domain_service=_FakePlanner(result={}),
+        execution_service=_FakeExecution(),
+        llm_client=_FakeLLM(),
+        fewshot_service=_FakeFewshots(),
+        domain_vector_service=None,
+        route_domain_vector_enabled=True,
+    )
+
+    decision = svc._route_decision(prompt="hello there", workspace_id="ws-1", user_id="u1")
+
+    assert decision["domain_vector_match"]["error"] == "init_failed"
+    assert decision["route"] == "chat"
+
+
+def test_router_domain_vector_search_surfaces_unexpected_errors() -> None:
+    class _BrokenVector:
+        def search_domains(self, **kwargs):
+            del kwargs
+            raise TypeError("bad vector search")
+
+    svc = ForgeInsightsRouterService(
+        chat_service=_FakeChat(),
+        planner_domain_service=_FakePlanner(result={}),
+        execution_service=_FakeExecution(),
+        llm_client=_FakeLLM(),
+        fewshot_service=_FakeFewshots(),
+        domain_vector_service=_BrokenVector(),
+        route_domain_vector_enabled=True,
+    )
+
+    with pytest.raises(TypeError, match="bad vector search"):
+        svc._route_decision(prompt="hello there", workspace_id="ws-1", user_id="u1")

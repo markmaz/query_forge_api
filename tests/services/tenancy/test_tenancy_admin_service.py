@@ -13,7 +13,7 @@ from app.models.tenancy.tenancy_admin import (
     WorkspaceBindingUpdateRequest,
     WorkspaceMembershipCreateRequest,
 )
-from app.services.tenancy.tenancy_admin_service import TenancyAdminService
+from app.services.tenancy.tenancy_admin_service import TenancyAdminService, _json_loads
 
 
 def test_list_organizations_returns_paginated_rows():
@@ -894,3 +894,125 @@ def test_delete_workspace_hard_removes_row():
     out = svc.delete_workspace(workspace_id="ws-1", hard=True)
     assert out == {"workspace_id": "ws-1", "deleted": True, "mode": "hard"}
     assert ("DELETE FROM workspace WHERE id = :id", {"id": "ws-1"}) in sql.writes
+
+
+def test_test_datasource_surfaces_unexpected_executor_errors(monkeypatch):
+    class _Executor:
+        def test_connection(self):
+            raise TypeError("bad executor wiring")
+
+    class _SQL:
+        def execute_query_mappings(self, query, _params=None):
+            if "FROM datasource" in query and "WHERE id = :id" in query:
+                return [
+                    {
+                        "id": 4,
+                        "organization_id": "org-1",
+                        "name": "primary",
+                        "slug": "primary",
+                        "type": "mysql",
+                        "description": None,
+                        "is_active": 1,
+                        "secret_ref": None,
+                        "config_json": {"host": "h", "port": 3306, "database": "d", "user": "u", "password": "p"},
+                        "last_tested_at": None,
+                        "last_test_status": None,
+                        "last_test_message": None,
+                        "created_at": None,
+                        "updated_at": None,
+                    }
+                ]
+            return []
+
+        def execute_write(self, _query, params=None):
+            return params
+
+    monkeypatch.setattr("app.services.tenancy.tenancy_admin_service.ExecutorFactory.create", lambda *_args, **_kwargs: _Executor())
+
+    svc = TenancyAdminService(sql=_SQL())
+    with pytest.raises(TypeError, match="bad executor wiring"):
+        svc.test_datasource(datasource_id=4)
+
+
+def test_list_datasource_namespaces_catalog_falls_back_for_expected_errors(monkeypatch):
+    class _Executor:
+        def execute(self, sql):
+            del sql
+            raise RuntimeError("catalog lookup unavailable")
+
+    class _Provider:
+        def list_schemas(self, catalog):
+            assert catalog == "ANALYTICS"
+            return ["PUBLIC"]
+
+    class _SQL:
+        def execute_query_mappings(self, query, _params=None):
+            if "FROM datasource" in query and "WHERE id = :id" in query:
+                return [
+                    {
+                        "id": 4,
+                        "organization_id": "org-1",
+                        "name": "primary",
+                        "slug": "primary",
+                        "type": "snowflake",
+                        "description": None,
+                        "is_active": 1,
+                        "secret_ref": None,
+                        "config_json": {"account": "acct", "user": "svc", "database": "ANALYTICS", "schema": "PUBLIC", "password": "p"},
+                        "last_tested_at": None,
+                        "last_test_status": None,
+                        "last_test_message": None,
+                        "created_at": None,
+                        "updated_at": None,
+                    }
+                ]
+            return []
+
+    monkeypatch.setattr("app.services.tenancy.tenancy_admin_service.ExecutorFactory.create", lambda *_args, **_kwargs: _Executor())
+    monkeypatch.setattr("app.services.tenancy.tenancy_admin_service.MetadataProviderFactory.create", lambda *_args, **_kwargs: _Provider())
+
+    svc = TenancyAdminService(sql=_SQL())
+    out = svc.list_datasource_namespaces(datasource_id=4)
+
+    assert out["catalogs"] == ["ANALYTICS"]
+    assert out["schemas"] == ["PUBLIC"]
+
+
+def test_list_datasource_namespaces_surfaces_unexpected_catalog_errors(monkeypatch):
+    class _Executor:
+        def execute(self, sql):
+            del sql
+            raise TypeError("bad catalog executor")
+
+    class _SQL:
+        def execute_query_mappings(self, query, _params=None):
+            if "FROM datasource" in query and "WHERE id = :id" in query:
+                return [
+                    {
+                        "id": 4,
+                        "organization_id": "org-1",
+                        "name": "primary",
+                        "slug": "primary",
+                        "type": "snowflake",
+                        "description": None,
+                        "is_active": 1,
+                        "secret_ref": None,
+                        "config_json": {"account": "acct", "user": "svc", "database": "ANALYTICS", "schema": "PUBLIC", "password": "p"},
+                        "last_tested_at": None,
+                        "last_test_status": None,
+                        "last_test_message": None,
+                        "created_at": None,
+                        "updated_at": None,
+                    }
+                ]
+            return []
+
+    monkeypatch.setattr("app.services.tenancy.tenancy_admin_service.ExecutorFactory.create", lambda *_args, **_kwargs: _Executor())
+
+    svc = TenancyAdminService(sql=_SQL())
+    with pytest.raises(TypeError, match="bad catalog executor"):
+        svc.list_datasource_namespaces(datasource_id=4)
+
+
+def test_json_loads_returns_original_string_for_invalid_json() -> None:
+    assert _json_loads("{not-json}") == "{not-json}"

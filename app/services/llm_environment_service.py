@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from botocore.exceptions import BotoCoreError, ClientError
-except Exception:  # pragma: no cover - fallback when botocore is unavailable
+except ModuleNotFoundError:  # pragma: no cover - fallback when botocore is unavailable
     class BotoCoreError(Exception):
         pass
 
@@ -43,7 +43,7 @@ def _build_ec2_client(
 ):
     try:
         import boto3
-    except Exception as exc:  # pragma: no cover - runtime dependency guard
+    except ModuleNotFoundError as exc:  # pragma: no cover - runtime dependency guard
         raise ForgeError("boto3 is required for LLM environment control", status_code=500) from exc
     return boto3.client(
         "ec2",
@@ -125,7 +125,7 @@ class LLMEnvironmentService:
             self._ec2.start_instances(InstanceIds=[self.instance_id])
             self._invalidate_cache()
             return self.get_instance_status(force_refresh=True)
-        except Exception as exc:
+        except (BotoCoreError, ClientError, ForgeError) as exc:
             raise self._translate_aws_error("Failed to start LLM instance", exc)
 
     def stop_instance(self) -> Dict[str, Any]:
@@ -134,7 +134,7 @@ class LLMEnvironmentService:
             self._ec2.stop_instances(InstanceIds=[self.instance_id])
             self._invalidate_cache()
             return self.get_instance_status(force_refresh=True)
-        except Exception as exc:
+        except (BotoCoreError, ClientError, ForgeError) as exc:
             raise self._translate_aws_error("Failed to stop LLM instance", exc)
 
     def get_instance_status(self, *, force_refresh: bool = False) -> Dict[str, Any]:
@@ -162,7 +162,7 @@ class LLMEnvironmentService:
                 self._last_logged_raw_state = str(raw_state)
 
             return dict(status)
-        except Exception as exc:
+        except (BotoCoreError, ClientError, ForgeError) as exc:
             raise self._translate_aws_error("Failed to fetch LLM instance status", exc)
 
     def _fetch_instance_status(self) -> Dict[str, Any]:

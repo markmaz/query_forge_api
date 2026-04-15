@@ -217,7 +217,6 @@ class DomainLifecycleService:
         name: str,
         kind: Optional[str] = None,
         description: Optional[str] = None,
-        model_table_id: Optional[int] = None,
         column_name_policy: Optional[str] = None,
         bypass_permissions: bool = False,
     ) -> Dict[str, Any]:

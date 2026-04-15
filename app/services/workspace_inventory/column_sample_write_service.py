@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Keep this conservative; if you have weird identifiers, we still support them via backticks escaping.
 SAFE_IDENT_RE = re.compile(r"^[A-Za-z0-9_]+$")
+SAMPLE_WRITE_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
 def _quote_uc_ident(ident: str) -> str:
@@ -108,9 +109,17 @@ ORDER BY ordinal_position, column_name
         )
         return [dict(r) for r in rows]
 
-    def _fetch_column_stats(self, *, full_name: str, column_name: str, timeout_s: Optional[int] = 120) -> Dict[str, Any]:
+    def _fetch_column_stats(
+        self,
+        *,
+        full_name: str,
+        column_name: str,
+        timeout_s: Optional[int] = 120,
+        qf_timeout_s: Optional[int] = None,
+    ) -> Dict[str, Any]:
         tbl = _quote_uc_ident(full_name)
         col = _quote_col(column_name)
+        effective_timeout_s = qf_timeout_s if qf_timeout_s is not None else timeout_s
 
         sql_text = f"""
 SELECT
@@ -123,7 +132,7 @@ TABLESAMPLE (1 PERCENT)
         resp = self._sql.submit_statement(
             sql_text,
             qf_result_fmt="ARROW_STREAM",
-            qf_timeout_s=timeout_s,  # if your executor supports it
+            qf_timeout_s=effective_timeout_s,  # if your executor supports it
         )
 
         table: Optional[pa.Table] = resp.get("table")
@@ -152,24 +161,36 @@ TABLESAMPLE (1 PERCENT)
         column_name: str,
         limit: int = 10,
         timeout_s: Optional[int] = 120,
+        qf_timeout_s: Optional[int] = None,
+        distinct: bool = True,
     ) -> List[str]:
         tbl = _quote_uc_ident(full_name)
         col = _quote_col(column_name)
+        effective_timeout_s = qf_timeout_s if qf_timeout_s is not None else timeout_s
 
-        sql_text = f"""
-    SELECT CAST({col} AS STRING) AS value, COUNT(1) AS n
-    FROM {tbl}
-    TABLESAMPLE (1 PERCENT)
-    WHERE {col} IS NOT NULL
-    GROUP BY {col}
-    ORDER BY n DESC
-    LIMIT {int(limit)}
-    """
+        if distinct:
+            sql_text = f"""
+        SELECT CAST({col} AS STRING) AS value, COUNT(1) AS n
+        FROM {tbl}
+        TABLESAMPLE (1 PERCENT)
+        WHERE {col} IS NOT NULL
+        GROUP BY {col}
+        ORDER BY n DESC
+        LIMIT {int(limit)}
+        """
+        else:
+            sql_text = f"""
+        SELECT CAST({col} AS STRING) AS value
+        FROM {tbl}
+        TABLESAMPLE (1 PERCENT)
+        WHERE {col} IS NOT NULL
+        LIMIT {int(limit)}
+        """
 
         resp = self._sql.submit_statement(
             sql_text,
             qf_result_fmt="ARROW_STREAM",
-            qf_timeout_s=timeout_s,
+            qf_timeout_s=effective_timeout_s,
         )
 
         table: Optional[pa.Table] = resp.get("table")
@@ -232,14 +253,14 @@ TABLESAMPLE (1 PERCENT)
                         stats = self._fetch_column_stats(
                             full_name=full_name,
                             column_name=col_name,
-                            qf_timeout_s=statement_timeout_s,
+                            timeout_s=statement_timeout_s,
                         )
                         samples = self._fetch_column_samples(
                             full_name=full_name,
                             column_name=col_name,
                             limit=per_column_limit,
                             distinct=distinct_values,
-                            qf_timeout_s=statement_timeout_s,
+                            timeout_s=statement_timeout_s,
                         )
 
                         tx.execute_write(
@@ -269,7 +290,7 @@ TABLESAMPLE (1 PERCENT)
                         )
                         cols_updated += 1
 
-                    except Exception as e:
+                    except SAMPLE_WRITE_FALLBACK_ERRORS as e:
                         logger.exception(
                             "Column sample failed workspace_table_id=%s col_id=%s col=%s full_name=%s",
                             workspace_table_id,

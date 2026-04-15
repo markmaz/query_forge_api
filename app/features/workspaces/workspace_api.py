@@ -32,6 +32,13 @@ def _workspace_service():
     return workspaces_feature_service.build_workspace_service(workspace_service_factory=WorkspaceService)
 
 
+def _bool_arg(name: str, *, default: bool = False) -> bool:
+    value = str(request.args.get(name) or "").strip().lower()
+    if not value:
+        return default
+    return value in {"1", "true", "yes", "y", "on"}
+
+
 @workspace_ns.route("/", methods=["GET"])
 class Workspaces(Resource):
     @workspace_ns.marshal_list_with(workspace_model)
@@ -54,12 +61,32 @@ class WorkSpaceDetails(Resource):
 
 @workspace_ns.route("/<string:workspace_id>/users")
 class WorkspaceUsers(Resource):
-    @workspace_ns.marshal_list_with(user_model)
-    @workspace_ns.doc(params={"workspace_id": "The ID of the workspace"})
+    @workspace_ns.doc(
+        params={
+            "workspace_id": "The ID of the workspace",
+            "q": "Optional username/email search",
+            "limit": "Max rows to return",
+            "offset": "Pagination offset",
+            "include_inactive": "Include inactive users",
+        }
+    )
     @token_required
     @require_admin()
     def get(self, workspace_id: str):
-        return _workspace_service().get_workspace_users_from_dbx(workspace_id)
+        try:
+            rows = WorkspaceUserReadService().list_workspace_users(
+                workspace_id=workspace_id,
+                q=(request.args.get("q") or "").strip() or None,
+                limit=workspaces_feature_service.int_arg("limit", default=5000),
+                offset=workspaces_feature_service.int_arg("offset", default=0),
+                include_inactive=_bool_arg("include_inactive", default=False),
+            )
+            return {"rows": rows}, 200
+        except ForgeError as exc:
+            return {"error": str(exc)}, getattr(exc, "status_code", 400) or 400
+        except Exception:
+            logger.exception("Workspace users fetch failed for workspace_id=%s", workspace_id)
+            return {"error": "Workspace users fetch failed"}, 500
 
 
 @workspace_ns.route("/<string:workspace_id>/namespaces")

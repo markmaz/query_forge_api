@@ -1,9 +1,9 @@
+from app.api_config import NAME, VERSION, build_url
+
+from .query_tree_api import qf_saved_query_ns
 from app.routes.query_analysis_routes import query_analysis_ns
 
-from .query_tree_api import qf_saved_query_ns, qf_tree_ns
 
-NAMESPACES = [
-    (qf_tree_ns, ("query-tree",)),
-    (qf_saved_query_ns, ("saved-queries",)),
-    (query_analysis_ns, ("queries",)),
-]
+def register(api):
+    api.add_namespace(qf_saved_query_ns, path=build_url("/", NAME, VERSION, "saved-queries"))
+    api.add_namespace(query_analysis_ns, path=build_url("/", NAME, VERSION, "queries"))

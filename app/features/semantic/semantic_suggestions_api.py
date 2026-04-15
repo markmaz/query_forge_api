@@ -13,7 +13,6 @@ from app.routes.request_helpers import bool_arg, int_arg
 from app.services.semantic.semantic_suggestion_service import SemanticSuggestionService
 
 from .schemas import register_suggestion_models
-from .service import semantic_feature_service
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +29,7 @@ class SuggestionRuns(Resource):
         try:
             body: Dict[str, Any] = request.get_json(silent=True) or {}
             created_by = str(getattr(g, "user_id", "") or "") or None
-            run = semantic_feature_service.build_suggestion_service(
-                suggestion_service_factory=SemanticSuggestionService
-            ).create_run(body, created_by=created_by)
+            run = SemanticSuggestionService().create_run(body, created_by=created_by)
             return {"run": run}, 201
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -49,9 +46,7 @@ class SuggestionRunExecute(Resource):
     def post(self, run_id: int):
         try:
             llm_id = _optional_int(request.args.get("llm_id"), "llm_id")
-            run = semantic_feature_service.build_suggestion_service(
-                suggestion_service_factory=SemanticSuggestionService
-            ).execute_run(run_id, llm_id=llm_id)
+            run = SemanticSuggestionService().execute_run(run_id, llm_id=llm_id)
             return {"run": run}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -66,9 +61,7 @@ class SuggestionRunById(Resource):
     @require_access("semantic")
     def get(self, run_id: int):
         try:
-            run = semantic_feature_service.build_suggestion_service(
-                suggestion_service_factory=SemanticSuggestionService
-            ).get_run(run_id)
+            run = SemanticSuggestionService().get_run(run_id)
             return {"run": run}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -97,9 +90,7 @@ class SuggestionItems(Resource):
             decision_status = request.args.get("decision_status") or None
             proposed_semantic_type = request.args.get("proposed_semantic_type") or None
             is_valid = bool_arg("is_valid", default=None)
-            result = semantic_feature_service.build_suggestion_service(
-                suggestion_service_factory=SemanticSuggestionService
-            ).list_items(
+            result = SemanticSuggestionService().list_items(
                 run_id=run_id,
                 decision_status=decision_status,
                 proposed_semantic_type=proposed_semantic_type,
@@ -123,9 +114,7 @@ class SuggestionItemById(Resource):
     def patch(self, item_id: int):
         try:
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            row = semantic_feature_service.build_suggestion_service(
-                suggestion_service_factory=SemanticSuggestionService
-            ).update_item(item_id, body)
+            row = SemanticSuggestionService().update_item(item_id, body)
             return {"item": row}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -140,9 +129,7 @@ class SuggestionRunApply(Resource):
     @require_access("semantic", role="admin")
     def post(self, run_id: int):
         try:
-            run = semantic_feature_service.build_suggestion_service(
-                suggestion_service_factory=SemanticSuggestionService
-            ).apply_approved(run_id)
+            run = SemanticSuggestionService().apply_approved(run_id)
             return {"run": run}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code

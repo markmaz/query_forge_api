@@ -283,7 +283,7 @@ class PromptFeedbackService:
         ws = _required_text(workspace_id, "workspace_id")
         try:
             fid = int(feedback_id)
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             raise ForgeError("feedback_id must be an integer", status_code=400) from exc
         if fid <= 0:
             raise ForgeError("feedback_id must be greater than 0", status_code=400)
@@ -367,7 +367,7 @@ def _coerce_json(value: Any) -> Any:
     if isinstance(value, (bytes, bytearray)):
         try:
             value = value.decode("utf-8")
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             return str(value)
     if isinstance(value, str):
         text = value.strip()
@@ -375,6 +375,6 @@ def _coerce_json(value: Any) -> Any:
             return None
         try:
             return json.loads(text)
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             return {"_raw": text}
     return value

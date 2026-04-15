@@ -184,7 +184,7 @@ def _normalize_hits(table_hits: Sequence[Mapping[str, Any]]) -> List[_Hit]:
             continue
         try:
             table_id_int = int(table_id)
-        except Exception:
+        except (TypeError, ValueError):
             continue
         score = float(hit.get("score") or 0.0)
         if table_id_int not in score_map or score > score_map[table_id_int]:

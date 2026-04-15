@@ -35,11 +35,16 @@ def _headers(monkeypatch, *, is_admin: bool = True):
 def test_list_concepts_route(client, monkeypatch):
     class _Svc:
         def list_concepts(self, **kwargs):
-            return {"rows": [{"id": 1, "concept_key": "SCHOOL_YEAR"}], "total": 1, "page": kwargs["page"], "page_size": kwargs["page_size"]}
+            return {
+                "rows": [{"id": 1, "concept_key": "SCHOOL_YEAR"}],
+                "total": 1,
+                "page": kwargs["page"],
+                "page_size": kwargs["page_size"],
+            }
 
     monkeypatch.setattr(semantic_concepts, "SemanticConceptService", _Svc)
 
-    resp = client.get("/api/v1/semantic/concepts?vertical=education&page=1&page_size=10", headers=_headers(monkeypatch))
+    resp = client.get("/api/v1/semantic/concepts?page=1&page_size=10", headers=_headers(monkeypatch))
     assert resp.status_code == 200
     assert resp.json["total"] == 1
     assert resp.json["rows"][0]["concept_key"] == "SCHOOL_YEAR"
@@ -48,12 +53,11 @@ def test_list_concepts_route(client, monkeypatch):
 def test_list_concept_keys_route(client, monkeypatch):
     class _Svc:
         def list_concept_keys(self, **kwargs):
-            assert kwargs["vertical"] == "education"
             return {"concept_keys": ["ATTENDANCE_RATE", "SCHOOL_YEAR"]}
 
     monkeypatch.setattr(semantic_concepts, "SemanticConceptService", _Svc)
 
-    resp = client.get("/api/v1/semantic/concepts/keys?vertical=education", headers=_headers(monkeypatch))
+    resp = client.get("/api/v1/semantic/concepts/keys", headers=_headers(monkeypatch))
     assert resp.status_code == 200
     assert resp.json["concept_keys"] == ["ATTENDANCE_RATE", "SCHOOL_YEAR"]
 
@@ -96,46 +100,43 @@ def test_create_alias_route(client, monkeypatch):
 
 def test_seed_route(client, monkeypatch):
     class _Svc:
-        def seed(self, vertical):
-            return {"vertical_norm": vertical, "concepts_created": 1, "aliases_created": 1}
+        def seed(self):
+            return {"concepts_created": 1, "aliases_created": 1}
 
     monkeypatch.setattr(semantic_concepts, "SemanticConceptService", _Svc)
 
     resp = client.post(
         "/api/v1/semantic/concepts/seed",
-        json={"vertical": "education"},
+        json={},
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 200
-    assert resp.json["result"]["vertical_norm"] == "education"
+    assert resp.json["result"]["concepts_created"] == 1
 
 
 def test_rebuild_index_route(client, monkeypatch):
     class _EmbedSvc:
-        def rebuild_semantic_concept_index(self, *, vertical_norm):
-            return {"collection": "semantic_concepts_v1", "points_upserted": 10, "vertical_norm": vertical_norm}
+        def rebuild_semantic_concept_index(self):
+            return {"collection": "semantic_concepts_v1", "points_upserted": 10}
 
     monkeypatch.setattr(semantic_concepts, "SemanticConceptEmbeddingService", _EmbedSvc)
 
     resp = client.post(
         "/api/v1/semantic/concepts/rebuild-index",
-        json={"vertical_norm": "education"},
+        json={},
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 200
-    assert resp.json["vertical_norm"] == "education"
     assert resp.json["result"]["points_upserted"] == 10
 
 
 def test_backfill_primary_keys_route(client, monkeypatch):
     class _Svc:
-        def backfill_primary_semantic_keys(self, *, workspace_id, vertical_norm, dry_run):
+        def backfill_primary_semantic_keys(self, *, workspace_id, dry_run):
             assert workspace_id == "ws-1"
-            assert vertical_norm == "education"
             assert dry_run is True
             return {
                 "workspace_id": workspace_id,
-                "vertical_norm": vertical_norm,
                 "dry_run": dry_run,
                 "candidates": 4,
                 "updated": 0,
@@ -145,7 +146,7 @@ def test_backfill_primary_keys_route(client, monkeypatch):
 
     resp = client.post(
         "/api/v1/semantic/concepts/backfill-primary-keys",
-        json={"workspace_id": "ws-1", "vertical_norm": "education", "dry_run": True},
+        json={"workspace_id": "ws-1", "dry_run": True},
         headers=_headers(monkeypatch),
     )
     assert resp.status_code == 200
@@ -166,9 +167,6 @@ def test_delete_concept_route(client, monkeypatch):
 
 def test_alias_crud_routes(client, monkeypatch):
     class _Svc:
-        def get_alias(self, alias_id):
-            return {"id": alias_id, "alias_key": "k_school"}
-
         def patch_alias(self, alias_id, payload):
             return {"id": alias_id, **payload}
 
@@ -177,10 +175,6 @@ def test_alias_crud_routes(client, monkeypatch):
             return None
 
     monkeypatch.setattr(semantic_concepts, "SemanticConceptService", _Svc)
-
-    get_resp = client.get("/api/v1/semantic/concept-aliases/9", headers=_headers(monkeypatch))
-    assert get_resp.status_code == 200
-    assert get_resp.json["row"]["id"] == 9
 
     patch_resp = client.patch(
         "/api/v1/semantic/concept-aliases/9",
@@ -206,9 +200,6 @@ def test_value_alias_crud_routes(client, monkeypatch):
 
         def create_value_alias(self, payload):
             return {"id": 2, **payload}
-
-        def get_value_alias(self, value_alias_id):
-            return {"id": value_alias_id}
 
         def patch_value_alias(self, value_alias_id, payload):
             return {"id": value_alias_id, **payload}
@@ -237,10 +228,6 @@ def test_value_alias_crud_routes(client, monkeypatch):
     assert create_resp.status_code == 201
     assert create_resp.json["row"]["id"] == 2
 
-    get_resp = client.get("/api/v1/semantic/value-aliases/2", headers=_headers(monkeypatch))
-    assert get_resp.status_code == 200
-    assert get_resp.json["row"]["id"] == 2
-
     patch_resp = client.patch(
         "/api/v1/semantic/value-aliases/2",
         json={"weight": 0.7},
@@ -264,9 +251,6 @@ def test_concept_column_map_crud_routes(client, monkeypatch):
 
         def create_concept_column_map(self, payload):
             return {"id": 6, **payload}
-
-        def get_concept_column_map(self, map_id):
-            return {"id": map_id}
 
         def patch_concept_column_map(self, map_id, payload):
             return {"id": map_id, **payload}
@@ -296,10 +280,6 @@ def test_concept_column_map_crud_routes(client, monkeypatch):
     assert create_resp.status_code == 201
     assert create_resp.json["row"]["id"] == 6
     assert create_resp.json["row"]["workspace_column_id"] == 88
-
-    get_resp = client.get("/api/v1/semantic/concept-column-maps/6", headers=_headers(monkeypatch))
-    assert get_resp.status_code == 200
-    assert get_resp.json["row"]["id"] == 6
 
     patch_resp = client.patch(
         "/api/v1/semantic/concept-column-maps/6",

@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS `domain_time_policy` (
   `prefer_time_object_over_filter` tinyint(1) NOT NULL DEFAULT '1',
   `strict_mode` tinyint(1) NOT NULL DEFAULT '1',
   `relative_map` json DEFAULT NULL,
+  `semester_config` json DEFAULT NULL,
   `notes` text DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
@@ -30,4 +31,3 @@ CREATE TABLE IF NOT EXISTS `domain_time_policy` (
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_0900_ai_ci;
-

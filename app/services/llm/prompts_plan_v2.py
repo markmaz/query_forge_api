@@ -135,14 +135,12 @@ def build_slot_user_prompt(
     *,
     normalized_prompt: str,
     workspace_id: str,
-    vertical_norm: str,
     base_domain_id: int,
 ) -> str:
     return (
         "Extract slot hints from this prompt.\n"
         f"prompt: {normalized_prompt}\n"
         f"workspace_id: {workspace_id}\n"
-        f"vertical_norm: {vertical_norm}\n"
         f"base_domain_id: {base_domain_id}\n"
         "Return JSON only."
     )
@@ -157,9 +155,11 @@ def build_developer_prompt(
 ) -> str:
     feedback_line = f"- Validation feedback from previous attempt: {validation_feedback}\n" if validation_feedback else ""
     retry_hint_line = f"{retry_hint}\n" if retry_hint else ""
+    slot_hints_json = json.dumps(dict(slot_hints or {}), ensure_ascii=True, sort_keys=True)
     return (
         "You are a query planner that returns STRICT JSON only. Never return prose, markdown, comments, or code fences.\n"
         "You must produce a valid PlanV2 JSON object.\n"
+        f"Derived slot hints from the user prompt: {slot_hints_json}\n"
         "Hard rules:\n"
         "- Use exactly one base_domain_id (already provided).\n"
         "- Choose dimensions ONLY from allowed_dimensions column_key values.\n"
@@ -414,7 +414,6 @@ def build_user_prompt(
     *,
     normalized_prompt: str,
     workspace_id: str,
-    vertical_norm: str,
     base_domain: Mapping[str, Any],
     capabilities: Mapping[str, Sequence[Mapping[str, Any]]],
     schema: Dict[str, Any],
@@ -439,7 +438,6 @@ def build_user_prompt(
         "Now build PlanV2 for:\n"
         f"prompt: {normalized_prompt}\n"
         f"workspace_id: {workspace_id}\n"
-        f"vertical_norm: {vertical_norm}\n"
         f"base_domain: {json.dumps(dict(base_domain), ensure_ascii=True)}\n"
         f"slot_hints: {json.dumps(dict(slot_hints), ensure_ascii=True)}\n"
         f"allowed_dimensions: {json.dumps(dimensions, ensure_ascii=True)}\n"

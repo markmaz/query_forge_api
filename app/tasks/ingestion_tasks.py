@@ -5,10 +5,15 @@ from datetime import datetime, timezone
 from typing import Any
 
 from celery import shared_task
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
 
 logger = logging.getLogger(__name__)
+
+INGESTION_PROGRESS_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+INGESTION_TASK_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
 
 
 def _get_sync_service():
@@ -116,7 +121,7 @@ WHERE id = :run_id
                 try:
                     tx.execute_write(advanced_sql, params)
                     return
-                except Exception:
+                except INGESTION_PROGRESS_FALLBACK_ERRORS:
                     advanced_progress_supported = False
                     logger.warning(
                         "ingestion_run does not have advanced progress columns yet; "
@@ -139,7 +144,7 @@ WHERE id = :run_id
             progress_callback=_persist_progress,
         )
         status = "completed"
-    except Exception as exc:
+    except INGESTION_TASK_FALLBACK_ERRORS as exc:
         logger.exception("ingestion task %s failed", run_id)
         error_text = str(exc)[:2000]
 
@@ -219,7 +224,7 @@ WHERE id = :run_id
             try:
                 tx.execute_write(advanced_final_sql, final_params)
                 return
-            except Exception:
+            except INGESTION_PROGRESS_FALLBACK_ERRORS:
                 logger.warning(
                     "ingestion_run does not have advanced progress columns yet; "
                     "falling back to legacy final status update"
@@ -229,7 +234,7 @@ WHERE id = :run_id
 
 @shared_task(bind=True, name="qf.ingestion.sync_metadata")
 def sync_metadata_task(
-    self,
+    _self,
     run_id: str,
     datasource: str,
     catalog: str | None,

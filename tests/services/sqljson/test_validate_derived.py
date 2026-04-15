@@ -78,3 +78,43 @@ def test_validate_and_normalize_invalid_metric_type_raises_when_strict() -> None
     }
     with pytest.raises(ForgeError, match="derived_validation_failed: invalid_metric_type"):
         validate_and_normalize_derived_sqljson(q, plan=_plan(), strict=True)
+
+
+def test_validate_and_normalize_invalid_workspace_table_id_reports_issue() -> None:
+    q = {
+        "selects": {
+            "dimensions": [
+                {
+                    "workspaceTableId": "not-an-int",
+                    "columnName": "county_fips_code",
+                }
+            ],
+            "metrics": [],
+        },
+    }
+
+    _, issues, _ = validate_and_normalize_derived_sqljson(q, plan=_plan(), strict=False)
+
+    assert any(i["code"] == "unknown_column_key" for i in issues)
+
+
+def test_validate_and_normalize_invalid_model_column_id_is_ignored() -> None:
+    q = {
+        "selects": {
+            "dimensions": [
+                {
+                    "workspaceTableId": 20,
+                    "modelColumnId": "not-an-int",
+                    "columnName": "county_fips_code",
+                }
+            ],
+            "metrics": [],
+        },
+    }
+
+    normalized, issues, meta = validate_and_normalize_derived_sqljson(q, plan=_plan(), strict=False)
+
+    assert issues == []
+    assert normalized["columns"][0]["modelColumnId"] is None
+    assert normalized["columns"][0]["workspaceTableId"] == 20
+    assert meta["derived_registry"] == {}

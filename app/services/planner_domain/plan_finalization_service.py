@@ -5,10 +5,14 @@ import logging
 from time import perf_counter
 from typing import Any, Dict, List, Mapping
 
+from valkey.exceptions import ValkeyError
+
 from app.services.planner_domain.conversation_store import build_conversation_state
 from app.services.planner_domain.pipeline_trace import _add_pipeline_step, _elapsed_ms
 
 logger = logging.getLogger(__name__)
+
+CONVERSATION_STORE_FALLBACK_ERRORS = (OSError, ValkeyError)
 
 
 class PlanFinalizationService:
@@ -22,7 +26,6 @@ class PlanFinalizationService:
         *,
         workspace_id: str,
         user_id: str,
-        vertical_norm: str,
         normalized_prompt: str,
         trace_id: str,
         conversation_id: str,
@@ -42,7 +45,6 @@ class PlanFinalizationService:
         state = build_conversation_state(
             workspace_id=workspace_id,
             user_id=str(user_id),
-            vertical_norm=vertical_norm,
             prompt=normalized_prompt,
             trace_id=trace_id,
             plan_json_v2=dict(plan_json_v2 or {}),
@@ -57,7 +59,7 @@ class PlanFinalizationService:
                 state=state,
                 qf_ttl_seconds=self._conversation_ttl_seconds,
             )
-        except Exception as exc:
+        except CONVERSATION_STORE_FALLBACK_ERRORS as exc:
             logger.warning("planner_domain conversation save failed conversation_id=%s err=%s", conversation_id, exc)
 
         _add_pipeline_step(

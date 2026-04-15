@@ -96,7 +96,6 @@ def test_plan_conversation_context_from_state_returns_context() -> None:
     state = {
         "plan_json_v2": {"intent": "list"},
         "last_prompt": "show students",
-        "vertical_norm": "education",
     }
     ctx = _plan_conversation_context_from_state(
         conversation_id="pdc_1",
@@ -117,7 +116,6 @@ def test_conversation_context_payload_includes_scoped_plan() -> None:
         conversation_id="pdc_1",
         prior_prompt="show students",
         prior_plan_json_v2={"intent": "list", "base_domain_id": 5, "filters": []},
-        prior_vertical_norm="education",
         followup_mode=True,
         seeded_from_client=False,
     )
@@ -134,7 +132,6 @@ def test_bootstrap_conversation_state_from_seed_basic() -> None:
     state = _bootstrap_conversation_state_from_seed(
         workspace_id="ws-1",
         user_id="u-1",
-        vertical_norm="education",
         seed_plan_json_v2={"intent": "list", "trace_id": "t1"},
         seed_last_prompt="show students",
     )

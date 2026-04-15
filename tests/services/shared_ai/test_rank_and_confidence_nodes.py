@@ -35,7 +35,6 @@ def _context() -> PipelineContext:
         trace_id="trace-1",
         workspace_id="ws-1",
         user_id="user-1",
-        vertical_norm="education",
         request={},
     )
     context.set_artifact("reranked_candidates", CandidateSetArtifact())

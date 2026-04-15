@@ -42,9 +42,7 @@ class ForgeInsightsConversationStore:
         user_id: str,
         conversation_id: str,
         messages: Sequence[Mapping[str, Any]],
-        qf_ttl_seconds: int,
     ) -> None:
-        del qf_ttl_seconds
         existing = self.get_conversation(
             workspace_id=workspace_id,
             user_id=user_id,
@@ -60,7 +58,6 @@ class ForgeInsightsConversationStore:
                 "title": existing.get("title"),
                 "summary": existing.get("summary"),
             },
-            qf_ttl_seconds=0,
         )
 
     def get_conversation(
@@ -127,9 +124,7 @@ class ForgeInsightsConversationStore:
         user_id: str,
         conversation_id: str,
         conversation: Mapping[str, Any],
-        qf_ttl_seconds: int,
     ) -> None:
-        del qf_ttl_seconds
         ws = _required_text(workspace_id, "workspace_id", max_len=64)
         uid = _required_text(user_id, "user_id", max_len=255)
         cid = _required_text(conversation_id, "conversation_id", max_len=128)

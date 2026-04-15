@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from valkey.exceptions import ConnectionError as ValkeyConnectionError
 
 from app.services.rbac_service import (
     assign_role,
@@ -346,3 +347,29 @@ def test_invalidate_clears_workspace_feature_cache():
         mock.return_value = client
         invalidate_workspace_features(workspace_id=7)
         client.delete.assert_called_once_with("qf:features:workspace:7")
+
+
+def test_get_user_roles_tolerates_valkey_cache_failure(monkeypatch):
+    import app.services.rbac_service as rbac_service
+
+    client = MagicMock()
+    client.smembers.side_effect = ValkeyConnectionError("cache unavailable")
+    monkeypatch.setattr(rbac_service, "_valkey", lambda: client)
+
+    query = MagicMock()
+    query.filter.return_value = query
+    query.all.return_value = _mock_user_roles(["skills:user"])
+    monkeypatch.setattr(rbac_service.UserRole, "query", MagicMock(join=MagicMock(return_value=query)))
+
+    roles = rbac_service.get_user_roles(user_id="u-1", workspace_id="ws-1")
+
+    assert roles == {"skills:user"}
+
+
+def test_get_user_roles_does_not_swallow_non_cache_errors(monkeypatch):
+    import app.services.rbac_service as rbac_service
+
+    monkeypatch.setattr(rbac_service, "_valkey", lambda: (_ for _ in ()).throw(ValueError("bad cache config")))
+
+    with pytest.raises(ValueError, match="bad cache config"):
+        rbac_service.get_user_roles(user_id="u-1", workspace_id="ws-1")

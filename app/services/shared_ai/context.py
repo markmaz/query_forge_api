@@ -14,7 +14,6 @@ class PipelineContext:
     trace_id: str
     workspace_id: Optional[str]
     user_id: Optional[str]
-    vertical_norm: Optional[str]
     request: dict[str, Any]
     artifacts: dict[str, Any] = field(default_factory=dict)
     debug: dict[str, Any] = field(default_factory=dict)

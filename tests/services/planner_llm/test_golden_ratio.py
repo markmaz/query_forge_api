@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import pytest
+
 from app.services.planner_llm.service import PlannerLLMConstraints, PlannerLLMService
 
 
 class _FakeRetriever:
-    def retrieve(self, *, workspace_id, vertical, normalized_prompt, constraints):
-        del workspace_id, vertical, normalized_prompt, constraints
+    def retrieve(self, *, workspace_id, normalized_prompt, constraints):
+        del workspace_id, normalized_prompt, constraints
         return {
             "domains": [
                 {
@@ -109,8 +111,7 @@ class _FakeLLM:
 
 
 class _FakeCache:
-    def get_registry_version(self, *, vertical):
-        del vertical
+    def get_registry_version(self):
         return "v1"
 
     def build_cache_key(self, **kwargs):
@@ -125,6 +126,18 @@ class _FakeCache:
         del kwargs
 
 
+class _ExpectedFailingCache(_FakeCache):
+    def set(self, **kwargs):
+        del kwargs
+        raise RuntimeError("cache unavailable")
+
+
+class _UnexpectedFailingCache(_FakeCache):
+    def set(self, **kwargs):
+        del kwargs
+        raise AssertionError("unexpected cache write failure")
+
+
 def test_golden_students_per_teacher_by_county_uses_derived_ratio_and_repairs_domains() -> None:
     svc = PlannerLLMService(
         retriever=_FakeRetriever(),
@@ -135,7 +148,6 @@ def test_golden_students_per_teacher_by_county_uses_derived_ratio_and_repairs_do
         {
             "workspace_id": "ws-1",
             "prompt": "students per teacher by county",
-            "vertical": "education",
             "constraints": PlannerLLMConstraints(max_domains=3).model_dump(mode="json"),
             "debug": True,
         }
@@ -158,3 +170,41 @@ def test_golden_students_per_teacher_by_county_uses_derived_ratio_and_repairs_do
     assert expr_metric["expr"]["numerator"]["field"]["columnName"] == "k_student"
     assert expr_metric["expr"]["denominator"]["fn"] == "count_distinct"
     assert expr_metric["expr"]["denominator"]["field"]["columnName"] == "k_staff_school_association"
+
+
+def test_plan_survives_expected_cache_write_failures() -> None:
+    svc = PlannerLLMService(
+        retriever=_FakeRetriever(),
+        llm_client=_FakeLLM(),
+        cache=_ExpectedFailingCache(),
+    )
+
+    out = svc.plan(
+        {
+            "workspace_id": "ws-1",
+            "prompt": "students per teacher by county",
+            "constraints": PlannerLLMConstraints(max_domains=3).model_dump(mode="json"),
+            "debug": False,
+        }
+    )
+
+    assert out["validation"]["is_valid"] is True
+    assert out["cache"]["hit"] is False
+
+
+def test_plan_surfaces_unexpected_cache_write_failures() -> None:
+    svc = PlannerLLMService(
+        retriever=_FakeRetriever(),
+        llm_client=_FakeLLM(),
+        cache=_UnexpectedFailingCache(),
+    )
+
+    with pytest.raises(AssertionError, match="unexpected cache write failure"):
+        svc.plan(
+            {
+                "workspace_id": "ws-1",
+                "prompt": "students per teacher by county",
+                "constraints": PlannerLLMConstraints(max_domains=3).model_dump(mode="json"),
+                "debug": False,
+            }
+        )

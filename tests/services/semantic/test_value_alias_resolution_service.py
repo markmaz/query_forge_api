@@ -22,7 +22,7 @@ def test_value_alias_resolution_maps_metro_schools_to_district_name() -> None:
     ]
     svc = ValueAliasResolutionService(sql=sql)
 
-    out = svc.resolve(prompt="metro schools", vertical_norm="education")
+    out = svc.resolve(prompt="metro schools")
 
     assert out == [
         {
@@ -37,3 +37,4 @@ def test_value_alias_resolution_maps_metro_schools_to_district_name() -> None:
     ]
     assert len(sql.query_mappings_calls) == 3
     assert "FROM semantic_value_alias va" in sql.query_mappings_calls[0].query
+    assert "vertical_norm" not in (sql.query_mappings_calls[0].params or {})

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.exceptions.forge_error import ForgeError
 from app.services.forge_match.confidence import ForgeMatchConfidenceScorer
 from app.services.forge_match.field_extractor import SourceFieldRecord
 from app.services.forge_match.llm_ranker import ForgeMatchLLMRanker
@@ -23,6 +27,10 @@ from app.services.shared_ai.artifacts import (
 from app.services.shared_ai.context import PipelineContext
 
 logger = logging.getLogger(__name__)
+
+PERSISTENCE_SOURCE_ID_ERRORS = (TypeError, ValueError)
+ROW_PIPELINE_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+JSON_PARSE_FALLBACK_ERRORS = (TypeError, ValueError, json.JSONDecodeError)
 
 
 class ForgeMatchLLMDecisionAdapter:
@@ -115,7 +123,7 @@ class ForgeMatchPersistenceAdapter:
             raise TypeError("ForgeMatchPersistenceAdapter requires session_id in request['session_id'].")
         try:
             source_record_id = int(context.request.get("source_record_id") or 0)
-        except Exception as exc:
+        except PERSISTENCE_SOURCE_ID_ERRORS as exc:
             raise TypeError(
                 "ForgeMatchPersistenceAdapter requires integer source_record_id in request['source_record_id']."
             ) from exc
@@ -156,7 +164,6 @@ class ExistingRetrieverCandidateAdapter:
             workspace_id=str(context.workspace_id or "").strip(),
             source_record=source_record,
             top_n=int(context.request.get("top_n") or 8),
-            vertical_norm=str(context.vertical_norm or "generic"),
             domain_id=int(context.request["domain_id"]) if context.request.get("domain_id") is not None else None,
         )
         return CandidateSetArtifact(
@@ -252,7 +259,6 @@ class ForgeMatchSessionExecutionAdapter:
         job_id = _text_or_none(context.request.get("job_id"))
         force = bool(context.request.get("force"))
         top_n = max(3, int(context.request.get("top_n") or 8))
-        vertical_norm = _text_or_none(context.request.get("vertical_norm")) or str(context.vertical_norm or "generic")
         domain_id = _safe_int(context.request.get("domain_id"))
         llm_id = _safe_int(context.request.get("llm_id"))
 
@@ -327,13 +333,12 @@ class ForgeMatchSessionExecutionAdapter:
                     source_record_id=src_id,
                     source_record=source_record,
                     top_n=top_n,
-                    vertical_norm=vertical_norm,
                     domain_id=domain_id,
                     llm_id=llm_id,
                 )
                 analyzed += 1
                 current_phase = "ranking"
-            except Exception as row_exc:
+            except ROW_PIPELINE_FALLBACK_ERRORS as row_exc:
                 failed += 1
                 logger.exception(
                     "ForgeMatch row analyze failed session_id=%s source_record_id=%s",
@@ -474,7 +479,7 @@ def _safe_int(value: Any) -> int | None:
         return None
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -492,11 +497,9 @@ def _parse_json_dict(value: Any) -> dict[str, Any] | None:
         text = value.strip()
         if not text:
             return None
-        import json
-
         try:
             parsed = json.loads(text)
-        except Exception:
+        except JSON_PARSE_FALLBACK_ERRORS:
             return None
         return parsed if isinstance(parsed, dict) else None
     return None

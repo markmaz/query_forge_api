@@ -212,7 +212,7 @@ def validate_and_fix_reasons(card: Dict[str, Any], reasons: Any) -> Tuple[List[s
 def clamp_confidence(value: Any) -> float:
     try:
         out = float(value)
-    except Exception:
+    except (TypeError, ValueError):
         out = 0.5
     return max(0.0, min(1.0, out))
 
@@ -284,6 +284,7 @@ def _short_reason(text: str) -> str:
 
 
 def _limit_reasons(reasons: Any, card: Dict[str, Any]) -> List[str]:
+    del card
     out: List[str] = []
     if isinstance(reasons, str):
         reasons = [reasons]

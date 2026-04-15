@@ -6,6 +6,7 @@ import pytest
 
 from app.adapters.query_port import ForgeExecResult
 from app.exceptions.forge_error import ForgeError
+import app.services.domain.planner_rerank_policy_candidate_service as candidate_service
 from app.services.domain.planner_rerank_policy_candidate_service import PlannerRerankPolicyCandidateService
 
 
@@ -127,6 +128,8 @@ def test_create_candidate_persists_pending_candidate() -> None:
     assert out["candidate_id"] == 5
     assert out["review_status"] == "pending"
     assert sql.write_calls
+    assert "vertical_norm" not in sql.write_calls[0]["query"]
+    assert "NULL," not in sql.write_calls[0]["query"]
 
 
 def test_delete_candidate_removes_existing_row() -> None:
@@ -138,7 +141,6 @@ def test_delete_candidate_removes_existing_row() -> None:
                     "candidate_key": "candidate_1",
                     "source_type": "ai_recommendation",
                     "workspace_id": "ws-1",
-                    "vertical_norm": "education",
                     "candidate_json": {
                         "version": 1,
                         "when_signals_all": ["student_listing"],
@@ -167,7 +169,6 @@ def test_approve_candidate_promotes_into_policy() -> None:
                     "candidate_key": "candidate_1",
                     "source_type": "ai_recommendation",
                     "workspace_id": "ws-1",
-                    "vertical_norm": "education",
                     "candidate_json": {
                         "version": 1,
                         "when_signals_all": ["student_listing", "school_literal_present"],
@@ -207,3 +208,60 @@ def test_list_candidates_validates_review_status() -> None:
     with pytest.raises(ForgeError) as exc_info:
         svc.list_candidates(workspace_id="ws-1", review_status="bad")
     assert exc_info.value.status_code == 400
+
+
+def test_list_candidates_omits_vertical_from_public_payload() -> None:
+    sql = _FakeSQL(
+        rows_by_call=[
+            [
+                {
+                    "id": 9,
+                    "candidate_key": "candidate_9",
+                    "source_type": "manual",
+                    "workspace_id": "ws-1",
+                    "candidate_json": {
+                        "version": 1,
+                        "when_signals_all": ["student_listing"],
+                        "prefer_capabilities": ["STUDENT_IDENTITY"],
+                        "boost": 0.2,
+                        "max_effect": 0.2,
+                    },
+                    "rationale_json": {"reason": "manual"},
+                    "confidence": 0.75,
+                    "review_status": "pending",
+                    "approved_policy_id": None,
+                }
+            ]
+        ]
+    )
+    svc = PlannerRerankPolicyCandidateService(sql=sql, policy_service=_FakePolicyService())
+
+    out = svc.list_candidates(workspace_id="ws-1", review_status="pending")
+
+    assert "vertical_norm" not in out
+    assert "vertical_norm" not in out["candidates"][0]
+
+
+def test_parse_candidate_policy_wraps_expected_invalid_json() -> None:
+    with pytest.raises(ForgeError, match="Invalid planner rerank policy candidate JSON"):
+        candidate_service._parse_candidate_policy("{bad-json}")
+
+
+def test_parse_candidate_policy_surfaces_unexpected_json_loader_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(_raw):
+        raise AssertionError("unexpected json loader bug")
+
+    monkeypatch.setattr(candidate_service.json, "loads", _boom)
+
+    with pytest.raises(AssertionError, match="unexpected json loader bug"):
+        candidate_service._parse_candidate_policy('{"version": 1}')
+
+
+def test_parse_candidate_policy_surfaces_unexpected_validation_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(_payload):
+        raise AssertionError("unexpected candidate validation bug")
+
+    monkeypatch.setattr(candidate_service.PlannerRerankPolicyRule, "model_validate", _boom)
+
+    with pytest.raises(AssertionError, match="unexpected candidate validation bug"):
+        candidate_service._parse_candidate_policy({"version": 1})

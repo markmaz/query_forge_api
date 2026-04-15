@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.services.forge_match.field_extractor import SourceFieldRecord
 from app.services.forge_match.llm_ranker import ForgeMatchLLMRanker
 
@@ -116,3 +118,34 @@ def test_ranker_fallback_refuses_confident_match_when_definitions_conflict() -> 
     assert out["match_decision"] == "ambiguous"
     assert out["selected_column_id"] is None
     assert "definition_conflict" in out["reason_codes"]
+
+
+def test_ranker_surfaces_unexpected_selected_id_conversion_failures() -> None:
+    class _BadInt:
+        def __int__(self):
+            raise AssertionError("selected id conversion bug")
+
+    llm = _LLM(
+        {
+            "selected_column_id": _BadInt(),
+            "alternate_column_ids": [],
+            "match_decision": "matched",
+            "reason_codes": ["name_similarity"],
+            "explanation": "bad",
+            "ambiguity_note": None,
+            "llm_confidence": 0.9,
+        }
+    )
+    ranker = ForgeMatchLLMRanker(llm=llm)
+    candidates = [
+        {
+            "column_id": 4812,
+            "column_name": "student_birth_date",
+            "display_name": "Student Birth Date",
+            "table_name": "dim_student",
+            "combined_retrieval_score": 0.88,
+        }
+    ]
+
+    with pytest.raises(AssertionError, match="selected id conversion bug"):
+        ranker.rank(workspace_id="ws-test", source_record=_source(), candidates=candidates)

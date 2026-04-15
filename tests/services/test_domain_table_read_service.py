@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -49,7 +50,10 @@ def test_get_domain_validation() -> None:
 
 def test_list_workspace_tables_calls_registry_sync_when_schema_present(monkeypatch) -> None:
     sql = FakeForgeQueryPort()
-    sql.query_mappings_responses = [[]]
+    sql.query_mappings_responses = [
+        [{"last_seen_at": None}],
+        [],
+    ]
     service = DomainTableReadService(sql=sql, metadata_mode="legacy")
     called = {}
 
@@ -85,7 +89,10 @@ def test_list_workspace_tables_skips_registry_sync_when_schema_missing(monkeypat
 
 def test_list_workspace_tables_tolerates_inventory_sync_failure(monkeypatch) -> None:
     sql = FakeForgeQueryPort()
-    sql.query_mappings_responses = [[{"workspace_table_id": 1, "table_name": "orders"}]]
+    sql.query_mappings_responses = [
+        [{"last_seen_at": None}],
+        [{"workspace_table_id": 1, "table_name": "orders"}],
+    ]
     service = DomainTableReadService(sql=sql, metadata_mode="legacy")
 
     def fake_sync(*_args, **_kwargs):
@@ -104,6 +111,85 @@ def test_list_workspace_tables_tolerates_inventory_sync_failure(monkeypatch) -> 
     )
 
     assert rows[0]["table_name"] == "orders"
+
+
+def test_list_workspace_tables_surfaces_unexpected_inventory_sync_failure(monkeypatch) -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [{"last_seen_at": None}],
+        [{"workspace_table_id": 1, "table_name": "orders"}],
+    ]
+    service = DomainTableReadService(sql=sql, metadata_mode="legacy")
+
+    def fake_sync(*_args, **_kwargs):
+        raise AssertionError("unexpected inventory sync bug")
+
+    monkeypatch.setattr(
+        service,
+        "_sync_workspace_inventory_from_registry",
+        fake_sync,
+    )
+
+    with pytest.raises(AssertionError, match="unexpected inventory sync bug"):
+        service.list_workspace_tables(
+            workspace_id="ws1",
+            schema_name="asset",
+            ensure_snapshot=True,
+        )
+
+
+def test_list_workspace_tables_skips_registry_sync_when_snapshot_is_fresh(monkeypatch) -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [{"last_seen_at": (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()}],
+        [{"workspace_table_id": 1, "table_name": "orders"}],
+    ]
+    service = DomainTableReadService(sql=sql, metadata_mode="legacy")
+    called = {"count": 0}
+
+    def fake_sync(*_args, **_kwargs):
+        called["count"] += 1
+
+    monkeypatch.setattr(service, "_sync_workspace_inventory_from_registry", fake_sync)
+
+    rows = service.list_workspace_tables(
+        workspace_id="ws1",
+        schema_name="asset",
+        ensure_snapshot=True,
+        min_fresh_age_minutes=15,
+    )
+
+    assert rows[0]["table_name"] == "orders"
+    assert called["count"] == 0
+
+
+def test_list_workspace_tables_refreshes_when_snapshot_is_stale(monkeypatch) -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [{"last_seen_at": (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()}],
+        [],
+    ]
+    service = DomainTableReadService(sql=sql, metadata_mode="legacy")
+    called = {"count": 0}
+
+    def fake_sync(*_args, **_kwargs):
+        called["count"] += 1
+
+    monkeypatch.setattr(service, "_sync_workspace_inventory_from_registry", fake_sync)
+
+    service.list_workspace_tables(
+        workspace_id="ws1",
+        schema_name="asset",
+        ensure_snapshot=True,
+        min_fresh_age_minutes=15,
+    )
+
+    assert called["count"] == 1
+
+
+def test_domain_table_read_service_rejects_unknown_metadata_mode() -> None:
+    with pytest.raises(ValueError, match="Unsupported metadata_mode"):
+        DomainTableReadService(sql=FakeForgeQueryPort(), metadata_mode="future")
 
 
 def test_sync_workspace_inventory_uses_workspace_datasource_from_db(monkeypatch) -> None:

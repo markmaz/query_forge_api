@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED
 from app.services.planner.semantic_grounding_service import SemanticGroundingService
@@ -48,16 +50,12 @@ _SEMESTER_BUCKET_CONCEPT_KEYS: Dict[str, set] = {
 def _to_int(value: Any) -> Optional[int]:
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
 def _norm_key(value: Any) -> str:
     return str(value or "").strip().lower()
-
-
-def _norm_vertical(value: Any) -> str:
-    return str(value or "generic").strip().lower() or "generic"
 
 
 def _dedupe_constraints(values: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
@@ -284,7 +282,6 @@ class SemanticIntegrationService:
         self,
         *,
         prompt: str,
-        vertical_norm: str,
     ) -> List[Dict[str, Any]]:
         """Return deduplicated semantic alias constraints for a prompt.
 
@@ -296,29 +293,26 @@ class SemanticIntegrationService:
         try:
             constraints = self._semantic_grounding_service().resolve_alias_constraints(
                 prompt=prompt,
-                vertical_norm=vertical_norm,
             )
-        except Exception as exc:
+        except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
             logger.warning("planner_domain semantic alias constraints failed err=%s", exc)
             return []
         return _dedupe_constraints(constraints)
 
     def build_grounding_bundle(self, **kwargs: Any) -> Any:
         """Build a semantic grounding bundle via the underlying grounding service."""
-        return self._semantic_grounding_service().build_grounding_bundle(**kwargs)
+        return self._semantic_grounding_service().build_grounding_bundle(**dict(kwargs))
 
     def resolve_semester_indicator_columns(
         self,
         *,
         workspace_id: str,
-        vertical_norm: str,
         capabilities: Mapping[str, Any],
     ) -> Dict[str, str]:
         """Resolve semester indicator column keys from capabilities and semantic concepts."""
         inferred = _infer_semester_indicator_columns_from_capabilities(capabilities=capabilities)
         semantic = self._resolve_semester_indicator_columns_from_semantic_concepts(
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             capabilities=capabilities,
         )
         out = dict(inferred)
@@ -330,7 +324,6 @@ class SemanticIntegrationService:
         *,
         plan_json: Mapping[str, Any],
         workspace_id: str,
-        vertical_norm: str,
         capabilities: Mapping[str, Any],
     ) -> Tuple[Dict[str, Any], List[str], Dict[str, Any]]:
         """Rewrite filter values using the semantic value-alias map.
@@ -348,7 +341,6 @@ class SemanticIntegrationService:
 
         column_to_concept = self._load_filter_column_concept_keys(
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             capabilities=capabilities,
         )
         if not column_to_concept:
@@ -356,7 +348,6 @@ class SemanticIntegrationService:
 
         boolean_filter_columns = _boolean_like_filter_column_keys(capabilities)
         alias_map = self._load_semantic_value_alias_map(
-            vertical_norm=vertical_norm,
             concept_keys=sorted(set(column_to_concept.values())),
         )
         if not alias_map:
@@ -414,7 +405,6 @@ class SemanticIntegrationService:
         self,
         *,
         workspace_id: str,
-        vertical_norm: str,
         capabilities: Mapping[str, Any],
     ) -> Dict[str, str]:
         workspace_to_key: Dict[int, str] = {}
@@ -448,9 +438,7 @@ class SemanticIntegrationService:
         if not unresolved_ids:
             return out
 
-        params: Dict[str, Any] = {
-            "vertical_norm": _norm_vertical(vertical_norm),
-        }
+        params: Dict[str, Any] = {}
         placeholders: List[str] = []
         for idx, workspace_column_id in enumerate(unresolved_ids):
             token = f"wcid_{idx}"
@@ -464,17 +452,15 @@ class SemanticIntegrationService:
             FROM workspace_column_semantic_concept_map m
             JOIN semantic_concept sc
               ON sc.id = m.semantic_concept_id
-            WHERE LOWER(COALESCE(m.vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
-              AND m.workspace_column_id IN ({", ".join(placeholders)})
+            WHERE m.workspace_column_id IN ({", ".join(placeholders)})
             ORDER BY
-              CASE WHEN LOWER(COALESCE(m.vertical_norm, 'generic')) = :vertical_norm THEN 0 ELSE 1 END,
               CASE WHEN LOWER(COALESCE(m.relationship_kind, 'primary')) = 'primary' THEN 0 ELSE 1 END,
               COALESCE(m.weight, 1.0) DESC,
               m.id ASC
         """
         try:
             rows = ForgeMetaSQL().execute_query_mappings(sql, params)
-        except Exception as exc:
+        except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
             logger.warning("planner_domain semantic concept lookup failed err=%s", exc)
             return out
 
@@ -525,7 +511,7 @@ class SemanticIntegrationService:
         """
         try:
             rows = ForgeMetaSQL().execute_query_mappings(sql, params)
-        except Exception as exc:
+        except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
             logger.warning(
                 "planner_domain workspace column semantic concept lookup failed err=%s", exc
             )
@@ -545,7 +531,6 @@ class SemanticIntegrationService:
     def _load_semantic_value_alias_map(
         self,
         *,
-        vertical_norm: str,
         concept_keys: Sequence[str],
     ) -> Dict[Tuple[str, str], Any]:
         normalized_keys = sorted(
@@ -554,9 +539,7 @@ class SemanticIntegrationService:
         if not normalized_keys:
             return {}
 
-        params: Dict[str, Any] = {
-            "vertical_norm": _norm_vertical(vertical_norm),
-        }
+        params: Dict[str, Any] = {}
         placeholders: List[str] = []
         for idx, concept_key in enumerate(normalized_keys):
             token = f"ck_{idx}"
@@ -572,15 +555,13 @@ class SemanticIntegrationService:
             JOIN semantic_concept sc
               ON sc.id = va.semantic_concept_id
             WHERE UPPER(TRIM(sc.concept_key)) IN ({", ".join(placeholders)})
-              AND LOWER(COALESCE(va.vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
             ORDER BY
-              CASE WHEN LOWER(COALESCE(va.vertical_norm, 'generic')) = :vertical_norm THEN 0 ELSE 1 END,
               COALESCE(va.weight, 1.0) DESC,
               va.id ASC
         """
         try:
             rows = ForgeMetaSQL().execute_query_mappings(sql, params)
-        except Exception as exc:
+        except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
             logger.warning("planner_domain semantic value alias lookup failed err=%s", exc)
             return {}
 
@@ -599,7 +580,6 @@ class SemanticIntegrationService:
         self,
         *,
         workspace_id: str,
-        vertical_norm: str,
         capabilities: Mapping[str, Any],
     ) -> Dict[str, str]:
         if not QF_PLAN_DOMAIN_SEMANTIC_ASSIST_ENABLED:
@@ -646,9 +626,7 @@ class SemanticIntegrationService:
         if not unresolved_ids:
             return {bucket: value for bucket, (_score, value) in best.items() if value}
 
-        params: Dict[str, Any] = {
-            "vertical_norm": _norm_vertical(vertical_norm),
-        }
+        params: Dict[str, Any] = {}
         placeholders: List[str] = []
         for idx, workspace_column_id in enumerate(unresolved_ids):
             token = f"wid_{idx}"
@@ -665,17 +643,15 @@ class SemanticIntegrationService:
             FROM workspace_column_semantic_concept_map m
             JOIN semantic_concept sc
               ON sc.id = m.semantic_concept_id
-            WHERE LOWER(COALESCE(m.vertical_norm, 'generic')) IN (:vertical_norm, 'generic')
-              AND m.workspace_column_id IN ({", ".join(placeholders)})
+            WHERE m.workspace_column_id IN ({", ".join(placeholders)})
             ORDER BY
-              CASE WHEN LOWER(COALESCE(m.vertical_norm, 'generic')) = :vertical_norm THEN 0 ELSE 1 END,
               CASE WHEN LOWER(COALESCE(m.relationship_kind, 'primary')) = 'primary' THEN 0 ELSE 1 END,
               COALESCE(m.weight, 1.0) DESC,
               m.id ASC
         """
         try:
             rows = ForgeMetaSQL().execute_query_mappings(sql, params)
-        except Exception as exc:
+        except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
             logger.warning(
                 "planner_domain semantic semester indicator lookup failed err=%s", exc
             )

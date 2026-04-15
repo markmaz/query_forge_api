@@ -5,11 +5,20 @@ from typing import Iterable, Optional, Sequence
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qdrant_models
-from qdrant_client.http.exceptions import UnexpectedResponse
+from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 from app.config import QDRANT_API_KEY, QDRANT_TIMEOUT_S, QDRANT_URL
 
 logger = logging.getLogger(__name__)
+
+QDRANT_INDEX_ERRORS = (
+    ResponseHandlingException,
+    UnexpectedResponse,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
 
 
 class QdrantClientWrapper:
@@ -79,7 +88,7 @@ class QdrantClientWrapper:
                 field_schema=schema,
                 wait=True,
             )
-        except Exception:
+        except QDRANT_INDEX_ERRORS:
             logger.exception("Failed to ensure payload index key=%s collection=%s", key, self._collection_name)
             raise
 

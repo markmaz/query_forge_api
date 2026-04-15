@@ -4,7 +4,7 @@ import pytest
 
 from app.exceptions.forge_error import ForgeError
 from app.services.domain_resolver import DomainPlan, DomainPlanJoin, DomainPlanTable
-from app.services.query_forge_service import QF_MAX_MANUAL_IN, TABLE_BY_TYPE, QueryForgeService
+from app.services.query_forge.service import QF_MAX_MANUAL_IN, TABLE_BY_TYPE, QueryForgeService
 from tests._support.fakes import FakeForgeQueryPort
 
 
@@ -263,7 +263,7 @@ def test_normalize_filters_collapses_or_equals() -> None:
             {"type": "condition", "field": {"columnName": "code"}, "op": "equals", "value": "B"},
         ],
     }
-    out = svc._qf_norm_filters(node)
+    out = svc._normalizer.normalize_filters(node)
     assert out["op"] == "in"
     assert out["value"] == ["A", "B"]
     assert out["id"] == "g1"
@@ -286,7 +286,7 @@ def test_normalize_filters_collapses_or_equals() -> None:
 )
 def test_normalize_filters_no_collapse(node: dict) -> None:
     svc = QueryForgeService(executor=FakeForgeQueryPort(), domain_resolver=FakeResolver(_single_table_plan()))
-    out = svc._qf_norm_filters(node)
+    out = svc._normalizer.normalize_filters(node)
     assert out.get("type") == "group"
 
 
@@ -361,7 +361,7 @@ def test_normalize_filters_or_children_non_condition() -> None:
             "bad",
         ],
     }
-    normalized = svc._qf_norm_filters(node)
+    normalized = svc._normalizer.normalize_filters(node)
     assert normalized["children"][1] == "bad"
 
     node = {
@@ -372,7 +372,7 @@ def test_normalize_filters_or_children_non_condition() -> None:
             {"type": "condition", "field": {"columnName": "id"}, "op": "gt", "value": 2},
         ],
     }
-    normalized = svc._qf_norm_filters(node)
+    normalized = svc._normalizer.normalize_filters(node)
     assert normalized["children"][1]["op"] == "gt"
 
 
@@ -457,6 +457,34 @@ def test_filter_and_sorting_table_ids() -> None:
     assert svc._qf_sorting_table_ids(sorting, plan) == {1}
 
 
+def test_filter_and_sorting_table_ids_surfaces_unexpected_int_errors() -> None:
+    class ExplosiveInt:
+        def __int__(self) -> int:
+            raise AssertionError("unexpected int conversion failure")
+
+    plan = _single_table_plan()
+    svc = QueryForgeService(executor=FakeForgeQueryPort(), domain_resolver=FakeResolver(plan))
+
+    node = {
+        "type": "group",
+        "match": "and",
+        "children": [
+            {
+                "type": "condition",
+                "field": {"columnName": "x", "workspaceTableId": ExplosiveInt()},
+                "op": "equals",
+                "value": 1,
+            }
+        ],
+    }
+    with pytest.raises(AssertionError, match="unexpected int conversion failure"):
+        svc._qf_filter_table_ids(node, plan)
+
+    sorting = [{"col": {"columnName": "x", "workspaceTableId": ExplosiveInt()}, "dir": "asc"}]
+    with pytest.raises(AssertionError, match="unexpected int conversion failure"):
+        svc._qf_sorting_table_ids(sorting, plan)
+
+
 def test_compile_order_by_supports_metric_ref_alias() -> None:
     plan = _single_table_plan()
     svc = QueryForgeService(executor=FakeForgeQueryPort(), domain_resolver=FakeResolver(plan))
@@ -521,7 +549,7 @@ def test_compile_where_in_normalization_edges(monkeypatch: pytest.MonkeyPatch) -
     assert where_sql == "t0.code IN (:p1)"
     assert params == {"p1": "[a]"}
 
-    monkeypatch.setattr("app.services.query_forge_service.QF_MAX_MANUAL_IN", 500)
+    monkeypatch.setattr("app.services.query_forge.service.QF_MAX_MANUAL_IN", 500)
     values = [str(i) for i in range(201)]
     node = {"type": "condition", "field": {"columnName": "code"}, "op": "in", "value": values}
     where_sql, _exists, params = _compile_where_with_params(svc, node, plan)
@@ -778,8 +806,8 @@ def test_compile_attachments_join_default_suffix(monkeypatch: pytest.MonkeyPatch
         return f":p{_counter[0]}"
 
     monkeypatch.setattr(
-        svc,
-        "_qf_norm_col_key",
+        svc._normalizer,
+        "normalize_col_key",
         lambda _col, _path: {"columnName": "patient_id", "workspaceTableId": 1, "modelColumnId": None, "exprId": None},
     )
     ctx = svc._compile_attachments(

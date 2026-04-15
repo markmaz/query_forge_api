@@ -21,7 +21,7 @@ _DISTRICT_LEA_TERM_RE = re.compile(
 def _to_int(value: Any) -> Optional[int]:
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 

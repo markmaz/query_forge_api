@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.services.domains.domain_resolver_service import DomainResolverService
 
 
@@ -70,3 +72,17 @@ def test_resolve_split_hits_across_domains() -> None:
     )
     assert result["recommended"][0]["domain_id"] == 10
     assert result["recommended"][1]["domain_id"] == 11
+
+
+def test_resolve_from_table_hits_surfaces_unexpected_table_id_errors() -> None:
+    class _BrokenTableId:
+        def __int__(self) -> int:
+            raise AssertionError("unexpected int coercion failure")
+
+    svc = DomainResolverService(sql=_StubSQL([], []))
+
+    with pytest.raises(AssertionError, match="unexpected int coercion failure"):
+        svc.resolve_from_table_hits(
+            workspace_id="ws1",
+            table_hits=[{"workspace_table_id": _BrokenTableId(), "score": 0.9}],
+        )

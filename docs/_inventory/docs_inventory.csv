@@ -1,0 +1,46 @@
+doc_id,title,category,status,source_files,confidence,notes
+GS-001,What is QueryForge?,getting-started,COMPLETE,app/routes/ app/skills/ app/services/query_forge_service.py,CODE_CONFIRMED,
+GS-002,Core Concepts,getting-started,COMPLETE,specs/queryforge_rbac_spec.md app/skills/ app/routes/,CODE_CONFIRMED,
+GS-003,First Query,getting-started,COMPLETE,app/routes/execution_routes.py app/routes/query_analysis_routes.py,CODE_CONFIRMED (routes) NEEDS_VERIFICATION (UI flow),Exact navigation labels not confirmed
+CON-001,Domains,concepts,COMPLETE,app/routes/domain_routes.py app/routes/domain_profile_embeddings.py,CODE_CONFIRMED,
+CON-002,Semantic Registry,concepts,COMPLETE,app/routes/semantic_concepts.py app/routes/semantic_registry.py,CODE_CONFIRMED,Distinction between registry and concepts NEEDS_VERIFICATION
+CON-003,Planner,concepts,COMPLETE,app/services/planner_domain/service.py .claude/audits/backend-audit.md,CODE_CONFIRMED,
+CON-004,Saved Queries,concepts,COMPLETE,.claude/audits/backend-audit.md (Task 6),INFERRED_FROM_STRUCTURE,query_tree_routes.py not found in directory
+CON-005,Skills,concepts,COMPLETE,app/skills/ app/routes/skills_routes.py app/tasks/skill_runner.py,CODE_CONFIRMED,
+CON-006,Agents,concepts,COMPLETE,specs/queryforge_agent_layer_codex_spec.md,NEEDS_VERIFICATION,Implementation not confirmed from code
+CON-007,ForgeMatch,concepts,COMPLETE,app/routes/forge_match_routes.py src/features/forgeMatch/README.md,CODE_CONFIRMED,
+CON-008,Shared AI Pipelines,concepts,COMPLETE,specs/queryforge_shared_ai_pipeline_architecture_spec.md app/services/shared_ai/,SPEC_CONFIRMED + CODE_CONFIRMED,
+CON-009,Workspaces and Organizations,concepts,COMPLETE,app/routes/admin_routes.py .claude/audits/implementation-notes.md,CODE_CONFIRMED,
+CON-010,Feature Entitlements,concepts,COMPLETE,specs/queryforge_rbac_spec.md .claude/audits/backend-audit.md,SPEC_CONFIRMED,
+UG-001,Query Studio,user-guides,COMPLETE,app/routes/execution_routes.py app/routes/export_routes.py,CODE_CONFIRMED (routes) NEEDS_VERIFICATION (UI),
+UG-002,Domains Overview,user-guides,COMPLETE,app/routes/domain_routes.py,CODE_CONFIRMED,
+UG-003,ForgeMatch Overview,user-guides,COMPLETE,src/features/forgeMatch/README.md app/routes/forge_match_routes.py,CODE_CONFIRMED,
+UG-004,Saved Queries Overview,user-guides,COMPLETE,.claude/audits/backend-audit.md,NEEDS_VERIFICATION,query_tree_routes.py location unconfirmed
+UG-005,Agents Overview,user-guides,COMPLETE,specs/queryforge_agent_layer_codex_spec.md,NEEDS_VERIFICATION,Implementation not confirmed
+PB-001,Build First Query,task-playbooks,COMPLETE,app/routes/execution_routes.py,CODE_CONFIRMED (routes) NEEDS_VERIFICATION (UI),
+PB-002,Save and Share Query,task-playbooks,COMPLETE,.claude/audits/backend-audit.md,INFERRED_FROM_STRUCTURE,
+PB-003,Map a Spreadsheet,task-playbooks,COMPLETE,src/features/forgeMatch/README.md app/routes/forge_match_routes.py,CODE_CONFIRMED,
+PB-004,Create a Domain,task-playbooks,COMPLETE,app/routes/domain_routes.py,CODE_CONFIRMED,
+PB-005,Run Weekly Digest,task-playbooks,COMPLETE,app/routes/skills_routes.py app/skills/ai_summary_digest.py,CODE_CONFIRMED,ai_summary_digest config schema NEEDS_VERIFICATION
+PB-006,Troubleshoot Planner Output,task-playbooks,COMPLETE,app/routes/admin_routes.py app/services/planner_domain/service.py,CODE_CONFIRMED,
+AD-001,Workspace Setup,admin,COMPLETE,app/routes/admin_routes.py docs/plans/tenancy_bootstrap_runbook.md,CODE_CONFIRMED,
+AD-002,User Management,admin,COMPLETE,specs/queryforge_rbac_spec.md .claude/audits/backend-audit.md,SPEC_CONFIRMED,
+AD-003,Feature Entitlements,admin,COMPLETE,specs/queryforge_rbac_spec.md .claude/audits/backend-audit.md,SPEC_CONFIRMED,
+AD-004,Deployment Overview,admin,COMPLETE,app/routes/admin_routes.py CLAUDE.md .claude/audits/implementation-notes.md,CODE_CONFIRMED,
+AR-001,Planner Pipeline,architecture,COMPLETE,app/services/planner_domain/ specs/queryforge_shared_ai_pipeline_architecture_spec.md,CODE_CONFIRMED,
+AR-002,Shared AI Pipeline,architecture,COMPLETE,app/services/shared_ai/ specs/queryforge_shared_ai_pipeline_architecture_spec.md,CODE_CONFIRMED,
+AR-003,Semantic Layer,architecture,COMPLETE,app/routes/semantic_concepts.py app/services/semantic_registry_service.py,CODE_CONFIRMED,
+AR-004,Agent Layer,architecture,COMPLETE,specs/queryforge_agent_layer_codex_spec.md,NEEDS_VERIFICATION,Implementation not confirmed
+AR-005,Backend Structure,architecture,COMPLETE,app/routes/ CLAUDE.md .claude/audits/backend-audit.md,CODE_CONFIRMED,
+REF-001,Planner Response Objects,reference,COMPLETE,app/services/query_forge_service.py app/skills/base.py,CODE_CONFIRMED (some fields) NEEDS_VERIFICATION (plan response),
+REF-002,Route Groups,reference,COMPLETE,app/routes/ .claude/audits/backend-audit.md,CODE_CONFIRMED,URL prefixes partially NEEDS_VERIFICATION
+REF-003,Agent Definition Model,reference,COMPLETE,specs/queryforge_agent_layer_codex_spec.md,NEEDS_VERIFICATION,
+REF-004,Entitlements Model,reference,COMPLETE,specs/queryforge_rbac_spec.md,SPEC_CONFIRMED,
+REF-005,Saved Query Model,reference,COMPLETE,app/tasks/skill_runner.py .claude/audits/backend-audit.md,INFERRED_FROM_STRUCTURE,
+TR-001,Wrong Domain Selected,troubleshooting,COMPLETE,app/routes/domain_profile_embeddings.py app/routes/admin_routes.py,CODE_CONFIRMED (routes) INFERRED_FROM_STRUCTURE (steps),
+TR-002,No Query Results,troubleshooting,COMPLETE,app/routes/domain_routes.py,INFERRED_FROM_STRUCTURE,
+TR-003,Mapping Ambiguity,troubleshooting,COMPLETE,app/routes/semantic_concepts.py app/routes/embeddings.py,INFERRED_FROM_STRUCTURE,
+TR-004,LLM Failure,troubleshooting,COMPLETE,.claude/audits/implementation-notes.md app/routes/data_environment.py,CODE_CONFIRMED,
+TR-005,Agent/Skill Execution Issue,troubleshooting,COMPLETE,app/routes/skills_routes.py app/routes/admin_routes.py app/tasks/skill_runner.py,CODE_CONFIRMED,
+INV-001,Documentation Inventory,_inventory,COMPLETE,All source files,CODE_CONFIRMED,
+INV-002,Gaps and Questions,_inventory,COMPLETE,All source files,CODE_CONFIRMED,

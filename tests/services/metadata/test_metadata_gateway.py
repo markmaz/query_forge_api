@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List
 
+import pytest
+
 from app.services.metadata.gateway import MetadataGateway
 
 
@@ -77,6 +79,18 @@ def test_gateway_is_workspace_only() -> None:
     gw = MetadataGateway(workspace_repo=_FakeWorkspaceRepo())  # type: ignore[arg-type]
     assert gw.configured_mode == "workspace"
     assert gw.effective_mode == "workspace"
+
+
+def test_gateway_preserves_legacy_configured_mode_while_using_workspace_behavior() -> None:
+    gw = MetadataGateway(mode="legacy", workspace_repo=_FakeWorkspaceRepo())  # type: ignore[arg-type]
+
+    assert gw.configured_mode == "legacy"
+    assert gw.effective_mode == "workspace"
+
+
+def test_gateway_rejects_unknown_metadata_mode() -> None:
+    with pytest.raises(ValueError, match="Unsupported metadata_mode"):
+        MetadataGateway(mode="future", workspace_repo=_FakeWorkspaceRepo())  # type: ignore[arg-type]
 
 
 def test_gateway_upsert_tables_returns_workspace_name_to_id() -> None:

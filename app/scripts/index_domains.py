@@ -12,12 +12,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build or refresh Qdrant domain vector index.")
     parser.add_argument("--workspace-id", dest="workspace_id", default=None, help="Optional workspace scope.")
     parser.add_argument(
-        "--vertical",
-        dest="vertical_norm",
-        default=None,
-        help="Optional vertical filter (education|healthcare|generic).",
-    )
-    parser.add_argument(
         "--json-fallback",
         dest="json_fallback_path",
         default=None,
@@ -35,7 +29,6 @@ def main() -> None:
     svc = DomainVectorIndexService()
     result = svc.reindex_domains(
         workspace_id=args.workspace_id,
-        vertical_norm=args.vertical_norm,
         force=bool(args.force),
         json_fallback_path=args.json_fallback_path,
     )

@@ -1,4 +1,7 @@
 """Unit tests for app.services.planner_domain.next_actions_service."""
+import pytest
+
+from app.exceptions.forge_error import ForgeError
 from app.services.planner_domain.next_actions_service import (
     NextActionsService,
     _normalize_next_actions,
@@ -121,3 +124,64 @@ def test_maybe_generate_returns_empty_when_disabled(monkeypatch):
     )
     assert actions == []
     assert trace["enabled"] is False
+
+
+def test_maybe_generate_tolerates_llm_provider_failures(monkeypatch):
+    import app.services.planner_domain.next_actions_service as svc_module
+
+    class _FailingLLM:
+        def chat_json_with_trace(self, **kwargs):
+            del kwargs
+            raise ForgeError("LLM provider unavailable", status_code=503)
+
+    monkeypatch.setattr(svc_module, "QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_ENABLED", True)
+    svc = NextActionsService(llm_client=_FailingLLM())
+    actions, trace = svc.maybe_generate(
+        plan_json={"intent": "list", "selects": {"dimensions": [{"column_key": "d1.school_name"}], "metrics": []}, "filters": []},
+        capabilities={
+            "dimensions": [{"column_key": "d1.school_name", "label": "School Name"}],
+            "filter_columns": [],
+            "time_columns": [],
+            "domain_metrics": [],
+            "user_metrics": [],
+            "overlay_metrics": [],
+            "domain_version": 1,
+        },
+        prompt="show schools",
+        selected_domain_id=1,
+        selected_domain_name="Test",
+    )
+
+    assert actions == []
+    assert trace["enabled"] is True
+    assert trace["used"] is False
+    assert "LLM provider unavailable" in trace["error"]
+
+
+def test_maybe_generate_surfaces_unexpected_llm_errors(monkeypatch):
+    import app.services.planner_domain.next_actions_service as svc_module
+
+    class _FailingLLM:
+        def chat_json_with_trace(self, **kwargs):
+            del kwargs
+            raise AssertionError("unexpected llm failure")
+
+    monkeypatch.setattr(svc_module, "QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_ENABLED", True)
+    svc = NextActionsService(llm_client=_FailingLLM())
+
+    with pytest.raises(AssertionError, match="unexpected llm failure"):
+        svc.maybe_generate(
+            plan_json={"intent": "list", "selects": {"dimensions": [{"column_key": "d1.school_name"}], "metrics": []}, "filters": []},
+            capabilities={
+                "dimensions": [{"column_key": "d1.school_name", "label": "School Name"}],
+                "filter_columns": [],
+                "time_columns": [],
+                "domain_metrics": [],
+                "user_metrics": [],
+                "overlay_metrics": [],
+                "domain_version": 1,
+            },
+            prompt="show schools",
+            selected_domain_id=1,
+            selected_domain_name="Test",
+        )

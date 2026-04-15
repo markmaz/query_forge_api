@@ -25,7 +25,6 @@ _SKIP_PATHS = {
     "/api/v1/dashboards",
     "/api/v1/models/samples/refresh",
     "/api/v1/workspace-inventory/sync",
-    "/api/v1/workspace-inventory/unmapped-tables",
 }
 
 _BASE_URL = os.environ.get("TEST_BASE_URL", "http://localhost:8080").rstrip("/")

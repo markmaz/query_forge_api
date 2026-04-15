@@ -26,7 +26,6 @@ def test_retrieve_candidates_node_sets_candidate_artifact_and_debug() -> None:
         trace_id="trace-1",
         workspace_id="ws-1",
         user_id="user-1",
-        vertical_norm="education",
         request={"prompt": "birth date"},
     )
 

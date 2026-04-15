@@ -5,11 +5,16 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
+
+LEGACY_THREAD_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+STALE_FILTER_FALLBACK_ERRORS = (ImportError, OSError, RuntimeError, TypeError, ValueError)
 
 
 class ForgeInsightsThreadsService:
@@ -78,25 +83,6 @@ class ForgeInsightsThreadsService:
             {"workspace_id": ws, "user_id": uid, "include_archived": 1 if include_archived else 0},
         )
         return [_normalize_project_row(r) for r in rows]
-
-    def get_project(self, *, workspace_id: str, user_id: str, project_id: int) -> Dict[str, Any]:
-        ws = _required_text(workspace_id, "workspace_id", max_len=64)
-        uid = _required_text(user_id, "user_id", max_len=255)
-        project_key = _required_int(project_id, "project_id")
-        rows = self._sql.execute_query_mappings(
-            """
-            SELECT id, workspace_id, user_id, name, description, is_archived, created_at, updated_at
-            FROM forge_insights_project
-            WHERE id = :project_id
-              AND workspace_id = :workspace_id
-              AND user_id = :user_id
-            LIMIT 1
-            """,
-            {"project_id": project_key, "workspace_id": ws, "user_id": uid},
-        )
-        if not rows:
-            raise ForgeError("ForgeInsights project not found", status_code=404)
-        return _normalize_project_row(rows[0])
 
     def update_project(
         self,
@@ -298,7 +284,7 @@ class ForgeInsightsThreadsService:
                 """,
                 params,
             )
-        except Exception:
+        except LEGACY_THREAD_FALLBACK_ERRORS:
             # Backward-compatible fallback for environments that have not run V024 yet.
             logger.warning(
                 "forge insights conversation table unavailable; falling back to legacy thread listing",
@@ -356,7 +342,7 @@ class ForgeInsightsThreadsService:
                             continue
                         filtered_rows.append(row)
                     rows = filtered_rows
-                except Exception:
+                except STALE_FILTER_FALLBACK_ERRORS:
                     logger.warning(
                         "forge insights stale-thread cache filter failed; returning legacy thread rows",
                         exc_info=True,
@@ -608,7 +594,7 @@ def _optional_text(value: Any, *, max_len: int) -> Optional[str]:
 def _required_int(value: Any, field_name: str) -> int:
     try:
         parsed = int(value)
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         raise ForgeError(f"{field_name} must be an integer", status_code=400) from exc
     if parsed <= 0:
         raise ForgeError(f"{field_name} must be > 0", status_code=400)

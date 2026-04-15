@@ -6,6 +6,8 @@ from uuid import uuid4
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
 
+TABLE_CHECK_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+
 
 class ValueOverrideMetaWriter:
     def __init__(self, mysql: ForgeQueryPort) -> None:
@@ -104,6 +106,6 @@ class ValueOverrideMetaWriter:
             return
         try:
             self._sql.execute_query_mappings("SELECT 1 FROM crosswalk_list_meta LIMIT 1")
-        except Exception as exc:  # narrow mysql errors without importing driver
+        except TABLE_CHECK_FALLBACK_ERRORS as exc:  # narrow mysql errors without importing driver
             raise ForgeError("crosswalk_list_meta missing; run migrations", status_code=500) from exc
         self._checked = True

@@ -40,5 +40,5 @@ def _safe_json(response: Response) -> dict[str, Any]:
         if isinstance(decoded, dict):
             return decoded
         return {"error": decoded}
-    except Exception:
+    except ValueError:
         return {"error": response.text or "Unknown API error"}

@@ -37,7 +37,7 @@ def test_vector_domain_search_route_success(client, monkeypatch):
     class _Svc:
         def search_domains(self, **kwargs):
             assert kwargs["workspace_id"] == "ws-1"
-            assert kwargs["vertical_norm"] == "education"
+            assert "vertical_norm" not in kwargs
             return {
                 "results": [
                     {
@@ -56,7 +56,6 @@ def test_vector_domain_search_route_success(client, monkeypatch):
         "/api/v1/vector/domains/search",
         json={
             "workspace_id": "ws-1",
-            "vertical_norm": "education",
             "query": "student enrollment",
             "limit": 5,
             "score_threshold": 0.2,
@@ -74,7 +73,6 @@ def test_vector_domain_search_route_workspace_mismatch(client, monkeypatch):
         "/api/v1/vector/domains/search",
         json={
             "workspace_id": "ws-2",
-            "vertical_norm": "education",
             "query": "student enrollment",
         },
         headers=_headers(monkeypatch),

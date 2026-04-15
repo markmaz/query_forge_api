@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
+import httpx
 import pytest
 
 from app.exceptions.forge_error import ForgeError
@@ -56,8 +59,7 @@ class _MemoryStore:
     def get_messages(self, *, workspace_id: str, user_id: str, conversation_id: str):
         return self.rows.get((workspace_id, user_id, conversation_id))
 
-    def save_messages(self, *, workspace_id: str, user_id: str, conversation_id: str, messages, qf_ttl_seconds: int):
-        del qf_ttl_seconds
+    def save_messages(self, *, workspace_id: str, user_id: str, conversation_id: str, messages):
         self.rows[(workspace_id, user_id, conversation_id)] = [dict(m) for m in messages]
 
 
@@ -78,9 +80,7 @@ class _ConversationStoreV2:
         user_id: str,
         conversation_id: str,
         conversation,
-        qf_ttl_seconds: int,
     ):
-        del qf_ttl_seconds
         self.rows[(workspace_id, user_id, conversation_id)] = dict(conversation)
 
     def list_conversations(self, *, workspace_id: str, user_id: str, limit: int):
@@ -160,6 +160,56 @@ def test_provider_error_maps_to_502(monkeypatch) -> None:
         "Client",
         lambda *args, **kwargs: _FakeClient(
             response=_FakeResponse(500, body={"error": "boom"}, text='{"error":"boom"}'),
+            **kwargs,
+        ),
+    )
+    svc = MinimalChatService(base_url="http://localhost:8000", model="qwen", timeout_seconds=10, conversation_store=_MemoryStore())
+
+    with pytest.raises(ForgeError) as exc:
+        svc.chat(_valid_body(), workspace_id="ws-1", user_id="user-1")
+    assert exc.value.status_code == 502
+
+
+def test_provider_http_error_maps_to_502(monkeypatch) -> None:
+    import app.services.chat.minimal_chat_service as mod
+
+    monkeypatch.setattr(
+        mod.httpx,
+        "Client",
+        lambda *args, **kwargs: _FakeClient(
+            exc=httpx.ConnectError("connection refused", request=httpx.Request("POST", "http://localhost:8000/v1/chat/completions")),
+            **kwargs,
+        ),
+    )
+    svc = MinimalChatService(base_url="http://localhost:8000", model="qwen", timeout_seconds=10, conversation_store=_MemoryStore())
+
+    with pytest.raises(ForgeError) as exc:
+        svc.chat(_valid_body(), workspace_id="ws-1", user_id="user-1")
+    assert exc.value.status_code == 502
+
+
+def test_provider_unexpected_client_error_surfaces(monkeypatch) -> None:
+    import app.services.chat.minimal_chat_service as mod
+
+    monkeypatch.setattr(
+        mod.httpx,
+        "Client",
+        lambda *args, **kwargs: _FakeClient(exc=AssertionError("unexpected provider failure"), **kwargs),
+    )
+    svc = MinimalChatService(base_url="http://localhost:8000", model="qwen", timeout_seconds=10, conversation_store=_MemoryStore())
+
+    with pytest.raises(AssertionError, match="unexpected provider failure"):
+        svc.chat(_valid_body(), workspace_id="ws-1", user_id="user-1")
+
+
+def test_provider_invalid_json_maps_to_502(monkeypatch) -> None:
+    import app.services.chat.minimal_chat_service as mod
+
+    monkeypatch.setattr(
+        mod.httpx,
+        "Client",
+        lambda *args, **kwargs: _FakeClient(
+            response=_FakeResponse(200, body=ValueError("bad json"), text="not-json"),
             **kwargs,
         ),
     )
@@ -378,3 +428,145 @@ def test_forge_insights_defaults_to_db_conversation_store(monkeypatch) -> None:
     monkeypatch.setattr(store_mod, "ForgeInsightsConversationStore", lambda: _Store())
     svc = ForgeInsightsChatService(base_url="http://localhost:8000", model="qwen", timeout_seconds=10)
     assert isinstance(svc._conversation_store, _Store)
+
+
+def test_list_conversations_tolerates_store_backend_failures() -> None:
+    class _FailingStore:
+        def list_conversations(self, **kwargs):
+            del kwargs
+            raise RuntimeError("store unavailable")
+
+    svc = ForgeInsightsChatService(
+        base_url="http://localhost:8000",
+        model="qwen",
+        timeout_seconds=10,
+        conversation_store=_FailingStore(),
+    )
+
+    out = svc.list_conversations(workspace_id="ws-1", user_id="u1")
+    assert out["items"] == []
+    assert out["count"] == 0
+
+
+def test_list_conversations_surfaces_unexpected_store_errors() -> None:
+    class _FailingStore:
+        def list_conversations(self, **kwargs):
+            del kwargs
+            raise AssertionError("unexpected list failure")
+
+    svc = ForgeInsightsChatService(
+        base_url="http://localhost:8000",
+        model="qwen",
+        timeout_seconds=10,
+        conversation_store=_FailingStore(),
+    )
+
+    with pytest.raises(AssertionError, match="unexpected list failure"):
+        svc.list_conversations(workspace_id="ws-1", user_id="u1")
+
+
+def test_reset_conversation_tolerates_store_backend_failures() -> None:
+    class _FailingStore:
+        def delete_conversation(self, **kwargs):
+            del kwargs
+            raise RuntimeError("store unavailable")
+
+    svc = ForgeInsightsChatService(
+        base_url="http://localhost:8000",
+        model="qwen",
+        timeout_seconds=10,
+        conversation_store=_FailingStore(),
+    )
+
+    with pytest.raises(ForgeError) as exc:
+        svc.reset_conversation(workspace_id="ws-1", user_id="u1", conversation_id="fi_123")
+    assert exc.value.status_code == 404
+
+
+def test_reset_conversation_surfaces_unexpected_store_errors() -> None:
+    class _FailingStore:
+        def delete_conversation(self, **kwargs):
+            del kwargs
+            raise AssertionError("unexpected delete failure")
+
+    svc = ForgeInsightsChatService(
+        base_url="http://localhost:8000",
+        model="qwen",
+        timeout_seconds=10,
+        conversation_store=_FailingStore(),
+    )
+
+    with pytest.raises(AssertionError, match="unexpected delete failure"):
+        svc.reset_conversation(workspace_id="ws-1", user_id="u1", conversation_id="fi_123")
+
+
+def test_hybrid_conversation_store_falls_back_to_memory_on_valkey_read_failure(monkeypatch) -> None:
+    import app.services.chat.minimal_chat_service as mod
+
+    class _FailingClient:
+        def get(self, key):
+            del key
+            raise mod.ValkeyError("valkey unavailable")
+
+    monkeypatch.setattr(mod, "_valkey_client", _FailingClient())
+    monkeypatch.setattr(mod, "_IN_MEMORY_CONV_STORE", {"chat:minimal:ws-1:u1:conv_1": '{"messages":[{"role":"user","content":"Hello"}]}'})
+
+    store = mod.HybridConversationStore(namespace="minimal")
+    out = store.get_conversation(workspace_id="ws-1", user_id="u1", conversation_id="conv_1")
+
+    assert out is not None
+    assert out["messages"] == [{"role": "user", "content": "Hello"}]
+
+
+def test_hybrid_conversation_store_drops_expired_memory_entries(monkeypatch) -> None:
+    import app.services.chat.minimal_chat_service as mod
+
+    monkeypatch.setattr(mod, "_valkey_client", None)
+    monkeypatch.setattr(
+        mod,
+        "_IN_MEMORY_CONV_STORE",
+        {
+            "chat:minimal:ws-1:u1:conv_1": {
+                "value": '{"messages":[{"role":"user","content":"Hello"}]}',
+                "stored_at": (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat().replace("+00:00", "Z"),
+                "expires_at": (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
+            }
+        },
+    )
+
+    store = mod.HybridConversationStore(namespace="minimal")
+    out = store.get_conversation(workspace_id="ws-1", user_id="u1", conversation_id="conv_1")
+
+    assert out is None
+    assert mod._IN_MEMORY_CONV_STORE == {}
+
+
+def test_hybrid_conversation_store_trims_oldest_memory_entries(monkeypatch) -> None:
+    import app.services.chat.minimal_chat_service as mod
+
+    monkeypatch.setattr(mod, "_valkey_client", None)
+    monkeypatch.setattr(mod, "_IN_MEMORY_CONV_STORE", {})
+    monkeypatch.setattr(mod, "_MAX_IN_MEMORY_CONVERSATIONS", 2)
+
+    mod._write_in_memory_value("chat:minimal:ws-1:u1:conv_1", '{"messages":[]}', ttl_seconds=600)
+    mod._write_in_memory_value("chat:minimal:ws-1:u1:conv_2", '{"messages":[]}', ttl_seconds=600)
+    mod._write_in_memory_value("chat:minimal:ws-1:u1:conv_3", '{"messages":[]}', ttl_seconds=600)
+
+    assert "chat:minimal:ws-1:u1:conv_1" not in mod._IN_MEMORY_CONV_STORE
+    assert "chat:minimal:ws-1:u1:conv_2" in mod._IN_MEMORY_CONV_STORE
+    assert "chat:minimal:ws-1:u1:conv_3" in mod._IN_MEMORY_CONV_STORE
+
+
+def test_hybrid_conversation_store_surfaces_unexpected_valkey_read_errors(monkeypatch) -> None:
+    import app.services.chat.minimal_chat_service as mod
+
+    class _FailingClient:
+        def get(self, key):
+            del key
+            raise AssertionError("unexpected valkey read failure")
+
+    monkeypatch.setattr(mod, "_valkey_client", _FailingClient())
+
+    store = mod.HybridConversationStore(namespace="minimal")
+    with pytest.raises(AssertionError, match="unexpected valkey read failure"):
+        store.get_conversation(workspace_id="ws-1", user_id="u1", conversation_id="conv_1")

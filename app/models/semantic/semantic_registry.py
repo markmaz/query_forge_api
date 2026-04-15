@@ -14,22 +14,16 @@ class SemanticBase(DeclarativeBase):
 
 
 class SemanticRegistry(SemanticBase):
-    """Global or vertical-scoped business concept metadata."""
+    """Business concept metadata."""
 
     __tablename__ = "semantic_registry"
     __table_args__ = (
-        UniqueConstraint("vertical_norm", "concept_key", name="uq_semantic_registry_vertical_concept"),
-        Index("idx_semantic_registry_vertical_type", "vertical_norm", "semantic_type"),
-        Index("idx_semantic_registry_vertical_entity", "vertical_norm", "entity"),
+        UniqueConstraint("concept_key", name="uq_semantic_registry_concept"),
+        Index("idx_semantic_registry_type", "semantic_type"),
+        Index("idx_semantic_registry_entity", "entity"),
     )
 
     id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
-    vertical: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    vertical_norm: Mapped[str] = mapped_column(
-        String(50),
-        Computed("IFNULL(vertical, '__global__')", persisted=True),
-        nullable=False,
-    )
     concept_key: Mapped[str] = mapped_column(String(150), nullable=False)
     semantic_type: Mapped[str] = mapped_column(String(50), nullable=False)
     sub_type: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)

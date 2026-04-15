@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
+TOKEN_REFRESH_ERRORS = (requests.RequestException, ValueError)
+
 
 class BaseForgeTokenManager:
     def __init__(self, name: str, token_url: str, client_id: str, client_secret: str, scope: str = "all-apis"):
@@ -35,7 +37,7 @@ class BaseForgeTokenManager:
                 logging.info(f"{self._token_manager_name} token refreshed.")
             else:
                 logging.error(f"Failed to refresh token: {response.text}")
-        except Exception as e:
+        except TOKEN_REFRESH_ERRORS as e:
             logging.error(f"Error refreshing token: {e}")
 
     def start_auto_refresh(self, interval=3000):

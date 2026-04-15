@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+from json import JSONDecodeError
 import logging
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Mapping, Optional
+
+from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
@@ -17,6 +21,10 @@ from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
 
+POLICY_LOOKUP_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+POLICY_JSON_PARSE_ERRORS = (TypeError, ValueError, JSONDecodeError)
+POLICY_RULE_VALIDATION_ERRORS = (ValidationError, ValueError, TypeError)
+
 
 class PlannerRerankPolicyService:
     def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
@@ -28,7 +36,6 @@ class PlannerRerankPolicyService:
         workspace_id: str,
         user_id: str,
         base_domain_id: Optional[int] = None,
-        vertical_norm: str = "generic",
         include_inactive: bool = False,
     ) -> Dict[str, Any]:
         domain_row = None
@@ -47,7 +54,6 @@ class PlannerRerankPolicyService:
               description,
               scope_type,
               scope_workspace_id,
-              scope_vertical_norm,
               scope_base_domain_id,
               priority,
               is_active,
@@ -58,17 +64,10 @@ class PlannerRerankPolicyService:
             FROM planner_rerank_policy
             WHERE (
               scope_type = 'global'
-              OR (scope_type = 'vertical' AND scope_vertical_norm = :vertical_norm)
               OR (scope_type = 'workspace' AND scope_workspace_id = :workspace_id)
               OR (
                 :base_domain_id IS NOT NULL
                 AND scope_type = 'global_domain'
-                AND scope_base_domain_id = :base_domain_id
-              )
-              OR (
-                :base_domain_id IS NOT NULL
-                AND scope_type = 'vertical_domain'
-                AND scope_vertical_norm = :vertical_norm
                 AND scope_base_domain_id = :base_domain_id
               )
               OR (
@@ -82,7 +81,6 @@ class PlannerRerankPolicyService:
             """,
             {
                 "workspace_id": str(workspace_id),
-                "vertical_norm": str(vertical_norm or "generic"),
                 "base_domain_id": int(base_domain_id) if base_domain_id is not None else None,
             },
         )
@@ -92,7 +90,7 @@ class PlannerRerankPolicyService:
             payload["scope_rank"] = _scope_rank(str(payload.get("scope_type") or ""))
             payload["is_inherited"] = bool(
                 base_domain_id is not None
-                and str(payload.get("scope_type") or "") not in {"workspace_domain", "vertical_domain", "global_domain"}
+                and str(payload.get("scope_type") or "") not in {"workspace", "workspace_domain"}
             )
             payload["policy_json"] = _parse_policy_rule(payload.get("policy_json")).model_dump()
             policies.append(payload)
@@ -105,7 +103,6 @@ class PlannerRerankPolicyService:
         )
         return {
             "workspace_id": str(workspace_id),
-            "vertical_norm": str(vertical_norm or "generic"),
             "base_domain_id": int(base_domain_id) if base_domain_id is not None else None,
             "domain_name": str((domain_row or {}).get("domain_name") or "").strip() or None,
             "can_edit": True,
@@ -116,7 +113,6 @@ class PlannerRerankPolicyService:
         self,
         *,
         workspace_id: str,
-        vertical_norm: str,
         base_domain_id: int,
     ) -> List[Dict[str, Any]]:
         try:
@@ -129,7 +125,6 @@ class PlannerRerankPolicyService:
                   description,
                   scope_type,
                   scope_workspace_id,
-                  scope_vertical_norm,
                   scope_base_domain_id,
                   priority,
                   is_active,
@@ -139,14 +134,8 @@ class PlannerRerankPolicyService:
                 WHERE is_active = 1
                   AND (
                     scope_type = 'global'
-                    OR (scope_type = 'vertical' AND scope_vertical_norm = :vertical_norm)
                     OR (scope_type = 'workspace' AND scope_workspace_id = :workspace_id)
                     OR (scope_type = 'global_domain' AND scope_base_domain_id = :base_domain_id)
-                    OR (
-                      scope_type = 'vertical_domain'
-                      AND scope_vertical_norm = :vertical_norm
-                      AND scope_base_domain_id = :base_domain_id
-                    )
                     OR (
                       scope_type = 'workspace_domain'
                       AND scope_workspace_id = :workspace_id
@@ -156,15 +145,13 @@ class PlannerRerankPolicyService:
                 """,
                 {
                     "workspace_id": str(workspace_id),
-                    "vertical_norm": str(vertical_norm or "generic"),
                     "base_domain_id": int(base_domain_id),
                 },
             )
-        except Exception as exc:  # pragma: no cover - defensive runtime fallback
+        except POLICY_LOOKUP_FALLBACK_ERRORS as exc:  # pragma: no cover - defensive runtime fallback
             logger.warning(
-                "planner rerank policy lookup failed workspace_id=%s vertical_norm=%s base_domain_id=%s err=%s",
+                "planner rerank policy lookup failed workspace_id=%s base_domain_id=%s err=%s",
                 workspace_id,
-                vertical_norm,
                 base_domain_id,
                 exc,
             )
@@ -208,7 +195,6 @@ class PlannerRerankPolicyService:
             "description": req.description,
             "scope_type": req.scope_type,
             "scope_workspace_id": req.scope_workspace_id or (workspace_id if req.scope_type.startswith("workspace") else None),
-            "scope_vertical_norm": req.scope_vertical_norm,
             "scope_base_domain_id": req.scope_base_domain_id,
             "priority": int(req.priority),
             "is_active": 1 if req.is_active else 0,
@@ -233,10 +219,6 @@ class PlannerRerankPolicyService:
                     OR scope_workspace_id = :scope_workspace_id
                   )
                   AND (
-                    (scope_vertical_norm IS NULL AND :scope_vertical_norm IS NULL)
-                    OR scope_vertical_norm = :scope_vertical_norm
-                  )
-                  AND (
                     (scope_base_domain_id IS NULL AND :scope_base_domain_id IS NULL)
                     OR scope_base_domain_id = :scope_base_domain_id
                   )
@@ -257,7 +239,6 @@ class PlannerRerankPolicyService:
                         description = :description,
                         scope_type = :scope_type,
                         scope_workspace_id = :scope_workspace_id,
-                        scope_vertical_norm = :scope_vertical_norm,
                         scope_base_domain_id = :scope_base_domain_id,
                         priority = :priority,
                         is_active = :is_active,
@@ -301,7 +282,6 @@ class PlannerRerankPolicyService:
                       description,
                       scope_type,
                       scope_workspace_id,
-                      scope_vertical_norm,
                       scope_base_domain_id,
                       priority,
                       is_active,
@@ -313,7 +293,6 @@ class PlannerRerankPolicyService:
                       :description,
                       :scope_type,
                       :scope_workspace_id,
-                      :scope_vertical_norm,
                       :scope_base_domain_id,
                       :priority,
                       :is_active,
@@ -367,7 +346,6 @@ class PlannerRerankPolicyService:
             "policy_key": req.policy_key,
             "scope_type": req.scope_type,
             "scope_workspace_id": params["scope_workspace_id"],
-            "scope_vertical_norm": params["scope_vertical_norm"],
             "scope_base_domain_id": params["scope_base_domain_id"],
             "priority": req.priority,
             "is_active": req.is_active,
@@ -438,7 +416,6 @@ class PlannerRerankPolicyService:
               description,
               scope_type,
               scope_workspace_id,
-              scope_vertical_norm,
               scope_base_domain_id,
               priority,
               is_active,
@@ -467,11 +444,11 @@ def _parse_policy_rule(value: Any) -> PlannerRerankPolicyRule:
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
-        except Exception as exc:  # pragma: no cover - defensive
+        except POLICY_JSON_PARSE_ERRORS as exc:  # pragma: no cover - defensive
             raise ForgeError(f"Invalid planner rerank policy JSON: {exc}", status_code=500)
     try:
         return PlannerRerankPolicyRule.model_validate(raw or {})
-    except Exception as exc:
+    except POLICY_RULE_VALIDATION_ERRORS as exc:
         raise ForgeError(f"Invalid planner rerank policy JSON: {exc}", status_code=500)
 
 
@@ -480,10 +457,8 @@ def _scope_rank(scope_type: str) -> int:
     if token not in PLANNER_RERANK_SCOPE_TYPES:
         return 0
     return {
-        "workspace_domain": 6,
-        "workspace": 5,
-        "vertical_domain": 4,
-        "vertical": 3,
+        "workspace_domain": 4,
+        "workspace": 3,
         "global_domain": 2,
         "global": 1,
     }[token]

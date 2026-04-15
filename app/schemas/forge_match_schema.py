@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 ReviewStatus = Literal["suggested", "accepted", "rejected", "needs_review", "manually_mapped"]
@@ -14,18 +14,9 @@ class ForgeMatchAnalyzeRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     top_n: int = Field(default=8, ge=3, le=20)
-    vertical_norm: Optional[str] = None
     domain_id: Optional[int] = Field(default=None, ge=1)
     force: bool = False
     llm_id: Optional[int] = Field(default=None, ge=1)
-
-    @field_validator("vertical_norm", mode="before")
-    @classmethod
-    def _normalize_vertical(cls, value: Any) -> Optional[str]:
-        if value is None:
-            return None
-        text = str(value).strip().lower()
-        return text or None
 
 
 class ForgeMatchPatchItem(BaseModel):

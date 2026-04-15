@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+import app.services.planner.compact_planner as compact_planner
 from app.exceptions.forge_error import ForgeError
 from app.services.planner.compact_planner import build_compact_plan_and_project
 from app.services.planner.semantic_candidate_models import (
@@ -66,7 +67,6 @@ def _semantic_candidates() -> SemanticCandidatePayload:
         prompt="Show total sales by account and territory in the NE this quarter",
         normalized_prompt="show total sales by account and territory in the ne this quarter",
         workspace_id="ws-1",
-        vertical_norm="generic",
         base_domain_id=3,
         base_domain_key="SALES_PERFORMANCE",
         domain=SemanticConceptCandidate(concept_key="SALES_PERFORMANCE", label="Sales Performance", score=0.99, semantic_type="domain"),
@@ -176,7 +176,6 @@ def test_compact_planner_returns_projected_plan_v2() -> None:
         prompt="Show total sales by account and territory in the NE this quarter",
         normalized_prompt="Show total sales by account and territory in the NE this quarter",
         workspace_id="ws-1",
-        vertical_norm="generic",
         base_domain_id=3,
         domain_name="Sales Performance",
         capabilities_compact=_capabilities(),
@@ -229,7 +228,6 @@ def test_compact_planner_uses_precomputed_candidates_without_retrieval() -> None
         prompt="Show total sales by account",
         normalized_prompt="Show total sales by account",
         workspace_id="ws-1",
-        vertical_norm="generic",
         base_domain_id=3,
         domain_name="Sales Performance",
         capabilities_compact=_capabilities(),
@@ -273,7 +271,6 @@ def test_compact_planner_truncation_retries_once() -> None:
         prompt="Show quota attainment by sales rep this quarter",
         normalized_prompt="Show quota attainment by sales rep this quarter",
         workspace_id="ws-1",
-        vertical_norm="generic",
         base_domain_id=3,
         domain_name="Sales Performance",
         capabilities_compact=_capabilities(),
@@ -321,7 +318,6 @@ def test_compact_planner_rejects_invented_metric_ids() -> None:
             prompt="Show fake metric",
             normalized_prompt="Show fake metric",
             workspace_id="ws-1",
-            vertical_norm="generic",
             base_domain_id=3,
             domain_name="Sales Performance",
             capabilities_compact=_capabilities(),
@@ -348,7 +344,6 @@ def test_compact_planner_raises_specific_truncation_error_when_both_attempts_tru
             prompt="Show quota attainment by sales rep this quarter",
             normalized_prompt="Show quota attainment by sales rep this quarter",
             workspace_id="ws-1",
-            vertical_norm="generic",
             base_domain_id=3,
             domain_name="Sales Performance",
             capabilities_compact=_capabilities(),
@@ -411,7 +406,6 @@ def test_compact_planner_coerces_relative_time_when_time_key_not_candidate() -> 
         prompt="Show total sales by account this quarter",
         normalized_prompt="Show total sales by account this quarter",
         workspace_id="ws-1",
-        vertical_norm="generic",
         base_domain_id=3,
         domain_name="Sales Performance",
         capabilities_compact=_capabilities(),
@@ -425,3 +419,26 @@ def test_compact_planner_coerces_relative_time_when_time_key_not_candidate() -> 
     assert out["compact_plan"]["time"]["time_range"] == "this_quarter"
     assert out["compact_plan"]["time"]["time_grain"] == "quarter"
     assert out["compact_plan"]["time"].get("time_concept_key") in {None, ""}
+
+
+def test_extract_provider_model_and_tokens_ignores_invalid_provider_json() -> None:
+    model, usage = compact_planner._extract_provider_model_and_tokens(
+        trace={"raw_text": "{not-json}"},
+        fallback_model="gpt-5",
+    )
+
+    assert model == "gpt-5"
+    assert usage == {}
+
+
+def test_extract_provider_model_and_tokens_surfaces_unexpected_parser_errors(monkeypatch) -> None:
+    def _broken_loads(_raw_text: str):
+        raise AssertionError("unexpected provider parse failure")
+
+    monkeypatch.setattr(compact_planner.json, "loads", _broken_loads)
+
+    with pytest.raises(AssertionError, match="unexpected provider parse failure"):
+        compact_planner._extract_provider_model_and_tokens(
+            trace={"raw_text": '{"model":"gpt-5"}'},
+            fallback_model="gpt-5",
+        )

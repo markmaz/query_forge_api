@@ -89,3 +89,20 @@ def test_missing_table_raises_service_error() -> None:
             user_name=None,
             is_shared=False,
         )
+
+
+def test_missing_table_surfaces_unexpected_check_errors() -> None:
+    fake = FakeForgeQueryPort()
+    fake.query_mappings_exceptions.append(AssertionError("unexpected table check bug"))
+    writer = ValueOverrideMetaWriter(fake)
+
+    with pytest.raises(AssertionError, match="unexpected table check bug"):
+        writer.upsert_meta(
+            workspace_id="ws1",
+            list_type="regions",
+            list_id="list-1",
+            list_name="My List",
+            user_id=None,
+            user_name=None,
+            is_shared=False,
+        )

@@ -11,7 +11,6 @@ def _context(prompt: str) -> PipelineContext:
         trace_id="trace-1",
         workspace_id="ws-1",
         user_id="user-1",
-        vertical_norm="generic",
         request={"prompt": prompt},
     )
 

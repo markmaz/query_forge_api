@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.tenancy.datasource_config_crypto import decrypt_datasource_config
@@ -34,7 +36,7 @@ class DatasourceCatalogService:
                 """,
                 {"include_inactive": 1 if include_inactive else 0},
             )
-        except Exception:
+        except SQLAlchemyError:
             return []
 
         out: List[Dict[str, Any]] = []
@@ -70,7 +72,7 @@ class DatasourceCatalogService:
                 """,
                 {"name": ds_name},
             )
-        except Exception:
+        except SQLAlchemyError:
             return None
         if not rows:
             return None
@@ -97,7 +99,7 @@ class DatasourceCatalogService:
                 WHERE COALESCE(is_active, 1) = 1
                 """
             )
-        except Exception:
+        except SQLAlchemyError:
             return {}
 
         out: Dict[str, Dict[str, Any]] = {}
@@ -137,6 +139,6 @@ class DatasourceCatalogService:
                 parsed = json.loads(text)
                 if isinstance(parsed, dict):
                     return parsed
-            except Exception:
+            except (TypeError, ValueError, json.JSONDecodeError):
                 return {}
         return {}

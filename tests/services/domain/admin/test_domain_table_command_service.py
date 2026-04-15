@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from app.exceptions.forge_error import ForgeError
 from app.services.domain.admin.domain_table_command_service import DomainTableCommandService
 from tests._support.fakes import FakeForgeQueryPort
 
@@ -52,3 +55,17 @@ def test_add_or_update_table_sets_primary_and_returns_row() -> None:
         set_primary_if_empty=True,
     )
     assert res["workspace_table_id"] == 10
+
+
+def test_normalize_ids_surfaces_unexpected_int_errors() -> None:
+    class _BadInt:
+        def __int__(self) -> int:
+            raise AssertionError("unexpected id parse bug")
+
+    with pytest.raises(AssertionError, match="unexpected id parse bug"):
+        DomainTableCommandService._normalize_ids([_BadInt()], "add")
+
+
+def test_normalize_ids_wraps_expected_int_errors() -> None:
+    with pytest.raises(ForgeError, match="'add' must contain integers"):
+        DomainTableCommandService._normalize_ids(["abc"], "add")

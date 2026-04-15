@@ -1,5 +1,6 @@
-from .data_environment_api import data_environment_ns
+from app.api_config import NAME, VERSION
+from app.routes.data_environment import data_environment_ns
 
-NAMESPACES = [
-    (data_environment_ns, "/{NAME}/{VERSION}/data-environment"),
-]
+
+def register(api):
+    api.add_namespace(data_environment_ns, path=f"/{NAME}/{VERSION}/data-environment")

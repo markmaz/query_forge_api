@@ -18,7 +18,6 @@ def register_planner_models(namespace: Namespace) -> dict[str, object]:
             "PlannerDomainRequest",
             {
                 "workspace_id": fields.String(required=False),
-                "vertical_norm": fields.String(required=False, default="generic"),
                 "prompt": fields.String(required=True),
                 "conversation_id": fields.String(required=False),
                 "context_seed_plan_json_v2": fields.Raw(required=False),
@@ -39,7 +38,6 @@ def register_planner_models(namespace: Namespace) -> dict[str, object]:
                 "workspace_id": fields.String(required=False),
                 "prompt": fields.String(required=True),
                 "plan_json_v2": fields.Raw(required=True),
-                "vertical_norm": fields.String(required=False, default="generic"),
                 "base_domain_id": fields.Integer(required=False),
                 "conversation_id": fields.String(required=False),
                 "trace_id": fields.String(required=False),
@@ -52,7 +50,6 @@ def register_planner_models(namespace: Namespace) -> dict[str, object]:
             {
                 "workspace_id": fields.String(required=False),
                 "prompt": fields.String(required=True),
-                "vertical": fields.String(required=False, default="generic"),
                 "constraints": fields.Raw(required=False),
                 "debug": fields.Boolean(required=False, default=False),
                 "llm_id": fields.Integer(required=False, description="Optional workspace LLM id override"),

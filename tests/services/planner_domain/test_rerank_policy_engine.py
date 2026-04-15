@@ -15,8 +15,8 @@ class _FakePolicyService:
     def __init__(self, rows):
         self._rows = list(rows)
 
-    def get_applicable_policies(self, *, workspace_id: str, vertical_norm: str, base_domain_id: int):
-        del workspace_id, vertical_norm, base_domain_id
+    def get_applicable_policies(self, *, workspace_id: str, base_domain_id: int):
+        del workspace_id, base_domain_id
         return list(self._rows)
 
 
@@ -45,6 +45,25 @@ def test_prompt_signal_service_extracts_days_off_and_lowercase_school_literal() 
     assert "time_constraint_present" in signals
 
 
+def test_prompt_signal_service_extracts_explicit_school_key_request() -> None:
+    svc = PromptSignalService()
+    signals = svc.extract_signals(prompt="Show me the school ids for Barksdale Elementary")
+    assert "explicit_school_key_request" in signals
+
+
+def test_prompt_signal_service_extracts_explicit_staff_classification_request() -> None:
+    svc = PromptSignalService()
+    signals = svc.extract_signals(prompt="Show me the staff classification at Lincoln High")
+    assert "explicit_staff_classification_request" in signals
+
+
+def test_prompt_signal_service_extracts_school_listing() -> None:
+    svc = PromptSignalService()
+    signals = svc.extract_signals(prompt="Show me all the schools in Clarksville, TN")
+    assert "school_listing" in signals
+    assert "listing_intent" in signals
+
+
 def test_prompt_signal_service_extracts_age_extreme_signal() -> None:
     svc = PromptSignalService()
     signals = svc.extract_signals(prompt="Show me the eldest student")
@@ -69,20 +88,20 @@ def test_prompt_signal_service_extracts_birth_month_signal_for_plural_birthdays(
     assert "student_listing" in signals
 
 
-def test_capability_service_prefers_explicit_workspace_scope_over_vertical_scope() -> None:
+def test_capability_service_prefers_explicit_workspace_scope_over_global_scope() -> None:
     class _SQL:
         def execute_query_mappings(self, query, params=None):
             del query, params
             return [
                 {
-                    "scope_type": "vertical",
+                    "scope_type": "global",
                     "scope_workspace_id": None,
-                    "scope_vertical_norm": "education",
+                    "scope_vertical_norm": None,
                     "base_domain_id": 9,
                     "capability_key": "SCHOOL_NAME",
                     "support_level": "partial",
                     "source_type": "semantic_concept",
-                    "source_ref": "vertical-row",
+                    "source_ref": "global-row",
                     "confidence": 0.6,
                 },
                 {
@@ -101,7 +120,6 @@ def test_capability_service_prefers_explicit_workspace_scope_over_vertical_scope
     svc = PlannerDomainCapabilityService(sql=_SQL())
     out = svc.resolve_capabilities(
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=9,
         capabilities={"dimensions": [], "time_columns": [], "filter_columns": [], "domain_metrics": []},
         shortlisted_columns=[],
@@ -115,7 +133,6 @@ def test_capability_service_infers_calendar_capabilities() -> None:
     svc = PlannerDomainCapabilityService(sql=_EmptySQL())
     out = svc.resolve_capabilities(
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=6,
         capabilities={
             "dimensions": [
@@ -140,7 +157,6 @@ def test_capability_service_infers_birth_date_and_age_capabilities() -> None:
     svc = PlannerDomainCapabilityService(sql=_EmptySQL())
     out = svc.resolve_capabilities(
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=21,
         capabilities={
             "dimensions": [
@@ -201,7 +217,6 @@ def test_rerank_policy_engine_boosts_supported_domain_and_penalizes_missing_capa
     strong = engine.evaluate_candidate(
         prompt="Show me all the students enrolled at Barksdale Elementary",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=9,
         base_score=0.94,
         capabilities={
@@ -219,7 +234,6 @@ def test_rerank_policy_engine_boosts_supported_domain_and_penalizes_missing_capa
     weak = engine.evaluate_candidate(
         prompt="Show me all the students enrolled at Barksdale Elementary",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=15,
         base_score=1.02,
         capabilities={
@@ -268,7 +282,6 @@ def test_rerank_policy_engine_prefers_birth_date_domain_for_age_extreme_prompt()
     strong = engine.evaluate_candidate(
         prompt="Show me the eldest student",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=21,
         base_score=0.93,
         capabilities={
@@ -285,7 +298,6 @@ def test_rerank_policy_engine_prefers_birth_date_domain_for_age_extreme_prompt()
     weak = engine.evaluate_candidate(
         prompt="Show me the eldest student",
         workspace_id="ws-1",
-        vertical_norm="education",
         base_domain_id=15,
         base_score=1.01,
         capabilities={

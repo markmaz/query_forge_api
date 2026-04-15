@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from flask import g, has_request_context
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.adapters.databricks_workspace_token_provider import (
     DatabricksWorkspaceTokenProvider,
@@ -22,6 +23,9 @@ from app.services.tenancy.datasource_resolver_service import (
 from app.services.tenancy.secret_resolver import SecretResolver
 from app.services.workspace_access_service import WorkspaceAccessService
 from app.services.workspace_service import WorkspaceService
+
+LEGACY_CONTEXT_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+DATASOURCE_RESOLUTION_WRAP_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
 
 
 class _StaticTokenProvider:
@@ -71,7 +75,7 @@ class WorkspaceSqlContextBuilder:
 
         try:
             resolved = self._resolve_workspace_datasource(workspace_id)
-        except Exception:
+        except LEGACY_CONTEXT_FALLBACK_ERRORS:
             return self._build_legacy_context(workspace_id=workspace_id, user_name=user_name)
         return self._build_from_datasource(workspace_id=workspace_id, resolved=resolved, user_name=user_name)
 
@@ -83,7 +87,7 @@ class WorkspaceSqlContextBuilder:
             )
         except ForgeError:
             raise
-        except Exception as exc:
+        except DATASOURCE_RESOLUTION_WRAP_ERRORS as exc:
             raise ForgeError(
                 f"Failed to resolve datasource for workspace '{workspace_id}'",
                 status_code=500,

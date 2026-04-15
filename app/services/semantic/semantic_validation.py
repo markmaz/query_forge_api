@@ -9,6 +9,7 @@ from app.services.semantic.semantic_llm_schema import SemanticType, normalize_co
 _UPPER_SNAKE_RE = re.compile(r"^[A-Z0-9]+(?:_[A-Z0-9]+)*$")
 _NUMERIC_SAMPLE_RE = re.compile(r"^-?\d+(\.\d+)?$")
 _NUMERIC_TYPES = {"int", "integer", "bigint", "float", "double", "decimal", "numeric", "smallint", "tinyint"}
+FLOAT_PARSE_ERRORS = (TypeError, ValueError)
 
 
 def validate_semantic_suggestion(
@@ -29,7 +30,7 @@ def validate_semantic_suggestion(
     confidence_raw = data.get("confidence", 0.0)
     try:
         confidence = float(confidence_raw)
-    except Exception:
+    except FLOAT_PARSE_ERRORS:
         confidence = 0.0
         errors.append("invalid_confidence")
     if confidence < 0.0 or confidence > 1.0:

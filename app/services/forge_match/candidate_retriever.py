@@ -22,6 +22,7 @@ from app.services.shared_ai.context import PipelineContext
 from app.services.shared_ai.executor import PipelineExecutor
 
 logger = logging.getLogger(__name__)
+VECTOR_RETRIEVAL_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, TypeError, ValueError)
 
 
 def _is_vector_enabled() -> bool:
@@ -99,7 +100,6 @@ class ForgeMatchCandidateRetriever:
         workspace_id: str,
         source_record: SourceFieldRecord,
         top_n: int = 8,
-        vertical_norm: Optional[str] = None,
         domain_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         ws = str(workspace_id or "").strip()
@@ -112,7 +112,6 @@ class ForgeMatchCandidateRetriever:
             trace_id=f"forge_match_{uuid.uuid4().hex}",
             workspace_id=ws,
             user_id=None,
-            vertical_norm=str(vertical_norm or "generic"),
             request={
                 "prompt": str(source_record.normalized_search_text or source_record.source_field_name or "").strip(),
                 "source_record": source_record,
@@ -395,7 +394,7 @@ class ForgeMatchCandidateRetriever:
                 domain_id=int(domain_id) if domain_id is not None else None,
                 limit=limit,
             )
-        except Exception as exc:
+        except VECTOR_RETRIEVAL_FALLBACK_ERRORS as exc:
             logger.warning("ForgeMatch vector retrieval failed: %s", exc)
             return {}
 
@@ -574,7 +573,7 @@ def _to_int_or_none(value: Any) -> Optional[int]:
         return None
     try:
         parsed = int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
 
@@ -604,7 +603,6 @@ class ForgeMatchColumnRetrievalAdapter:
                     context.request.get("preferred_domain_id") or context.request.get("domain_id")
                 ),
                 "search_scope": "workspace_global",
-                "vertical_norm": str(context.vertical_norm or "generic"),
             },
         )
 

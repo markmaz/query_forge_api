@@ -5,9 +5,19 @@ import logging
 from celery import shared_task
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.exceptions.forge_error import ForgeError
 from app.services.forge_match.mapping_service import ForgeMatchMappingService
 
 logger = logging.getLogger(__name__)
+
+FORGE_MATCH_TASK_FAILURE_ERRORS = (
+    ForgeError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+)
 
 
 @shared_task(bind=True, name="qf.forge_match.analyze_session")
@@ -19,7 +29,6 @@ def analyze_forge_match_session_task(
     session_id: str,
     top_n: int = 8,
     domain_id: int | None = None,
-    vertical_norm: str | None = None,
     force: bool = False,
     llm_id: int | None = None,
 ) -> dict:
@@ -32,7 +41,6 @@ def analyze_forge_match_session_task(
             session_id=session_id,
             top_n=top_n,
             domain_id=domain_id,
-            vertical_norm=vertical_norm,
             force=force,
             job_id=job_id,
             llm_id=llm_id,
@@ -44,7 +52,7 @@ def analyze_forge_match_session_task(
             "analyzed_count": int(result.get("analyzed_count") or 0),
             "failed_count": int(result.get("failed_count") or 0),
         }
-    except Exception:
+    except FORGE_MATCH_TASK_FAILURE_ERRORS:
         logger.exception("ForgeMatch analyze task failed job_id=%s session_id=%s", job_id, session_id)
         raise
 

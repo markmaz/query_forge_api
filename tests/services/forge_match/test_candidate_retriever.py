@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.services.forge_match.candidate_retriever import ForgeMatchCandidateRetriever, _vector_query_text
 from app.services.forge_match.field_extractor import SourceFieldRecord
 
@@ -74,7 +76,6 @@ def test_retrieve_applies_shared_pipeline_rerank() -> None:
         workspace_id="ws-1",
         source_record=source,
         top_n=5,
-        vertical_norm="education",
     )
 
     assert rows[0]["column_id"] == 202
@@ -140,7 +141,6 @@ def test_retrieve_preferred_domain_is_soft_bias_not_hard_filter() -> None:
         workspace_id="ws-1",
         source_record=source,
         top_n=5,
-        vertical_norm="education",
         domain_id=15,
     )
 
@@ -205,14 +205,12 @@ def test_retrieve_preferred_domain_does_not_change_scores() -> None:
         workspace_id="ws-1",
         source_record=source,
         top_n=5,
-        vertical_norm="education",
         domain_id=15,
     )
     rows_without_domain = retriever.retrieve(
         workspace_id="ws-1",
         source_record=source,
         top_n=5,
-        vertical_norm="education",
     )
 
     assert rows[0]["column_id"] == rows_without_domain[0]["column_id"]
@@ -272,7 +270,6 @@ def test_retrieve_hydrates_vector_only_candidates_even_when_lexical_rows_exist()
         workspace_id="ws-1",
         source_record=source,
         top_n=5,
-        vertical_norm="education",
     )
 
     assert rows[0]["column_id"] == 402
@@ -298,3 +295,52 @@ def test_vector_query_text_expands_birth_date_aliases() -> None:
 
     assert "Aliases: birth date, date of birth, birthdate, dob" in query_text
     assert "Object: StudentDemographics" in query_text
+
+
+def test_load_vector_scores_falls_back_on_expected_runtime_errors() -> None:
+    class _Vector:
+        def search(self, **kwargs):
+            del kwargs
+            raise RuntimeError("vector unavailable")
+
+    retriever = ForgeMatchCandidateRetriever(vector_search=_Vector())
+    source = SourceFieldRecord(
+        row_id="Sheet1:4",
+        sheet_name="Sheet1",
+        row_number=4,
+        source_field_name="BirthDate",
+        source_description="Student birthday value",
+        source_type="date",
+        source_object_name="StudentDemographics",
+        sample_value=None,
+        category=None,
+        normalized_search_text="BirthDate. Student birthday value",
+        raw_row={},
+    )
+
+    assert retriever._load_vector_scores(workspace_id="ws-1", source_record=source, domain_id=None, limit=10) == {}
+
+
+def test_load_vector_scores_surfaces_unexpected_errors() -> None:
+    class _Vector:
+        def search(self, **kwargs):
+            del kwargs
+            raise AssertionError("unexpected vector bug")
+
+    retriever = ForgeMatchCandidateRetriever(vector_search=_Vector())
+    source = SourceFieldRecord(
+        row_id="Sheet1:4",
+        sheet_name="Sheet1",
+        row_number=4,
+        source_field_name="BirthDate",
+        source_description="Student birthday value",
+        source_type="date",
+        source_object_name="StudentDemographics",
+        sample_value=None,
+        category=None,
+        normalized_search_text="BirthDate. Student birthday value",
+        raw_row={},
+    )
+
+    with pytest.raises(AssertionError, match="unexpected vector bug"):
+        retriever._load_vector_scores(workspace_id="ws-1", source_record=source, domain_id=None, limit=10)

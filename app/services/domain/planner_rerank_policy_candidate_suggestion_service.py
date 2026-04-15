@@ -4,6 +4,8 @@ import json
 import re
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
+from pydantic import ValidationError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config.llm_resolver import ResolvedLLMRuntime, build_llm_client_for_role
 from app.constants.llm_roles import LLMRole
@@ -23,6 +25,8 @@ from app.services.llm.llm_client import LLMClient
 from app.services.planner_domain.prompt_signal_service import PromptSignalService
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+LLM_SUGGESTION_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+LLM_SUGGESTION_VALIDATION_ERRORS = (ValidationError, TypeError, ValueError)
 
 
 class PlannerRerankPolicyCandidateSuggestionService:
@@ -53,14 +57,12 @@ class PlannerRerankPolicyCandidateSuggestionService:
         payload: Any,
     ) -> Dict[str, Any]:
         req = PlannerRerankPolicyCandidateSuggestRequest.model_validate(payload)
-        vertical_norm = str(req.vertical_norm or "generic").strip().lower() or "generic"
         prompt_signals = self._signals.extract_signals(prompt=req.prompt)
 
         expected_domain = self._build_domain_snapshot(
             workspace_id=workspace_id,
             user_id=user_id,
             domain_id=int(req.expected_base_domain_id),
-            vertical_norm=vertical_norm,
         )
         observed_domain = None
         if req.observed_base_domain_id is not None:
@@ -68,7 +70,6 @@ class PlannerRerankPolicyCandidateSuggestionService:
                 workspace_id=workspace_id,
                 user_id=user_id,
                 domain_id=int(req.observed_base_domain_id),
-                vertical_norm=vertical_norm,
             )
 
         llm_client, llm_resolution = self._resolve_llm(
@@ -83,7 +84,6 @@ class PlannerRerankPolicyCandidateSuggestionService:
                     user_prompt=_user_prompt(
                         prompt=req.prompt,
                         prompt_signals=prompt_signals,
-                        vertical_norm=vertical_norm,
                         expected_domain=expected_domain,
                         observed_domain=observed_domain,
                         notes=req.notes,
@@ -102,7 +102,7 @@ class PlannerRerankPolicyCandidateSuggestionService:
                 observed_domain=observed_domain,
             )
             suggestion_source_type = "trace_review"
-        except Exception as exc:
+        except LLM_SUGGESTION_FALLBACK_ERRORS as exc:
             del exc
             suggestion = _build_fallback_suggestion(
                 prompt=req.prompt,
@@ -147,7 +147,6 @@ class PlannerRerankPolicyCandidateSuggestionService:
                 "candidate_key": candidate_key,
                 "source_type": suggestion_source_type,
                 "workspace_id": workspace_id,
-                "vertical_norm": vertical_norm,
                 "candidate_policy": suggestion.candidate_policy.model_dump(),
                 "rationale_json": rationale,
                 "confidence": suggestion.confidence,
@@ -168,19 +167,16 @@ class PlannerRerankPolicyCandidateSuggestionService:
         workspace_id: str,
         user_id: str,
         domain_id: int,
-        vertical_norm: str,
     ) -> Dict[str, Any]:
         domain_name = self._load_domain_name(workspace_id=workspace_id, domain_id=domain_id)
         capabilities = self._domain_capabilities.get_domain_capabilities(
             workspace_id=workspace_id,
             user_id=user_id,
             domain_id=domain_id,
-            vertical_norm=vertical_norm,
         )
         dimensions = list(capabilities.get("dimensions") or [])
         resolved = self._planner_capabilities.resolve_capabilities(
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             base_domain_id=domain_id,
             capabilities=capabilities,
             shortlisted_columns=dimensions,
@@ -257,7 +253,7 @@ class PlannerRerankPolicyCandidateSuggestionService:
 def _is_valid_llm_payload(payload: Dict[str, Any]) -> bool:
     try:
         PlannerRerankPolicyCandidateSuggestionLLMResponse.model_validate(payload)
-    except Exception:
+    except LLM_SUGGESTION_VALIDATION_ERRORS:
         return False
     return True
 
@@ -284,14 +280,12 @@ def _user_prompt(
     *,
     prompt: str,
     prompt_signals: List[str],
-    vertical_norm: str,
     expected_domain: Mapping[str, Any],
     observed_domain: Optional[Mapping[str, Any]],
     notes: Optional[str],
 ) -> str:
     context = {
         "task": "Suggest one pending planner rerank policy candidate.",
-        "vertical_norm": vertical_norm,
         "prompt": prompt,
         "prompt_signals": prompt_signals,
         "known_signals": sorted(PLANNER_RERANK_SIGNAL_KEYS),

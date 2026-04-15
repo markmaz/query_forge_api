@@ -12,7 +12,7 @@ from app.decorators.rbac import require_access, public
 from app.exceptions.forge_error import ForgeError
 from app.models.query.ai_suggest import SuggestAPIResponse, SuggestRequest
 from app.services.embedding.embedding_search_service import EmbeddingSearchService
-from app.services.ai_suggest_service import AISuggestService, InvalidModelResponseError
+from app.services.ai_suggest import AISuggestService, InvalidModelResponseError
 from app.services.semantic.plan_service import PlanService
 
 from .service import ai_feature_service
@@ -130,13 +130,11 @@ def _inject_mode_placeholders(sqljson: dict, *, mode: str) -> dict:
 def _plan_response_as_suggest(
     *,
     suggest_request: SuggestRequest,
-    vertical_norm: str,
     debug: bool,
 ) -> SuggestAPIResponse:
     semantic_result = PlanService().plan(
         {
             "workspace_id": suggest_request.workspaceId,
-            "vertical_norm": vertical_norm,
             "prompt": suggest_request.prompt,
             "domain_id": _selected_domain_id(suggest_request),
             "debug": debug,
@@ -325,7 +323,7 @@ class AISuggest(Resource):
         body["workspaceId"] = workspace_id
 
         try:
-            vertical_norm = _resolve_vertical_norm(body)
+            _resolve_vertical_norm(body)
             debug = bool(body.pop("debug", False))
             suggest_request = SuggestRequest.model_validate(body)
         except ValidationError as exc:
@@ -335,7 +333,6 @@ class AISuggest(Resource):
         try:
             result = _plan_response_as_suggest(
                 suggest_request=suggest_request,
-                vertical_norm=vertical_norm,
                 debug=debug,
             )
             return result.model_dump(mode="json"), 200, DEPRECATION_HEADERS
@@ -515,7 +512,8 @@ class AISuggestSemanticAdapter(Resource):
         if not isinstance(body, dict):
             body = {}
 
-        vertical_norm = _resolve_vertical_norm(body)
+        if "vertical_norm" in body or "verticalNorm" in body:
+            return {"error": "vertical_norm is no longer supported"}, 400, DEPRECATION_HEADERS
         debug = bool(body.pop("debug", False))
         body["workspaceId"] = workspace_id
 
@@ -527,7 +525,6 @@ class AISuggestSemanticAdapter(Resource):
         try:
             payload = _plan_response_as_suggest(
                 suggest_request=suggest_request,
-                vertical_norm=vertical_norm,
                 debug=debug,
             )
             return payload.model_dump(mode="json"), 200, DEPRECATION_HEADERS

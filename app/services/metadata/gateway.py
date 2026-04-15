@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence
 
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.metadata.mode import effective_metadata_mode, normalize_metadata_mode
 from app.services.metadata.types import MetadataColumnRecord, MetadataTableRecord
 from app.services.metadata.workspace_repository import WorkspaceMetadataRepository
 
@@ -18,16 +19,18 @@ class MetadataGateway:
         workspace_repo: Optional[WorkspaceMetadataRepository] = None,
         legacy_repo: Optional[object] = None,
     ) -> None:
-        del mode, legacy_repo
+        del legacy_repo
+        self._configured_mode = normalize_metadata_mode(mode)
+        self._effective_mode = effective_metadata_mode(mode)
         self._workspace = workspace_repo or WorkspaceMetadataRepository(sql=sql)
 
     @property
     def configured_mode(self) -> str:
-        return "workspace"
+        return self._configured_mode
 
     @property
     def effective_mode(self) -> str:
-        return "workspace"
+        return self._effective_mode
 
     def get_table_by_name(self, *, table_name: str) -> Optional[MetadataTableRecord]:
         return self._workspace.get_table_by_name(table_name=table_name)
@@ -63,13 +66,11 @@ class MetadataGateway:
     def upsert_columns(
         self,
         *,
-        table_id_by_name: Mapping[str, int],
         columns: Sequence[Mapping[str, Any]],
         origin: str,
         overwrite_descriptions: bool = False,
     ) -> Dict[str, Any]:
         return self._workspace.upsert_columns(
-            table_id_by_name=table_id_by_name,
             columns=columns,
             origin=origin,
             overwrite_descriptions=overwrite_descriptions,

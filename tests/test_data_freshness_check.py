@@ -8,7 +8,7 @@ Run with: pytest tests/test_data_freshness_check.py -v
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -374,3 +374,83 @@ def test_execute_all_mode_no_alert_on_partial_failure(skill, metadata, sample_ro
 def test_parse_dt(skill, value, expected_none):
     result = skill._parse_dt(value)
     assert (result is None) == expected_none
+
+
+def test_load_snapshot_returns_none_on_expected_db_error(skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {"checks": [], "channels": []})
+
+    class _Query:
+        def filter_by(self, **kwargs):
+            del kwargs
+            raise RuntimeError("db unavailable")
+
+    with patch("app.models.query.skills.QuerySkill.query", _Query()):
+        assert skill._load_snapshot(ctx) is None
+
+
+def test_load_snapshot_surfaces_unexpected_db_error(skill, metadata, sample_rows):
+    ctx = make_context(metadata, sample_rows, {"checks": [], "channels": []})
+
+    class _Query:
+        def filter_by(self, **kwargs):
+            del kwargs
+            raise AssertionError("snapshot bug")
+
+    with patch("app.models.query.skills.QuerySkill.query", _Query()):
+        with pytest.raises(AssertionError, match="snapshot bug"):
+            skill._load_snapshot(ctx)
+
+
+def test_deliver_returns_failed_result_on_expected_channel_error(skill, now):
+    payload = skill._build_payload(
+        make_context(
+            QueryMetadata(
+                query_id=20,
+                query_name="Orders Pipeline",
+                column_names=["order_id"],
+                column_types={"order_id": "int"},
+                row_count=0,
+                execution_time_ms=5,
+                executed_at=now,
+            ),
+            [],
+            {"checks": [], "channels": [], "severity": "warning"},
+        ),
+        {"severity": "warning"},
+        [{"type": "no_rows", "message": "Query returned no rows."}],
+        now,
+    )
+    fake_channel = MagicMock()
+    fake_channel.send.side_effect = RuntimeError("slack unavailable")
+
+    with patch("app.skills.data_freshness_check.get_channel", return_value=fake_channel):
+        result = skill._deliver(payload, [{"type": "slack", "webhook_url": "https://hooks.slack.com/x"}])
+
+    assert result == [{"channel": "slack", "success": False, "message": "slack unavailable"}]
+
+
+def test_deliver_surfaces_unexpected_channel_error(skill, now):
+    payload = skill._build_payload(
+        make_context(
+            QueryMetadata(
+                query_id=20,
+                query_name="Orders Pipeline",
+                column_names=["order_id"],
+                column_types={"order_id": "int"},
+                row_count=0,
+                execution_time_ms=5,
+                executed_at=now,
+            ),
+            [],
+            {"checks": [], "channels": [], "severity": "warning"},
+        ),
+        {"severity": "warning"},
+        [{"type": "no_rows", "message": "Query returned no rows."}],
+        now,
+    )
+    fake_channel = MagicMock()
+    fake_channel.send.side_effect = AssertionError("delivery bug")
+
+    with patch("app.skills.data_freshness_check.get_channel", return_value=fake_channel):
+        with pytest.raises(AssertionError, match="delivery bug"):
+            skill._deliver(payload, [{"type": "slack", "webhook_url": "https://hooks.slack.com/x"}])

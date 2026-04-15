@@ -81,7 +81,6 @@ def test_relationship_concept_lookup_route(client, monkeypatch):
                 "rows": [
                     {
                         "id": 1,
-                        "vertical_norm": "generic",
                         "concept_key": "TOTAL_NET_AMOUNT",
                         "concept_name": "Total Net Amount",
                         "display_label": "Total Net Amount (TOTAL_NET_AMOUNT)",

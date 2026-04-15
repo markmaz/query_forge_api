@@ -7,6 +7,7 @@ import pytest
 
 from app.adapters.query_port import ForgeExecResult
 from app.exceptions.forge_error import ForgeError
+import app.services.domain.planner_domain_capability_service as planner_domain_capability_service
 from app.services.domain.planner_domain_capability_service import PlannerDomainCapabilityService
 
 
@@ -78,14 +79,14 @@ def test_list_capabilities_returns_scope_sorted_rows() -> None:
             [
                 {
                     "id": 1,
-                    "scope_type": "vertical",
+                    "scope_type": "global",
                     "scope_workspace_id": None,
-                    "scope_vertical_norm": "education",
+                    "scope_vertical_norm": None,
                     "base_domain_id": 9,
                     "capability_key": "SCHOOL_NAME",
                     "support_level": "direct",
                     "source_type": "semantic_concept",
-                    "source_ref": "vertical-row",
+                    "source_ref": "global-row",
                     "confidence": 0.6,
                     "notes": None,
                     "is_active": 1,
@@ -112,7 +113,6 @@ def test_list_capabilities_returns_scope_sorted_rows() -> None:
         workspace_id="ws-1",
         user_id="user-1",
         base_domain_id=9,
-        vertical_norm="education",
         include_inactive=False,
     )
 
@@ -149,7 +149,6 @@ def test_list_capabilities_normalizes_decimal_confidence() -> None:
         workspace_id="ws-1",
         user_id="user-1",
         base_domain_id=9,
-        vertical_norm="generic",
         include_inactive=False,
     )
 
@@ -228,3 +227,188 @@ def test_upsert_capability_insert_falls_back_to_select_when_lastrowid_missing() 
     )
 
     assert out["capability_id"] == 27
+
+
+def test_list_capabilities_ignores_expected_record_validation_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    sql = _FakeSQL(
+        rows_by_call=[
+            [_domain_row(domain_id=9)],
+            [
+                {
+                    "id": 1,
+                    "scope_type": "workspace_domain",
+                    "scope_workspace_id": "ws-1",
+                    "scope_vertical_norm": None,
+                    "base_domain_id": 9,
+                    "capability_key": "SCHOOL_NAME",
+                    "support_level": "direct",
+                    "source_type": "semantic_concept",
+                    "source_ref": "school_name",
+                    "confidence": 0.9,
+                    "notes": None,
+                    "is_active": 1,
+                }
+            ],
+        ]
+    )
+    svc = PlannerDomainCapabilityService(sql=sql)
+    monkeypatch.setattr(
+        planner_domain_capability_service,
+        "PlannerDomainCapabilityRecord",
+        type(
+            "_BrokenRecord",
+            (),
+            {"__init__": lambda self, **kwargs: (_ for _ in ()).throw(ValueError("bad persisted row"))},
+        ),
+    )
+
+    out = svc.list_capabilities(
+        workspace_id="ws-1",
+        user_id="user-1",
+        base_domain_id=9,
+        include_inactive=False,
+    )
+
+    assert out["capabilities"][0]["capability_key"] == "SCHOOL_NAME"
+
+
+def test_list_capabilities_surfaces_unexpected_record_validation_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    sql = _FakeSQL(
+        rows_by_call=[
+            [_domain_row(domain_id=9)],
+            [
+                {
+                    "id": 1,
+                    "scope_type": "workspace_domain",
+                    "scope_workspace_id": "ws-1",
+                    "scope_vertical_norm": None,
+                    "base_domain_id": 9,
+                    "capability_key": "SCHOOL_NAME",
+                    "support_level": "direct",
+                    "source_type": "semantic_concept",
+                    "source_ref": "school_name",
+                    "confidence": 0.9,
+                    "notes": None,
+                    "is_active": 1,
+                }
+            ],
+        ]
+    )
+    svc = PlannerDomainCapabilityService(sql=sql)
+    monkeypatch.setattr(
+        planner_domain_capability_service,
+        "PlannerDomainCapabilityRecord",
+        type(
+            "_BrokenRecord",
+            (),
+            {"__init__": lambda self, **kwargs: (_ for _ in ()).throw(AssertionError("validation bug"))},
+        ),
+    )
+
+    with pytest.raises(AssertionError, match="validation bug"):
+        svc.list_capabilities(
+            workspace_id="ws-1",
+            user_id="user-1",
+            base_domain_id=9,
+            include_inactive=False,
+        )
+
+
+def test_load_effective_capability_rows_returns_empty_on_expected_lookup_error() -> None:
+    sql = _FakeSQL(rows_by_call=[])
+    sql.execute_query_mappings = lambda query, params=None: (_ for _ in ()).throw(RuntimeError("db unavailable"))  # type: ignore[method-assign]
+    svc = PlannerDomainCapabilityService(sql=sql)
+
+    out = svc._load_effective_capability_rows(
+        workspace_id="ws-1",
+        base_domain_id=9,
+    )
+
+    assert out == []
+
+
+def test_load_effective_capability_rows_surfaces_unexpected_lookup_error() -> None:
+    sql = _FakeSQL(rows_by_call=[])
+    sql.execute_query_mappings = lambda query, params=None: (_ for _ in ()).throw(AssertionError("lookup bug"))  # type: ignore[method-assign]
+    svc = PlannerDomainCapabilityService(sql=sql)
+
+    with pytest.raises(AssertionError, match="lookup bug"):
+        svc._load_effective_capability_rows(
+            workspace_id="ws-1",
+            base_domain_id=9,
+        )
+
+
+def test_load_effective_capability_rows_ignores_expected_record_validation_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    sql = _FakeSQL(
+        rows_by_call=[
+            [
+                {
+                    "scope_type": "workspace_domain",
+                    "scope_workspace_id": "ws-1",
+                    "scope_vertical_norm": None,
+                    "base_domain_id": 9,
+                    "capability_key": "SCHOOL_NAME",
+                    "support_level": "direct",
+                    "source_type": "semantic_concept",
+                    "source_ref": "school_name",
+                    "confidence": 0.9,
+                    "notes": None,
+                }
+            ]
+        ]
+    )
+    svc = PlannerDomainCapabilityService(sql=sql)
+    monkeypatch.setattr(
+        planner_domain_capability_service,
+        "PlannerDomainCapabilityRecord",
+        type(
+            "_BrokenRecord",
+            (),
+            {"__init__": lambda self, **kwargs: (_ for _ in ()).throw(ValueError("bad row"))},
+        ),
+    )
+
+    out = svc._load_effective_capability_rows(
+        workspace_id="ws-1",
+        base_domain_id=9,
+    )
+
+    assert out == []
+
+
+def test_load_effective_capability_rows_surfaces_unexpected_record_validation_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    sql = _FakeSQL(
+        rows_by_call=[
+            [
+                {
+                    "scope_type": "workspace_domain",
+                    "scope_workspace_id": "ws-1",
+                    "scope_vertical_norm": None,
+                    "base_domain_id": 9,
+                    "capability_key": "SCHOOL_NAME",
+                    "support_level": "direct",
+                    "source_type": "semantic_concept",
+                    "source_ref": "school_name",
+                    "confidence": 0.9,
+                    "notes": None,
+                }
+            ]
+        ]
+    )
+    svc = PlannerDomainCapabilityService(sql=sql)
+    monkeypatch.setattr(
+        planner_domain_capability_service,
+        "PlannerDomainCapabilityRecord",
+        type(
+            "_BrokenRecord",
+            (),
+            {"__init__": lambda self, **kwargs: (_ for _ in ()).throw(AssertionError("row bug"))},
+        ),
+    )
+
+    with pytest.raises(AssertionError, match="row bug"):
+        svc._load_effective_capability_rows(
+            workspace_id="ws-1",
+            base_domain_id=9,
+        )

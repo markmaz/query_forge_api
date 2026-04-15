@@ -81,7 +81,6 @@ def test_upsert_columns_sets_is_active():
     mysql, tx = _make_mysql()
     writer = ModelCatalogWriter(mysql=mysql)
     writer.upsert_columns(
-        table_id_by_name={"orders": 1},
         columns=[{
             "table_name": "orders", "column_name": "id",
             "data_type": "BIGINT", "ordinal_position": 1,
@@ -100,7 +99,6 @@ def test_upsert_columns_skips_unknown_table():
     mysql, tx = _make_mysql()
     writer = ModelCatalogWriter(mysql=mysql)
     writer.upsert_columns(
-        table_id_by_name={"known_table": 1},
         columns=[{
             "table_name": "unknown_table", "column_name": "id",
             "data_type": "BIGINT", "ordinal_position": 1,

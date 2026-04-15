@@ -1,7 +1,9 @@
+from app.api_config import NAME, VERSION, build_url
+
 from .datasource_api import datasource_ns
 from .ingestion_api import ingestion_ns
 
-NAMESPACES = [
-    (ingestion_ns, ("ingestion",)),
-    (datasource_ns, ("datasources",)),
-]
+
+def register(api):
+    api.add_namespace(ingestion_ns, path=build_url("/", NAME, VERSION, "ingestion"))
+    api.add_namespace(datasource_ns, path=build_url("/", NAME, VERSION, "datasources"))

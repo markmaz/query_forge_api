@@ -153,7 +153,8 @@ def _make_caps(domain_id: int, dimensions: list, metrics: list | None = None,
     }
 
     class _Svc:
-        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id, vertical_norm):
+        def get_domain_capabilities(self, *, workspace_id, user_id, domain_id):
+            del workspace_id, user_id, domain_id
             return caps
 
     return _Svc()
@@ -209,13 +210,16 @@ def _capture_enrolled_students(tmp_dir: str) -> None:
             dimensions=[
                 {"column_key": "wt24.student_unique_id", "label": "Student ID",
                  "data_type": "string", "filterable": False,
-                 "workspace_table_id": 24, "model_column_id": 1001, "column_name": "student_unique_id"},
+                 "workspace_table_id": 24, "model_column_id": 1001, "column_name": "student_unique_id",
+                 "semantic_concept_key": "STUDENT_ID"},
                 {"column_key": "wt20.school_name", "label": "School Name",
                  "data_type": "string", "filterable": True,
-                 "workspace_table_id": 20, "model_column_id": 201, "column_name": "school_name"},
+                 "workspace_table_id": 20, "model_column_id": 201, "column_name": "school_name",
+                 "semantic_concept_key": "SCHOOL_NAME"},
                 {"column_key": "wt24.is_enrolled", "label": "Is Enrolled",
                  "data_type": "int", "filterable": True,
-                 "workspace_table_id": 24, "model_column_id": 1002, "column_name": "is_enrolled"},
+                 "workspace_table_id": 24, "model_column_id": 1002, "column_name": "is_enrolled",
+                 "semantic_concept_key": "ENROLLMENT_STATUS"},
             ],
         ),
         domain_vector_service=_make_vector(6, "Student Enrollment"),
@@ -276,7 +280,8 @@ def _capture_calendar_days_off(tmp_dir: str) -> None:
                  "workspace_table_id": 30, "model_column_id": 302, "column_name": "event_type"},
                 {"column_key": "wt20.school_name", "label": "School Name",
                  "data_type": "string", "filterable": True,
-                 "workspace_table_id": 20, "model_column_id": 201, "column_name": "school_name"},
+                 "workspace_table_id": 20, "model_column_id": 201, "column_name": "school_name",
+                 "semantic_concept_key": "SCHOOL_NAME"},
             ],
         ),
         domain_vector_service=_make_vector(7, "School Calendar"),
@@ -332,7 +337,8 @@ def _capture_race_alias_normalization(tmp_dir: str) -> None:
             }
 
     class _AliasResolver:
-        def resolve(self, *, prompt: str, vertical_norm: str):
+        def resolve(self, *, prompt: str):
+            del prompt
             return [
                 {
                     "column_key": "wt24.race_ethnicity",

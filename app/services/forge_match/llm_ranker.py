@@ -322,7 +322,7 @@ def _extract_json_payload(trace: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         payload = json.loads(content)
         if isinstance(payload, dict):
             return payload
-    except Exception:
+    except (TypeError, ValueError, json.JSONDecodeError):
         pass
 
     # Best effort: extract first object.
@@ -332,7 +332,7 @@ def _extract_json_payload(trace: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             continue
         try:
             obj, _ = decoder.raw_decode(content[idx:])
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             continue
         if isinstance(obj, dict):
             return obj
@@ -370,7 +370,7 @@ def _normalize_rank_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     selected = payload.get("selected_column_id")
     try:
         selected_id = int(selected) if selected is not None else None
-    except Exception:
+    except (TypeError, ValueError):
         selected_id = None
     if selected_id is not None and selected_id <= 0:
         selected_id = None
@@ -381,7 +381,7 @@ def _normalize_rank_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         for item in raw_alts:
             try:
                 parsed = int(item)
-            except Exception:
+            except (TypeError, ValueError):
                 continue
             if parsed > 0 and parsed != selected_id and parsed not in alternates:
                 alternates.append(parsed)
@@ -403,7 +403,7 @@ def _normalize_rank_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     confidence_raw = payload.get("llm_confidence")
     try:
         llm_conf = float(confidence_raw)
-    except Exception:
+    except (TypeError, ValueError):
         llm_conf = 0.0
     llm_conf = max(0.0, min(1.0, llm_conf))
 

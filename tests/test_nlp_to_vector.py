@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.services.nlp.nlp_to_vector import build_vector_search_request
 
 
@@ -43,3 +45,32 @@ def test_build_vector_request_count_adds_expansions() -> None:
     assert "count" in expanded
     assert "number of" in expanded
     assert "MEASURE" in result["constraints"]["prefer_column_kinds"]
+
+
+def test_build_vector_request_skips_invalid_domain_hint_ids() -> None:
+    result = build_vector_search_request(
+        {
+            "workspace_id": "ws1",
+            "text": "count students",
+            "domain_hints": [{"domain_id": "bad"}, {"domain_id": 9, "confidence": 0.8}],
+            "query_intent": {"subject": "student", "action": "COUNT"},
+        }
+    )
+
+    assert result["domain_ids"] == [9]
+
+
+def test_build_vector_request_surfaces_unexpected_domain_id_errors() -> None:
+    class _BrokenDomainId:
+        def __int__(self) -> int:
+            raise AssertionError("unexpected domain hint conversion failure")
+
+    with pytest.raises(AssertionError, match="unexpected domain hint conversion failure"):
+        build_vector_search_request(
+            {
+                "workspace_id": "ws1",
+                "text": "count students",
+                "domain_hints": [{"domain_id": _BrokenDomainId(), "confidence": 0.8}],
+                "query_intent": {"subject": "student", "action": "COUNT"},
+            }
+        )

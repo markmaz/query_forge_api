@@ -6,16 +6,6 @@ from app.exceptions.forge_error import ForgeError
 from app.services.workspace_service import WorkspaceService
 
 
-class _Resp:
-    def __init__(self, status_code: int, payload=None) -> None:
-        self.status_code = status_code
-        self._payload = payload or {}
-        self.text = "text"
-
-    def json(self):
-        return self._payload
-
-
 def test_get_all_workspaces_from_db() -> None:
     class _SQL:
         def execute_query_mappings(self, query, _params=None):
@@ -95,134 +85,13 @@ def test_get_workspace_legacy_fallback() -> None:
     assert ws["server"] == "https://legacy.example.com"
 
 
-def test_get_workspace_users_from_dbx(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.services.workspace_service.requests.get", lambda *_args, **_kwargs: _Resp(200))
-    monkeypatch.setattr(
-        "app.services.workspace_service.process_response",
-        lambda _resp: {
-            "Resources": [
-                {"displayName": "Alice", "userName": "alice", "name": {"givenName": "A", "familyName": "B"}}
-            ]
-        },
-    )
-    monkeypatch.setattr(
-        "app.services.workspace_service.WorkspaceDatasourceResolverService.resolve_for_workspace",
-        lambda self, *, workspace_id, require_active=True: type(
-            "Resolved",
-            (),
-            {
-                "datasource_type": "databricks",
-                "config_json": {"host": "https://dbx", "token": "dapi-test"},
-                "secret_ref": None,
-            },
-        )(),
-    )
-    monkeypatch.setattr(
-        WorkspaceService,
-        "get_workspace",
-        lambda *_args, **_kwargs: {"name": "Org"},
-    )
-    svc = WorkspaceService()
-    users = svc.get_workspace_users_from_dbx("1")
-    assert users[0]["display_name"] == "A B"
-
-
-def test_get_workspace_users_from_dbx_uses_oauth_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured = {}
-
-    monkeypatch.setattr("app.services.workspace_service.requests.get", lambda *_args, **_kwargs: _Resp(200))
-    monkeypatch.setattr(
-        "app.services.workspace_service.process_response",
-        lambda _resp: {"Resources": []},
-    )
-    monkeypatch.setattr(
-        "app.services.workspace_service.WorkspaceDatasourceResolverService.resolve_for_workspace",
-        lambda self, *, workspace_id, require_active=True: type(
-            "Resolved",
-            (),
-            {
-                "datasource_type": "databricks",
-                "config_json": {
-                    "host": "https://dbx",
-                    "auth_method": "oauth_client_credentials",
-                    "client_id": "client-1",
-                    "client_secret": "secret-1",
-                },
-                "secret_ref": None,
-            },
-        )(),
-    )
-    monkeypatch.setattr(
-        "app.services.workspace_service.create_databricks_oauth_provider",
-        lambda **kwargs: captured.update(kwargs) or type(
-            "Provider",
-            (),
-            {"fetch_forge_token": lambda self: "oauth-token-1"},
-        )(),
-    )
-    monkeypatch.setattr(
-        WorkspaceService,
-        "get_workspace",
-        lambda *_args, **_kwargs: {"name": "Org"},
-    )
-
-    svc = WorkspaceService()
-    svc.get_workspace_users_from_dbx("1")
-    assert captured["workspace_host"] == "https://dbx"
-    assert captured["workspace_id"] == "1"
-
-
-def test_get_workspace_users_from_dbx_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _raise(*_args, **_kwargs):
-        raise ForgeError("missing", 404)
-
-    monkeypatch.setattr(
-        "app.services.workspace_service.WorkspaceDatasourceResolverService.resolve_for_workspace",
-        _raise,
-    )
-    svc = WorkspaceService()
-    with pytest.raises(ForgeError):
-        svc.get_workspace_users_from_dbx("1")
-
-def test_get_workspace_users_from_dbx_non_dbx_datasource_uses_workspace_users() -> None:
+def test_get_workspace_surfaces_unexpected_lookup_errors() -> None:
     class _SQL:
-        def execute_query_mappings(self, query, params=None):
-            if "FROM workspace_membership wm" in query and "JOIN users u ON u.user_id = members.user_id" in query:
-                return [
-                    {
-                        "user_id": "u1",
-                        "username": "user1",
-                        "email": "u1@example.com",
-                        "first_name": "U",
-                        "last_name": "One",
-                        "status": "Active",
-                        "is_default": 1,
-                        "display_name": "U One",
-                    }
-                ]
-            if "FROM workspace w" in query:
-                ws_value = (params or {}).get("workspace_id") or (params or {}).get("ws") or "ws-1"
-                return [
-                    {
-                        "workspace_id": ws_value,
-                        "workspace_name": "One",
-                        "organization_is_active": 1,
-                        "workspace_is_active": 1,
-                        "datasource_id": 2,
-                        "datasource_name": "sf",
-                        "datasource_slug": "sf",
-                        "datasource_type": "snowflake",
-                        "datasource_is_active": 1,
-                        "config_json": {},
-                        "secret_ref": None,
-                        "default_catalog": None,
-                        "default_schema": None,
-                        "workspace_organization_id": "org-1",
-                        "datasource_organization_id": "org-1",
-                    }
-                ]
-            return []
+        def execute_query_mappings(self, query, _params=None):
+            del query, _params
+            raise AssertionError("unexpected workspace lookup bug")
 
     svc = WorkspaceService(sql=_SQL())
-    users = svc.get_workspace_users_from_dbx("ws-1")
-    assert users[0]["user_id"] == "u1"
+
+    with pytest.raises(AssertionError, match="unexpected workspace lookup bug"):
+        svc.get_workspace("ws-1")

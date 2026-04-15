@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from qdrant_client.http import models as qdrant_models
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import EMBEDDING_MODEL_NAME, QDRANT_DOMAIN_COLLECTION
@@ -22,6 +23,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_COLLECTION = QDRANT_DOMAIN_COLLECTION or "domain_catalog_v1"
 DEFAULT_LIMIT = 5
 MAX_LIMIT = 50
+DOMAIN_INDEX_SQL_FALLBACK_ERRORS = (ForgeError, SQLAlchemyError)
+DOMAIN_INDEX_JSON_LOAD_ERRORS = (OSError, json.JSONDecodeError)
+JSON_PARSE_ERRORS = (json.JSONDecodeError,)
 
 _DOMAIN_PROFILE_QUERY = """
 SELECT
@@ -70,7 +74,6 @@ ORDER BY d.id ASC
 class DomainEmbeddingState:
     domain_id: int
     workspace_id: Optional[str]
-    vertical_norm: Optional[str]
     domain_version: int
     embedding_hash: str
 
@@ -118,21 +121,18 @@ class DomainVectorIndexService:
         self,
         *,
         workspace_id: Optional[str] = None,
-        vertical_norm: Optional[str] = None,
         force: bool = False,
         json_fallback_path: Optional[str] = None,
     ) -> Dict[str, Any]:
-        del vertical_norm
         t0 = time.perf_counter()
         rows = self._load_domains(workspace_id=workspace_id, json_fallback_path=json_fallback_path)
 
         collection_meta = self.ensure_collection()
-        state = self._load_embedding_state(workspace_id=workspace_id, vertical_norm=None)
+        state = self._load_embedding_state(workspace_id=workspace_id)
         result = self.upsert_domains(
             rows,
             force=force,
             state_by_domain_id=state,
-            vertical_norm=None,
         )
         result["timings_ms"] = {"total": int((time.perf_counter() - t0) * 1000)}
         result["collection"] = collection_meta
@@ -145,9 +145,7 @@ class DomainVectorIndexService:
         *,
         force: bool = False,
         state_by_domain_id: Optional[Mapping[int, DomainEmbeddingState]] = None,
-        vertical_norm: Optional[str] = None,
     ) -> Dict[str, Any]:
-        del vertical_norm
         if not domains:
             return {"total": 0, "upserted": 0, "skipped": 0, "errors": []}
 
@@ -172,7 +170,6 @@ class DomainVectorIndexService:
             domain_version = _coerce_int(row.get("domain_version"), default=0)
             embedding_hash = hashlib.sha256(embedding_text.encode("utf-8")).hexdigest()
             ws_id = str(row.get("workspace_id") or "").strip() or None
-            explicit_vertical = _explicit_vertical_norm(row)
 
             prev = state.get(domain_id)
             if (
@@ -201,7 +198,6 @@ class DomainVectorIndexService:
                 DomainEmbeddingState(
                     domain_id=domain_id,
                     workspace_id=ws_id,
-                    vertical_norm=explicit_vertical,
                     domain_version=int(domain_version),
                     embedding_hash=embedding_hash,
                 )
@@ -227,7 +223,6 @@ class DomainVectorIndexService:
         *,
         workspace_id: str,
         query: str,
-        vertical_norm: Optional[str] = None,
         limit: int = DEFAULT_LIMIT,
         score_threshold: float = 0.2,
         include_payload: bool = True,
@@ -235,7 +230,6 @@ class DomainVectorIndexService:
         query_text = _normalize_query_text(query)
         if query_text == "":
             raise ForgeError("query is required", status_code=400)
-        del vertical_norm
 
         ws = str(workspace_id or "").strip()
         if ws == "":
@@ -304,7 +298,7 @@ class DomainVectorIndexService:
         ws = str(workspace_id or "").strip() or None
         try:
             rows = self._sql.execute_query_mappings(_DOMAIN_PROFILE_QUERY, {"workspace_id": ws})
-        except Exception as exc:
+        except DOMAIN_INDEX_SQL_FALLBACK_ERRORS as exc:
             logger.warning("domain profile query failed; attempting fallback err=%s", exc)
             rows = []
 
@@ -317,7 +311,7 @@ class DomainVectorIndexService:
         try:
             with open(json_fallback_path, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
-        except Exception as exc:
+        except DOMAIN_INDEX_JSON_LOAD_ERRORS as exc:
             logger.warning("domain profile fallback load failed path=%s err=%s", json_fallback_path, exc)
             return []
 
@@ -336,10 +330,8 @@ class DomainVectorIndexService:
         self,
         *,
         workspace_id: Optional[str],
-        vertical_norm: Optional[str],
     ) -> Dict[int, DomainEmbeddingState]:
         ws = str(workspace_id or "").strip() or None
-        del vertical_norm
 
         where: List[str] = []
         params: Dict[str, Any] = {}
@@ -348,7 +340,7 @@ class DomainVectorIndexService:
             params["workspace_id"] = ws
 
         sql = """
-        SELECT domain_id, workspace_id, vertical_norm, domain_version, embedding_hash
+        SELECT domain_id, workspace_id, domain_version, embedding_hash
         FROM domain_embedding_state
         """
         if where:
@@ -356,7 +348,7 @@ class DomainVectorIndexService:
 
         try:
             rows = self._sql.execute_query_mappings(sql, params)
-        except Exception as exc:
+        except DOMAIN_INDEX_SQL_FALLBACK_ERRORS as exc:
             if _is_missing_table_error(exc, "domain_embedding_state"):
                 logger.warning("domain_embedding_state table missing; incremental mode disabled")
                 return {}
@@ -370,7 +362,6 @@ class DomainVectorIndexService:
             out[domain_id] = DomainEmbeddingState(
                 domain_id=domain_id,
                 workspace_id=str(row.get("workspace_id") or "").strip() or None,
-                vertical_norm=_explicit_vertical_norm(row),
                 domain_version=_coerce_int(row.get("domain_version"), default=0),
                 embedding_hash=str(row.get("embedding_hash") or "").strip(),
             )
@@ -387,21 +378,18 @@ class DomainVectorIndexService:
                     INSERT INTO domain_embedding_state (
                       domain_id,
                       workspace_id,
-                      vertical_norm,
                       domain_version,
                       embedding_hash,
                       indexed_at
                     ) VALUES (
                       :domain_id,
                       :workspace_id,
-                      :vertical_norm,
                       :domain_version,
                       :embedding_hash,
                       UTC_TIMESTAMP()
                     )
                     ON DUPLICATE KEY UPDATE
                       workspace_id = VALUES(workspace_id),
-                      vertical_norm = VALUES(vertical_norm),
                       domain_version = VALUES(domain_version),
                       embedding_hash = VALUES(embedding_hash),
                       indexed_at = UTC_TIMESTAMP()
@@ -409,12 +397,11 @@ class DomainVectorIndexService:
                     {
                         "domain_id": int(row.domain_id),
                         "workspace_id": row.workspace_id,
-                        "vertical_norm": row.vertical_norm or "generic",
                         "domain_version": int(row.domain_version),
                         "embedding_hash": row.embedding_hash,
                     },
                 )
-            except Exception as exc:
+            except DOMAIN_INDEX_SQL_FALLBACK_ERRORS as exc:
                 if _is_missing_table_error(exc, "domain_embedding_state"):
                     logger.warning("domain_embedding_state table missing; state write skipped")
                     return
@@ -459,15 +446,6 @@ def build_domain_embedding_text(domain_profile: Mapping[str, Any]) -> str:
 
 def _normalize_query_text(text: Any) -> str:
     return _collapse_ws(str(text or "").strip())
-
-
-def _explicit_vertical_norm(row: Mapping[str, Any]) -> Optional[str]:
-    explicit = str(row.get("vertical_norm") or row.get("vertical") or "").strip().lower()
-    if explicit in {"education", "healthcare", "generic"}:
-        return explicit
-    return None
-
-
 def _as_text_list(value: Any) -> List[str]:
     parsed = value
     if isinstance(value, (bytes, bytearray, memoryview)):
@@ -477,7 +455,7 @@ def _as_text_list(value: Any) -> List[str]:
         if text.startswith("[") and text.endswith("]"):
             try:
                 parsed = json.loads(text)
-            except Exception:
+            except JSON_PARSE_ERRORS:
                 parsed = [text]
         elif text == "":
             parsed = []
@@ -547,7 +525,7 @@ def _coerce_bool(value: Any, *, default: bool) -> bool:
 def _coerce_int(value: Any, *, default: int) -> int:
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return int(default)
 
 

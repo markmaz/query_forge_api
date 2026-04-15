@@ -61,7 +61,6 @@ def test_ensure_mapping_writes_workspace_column_map() -> None:
         semantic_concept_id=9,
         relationship_kind="primary",
         weight=0.8,
-        vertical_norm="education",
     )
 
     assert affected == 1

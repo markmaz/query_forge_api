@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.adapters.analytics.mysql_metadata_provider import MySQLMetadataProvider
 from app.ports.sql_executor_abc import SQLExecutor
 
@@ -112,6 +114,24 @@ def test_profile_falls_back_to_sample_values_for_high_cardinality_columns():
     assert "SELECT DISTINCT" in sample_sql.upper()
     assert "GROUP BY" not in sample_sql.upper()
     assert result["name"]["top_values"] == ["alpha", "beta"]
+
+
+def test_profile_surfaces_unexpected_top_value_sampling_errors():
+    ex = MagicMock(spec=SQLExecutor)
+    ex.execute.side_effect = [
+        [{"row_count": 300}],
+        [{"null_name": 0, "dist_name": 3}],
+        AssertionError("unexpected mysql top value bug"),
+    ]
+    ex.get_dialect.return_value = "mysql"
+    provider = MySQLMetadataProvider(executor=ex)
+
+    with pytest.raises(AssertionError, match="unexpected mysql top value bug"):
+        provider.profile_table_columns(
+            table_ref="`mydb`.`people`",
+            columns=[{"column_name": "name", "data_type": "varchar", "is_nullable": True}],
+            options={**_DEFAULT_OPTIONS, "skip_top_values_for_id_like_cols": False},
+        )
 
 
 def test_list_schemas():

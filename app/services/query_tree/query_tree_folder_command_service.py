@@ -311,11 +311,8 @@ class QueryTreeFolderCommandService:
         folder_id = str(uuid.uuid4())
         try:
             self._repo.insert_folder(folder_id=folder_id, name=clean_name, parent_id=normalized_parent, sort_index=int(sort_index or 0))
-        except Exception as exc:
-            msg = str(exc).lower()
-            if "duplicate" in msg or "unique" in msg:
-                raise ForgeError("Folder already exists", status_code=400) from exc
-            raise
+        except IntegrityError as exc:
+            raise ForgeError("Folder already exists", status_code=400) from exc
         return {"folderId": folder_id, "name": clean_name, "parentId": normalized_parent, "sortIndex": int(sort_index or 0)}
 
     def rename_folder(self, *, folder_id: str, name: str) -> Dict[str, Any]:

@@ -9,6 +9,26 @@ from app.ports.sql_executor_abc import SQLExecutor
 
 logger = logging.getLogger(__name__)
 
+try:
+    from snowflake.connector.errors import Error as SnowflakeDriverError  # type: ignore[import]
+except ImportError:  # pragma: no cover - fallback only when connector is unavailable
+    SnowflakeDriverError = RuntimeError
+
+
+SNOWFLAKE_EXECUTION_ERRORS = (
+    SnowflakeDriverError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+SNOWFLAKE_CLEANUP_ERRORS = (
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+
 
 def _normalize_account_identifier(account: str) -> str:
     """Normalise a Snowflake account input for the Python connector.
@@ -308,7 +328,7 @@ class SnowflakeSQLExecutor(SQLExecutor):
             columns = [desc[0] for desc in (cursor.description or [])]
             rows = cursor.fetchall()
             return [dict(zip(columns, row)) for row in rows]
-        except Exception as exc:
+        except SNOWFLAKE_EXECUTION_ERRORS as exc:
             # FIND-021: log full driver exception internally; sanitize the raised
             # message so Snowflake account identifiers/hostnames are not returned
             # to callers.
@@ -334,12 +354,12 @@ class SnowflakeSQLExecutor(SQLExecutor):
             if cursor is not None:
                 try:
                     cursor.close()
-                except Exception:
+                except SNOWFLAKE_CLEANUP_ERRORS:
                     pass
             if conn is not None:
                 try:
                     conn.close()
-                except Exception:
+                except SNOWFLAKE_CLEANUP_ERRORS:
                     pass
 
     def test_connection(self) -> None:
@@ -350,7 +370,7 @@ class SnowflakeSQLExecutor(SQLExecutor):
             # Keep the execute() diagnostic, but make it explicit this happened
             # during a datasource connectivity check.
             raise RuntimeError(f"Analytics datasource connection test failed: {exc}") from exc
-        except Exception as exc:
+        except SNOWFLAKE_EXECUTION_ERRORS as exc:
             # FIND-021: sanitized message — no account identifier or hostname.
             logger.exception("SnowflakeSQLExecutor.test_connection failed")
             raise RuntimeError("Analytics datasource connection test failed") from exc

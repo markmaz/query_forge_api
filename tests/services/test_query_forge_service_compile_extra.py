@@ -6,7 +6,8 @@ import pytest
 
 from app.exceptions.forge_error import ForgeError
 from app.services.domain_resolver import DomainPlan, DomainPlanJoin, DomainPlanTable
-from app.services.query_forge_service import QF_MAX_MANUAL_IN, QueryForgeService
+from app.services.query_forge.result_mapper import cols_from_json, extract_total, infer_cols, rows_to_dicts
+from app.services.query_forge.service import QF_MAX_MANUAL_IN, QueryForgeService
 from tests._support.fakes import FakeForgeQueryPort
 
 
@@ -1850,7 +1851,7 @@ def test_compile_where_invalid_nodes() -> None:
 def test_columns_and_rows_helpers() -> None:
     plan = _single_table_plan()
     svc = QueryForgeService(executor=FakeForgeQueryPort(), domain_resolver=FakeResolver(plan))
-    cols = svc._qf_cols_from_json(
+    cols = cols_from_json(
         {
             "columns": [{"columnName": "city", "alias": "City"}],
             "aggs": {"enabled": True, "groupBy": [{"columnName": "city"}], "metrics": [{"fn": "count", "label": "Total"}]},
@@ -1859,20 +1860,20 @@ def test_columns_and_rows_helpers() -> None:
     assert cols[0]["label"] == "City"
     assert svc._col_label_key({"columnName": "x"}) == "x"
     assert svc._col_label_key("y") == "y"
-    assert svc._qf_cols_from_json({"columns": ["bad"]}) == []
-    assert svc._qf_cols_from_json({"columns": [{"columnName": None}]}) == []
-    assert svc._qf_infer_cols([{"a": 1, "b": 2}])[0]["key"] == "a"
-    assert svc._qf_infer_cols([[1, 2]]) == []
-    assert svc._qf_infer_cols([]) == []
-    assert svc._qf_extract_total([]) == 0
-    assert svc._qf_extract_total([{"total": 3}]) == 3
-    assert svc._qf_extract_total([[5]]) == 5
-    assert svc._qf_extract_total(["bad"]) == 0
-    assert svc._qf_rows_to_dicts([], [{"key": "a"}]) == []
-    assert svc._qf_rows_to_dicts([{"a": 1}], [{"key": "a"}])[0]["a"] == 1
-    assert svc._qf_rows_to_dicts([[1, 2], "bad"], [{"key": "a"}, {"key": "b"}])[0]["a"] == 1
-    assert svc._qf_rows_to_dicts([[1]], ["a"])[0]["a"] == 1
-    assert svc._qf_rows_to_dicts([[1, 2]], []) == []
+    assert cols_from_json({"columns": ["bad"]}) == []
+    assert cols_from_json({"columns": [{"columnName": None}]}) == []
+    assert infer_cols([{"a": 1, "b": 2}])[0]["key"] == "a"
+    assert infer_cols([[1, 2]]) == []
+    assert infer_cols([]) == []
+    assert extract_total([]) == 0
+    assert extract_total([{"total": 3}]) == 3
+    assert extract_total([[5]]) == 5
+    assert extract_total(["bad"]) == 0
+    assert rows_to_dicts([], [{"key": "a"}]) == []
+    assert rows_to_dicts([{"a": 1}], [{"key": "a"}])[0]["a"] == 1
+    assert rows_to_dicts([[1, 2], "bad"], [{"key": "a"}, {"key": "b"}])[0]["a"] == 1
+    assert rows_to_dicts([[1]], ["a"])[0]["a"] == 1
+    assert rows_to_dicts([[1, 2]], []) == []
 
 
 def test_compile_order_by_errors() -> None:

@@ -17,6 +17,7 @@ from app.services.semantic.catalog.catalog_models import (
 )
 
 logger = logging.getLogger(__name__)
+LLM_ENRICHMENT_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
 class _LLMBatchResponse(BaseModel):
@@ -29,7 +30,6 @@ class SemanticEnrichmentLLMInterface(Protocol):
         *,
         profiles: Sequence[ColumnProfile],
         workspace_id: str,
-        vertical_norm: str,
         domain_name: Optional[str],
         llm_id: Optional[int] = None,
     ) -> List[ColumnEnrichment]:
@@ -60,7 +60,6 @@ class LLMSemanticEnrichmentClient:
         *,
         profiles: Sequence[ColumnProfile],
         workspace_id: str,
-        vertical_norm: str,
         domain_name: Optional[str],
         llm_id: Optional[int] = None,
     ) -> List[ColumnEnrichment]:
@@ -103,7 +102,6 @@ class LLMSemanticEnrichmentClient:
         ]
 
         prompt_payload = {
-            "vertical_norm": vertical_norm,
             "domain_name": domain_name,
             "cards": cards,
         }
@@ -220,7 +218,6 @@ class SemanticEnrichmentService:
         *,
         profiles: Sequence[ColumnProfile],
         workspace_id: str,
-        vertical_norm: str,
         domain_name: Optional[str],
         llm_id: Optional[int] = None,
     ) -> List[EnrichedColumnProfile]:
@@ -246,14 +243,13 @@ class SemanticEnrichmentService:
                 llm_items = self._llm.enrich_batch(
                     profiles=batch_profiles,
                     workspace_id=workspace_id,
-                    vertical_norm=vertical_norm,
                     domain_name=domain_name,
                     llm_id=llm_id,
                 )
                 for idx, profile in enumerate(batch_profiles):
                     merged_item = _merge_with_heuristic(llm_items[idx], batch_heuristics[idx], profile=profile)
                     merged.append(EnrichedColumnProfile(profile=profile, enrichment=merged_item))
-            except Exception as exc:
+            except LLM_ENRICHMENT_FALLBACK_ERRORS as exc:
                 logger.warning(
                     "semantic_catalog enrichment fallback used for batch start=%s size=%s err=%s",
                     start,
@@ -407,7 +403,7 @@ def _extract_first_json_obj(raw: str) -> Optional[Dict[str, Any]]:
         parsed = json.loads(text)
         if isinstance(parsed, dict):
             return dict(parsed)
-    except Exception:
+    except (TypeError, ValueError, json.JSONDecodeError):
         pass
     decoder = json.JSONDecoder()
     for idx, ch in enumerate(text):
@@ -415,7 +411,7 @@ def _extract_first_json_obj(raw: str) -> Optional[Dict[str, Any]]:
             continue
         try:
             parsed, _ = decoder.raw_decode(text[idx:])
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             continue
         if isinstance(parsed, dict):
             return dict(parsed)

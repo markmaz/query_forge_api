@@ -190,3 +190,21 @@ def test_delete_feedback_raises_not_found() -> None:
     with pytest.raises(ForgeError) as exc:
         svc.delete_feedback(workspace_id="ws-1", feedback_id=9)
     assert exc.value.status_code == 404
+
+
+def test_delete_feedback_rejects_non_integer_feedback_id() -> None:
+    svc = PromptFeedbackService(sql=FakeForgeQueryPort(), max_payload_bytes=1024)
+
+    with pytest.raises(ForgeError, match="feedback_id must be an integer"):
+        svc.delete_feedback(workspace_id="ws-1", feedback_id="bad")
+
+
+def test_delete_feedback_surfaces_unexpected_integer_conversion_errors() -> None:
+    class _BrokenFeedbackId:
+        def __int__(self) -> int:
+            raise AssertionError("unexpected feedback id conversion failure")
+
+    svc = PromptFeedbackService(sql=FakeForgeQueryPort(), max_payload_bytes=1024)
+
+    with pytest.raises(AssertionError, match="unexpected feedback id conversion failure"):
+        svc.delete_feedback(workspace_id="ws-1", feedback_id=_BrokenFeedbackId())

@@ -101,7 +101,7 @@ def _select_domain_ids(domain_hints: Sequence[Any], *, max_domains: int) -> List
 
         try:
             domain_id = int(raw_id)
-        except Exception:
+        except (TypeError, ValueError):
             continue
 
         score = float(confidence) if confidence is not None else 0.0

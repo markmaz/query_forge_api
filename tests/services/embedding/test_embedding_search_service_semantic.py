@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.services.embedding.embedding_search_service import (
     _apply_hybrid_scoring,
     detect_semantic_intent,
@@ -120,3 +122,94 @@ def test_apply_hybrid_scoring_grade_level_integer_boost() -> None:
     )
     assert scored[0]["gradeBoost"] > scored[1]["gradeBoost"]
     assert scored[0]["score"] > scored[1]["score"]
+
+
+def test_apply_hybrid_scoring_scope_boost_ignores_expected_domain_id_parse_errors() -> None:
+    semantic_intent = detect_semantic_intent("show attendance domain")
+    items = [{"kind": "domain", "rawScore": 0.5, "domainId": "bad", "domainName": "Attendance"}]
+
+    scored = _apply_hybrid_scoring(
+        items,
+        query_text="show attendance domain",
+        workspace_id="ws1",
+        domain_id=7,
+        workspace_table_ids=None,
+        origin=None,
+        model_table_id=None,
+        source_table_name=None,
+        semantic_intent=semantic_intent,
+    )
+
+    assert "scoped_to_domain" not in scored[0]["reasons"]
+    assert scored[0]["score"] == pytest.approx(0.68)
+
+
+def test_apply_hybrid_scoring_scope_boost_surfaces_unexpected_domain_id_errors() -> None:
+    class ExplosiveInt:
+        def __int__(self) -> int:
+            raise AssertionError("unexpected int conversion failure")
+
+    semantic_intent = detect_semantic_intent("show attendance domain")
+    items = [{"kind": "domain", "rawScore": 0.5, "domainId": ExplosiveInt(), "domainName": "Attendance"}]
+
+    with pytest.raises(AssertionError, match="unexpected int conversion failure"):
+        _apply_hybrid_scoring(
+            items,
+            query_text="show attendance domain",
+            workspace_id="ws1",
+            domain_id=7,
+            workspace_table_ids=None,
+            origin=None,
+            model_table_id=None,
+            source_table_name=None,
+            semantic_intent=semantic_intent,
+        )
+
+
+def test_apply_hybrid_scoring_scope_boost_ignores_expected_workspace_table_parse_errors() -> None:
+    semantic_intent = detect_semantic_intent("show attendance rows")
+    items = [{"kind": "column", "rawScore": 0.5, "workspaceTableId": "bad", "columnName": "status", "tableName": "attendance"}]
+
+    scored = _apply_hybrid_scoring(
+        items,
+        query_text="show attendance rows",
+        workspace_id="ws1",
+        domain_id=7,
+        workspace_table_ids=[101],
+        origin=None,
+        model_table_id=None,
+        source_table_name=None,
+        semantic_intent=semantic_intent,
+    )
+
+    assert "scoped_to_domain" not in scored[0]["reasons"]
+
+
+def test_apply_hybrid_scoring_scope_boost_surfaces_unexpected_workspace_table_errors() -> None:
+    class ExplosiveInt:
+        def __int__(self) -> int:
+            raise AssertionError("unexpected int conversion failure")
+
+    semantic_intent = detect_semantic_intent("show attendance rows")
+    items = [
+        {
+            "kind": "column",
+            "rawScore": 0.5,
+            "workspaceTableId": ExplosiveInt(),
+            "columnName": "status",
+            "tableName": "attendance",
+        }
+    ]
+
+    with pytest.raises(AssertionError, match="unexpected int conversion failure"):
+        _apply_hybrid_scoring(
+            items,
+            query_text="show attendance rows",
+            workspace_id="ws1",
+            domain_id=7,
+            workspace_table_ids=[101],
+            origin=None,
+            model_table_id=None,
+            source_table_name=None,
+            semantic_intent=semantic_intent,
+        )

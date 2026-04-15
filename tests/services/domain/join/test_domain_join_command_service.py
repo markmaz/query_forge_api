@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+
+import pytest
+
 from app.services.domain.join.domain_join_command_service import DomainJoinCommandService
 from app.services.domain.join.domain_join_expression_parser import DomainJoinExpressionParser
 from app.services.domain.join.domain_join_repository import DomainJoinRepository
@@ -50,3 +54,65 @@ def test_command_service_create_reactivates_existing_join() -> None:
     )
     out = service.create_join(workspace_id="ws", payload=_payload())
     assert out == {"ok": True, "id": "j1"}
+
+
+def test_command_service_create_returns_none_when_insert_result_has_no_lastrowid() -> None:
+    class _Repository:
+        @contextmanager
+        def transaction(self):
+            yield object()
+
+        def ensure_domain(self, *_args, **_kwargs):
+            return None
+
+        def ensure_tables_in_domain(self, *_args, **_kwargs):
+            return None
+
+        def find_existing_join(self, *_args, **_kwargs):
+            return None
+
+        def insert_join(self, *_args, **_kwargs):
+            return object()
+
+    class _Validator:
+        def validate_join_expr_columns(self, *_args, **_kwargs):
+            return None
+
+    service = DomainJoinCommandService(repository=_Repository(), validator=_Validator())
+
+    out = service.create_join(workspace_id="ws", payload=_payload())
+
+    assert out == {"ok": True, "id": None}
+
+
+def test_command_service_create_surfaces_unexpected_lastrowid_errors() -> None:
+    class _BadResult:
+        @property
+        def lastrowid(self):
+            raise AssertionError("unexpected insert result bug")
+
+    class _Repository:
+        @contextmanager
+        def transaction(self):
+            yield object()
+
+        def ensure_domain(self, *_args, **_kwargs):
+            return None
+
+        def ensure_tables_in_domain(self, *_args, **_kwargs):
+            return None
+
+        def find_existing_join(self, *_args, **_kwargs):
+            return None
+
+        def insert_join(self, *_args, **_kwargs):
+            return _BadResult()
+
+    class _Validator:
+        def validate_join_expr_columns(self, *_args, **_kwargs):
+            return None
+
+    service = DomainJoinCommandService(repository=_Repository(), validator=_Validator())
+
+    with pytest.raises(AssertionError, match="unexpected insert result bug"):
+        service.create_join(workspace_id="ws", payload=_payload())

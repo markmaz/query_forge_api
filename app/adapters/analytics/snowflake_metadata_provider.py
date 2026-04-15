@@ -13,6 +13,7 @@ _IDENT_RE = re.compile(r"^[A-Za-z0-9_]+$")
 _ID_LIKE_PATTERNS = ("id", "_id", "guid", "uuid", "k_", "sk_", "pk_", "_key", "identifier")
 _COMPLEX_TYPES = {"binary", "variant", "object", "array"}
 _STRING_TYPES = {"varchar", "char", "nvarchar", "nchar", "text", "string"}
+METADATA_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
 def _safe_ident(s: str) -> str:
@@ -183,7 +184,7 @@ FROM (SELECT * FROM {table_ref} SAMPLE ({sample_pct}) LIMIT {row_cap}) _s
                     "sample_row_count": sample_row_count,
                 })
 
-        except Exception as exc:
+        except METADATA_FALLBACK_ERRORS as exc:
             logger.exception(
                 "SnowflakeMetadataProvider.profile_table_columns failed for %s", table_ref
             )
@@ -225,7 +226,7 @@ GROUP BY "{safe_cn}" ORDER BY cnt DESC LIMIT {per_col_limit}
                     normalized = _normalize_row(row)
                     top_values.append(str(normalized.get("val", "")))
                 result[cn]["top_values"] = top_values
-            except Exception as exc:
+            except METADATA_FALLBACK_ERRORS as exc:
                 logger.warning(
                     "Snowflake value sampling failed for %s.%s: %s", table_ref, cn, exc
                 )

@@ -1,7 +1,16 @@
 from __future__ import annotations
 
-from app.services.semantic.plan_service import LLMFilter, LLMPlanPayload, LLMSelectedColumn, PlanService
+import pytest
+
+from app.services.semantic.plan import sql_json_builder
+import app.services.semantic.plan.value_alias_applier as value_alias_applier
+from app.services.semantic.plan import PlanService
+from app.services.semantic.plan.models import LLMFilter, LLMPlanPayload, LLMSelectedColumn
+from app.services.semantic.plan.sql_json_builder import SqlJsonBuilder
+from app.services.semantic.plan.value_alias_applier import ValueAliasApplier
+from app.services.semantic.plan.plan_validator import PlanValidator
 from app.services.semantic.deterministic_matcher import DeterministicMatcher
+from app.services.domain.planner_semantic_time_policy_service import PlannerSemanticTimePolicyService
 from tests._support.fakes import FakeForgeQueryPort
 
 
@@ -24,7 +33,7 @@ def test_normalize_llm_payload_coerces_common_alternate_shapes() -> None:
         "notes": "single note",
     }
 
-    out = PlanService._normalize_llm_payload(payload, candidate_columns=candidate_columns)
+    out = SqlJsonBuilder.normalize_llm_payload(payload, candidate_columns=candidate_columns)
 
     assert out["selected_columns"] == [
         {"concept_key": "RACE", "model_column_id": 383},
@@ -52,7 +61,7 @@ def test_normalize_llm_payload_can_map_filter_column_expression() -> None:
         "confidence": 2.2,
     }
 
-    out = PlanService._normalize_llm_payload(payload, candidate_columns=candidate_columns)
+    out = SqlJsonBuilder.normalize_llm_payload(payload, candidate_columns=candidate_columns)
     assert out["filters"] == [{"concept_key": "RACE", "op": "=", "value": "black"}]
     assert out["confidence"] == 1.0
 
@@ -71,14 +80,7 @@ def test_apply_value_aliases_to_llm_plan_rewrites_filter_and_sql_json() -> None:
             }
         ]
     ]
-    svc = PlanService(
-        sql=sql,
-        deterministic=object(),
-        concept_retrieval=object(),
-        concept_to_column=object(),
-        column_vector=object(),
-        llm_client=object(),
-    )
+    applier = ValueAliasApplier(sql=sql)
     llm_plan = {
         "sql_json": {
             "where": [
@@ -96,7 +98,7 @@ def test_apply_value_aliases_to_llm_plan_rewrites_filter_and_sql_json() -> None:
         "notes": [],
     }
 
-    out = svc._apply_value_aliases_to_llm_plan(vertical_norm="education", llm_plan=llm_plan)
+    out = applier.apply(llm_plan=llm_plan)
 
     assert out["filters"] == [
         {"concept_key": "DISTRICT_NAME", "op": "=", "value": "Metro Schools District"}
@@ -104,6 +106,8 @@ def test_apply_value_aliases_to_llm_plan_rewrites_filter_and_sql_json() -> None:
     assert out["sql_json"]["where"][0]["param"]["value"] == "Metro Schools District"
     assert "value_aliases_applied=1" in out["notes"]
     assert len(sql.query_mappings_calls) == 1
+    assert "vertical_norm" not in (sql.query_mappings_calls[0].params or {})
+    assert "va.vertical_norm" not in sql.query_mappings_calls[0].query
     assert "FROM semantic_value_alias va" in sql.query_mappings_calls[0].query
 
 
@@ -137,7 +141,7 @@ def test_ground_plan_builds_sql_json_from_grounded_candidates() -> None:
         notes=[],
     )
 
-    out = PlanService._ground_plan(
+    out = SqlJsonBuilder.ground_plan(
         plan,
         candidate_columns,
         concepts,
@@ -178,7 +182,7 @@ def test_ground_plan_drops_filters_without_mapped_columns() -> None:
         notes=[],
     )
 
-    out = PlanService._ground_plan(
+    out = SqlJsonBuilder.ground_plan(
         plan,
         candidate_columns,
         concepts,
@@ -189,6 +193,104 @@ def test_ground_plan_drops_filters_without_mapped_columns() -> None:
     assert out["filters"] == []
     assert out["sql_json"]["filters"] is None
     assert "grounding_removed=1" in out["notes"]
+
+
+def test_build_grounded_sql_json_drops_invalid_set_domain_edit(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _BrokenSetDomainEdit:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+            raise ValueError("bad setDomain edit")
+
+    monkeypatch.setattr(sql_json_builder, "SetDomainEdit", _BrokenSetDomainEdit)
+
+    sql_json, dropped = SqlJsonBuilder.build_grounded_sql_json(
+        prompt="show students",
+        domain_id=77,
+        selected_columns=[],
+        filters=[],
+        candidate_by_mid={},
+        candidate_by_concept={},
+        llm_sql_json={},
+    )
+
+    assert dropped == 1
+    assert sql_json["meta"]["tool"] == "semantic_plan"
+
+
+def test_build_grounded_sql_json_surfaces_unexpected_set_domain_edit_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _BrokenSetDomainEdit:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+            raise AssertionError("unexpected setDomain bug")
+
+    monkeypatch.setattr(sql_json_builder, "SetDomainEdit", _BrokenSetDomainEdit)
+
+    with pytest.raises(AssertionError, match="unexpected setDomain bug"):
+        SqlJsonBuilder.build_grounded_sql_json(
+            prompt="show students",
+            domain_id=77,
+            selected_columns=[],
+            filters=[],
+            candidate_by_mid={},
+            candidate_by_concept={},
+            llm_sql_json={},
+        )
+
+
+def test_build_grounded_sql_json_drops_invalid_add_select_edit(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _BrokenAddSelectEdit:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+            raise ValueError("bad addSelect edit")
+
+    monkeypatch.setattr(sql_json_builder, "AddSelectEdit", _BrokenAddSelectEdit)
+
+    sql_json, dropped = SqlJsonBuilder.build_grounded_sql_json(
+        prompt="show students",
+        domain_id=None,
+        selected_columns=[{"concept_key": "STUDENT_ID", "model_column_id": 1115}],
+        filters=[],
+        candidate_by_mid={
+            1115: {
+                "model_column_id": 1115,
+                "workspace_table_id": 501,
+                "column_name": "k_student",
+                "concept_key": "STUDENT_ID",
+            }
+        },
+        candidate_by_concept={},
+        llm_sql_json={},
+    )
+
+    assert dropped == 1
+    assert sql_json["columns"] == []
+
+
+def test_build_grounded_sql_json_surfaces_unexpected_add_select_edit_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _BrokenAddSelectEdit:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+            raise AssertionError("unexpected addSelect bug")
+
+    monkeypatch.setattr(sql_json_builder, "AddSelectEdit", _BrokenAddSelectEdit)
+
+    with pytest.raises(AssertionError, match="unexpected addSelect bug"):
+        SqlJsonBuilder.build_grounded_sql_json(
+            prompt="show students",
+            domain_id=None,
+            selected_columns=[{"concept_key": "STUDENT_ID", "model_column_id": 1115}],
+            filters=[],
+            candidate_by_mid={
+                1115: {
+                    "model_column_id": 1115,
+                    "workspace_table_id": 501,
+                    "column_name": "k_student",
+                    "concept_key": "STUDENT_ID",
+                }
+            },
+            candidate_by_concept={},
+            llm_sql_json={},
+        )
 
 
 def test_apply_value_aliases_to_llm_plan_rewrites_sql_json_filter_tree_values() -> None:
@@ -205,14 +307,7 @@ def test_apply_value_aliases_to_llm_plan_rewrites_sql_json_filter_tree_values() 
             }
         ]
     ]
-    svc = PlanService(
-        sql=sql,
-        deterministic=object(),
-        concept_retrieval=object(),
-        concept_to_column=object(),
-        column_vector=object(),
-        llm_client=object(),
-    )
+    applier = ValueAliasApplier(sql=sql)
     llm_plan = {
         "sql_json": {
             "filters": {
@@ -236,9 +331,44 @@ def test_apply_value_aliases_to_llm_plan_rewrites_sql_json_filter_tree_values() 
         "notes": [],
     }
 
-    out = svc._apply_value_aliases_to_llm_plan(vertical_norm="education", llm_plan=llm_plan)
+    out = applier.apply(llm_plan=llm_plan)
 
     assert out["sql_json"]["filters"]["children"][0]["value"] == "Metro Schools District"
+    assert "vertical_norm" not in (sql.query_mappings_calls[0].params or {})
+    assert "va.vertical_norm" not in sql.query_mappings_calls[0].query
+
+
+def test_apply_value_aliases_to_llm_plan_surfaces_unexpected_json_roundtrip_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [
+            {
+                "concept_key": "DISTRICT_NAME",
+                "alias_value": "metro schools",
+                "canonical_value": "Metro Schools District",
+                "match_kind": "exact",
+                "weight": 1.0,
+                "vertical_norm": "education",
+            }
+        ]
+    ]
+    applier = ValueAliasApplier(sql=sql)
+    llm_plan = {
+        "sql_json": {"where": [{"value": "district_name", "op": "=", "param": {"value": "metro schools"}}]},
+        "selected_columns": [],
+        "filters": [{"concept_key": "DISTRICT_NAME", "op": "=", "value": "metro schools"}],
+        "join_plan": {},
+        "confidence": 0.8,
+        "notes": [],
+    }
+
+    def _boom(_value):
+        raise AssertionError("unexpected json roundtrip bug")
+
+    monkeypatch.setattr(value_alias_applier.json, "dumps", _boom)
+
+    with pytest.raises(AssertionError, match="unexpected json roundtrip bug"):
+        applier.apply(llm_plan=llm_plan)
 
 
 def test_plan_flow_keeps_birth_country_mapping_and_filter_column() -> None:
@@ -248,8 +378,8 @@ def test_plan_flow_keeps_birth_country_mapping_and_filter_column() -> None:
             return {"matched": [], "unmatched_tokens": ["kids", "born", "us"]}
 
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "Show all kids not born in the US",
                 "hits": [
@@ -367,8 +497,8 @@ def test_plan_flow_forces_canonical_district_filter_and_drops_locale_alias_filte
             return {"matched": [], "unmatched_tokens": ["metro", "schools"]}
 
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "metro schools",
                 "hits": [
@@ -444,8 +574,8 @@ def test_plan_flow_forces_canonical_district_filter_and_drops_locale_alias_filte
             }
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return [
                 {
                     "concept_key": "DISTRICT_NAME",
@@ -508,8 +638,8 @@ def test_plan_suppresses_identifier_concepts_when_prompt_has_no_identifier_inten
             return {"matched": [], "unmatched_tokens": []}
 
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "show students in metro schools",
                 "hits": [
@@ -540,8 +670,8 @@ def test_plan_suppresses_identifier_concepts_when_prompt_has_no_identifier_inten
             return {"filtered_to_candidate_count": 0, "hits": []}
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -584,8 +714,8 @@ def test_plan_keeps_identifier_concepts_when_prompt_requests_ids() -> None:
             return {"matched": [], "unmatched_tokens": []}
 
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "show student id and school id",
                 "hits": [
@@ -615,8 +745,8 @@ def test_plan_keeps_identifier_concepts_when_prompt_requests_ids() -> None:
             return {"filtered_to_candidate_count": 0, "hits": []}
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -657,8 +787,8 @@ def test_plan_black_kids_includes_race_from_lexical_alias_pass() -> None:
             return {"matched": [], "unmatched_tokens": ["black", "kids"]}
 
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "black kids",
                 "hits": [
@@ -687,8 +817,8 @@ def test_plan_black_kids_includes_race_from_lexical_alias_pass() -> None:
             return {"filtered_to_candidate_count": 0, "hits": []}
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -735,8 +865,8 @@ def test_plan_black_kids_includes_race_from_lexical_alias_pass() -> None:
 
 def test_plan_students_named_holden_prefers_student_name_mapping_and_filter() -> None:
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "Find all the students named Holden",
                 "hits": [
@@ -823,8 +953,8 @@ def test_plan_students_named_holden_prefers_student_name_mapping_and_filter() ->
             }
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -861,8 +991,8 @@ def test_plan_students_named_holden_prefers_student_name_mapping_and_filter() ->
 
 def test_plan_staff_named_holden_prefers_staff_name_filter() -> None:
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "Find all the staff named Holden",
                 "hits": [
@@ -912,8 +1042,8 @@ def test_plan_staff_named_holden_prefers_staff_name_filter() -> None:
             }
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -946,8 +1076,8 @@ def test_plan_staff_named_holden_prefers_staff_name_filter() -> None:
 
 def test_plan_validity_gate_injects_defaults_when_llm_returns_empty() -> None:
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "Find all the students named Holden",
                 "hits": [
@@ -997,8 +1127,8 @@ def test_plan_validity_gate_injects_defaults_when_llm_returns_empty() -> None:
             }
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -1041,8 +1171,8 @@ def test_plan_el_subgroup_injects_is_el_filter_and_keeps_sql_json() -> None:
             }
 
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "How many EL students were chronically absent last year?",
                 "hits": [
@@ -1089,8 +1219,8 @@ def test_plan_el_subgroup_injects_is_el_filter_and_keeps_sql_json() -> None:
             }
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -1135,8 +1265,8 @@ def test_plan_el_subgroup_injects_is_el_filter_and_keeps_sql_json() -> None:
 
 def test_plan_injects_student_first_last_and_school_filter_for_school_phrase_prompt() -> None:
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "Give me all the first and last names of all students at the Clarksville Elementary School",
                 "hits": [
@@ -1181,8 +1311,8 @@ def test_plan_injects_student_first_last_and_school_filter_for_school_phrase_pro
             }
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -1240,8 +1370,8 @@ def test_plan_injects_student_first_last_and_school_filter_for_school_phrase_pro
 
 def test_plan_injects_school_filter_for_quoted_school_phrase_prompt() -> None:
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": 'Give me all the first and last names of all students at "Clarksville Elementary School"',
                 "hits": [
@@ -1284,8 +1414,8 @@ def test_plan_injects_school_filter_for_quoted_school_phrase_prompt() -> None:
             }
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     class _DomainSelector:
@@ -1321,8 +1451,67 @@ def test_plan_injects_school_filter_for_quoted_school_phrase_prompt() -> None:
     )
 
 
+def test_filter_column_rank_prefers_dim_school_school_name() -> None:
+    dim_school_rank = SqlJsonBuilder.filter_column_rank(
+        concept_key="SCHOOL_NAME",
+        row={
+            "__selected__": False,
+            "table_name": "dim_school",
+            "column_name": "school_name",
+            "effective_weight": 1.0,
+            "model_column_id": 1,
+        },
+    )
+    fact_rank = SqlJsonBuilder.filter_column_rank(
+        concept_key="SCHOOL_NAME",
+        row={
+            "__selected__": False,
+            "table_name": "fct_student_school_association",
+            "column_name": "school_name",
+            "effective_weight": 1.1,
+            "model_column_id": 2,
+        },
+    )
+
+    assert dim_school_rank < fact_rank
+
+
+def test_build_default_projection_uses_semantic_projection_policy() -> None:
+    validator = PlanValidator()
+
+    out = validator._build_default_projection(
+        intent_entity="student",
+        mapped_columns=[
+            {"model_column_id": 1, "table_name": "dim_student", "concept_key": "FIRST_NAME", "effective_weight": 1.0, "final_score": 2.0},
+            {"model_column_id": 2, "table_name": "dim_student", "concept_key": "LAST_NAME", "effective_weight": 1.0, "final_score": 2.0},
+            {"model_column_id": 3, "table_name": "dim_student", "concept_key": "ID", "effective_weight": 1.0, "final_score": 2.0},
+        ],
+    )
+
+    assert out == [
+        {"concept_key": "ID", "model_column_id": 3},
+        {"concept_key": "FIRST_NAME", "model_column_id": 1},
+        {"concept_key": "LAST_NAME", "model_column_id": 2},
+    ]
+
+
+def test_select_preferred_time_column_uses_semantic_time_policy() -> None:
+    time_policy_svc = PlannerSemanticTimePolicyService()
+
+    out = time_policy_svc.select_preferred_time_column(
+        domain_hint="enrollment",
+        mapped_columns_for_time_concept=[
+            {"model_column_id": 2, "column_name": "year", "concept_key": "SCHOOL_YEAR", "final_score": 3.8},
+            {"model_column_id": 1, "column_name": "school_year", "concept_key": "SCHOOL_YEAR", "final_score": 3.7},
+        ],
+    )
+
+    assert out is not None
+    assert out["model_column_id"] == 1
+
+
 def test_plan_uses_tier2_school_slot_to_force_filter(monkeypatch) -> None:
-    import app.services.semantic.plan_service as plan_service_module
+    import app.services.semantic.plan.service as plan_service_module
 
     monkeypatch.setattr(plan_service_module, "NLP_TIER2_ENABLED", True)
 
@@ -1332,8 +1521,8 @@ def test_plan_uses_tier2_school_slot_to_force_filter(monkeypatch) -> None:
             return {"matched": [], "unmatched_tokens": []}
 
     class _ConceptRetrieval:
-        def search(self, *, prompt, vertical_norm, max_concepts, deterministic_matches):
-            del prompt, vertical_norm, max_concepts, deterministic_matches
+        def search(self, *, prompt, max_concepts, deterministic_matches):
+            del prompt, max_concepts, deterministic_matches
             return {
                 "query_text": "students at Clarksville Elementary School",
                 "hits": [
@@ -1414,8 +1603,8 @@ def test_plan_uses_tier2_school_slot_to_force_filter(monkeypatch) -> None:
             return {"domain_id": None, "source": "auto", "threshold_met": False, "domains": []}
 
     class _ValueAliasResolver:
-        def resolve(self, *, prompt, vertical_norm):
-            del prompt, vertical_norm
+        def resolve(self, *, prompt):
+            del prompt
             return []
 
     svc = PlanService(

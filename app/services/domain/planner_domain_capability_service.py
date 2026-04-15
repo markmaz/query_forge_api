@@ -5,6 +5,9 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
+from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.models.domain.planner_rerank_policy import (
@@ -15,6 +18,9 @@ from app.models.domain.planner_rerank_policy import (
 from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
+
+CAPABILITY_LOOKUP_FALLBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError)
+CAPABILITY_RECORD_VALIDATION_ERRORS = (ValidationError, ValueError, TypeError)
 
 
 class PlannerDomainCapabilityService:
@@ -27,7 +33,6 @@ class PlannerDomainCapabilityService:
         workspace_id: str,
         user_id: str,
         base_domain_id: int,
-        vertical_norm: str = "generic",
         include_inactive: bool = False,
     ) -> Dict[str, Any]:
         domain_row = self._load_domain_row(
@@ -41,7 +46,6 @@ class PlannerDomainCapabilityService:
               id,
               scope_type,
               scope_workspace_id,
-              scope_vertical_norm,
               base_domain_id,
               capability_key,
               support_level,
@@ -56,17 +60,14 @@ class PlannerDomainCapabilityService:
             WHERE base_domain_id = :base_domain_id
               AND (
                 scope_type = 'global'
-                OR (scope_type = 'vertical' AND scope_vertical_norm = :vertical_norm)
                 OR (scope_type = 'workspace' AND scope_workspace_id = :workspace_id)
                 OR (scope_type = 'global_domain')
-                OR (scope_type = 'vertical_domain' AND scope_vertical_norm = :vertical_norm)
                 OR (scope_type = 'workspace_domain' AND scope_workspace_id = :workspace_id)
               )
             {"AND is_active = 1" if not include_inactive else ""}
             """,
             {
                 "workspace_id": str(workspace_id),
-                "vertical_norm": str(vertical_norm or "generic"),
                 "base_domain_id": int(base_domain_id),
             },
         )
@@ -75,7 +76,7 @@ class PlannerDomainCapabilityService:
             payload = _json_safe_mapping(dict(row))
             try:
                 payload.update(PlannerDomainCapabilityRecord(**payload).model_dump())
-            except Exception:
+            except CAPABILITY_RECORD_VALIDATION_ERRORS:
                 pass
             payload["is_active"] = bool(payload.get("is_active"))
             payload["is_inherited"] = str(payload.get("scope_type") or "") not in {"workspace", "workspace_domain"}
@@ -90,7 +91,6 @@ class PlannerDomainCapabilityService:
         )
         return {
             "workspace_id": str(workspace_id),
-            "vertical_norm": str(vertical_norm or "generic"),
             "base_domain_id": int(base_domain_id),
             "domain_name": str(domain_row.get("domain_name") or "").strip() or None,
             "can_edit": bool(domain_row.get("can_edit")),
@@ -118,7 +118,6 @@ class PlannerDomainCapabilityService:
         params = {
             "scope_type": req.scope_type,
             "scope_workspace_id": req.scope_workspace_id or (workspace_id if req.scope_type.startswith("workspace") else None),
-            "scope_vertical_norm": req.scope_vertical_norm,
             "base_domain_id": int(req.base_domain_id),
             "capability_key": req.capability_key,
             "support_level": req.support_level,
@@ -147,10 +146,6 @@ class PlannerDomainCapabilityService:
                     OR scope_workspace_id = :scope_workspace_id
                   )
                   AND (
-                    (scope_vertical_norm IS NULL AND :scope_vertical_norm IS NULL)
-                    OR scope_vertical_norm = :scope_vertical_norm
-                  )
-                  AND (
                     (source_ref IS NULL AND :source_ref IS NULL)
                     OR source_ref = :source_ref
                   )
@@ -168,7 +163,6 @@ class PlannerDomainCapabilityService:
                     UPDATE planner_domain_capability
                     SET scope_type = :scope_type,
                         scope_workspace_id = :scope_workspace_id,
-                        scope_vertical_norm = :scope_vertical_norm,
                         base_domain_id = :base_domain_id,
                         capability_key = :capability_key,
                         support_level = :support_level,
@@ -189,7 +183,6 @@ class PlannerDomainCapabilityService:
                     INSERT INTO planner_domain_capability (
                       scope_type,
                       scope_workspace_id,
-                      scope_vertical_norm,
                       base_domain_id,
                       capability_key,
                       support_level,
@@ -201,7 +194,6 @@ class PlannerDomainCapabilityService:
                     ) VALUES (
                       :scope_type,
                       :scope_workspace_id,
-                      :scope_vertical_norm,
                       :base_domain_id,
                       :capability_key,
                       :support_level,
@@ -235,7 +227,6 @@ class PlannerDomainCapabilityService:
             "capability_id": capability_id,
             "scope_type": params["scope_type"],
             "scope_workspace_id": params["scope_workspace_id"],
-            "scope_vertical_norm": params["scope_vertical_norm"],
             "base_domain_id": params["base_domain_id"],
             "capability_key": params["capability_key"],
             "support_level": params["support_level"],
@@ -276,14 +267,12 @@ class PlannerDomainCapabilityService:
         self,
         *,
         workspace_id: str,
-        vertical_norm: str,
         base_domain_id: int,
         capabilities: Mapping[str, Any],
         shortlisted_columns: Sequence[Mapping[str, Any]],
     ) -> Dict[str, Any]:
         explicit_rows = self._load_effective_capability_rows(
             workspace_id=workspace_id,
-            vertical_norm=vertical_norm,
             base_domain_id=base_domain_id,
         )
         inferred_rows = _infer_capability_rows(capabilities=capabilities, shortlisted_columns=shortlisted_columns)
@@ -308,7 +297,6 @@ class PlannerDomainCapabilityService:
         self,
         *,
         workspace_id: str,
-        vertical_norm: str,
         base_domain_id: int,
     ) -> List[Dict[str, Any]]:
         try:
@@ -317,7 +305,6 @@ class PlannerDomainCapabilityService:
                 SELECT
                   scope_type,
                   scope_workspace_id,
-                  scope_vertical_norm,
                   base_domain_id,
                   capability_key,
                   support_level,
@@ -330,24 +317,20 @@ class PlannerDomainCapabilityService:
                   AND base_domain_id = :base_domain_id
                   AND (
                     scope_type = 'global'
-                    OR (scope_type = 'vertical' AND scope_vertical_norm = :vertical_norm)
                     OR (scope_type = 'workspace' AND scope_workspace_id = :workspace_id)
                     OR (scope_type = 'global_domain')
-                    OR (scope_type = 'vertical_domain' AND scope_vertical_norm = :vertical_norm)
                     OR (scope_type = 'workspace_domain' AND scope_workspace_id = :workspace_id)
                   )
                 """,
                 {
                     "workspace_id": str(workspace_id),
-                    "vertical_norm": str(vertical_norm or "generic"),
                     "base_domain_id": int(base_domain_id),
                 },
             )
-        except Exception as exc:  # pragma: no cover - defensive runtime fallback
+        except CAPABILITY_LOOKUP_FALLBACK_ERRORS as exc:  # pragma: no cover - defensive runtime fallback
             logger.warning(
-                "planner domain capability lookup failed workspace_id=%s vertical_norm=%s base_domain_id=%s err=%s",
+                "planner domain capability lookup failed workspace_id=%s base_domain_id=%s err=%s",
                 workspace_id,
-                vertical_norm,
                 base_domain_id,
                 exc,
             )
@@ -356,7 +339,7 @@ class PlannerDomainCapabilityService:
         for row in rows:
             try:
                 record = PlannerDomainCapabilityRecord(**dict(row))
-            except Exception:
+            except CAPABILITY_RECORD_VALIDATION_ERRORS:
                 continue
             current = by_key.get(record.capability_key)
             record_payload = record.model_dump()
@@ -398,7 +381,6 @@ class PlannerDomainCapabilityService:
               id,
               scope_type,
               scope_workspace_id,
-              scope_vertical_norm,
               base_domain_id,
               capability_key,
               support_level,
@@ -421,10 +403,8 @@ class PlannerDomainCapabilityService:
 def _capability_rank(row: Mapping[str, Any]) -> Tuple[int, float]:
     scope_type = str(row.get("scope_type") or "").strip().lower()
     scope_rank = {
-        "workspace_domain": 6,
-        "workspace": 5,
-        "vertical_domain": 4,
-        "vertical": 3,
+        "workspace_domain": 4,
+        "workspace": 3,
         "global_domain": 2,
         "global": 1,
     }.get(scope_type, 0)

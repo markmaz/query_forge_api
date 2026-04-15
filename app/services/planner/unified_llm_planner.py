@@ -31,7 +31,6 @@ def build_plan_and_slots(
     prompt: str,
     normalized_prompt: str,
     workspace_id: str,
-    vertical_norm: str,
     base_domain_id: int,
     domain_name: str | None,
     capabilities_compact: dict,
@@ -59,7 +58,6 @@ def build_plan_and_slots(
         prompt=prompt,
         normalized_prompt=normalized_prompt,
         workspace_id=workspace_id,
-        vertical_norm=vertical_norm,
         base_domain_id=base_domain_id,
         domain_name=domain_name,
         capabilities_compact=capabilities_compact,
@@ -184,7 +182,6 @@ def _build_unified_user_prompt(
     prompt: str,
     normalized_prompt: str,
     workspace_id: str,
-    vertical_norm: str,
     base_domain_id: int,
     domain_name: Optional[str],
     capabilities_compact: Mapping[str, Any],
@@ -196,7 +193,6 @@ def _build_unified_user_prompt(
         "normalized_prompt": normalized_prompt,
         "current_date": date.today().isoformat(),
         "workspace_id": workspace_id,
-        "vertical_norm": vertical_norm,
         "base_domain_id": int(base_domain_id),
         "domain_name": str(domain_name or ""),
         "allowed": dict(capabilities_compact or {}),
@@ -234,12 +230,12 @@ def _parse_unified_trace(trace: Mapping[str, Any]) -> tuple[Optional[Dict[str, A
         try:
             strict = parse_json_strict(json.dumps(dict(parsed_payload), ensure_ascii=True))
             return strict, raw_payload
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             pass
     try:
         strict = parse_json_strict(raw_payload)
         return strict, raw_payload
-    except Exception:
+    except (TypeError, ValueError, json.JSONDecodeError):
         return None, raw_payload
 
 
@@ -251,7 +247,7 @@ def _extract_first_json_object(raw: str) -> Optional[Dict[str, Any]]:
         parsed = json.loads(text)
         if isinstance(parsed, dict):
             return parsed
-    except Exception:
+    except (TypeError, ValueError, json.JSONDecodeError):
         pass
     decoder = json.JSONDecoder()
     for idx, ch in enumerate(text):
@@ -259,7 +255,7 @@ def _extract_first_json_object(raw: str) -> Optional[Dict[str, Any]]:
             continue
         try:
             parsed, _ = decoder.raw_decode(text[idx:])
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             continue
         if isinstance(parsed, dict):
             return parsed
@@ -273,7 +269,7 @@ def _extract_provider_model_and_tokens(*, trace: Mapping[str, Any], fallback_mod
     if raw_text:
         try:
             provider_body = json.loads(raw_text)
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             provider_body = None
         if isinstance(provider_body, Mapping):
             provider_model = provider_body.get("model")

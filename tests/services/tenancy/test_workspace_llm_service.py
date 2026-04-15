@@ -243,3 +243,30 @@ def test_test_connection_uses_ollama_tags_endpoint(service, mock_sql):
         "http://localhost:11434/api/tags",
         timeout=10,
     )
+
+
+def test_test_connection_returns_failure_for_expected_runtime_errors(service, mock_sql):
+    row = _make_row(encrypted_key="enc_key")
+    row["provider"] = "openai"
+    mock_sql.execute_query_mappings.return_value = [row]
+
+    with (
+        patch("app.services.tenancy.workspace_llm_service.decrypt_api_key", return_value="sk-real"),
+        patch.object(service, "_test_openai_compatible", side_effect=RuntimeError("temporary connectivity issue")),
+    ):
+        result = service.test_connection(1)
+
+    assert result == {"success": False, "message": "temporary connectivity issue"}
+
+
+def test_test_connection_surfaces_unexpected_errors(service, mock_sql):
+    row = _make_row(encrypted_key="enc_key")
+    row["provider"] = "openai"
+    mock_sql.execute_query_mappings.return_value = [row]
+
+    with (
+        patch("app.services.tenancy.workspace_llm_service.decrypt_api_key", return_value="sk-real"),
+        patch.object(service, "_test_openai_compatible", side_effect=AssertionError("unexpected connection bug")),
+    ):
+        with pytest.raises(AssertionError, match="unexpected connection bug"):
+            service.test_connection(1)

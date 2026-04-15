@@ -7,6 +7,7 @@ import pytest
 
 from app.adapters.query_port import ForgeExecResult
 from app.exceptions.forge_error import ForgeError
+import app.services.domain.planner_rerank_policy_service as planner_rerank_policy_service
 from app.services.domain.planner_rerank_policy_service import PlannerRerankPolicyService
 
 
@@ -104,16 +105,16 @@ def test_get_applicable_policies_orders_by_scope_then_priority() -> None:
                 _policy_row(id=1, policy_key="global_rule", scope_type="global", priority=200),
                 _policy_row(id=2, policy_key="workspace_rule", scope_type="workspace", priority=200),
                 _policy_row(id=3, policy_key="workspace_domain_rule", scope_type="workspace_domain", priority=300),
-                _policy_row(id=4, policy_key="vertical_rule", scope_type="vertical", priority=100),
+                _policy_row(id=4, policy_key="global_domain_rule", scope_type="global_domain", priority=100),
             ]
         ]
     )
     svc = PlannerRerankPolicyService(sql=sql)
-    out = svc.get_applicable_policies(workspace_id="ws-1", vertical_norm="education", base_domain_id=9)
+    out = svc.get_applicable_policies(workspace_id="ws-1", base_domain_id=9)
     assert [row["policy_key"] for row in out] == [
         "workspace_domain_rule",
         "workspace_rule",
-        "vertical_rule",
+        "global_domain_rule",
         "global_rule",
     ]
 
@@ -133,7 +134,6 @@ def test_list_policies_includes_domain_context_and_inherited_flags() -> None:
         workspace_id="ws-1",
         user_id="user-1",
         base_domain_id=9,
-        vertical_norm="education",
         include_inactive=False,
     )
 
@@ -239,3 +239,63 @@ def test_delete_policy_removes_existing_row() -> None:
     )
 
     assert out == {"deleted": True, "policy_id": 14}
+
+
+def test_get_applicable_policies_returns_empty_on_expected_lookup_error() -> None:
+    sql = _FakeSQL(rows_by_call=[])
+    sql.execute_query_mappings = lambda query, params=None: (_ for _ in ()).throw(RuntimeError("db unavailable"))  # type: ignore[method-assign]
+    svc = PlannerRerankPolicyService(sql=sql)
+
+    out = svc.get_applicable_policies(workspace_id="ws-1", base_domain_id=9)
+
+    assert out == []
+
+
+def test_get_applicable_policies_surfaces_unexpected_lookup_error() -> None:
+    sql = _FakeSQL(rows_by_call=[])
+    sql.execute_query_mappings = lambda query, params=None: (_ for _ in ()).throw(AssertionError("lookup bug"))  # type: ignore[method-assign]
+    svc = PlannerRerankPolicyService(sql=sql)
+
+    with pytest.raises(AssertionError, match="lookup bug"):
+        svc.get_applicable_policies(workspace_id="ws-1", base_domain_id=9)
+
+
+def test_parse_policy_rule_wraps_expected_json_parse_errors() -> None:
+    with pytest.raises(ForgeError, match="Invalid planner rerank policy JSON"):
+        planner_rerank_policy_service._parse_policy_rule("{not json}")
+
+
+def test_parse_policy_rule_surfaces_unexpected_json_parse_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        planner_rerank_policy_service.json,
+        "loads",
+        lambda value: (_ for _ in ()).throw(AssertionError("json bug")),
+    )
+
+    with pytest.raises(AssertionError, match="json bug"):
+        planner_rerank_policy_service._parse_policy_rule('{"version": 1}')
+
+
+def test_parse_policy_rule_wraps_expected_validation_errors() -> None:
+    with pytest.raises(ForgeError, match="Invalid planner rerank policy JSON"):
+        planner_rerank_policy_service._parse_policy_rule({"version": 1})
+
+
+def test_parse_policy_rule_surfaces_unexpected_validation_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        planner_rerank_policy_service.PlannerRerankPolicyRule,
+        "model_validate",
+        lambda value: (_ for _ in ()).throw(AssertionError("validation bug")),
+    )
+
+    with pytest.raises(AssertionError, match="validation bug"):
+        planner_rerank_policy_service._parse_policy_rule(
+            {
+                "version": 1,
+                "when_signals_all": ["student_listing"],
+                "prefer_capabilities": ["STUDENT_IDENTITY"],
+                "boost": 0.2,
+                "penalty": 0.0,
+                "max_effect": 0.2,
+            }
+        )
