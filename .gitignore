@@ -8,3 +8,4 @@ venv/
 /models/
 infra/qdrant/storage/
 /logs
+/logs/plan_domain_pipeline_timing.log
