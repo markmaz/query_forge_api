@@ -60,3 +60,24 @@ def test_build_db_params_normalizes_booleans_and_projection_scope() -> None:
     assert params["is_active"] == 1
     assert params["stop_on_match"] == 0
     assert '"projection_mode": "prepend"' in params["policy_json"]
+
+
+def test_resolve_db_uri_prefers_flag_overrides(monkeypatch) -> None:
+    monkeypatch.setenv("DB_HOST", "env-host")
+    monkeypatch.setenv("DB_USER", "env-user")
+    monkeypatch.setenv("DB_PASSWORD", "env-pass")
+    monkeypatch.setenv("DB_NAME", "env-db")
+    monkeypatch.setenv("DB_PORT", "3307")
+    monkeypatch.delenv("DB_URI", raising=False)
+
+    uri = seed_module._resolve_db_uri(
+        {
+            "host": "flag-host",
+            "user": "flag-user",
+            "password": "flag-pass",
+            "database": "flag-db",
+            "port": "3308",
+        }
+    )
+
+    assert "flag-user:flag-pass@flag-host:3308/flag-db" in uri

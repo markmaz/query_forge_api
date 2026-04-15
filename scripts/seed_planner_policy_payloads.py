@@ -8,12 +8,16 @@ from pathlib import Path
 import sys
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
-from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, URL
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.engine.result import Result
 from sqlalchemy.pool import QueuePool
+
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:  # pragma: no cover - exercised in production envs without python-dotenv
+    load_dotenv = None
 
 API_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -22,7 +26,8 @@ DEFAULT_PAYLOAD_PATH = REPO_ROOT / "docs/plans/2026-04-14-planner-policy-seed-im
 if str(API_ROOT) not in sys.path:
     sys.path.insert(0, str(API_ROOT))
 
-load_dotenv(API_ROOT / ".env")
+if load_dotenv is not None:
+    load_dotenv(API_ROOT / ".env")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -44,6 +49,31 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Show what would be inserted or updated without writing to the database.",
+    )
+    parser.add_argument(
+        "--db-host",
+        default="",
+        help="Override DB host for this run.",
+    )
+    parser.add_argument(
+        "--db-user",
+        default="",
+        help="Override DB user for this run.",
+    )
+    parser.add_argument(
+        "--db-password",
+        default="",
+        help="Override DB password for this run.",
+    )
+    parser.add_argument(
+        "--db-name",
+        default="",
+        help="Override DB name for this run.",
+    )
+    parser.add_argument(
+        "--db-port",
+        default="",
+        help="Optional DB port override for this run.",
     )
     return parser
 
@@ -93,6 +123,7 @@ def seed_policies(
     document: Mapping[str, Any],
     requested_families: Sequence[str],
     dry_run: bool,
+    db_config: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     families = select_families(document, requested_families)
     summary: Dict[str, Any] = {
@@ -120,7 +151,7 @@ def seed_policies(
             summary["processed"] += len(payloads)
         return summary
 
-    with _transaction() as tx:
+    with _transaction(db_config=db_config) as tx:
         for family in families:
             family_key = str(family.get("family_key") or "").strip()
             if family_key == "":
@@ -142,16 +173,27 @@ def seed_policies(
     return summary
 
 
-def _resolve_db_uri() -> str:
+def _build_db_config(args: argparse.Namespace) -> Dict[str, Any]:
+    return {
+        "host": str(getattr(args, "db_host", "") or "").strip(),
+        "user": str(getattr(args, "db_user", "") or "").strip(),
+        "password": str(getattr(args, "db_password", "") or ""),
+        "database": str(getattr(args, "db_name", "") or "").strip(),
+        "port": str(getattr(args, "db_port", "") or "").strip(),
+    }
+
+
+def _resolve_db_uri(db_config: Optional[Mapping[str, Any]] = None) -> str:
     direct_uri = str(os.getenv("DB_URI") or "").strip()
     if direct_uri:
         return direct_uri
 
-    host = str(os.getenv("DB_HOST") or "").strip()
-    user = str(os.getenv("DB_USER") or "").strip()
-    password = str(os.getenv("DB_PASSWORD") or "")
-    database = str(os.getenv("DB_NAME") or "").strip()
-    port_raw = str(os.getenv("DB_PORT") or "").strip()
+    db_config = dict(db_config or {})
+    host = str(db_config.get("host") or os.getenv("DB_HOST") or "").strip()
+    user = str(db_config.get("user") or os.getenv("DB_USER") or "").strip()
+    password = str(db_config.get("password") or os.getenv("DB_PASSWORD") or "")
+    database = str(db_config.get("database") or os.getenv("DB_NAME") or "").strip()
+    port_raw = str(db_config.get("port") or os.getenv("DB_PORT") or "").strip()
     port = int(port_raw) if port_raw else 3306
 
     missing = [name for name, value in (("DB_HOST", host), ("DB_USER", user), ("DB_NAME", database)) if not value]
@@ -173,9 +215,9 @@ def _resolve_db_uri() -> str:
     )
 
 
-def _build_engine():
+def _build_engine(*, db_config: Optional[Mapping[str, Any]] = None):
     return create_engine(
-        _resolve_db_uri(),
+        _resolve_db_uri(db_config=db_config),
         poolclass=QueuePool,
         pool_size=int(os.getenv("POOL_SIZE", "5")),
         max_overflow=int(os.getenv("MAX_OVERFLOW", "5")),
@@ -209,8 +251,8 @@ class _SeedTransaction:
 
 
 @contextmanager
-def _transaction():
-    engine = _build_engine()
+def _transaction(*, db_config: Optional[Mapping[str, Any]] = None):
+    engine = _build_engine(db_config=db_config)
     conn = engine.connect()
     tx = conn.begin()
     try:
@@ -326,10 +368,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     payload_path = Path(args.payload_file).expanduser().resolve()
     document = load_seed_document(payload_path)
     document["_payload_file"] = str(payload_path)
+    db_config = _build_db_config(args)
     summary = seed_policies(
         document=document,
         requested_families=args.family,
         dry_run=bool(args.dry_run),
+        db_config=db_config,
     )
     print(json.dumps(summary, indent=2, ensure_ascii=True, sort_keys=False))
 
