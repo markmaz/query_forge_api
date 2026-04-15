@@ -31,7 +31,6 @@ _analyze_model = forge_match_ns.model(
     "ForgeMatchAnalyzeRequest",
     {
         "top_n": fields.Integer(required=False, default=8),
-        "vertical_norm": fields.String(required=False),
         "domain_id": fields.Integer(required=False),
         "force": fields.Boolean(required=False, default=False),
         "llm_id": fields.Integer(required=False, description="Optional workspace LLM id override"),
@@ -198,7 +197,6 @@ class ForgeMatchAnalyze(Resource):
             result = service.analyze_session(
                 workspace_id=workspace_id,
                 session_id=session_id,
-                vertical_norm=req.vertical_norm,
                 domain_id=req.domain_id,
                 top_n=req.top_n,
                 force=req.force,
@@ -229,7 +227,6 @@ class ForgeMatchAnalyzeStart(Resource):
             run = service.start_analyze_session_job(
                 workspace_id=workspace_id,
                 session_id=session_id,
-                vertical_norm=req.vertical_norm,
                 domain_id=req.domain_id,
                 top_n=req.top_n,
                 force=req.force,
@@ -247,7 +244,6 @@ class ForgeMatchAnalyzeStart(Resource):
                             "session_id": session_id,
                             "top_n": req.top_n,
                             "domain_id": req.domain_id,
-                            "vertical_norm": req.vertical_norm,
                             "force": req.force,
                             "llm_id": req.llm_id,
                         },

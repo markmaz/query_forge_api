@@ -1,10 +1,11 @@
 from app.api_config import NAME, VERSION, build_url
-from app.routes.ai import ai_ns
-from app.routes.chat_minimal import chat_ns
-from app.routes.nlp_review import nlp_review_ns
-from app.routes.nlp_routes import nlp_ns
-from app.routes.nlp_tier2 import nlp_tier2_ns
-from app.routes.prompt_feedback import prompt_feedback_ns
+
+from .ai_api import ai_ns
+from .chat_api import chat_ns
+from .nlp_api import nlp_ns
+from .nlp_review_api import nlp_review_ns
+from .nlp_tier2_api import nlp_tier2_ns
+from .prompt_feedback_api import prompt_feedback_ns
 
 
 def register(api):

@@ -1,6 +1,7 @@
 from app.api_config import NAME, VERSION, build_url
-from app.routes.forge_insights import forge_insights_ns
-from app.routes.forge_match_routes import forge_match_ns
+
+from .forge_insights_api import forge_insights_ns
+from .forge_match_api import forge_match_ns
 
 
 def register(api):

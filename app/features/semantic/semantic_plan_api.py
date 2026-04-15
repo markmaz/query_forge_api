@@ -13,7 +13,6 @@ from app.routes.request_helpers import extract_workspace_id
 from app.services.semantic.plan_service import PlanService
 
 from .schemas import register_plan_models
-from .service import semantic_feature_service
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +29,7 @@ class SemanticPlan(Resource):
         try:
             body: Dict[str, Any] = request.get_json(silent=True) or {}
             body["workspace_id"] = extract_workspace_id()
-            result = semantic_feature_service.build_plan_service(plan_service_factory=PlanService).plan(
-                body, include_llm=True
-            )
+            result = PlanService().plan(body, include_llm=True)
             return _shape_plan_response(result), 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -50,9 +47,7 @@ class SemanticSuggestColumns(Resource):
         try:
             body: Dict[str, Any] = request.get_json(silent=True) or {}
             body["workspace_id"] = extract_workspace_id()
-            result = semantic_feature_service.build_plan_service(plan_service_factory=PlanService).plan(
-                body, include_llm=False
-            )
+            result = PlanService().plan(body, include_llm=False)
             return result, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code

@@ -13,7 +13,6 @@ from app.routes.request_helpers import int_arg
 from app.services.semantic.semantic_registry_service import SemanticRegistryService
 
 from .schemas import register_registry_models
-from .service import semantic_feature_service
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +26,6 @@ class SemanticRegistryCollection(Resource):
     @require_access("semantic")
     @semantic_registry_ns.doc(
         params={
-            "vertical": "Filter by vertical scope",
             "q": "Search concept_key and description",
             "semantic_type": "Filter by semantic_type",
             "entity": "Filter by entity",
@@ -37,10 +35,7 @@ class SemanticRegistryCollection(Resource):
     )
     def get(self):
         try:
-            result = semantic_feature_service.build_registry_service(
-                registry_service_factory=SemanticRegistryService
-            ).list_entries(
-                vertical=(request.args.get("vertical") or None),
+            result = SemanticRegistryService().list_entries(
                 q=(request.args.get("q") or None),
                 semantic_type=(request.args.get("semantic_type") or None),
                 entity=(request.args.get("entity") or None),
@@ -60,9 +55,7 @@ class SemanticRegistryCollection(Resource):
     def post(self):
         try:
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            row = semantic_feature_service.build_registry_service(
-                registry_service_factory=SemanticRegistryService
-            ).create_entry(body)
+            row = SemanticRegistryService().create_entry(body)
             return {"row": row}, 201
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -77,9 +70,7 @@ class SemanticRegistryById(Resource):
     @require_access("semantic")
     def get(self, entry_id: int):
         try:
-            row = semantic_feature_service.build_registry_service(
-                registry_service_factory=SemanticRegistryService
-            ).get_entry(entry_id)
+            row = SemanticRegistryService().get_entry(entry_id)
             return {"row": row}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -93,9 +84,7 @@ class SemanticRegistryById(Resource):
     def patch(self, entry_id: int):
         try:
             body: Dict[str, Any] = request.get_json(silent=True) or {}
-            row = semantic_feature_service.build_registry_service(
-                registry_service_factory=SemanticRegistryService
-            ).update_entry(entry_id, body)
+            row = SemanticRegistryService().update_entry(entry_id, body)
             return {"row": row}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
@@ -107,9 +96,7 @@ class SemanticRegistryById(Resource):
     @require_access("semantic", role="admin")
     def delete(self, entry_id: int):
         try:
-            semantic_feature_service.build_registry_service(registry_service_factory=SemanticRegistryService).delete_entry(
-                entry_id
-            )
+            SemanticRegistryService().delete_entry(entry_id)
             return {"deleted": True, "id": entry_id}, 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code

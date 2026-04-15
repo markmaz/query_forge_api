@@ -2,7 +2,7 @@ from app.api_config import NAME, VERSION, build_url
 from app.features.query_engine.query_forge_api import query_forge_ns
 from app.features.query_engine.query_studio_api import query_studio_ns
 from app.features.query_engine.query_studio_summary_api import query_studio_summary_ns
-from app.features.query_engine.query_tree_api import qf_tree_ns
+from app.features.saved_queries.query_tree_api import qf_tree_ns
 
 
 def register(api):
