@@ -5,6 +5,21 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _parse_allowed_origins(*raw_values: str | None) -> tuple[str, ...]:
+    allowed: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        if raw is None:
+            continue
+        for piece in str(raw).split(","):
+            origin = piece.strip().rstrip("/")
+            if not origin or origin == "*" or origin in seen:
+                continue
+            seen.add(origin)
+            allowed.append(origin)
+    return tuple(allowed)
+
+
 def _env_int(name: str, default: int) -> int:
     try:
         return int(os.getenv(name, str(default)))
@@ -377,4 +392,9 @@ GAZETTEER_ENABLED = os.getenv("GAZETTEER_ENABLED", "1").strip().lower() in (
 GAZETTEER_CSV_PATH = os.getenv("GAZETTEER_CSV_PATH", "data/school_districts.csv").strip() or "data/school_districts.csv"
 
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
+FRONTEND_ALLOWED_ORIGINS = _parse_allowed_origins(
+    os.getenv("FRONTEND_ALLOWED_ORIGINS"),
+    os.getenv("CORS_ALLOWED_ORIGINS"),
+    FRONTEND_BASE_URL,
+)
 DESTINATION_ENCRYPTION_KEY = os.getenv("DESTINATION_ENCRYPTION_KEY", "").strip() or None

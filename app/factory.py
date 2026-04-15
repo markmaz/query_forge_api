@@ -22,6 +22,7 @@ from app.config import (
     AWS_SECRET_ACCESS_KEY,
     AWS_SESSION_TOKEN,
     DESTINATION_ENCRYPTION_KEY,
+    FRONTEND_ALLOWED_ORIGINS,
     FRONTEND_BASE_URL,
     LLM_INSTANCE_ID,
     LLM_STATUS_CACHE_SECONDS,
@@ -135,6 +136,7 @@ def create_app():
     app.config["QF_MINIMAL_CHAT_ENABLED"] = QF_MINIMAL_CHAT_ENABLED
     app.config["QF_FORGE_INSIGHTS_ENABLED"] = QF_FORGE_INSIGHTS_ENABLED
     app.config["FRONTEND_BASE_URL"] = FRONTEND_BASE_URL
+    app.config["FRONTEND_ALLOWED_ORIGINS"] = list(FRONTEND_ALLOWED_ORIGINS)
     app.config["DESTINATION_ENCRYPTION_KEY"] = DESTINATION_ENCRYPTION_KEY
     if not app.config["LLM_INSTANCE_ID"]:
         raise RuntimeError("LLM_INSTANCE_ID environment variable is required")
@@ -174,7 +176,7 @@ def create_app():
 
     CORS(
         app,
-        resources={r"/*": {"origins": [FRONTEND_BASE_URL]}},
+        resources={r"/*": {"origins": list(FRONTEND_ALLOWED_ORIGINS)}},
         supports_credentials=True,
         expose_headers=["Content-Disposition"],
     )
