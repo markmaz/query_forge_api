@@ -33,7 +33,7 @@ def _env_float(name: str, default: float) -> float:
     except (TypeError, ValueError):
         return float(default)
 
-DB_HOST =  os.getenv("DB_HOST")
+DB_HOST = os.getenv("DB_HOST")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_NAME = os.getenv("DB_NAME")
@@ -62,43 +62,37 @@ DATABRICKS_CLIENT_ID = os.getenv("DATABRICKS_CLIENT_ID")
 DATABRICKS_CLIENT_SECRET = os.getenv("DATABRICKS_CLIENT_SECRET")
 
 
-POOL_SIZE=10
-MAX_OVERFLOW=20
-POOL_TIMEOUT=30
-POOL_RECYCLE=1800
-VALKEY_ADDRESS=os.getenv("VALKEY_ADDRESS")
-VALKEY_PORT=os.getenv("VALKEY_PORT")
-USE_CLUSTER=os.getenv("USE_CLUSTER")
-IS_STAND_ALONE=os.getenv("IS_STAND_ALONE")
-VALKEY_CONFIG=f"redis://{VALKEY_ADDRESS}:{VALKEY_PORT}/0"
-LOG_QUEUE=os.getenv("LOG_QUEUE")
+POOL_SIZE = 10
+MAX_OVERFLOW = 20
+POOL_TIMEOUT = 30
+POOL_RECYCLE = 1800
+VALKEY_ADDRESS = os.getenv("VALKEY_ADDRESS")
+VALKEY_PORT = os.getenv("VALKEY_PORT")
+VALKEY_CONFIG = f"redis://{VALKEY_ADDRESS}:{VALKEY_PORT}/0"
+LOG_QUEUE = os.getenv("LOG_QUEUE")
 
-CURRENT_ENVIRONMENT=os.getenv("CURRENT_ENVIRONMENT")
-PASSWORD_CHECK_URL=os.getenv("PASSWORD_CHECK_URL")
-MIN_PASSWORD_LENGTH=os.getenv("MIN_PASSWORD_LENGTH")
+PASSWORD_CHECK_URL = os.getenv("PASSWORD_CHECK_URL")
+MIN_PASSWORD_LENGTH = os.getenv("MIN_PASSWORD_LENGTH")
 
-SMTP_USERNAME=os.getenv("SMTP_USERNAME")
-SMTP_PASSWORD=os.getenv("SMTP_PASSWORD")
-SMTP_SERVER=os.getenv("SMTP_SERVER")
-SMTP_PORT=os.getenv("SMTP_PORT")
-DEFAULT_MAIL_SENDER=os.getenv("DEFAULT_MAIL_SENDER")
-INVITE_URL=os.getenv("INVITE_URL")
-PASSWORD_RESET_URL=os.getenv("PASSWORD_RESET_URL")
+SMTP_USERNAME = os.getenv("SMTP_USERNAME")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+SMTP_SERVER = os.getenv("SMTP_SERVER")
+SMTP_PORT = os.getenv("SMTP_PORT")
+DEFAULT_MAIL_SENDER = os.getenv("DEFAULT_MAIL_SENDER")
+INVITE_URL = os.getenv("INVITE_URL")
+PASSWORD_RESET_URL = os.getenv("PASSWORD_RESET_URL")
 
-SALES_INQUIRY_EMAIL = os.getenv("SALES_INQUIRY_EMAIL") or os.getenv("sales_inquiry_email")
+SALES_INQUIRY_EMAIL = os.getenv("SALES_INQUIRY_EMAIL")
 ERROR_VALIDATION_URL = (
     os.getenv("ERROR_VALIDATION_URL")
-    or os.getenv("error_validation_url")
     or "/request-walkthrough?error=validation"
 )
 ERROR_SERVER_URL = (
     os.getenv("ERROR_SERVER_URL")
-    or os.getenv("error_server_url")
     or "/request-walkthrough?error=server"
 )
 THANK_YOU_REDIRECT = (
     os.getenv("THANK_YOU_REDIRECT")
-    or os.getenv("thank_you_redirect")
     or "/thank-you"
 )
 # OPEN_AI_KEY=os.getenv("OPEN_AI_KEY")

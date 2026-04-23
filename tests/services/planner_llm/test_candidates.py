@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import app.services.planner_llm.service as planner_llm_service
+from app.config import (
+    QDRANT_COLUMN_COLLECTION,
+    QDRANT_COLUMN_COLLECTION_V2,
+    QDRANT_DOMAIN_COLLECTION,
+    QDRANT_SEMANTIC_CONCEPT_COLLECTION,
+)
 from app.services.planner_llm.service import PlannerLLMCandidateRetriever
 
 
@@ -26,3 +33,23 @@ def test_shape_columns_keeps_top_n_per_table_instead_of_aggressive_global_collap
     assert "wt2.b" in keys
     # no table completely starved
     assert any(item["table"] == "t3" for item in shaped)
+
+
+def test_candidate_retriever_uses_configured_qdrant_collection_names(monkeypatch) -> None:
+    seen: list[str] = []
+
+    class _QdrantStub:
+        def __init__(self, *, collection_name=None, **kwargs):
+            seen.append(collection_name)
+
+    monkeypatch.setattr(planner_llm_service, "QdrantClientWrapper", _QdrantStub)
+    monkeypatch.setattr(planner_llm_service, "ForgeMetaSQL", lambda: object())
+    monkeypatch.setattr(planner_llm_service, "EmbeddingModel", lambda: object())
+
+    PlannerLLMCandidateRetriever()
+
+    assert seen == [
+        QDRANT_SEMANTIC_CONCEPT_COLLECTION or "semantic_concepts_v1",
+        QDRANT_COLUMN_COLLECTION_V2 or QDRANT_COLUMN_COLLECTION or "column_catalog_v2",
+        QDRANT_DOMAIN_COLLECTION or "domain_catalog_v1",
+    ]

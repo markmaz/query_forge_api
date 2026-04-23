@@ -30,6 +30,7 @@ croniter
 # HTTP / API clients
 requests
 httpx
+mcp[cli]
 
 # AI / ML
 torch
