@@ -11,6 +11,7 @@ from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
 from app.features.auth.schemas import register_auth_models
 from app.features.auth.service import auth_feature_service
+from app.features.users.service import users_feature_service
 from app.models.tenancy.status_enum import UserStatus
 from app.models.tenancy.user import User
 from app.services.auth import (
@@ -143,6 +144,38 @@ class Login(Resource):
                 "workspaceId": workspace_id,
             }
         )
+
+
+@qf_auth_ns.route("/profile")
+class CurrentUserProfile(Resource):
+    @token_required
+    def put(self):
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            return {"error": "Invalid request body"}, 400
+
+        allowed_fields = {"first_name", "last_name", "email"}
+        update_payload: dict[str, str | None] = {}
+        for field in allowed_fields:
+            if field not in body:
+                continue
+            raw_value = body.get(field)
+            if raw_value is None:
+                update_payload[field] = None
+                continue
+            normalized = str(raw_value).strip()
+            if field == "email" and not normalized:
+                return {"error": "email is required"}, 400
+            update_payload[field] = normalized or None
+
+        if not update_payload:
+            return {"error": "At least one profile field is required"}, 400
+
+        updated = UserService().update_user(
+            user_id=str(getattr(g, "user_id", "") or "").strip(),
+            update_data=User(**update_payload),
+        )
+        return jsonify(users_feature_service.public_user_payload(updated))
 
 
 @qf_auth_ns.route("/mfa/totp/start")

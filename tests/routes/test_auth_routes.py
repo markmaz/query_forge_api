@@ -191,6 +191,53 @@ def test_totp_start_confirm_disable_success(client, monkeypatch):
     assert disable.json["enabled"] is False
 
 
+def test_profile_update_success(client, monkeypatch):
+    monkeypatch.setattr(security.auth_service, "verify_token", lambda _token: {"sub": "u1"})
+    monkeypatch.setattr(
+        auth_routes.UserService,
+        "update_user",
+        lambda self, user_id, update_data: User(
+            user_id=user_id,
+            first_name=update_data.first_name,
+            last_name=update_data.last_name,
+            email=update_data.email,
+            status="Active",
+            workspaces=[],
+        ),
+    )
+
+    resp = client.put(
+        "/api/v1/auth/profile",
+        headers={"Authorization": "Bearer token"},
+        json={
+            "first_name": "Casey",
+            "last_name": "Nguyen",
+            "email": "casey@example.com",
+            "ignored_field": "ignored",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json["user_id"] == "u1"
+    assert resp.json["first_name"] == "Casey"
+    assert resp.json["last_name"] == "Nguyen"
+    assert resp.json["email"] == "casey@example.com"
+    assert "ignored_field" not in resp.json
+
+
+def test_profile_update_requires_at_least_one_field(client, monkeypatch):
+    monkeypatch.setattr(security.auth_service, "verify_token", lambda _token: {"sub": "u1"})
+
+    resp = client.put(
+        "/api/v1/auth/profile",
+        headers={"Authorization": "Bearer token"},
+        json={},
+    )
+
+    assert resp.status_code == 400
+    assert resp.json["error"] == "At least one profile field is required"
+
+
 def test_reset_validate_missing_token(client):
     resp = client.post("/api/v1/auth/reset/validate", json={"token": ""})
     assert resp.status_code == 400

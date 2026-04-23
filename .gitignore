@@ -2,6 +2,9 @@ __pycache__/
 .vscode/
 log_file
 .env
+.env.local
+.env.docker
+.env.*.local
 venv/
 .DS_Store
 .venv

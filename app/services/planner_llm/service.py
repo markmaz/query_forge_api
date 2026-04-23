@@ -13,6 +13,12 @@ from qdrant_client.http import models as qdrant_models
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
+from app.config import (
+    QDRANT_COLUMN_COLLECTION,
+    QDRANT_COLUMN_COLLECTION_V2,
+    QDRANT_DOMAIN_COLLECTION,
+    QDRANT_SEMANTIC_CONCEPT_COLLECTION,
+)
 from app.config.llm_resolver import build_llm_client_for_role
 from app.constants.llm_roles import LLMRole
 from app.exceptions.forge_error import ForgeError
@@ -34,9 +40,9 @@ from app.services.sqljson_apply_service import apply_edits
 
 logger = logging.getLogger(__name__)
 
-SEMANTIC_COLLECTION = "semantic_concepts_v1"
-COLUMN_COLLECTION = "column_catalog_v2"
-DOMAIN_COLLECTION = "domain_catalog"
+SEMANTIC_COLLECTION = QDRANT_SEMANTIC_CONCEPT_COLLECTION or "semantic_concepts_v1"
+COLUMN_COLLECTION = QDRANT_COLUMN_COLLECTION_V2 or QDRANT_COLUMN_COLLECTION or "column_catalog_v2"
+DOMAIN_COLLECTION = QDRANT_DOMAIN_COLLECTION or "domain_catalog_v1"
 
 
 class PlannerLLMConstraints(BaseModel):
