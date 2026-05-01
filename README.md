@@ -174,6 +174,15 @@ That file is intended for:
 - `MCP_AUDIT_LOGGING`
 - `MCP_DEBUG`
 
+#### Feedback learning foundation
+
+- `FEEDBACK_AUTO_APPLY_ENABLED`
+- `FEEDBACK_CONFIDENCE_THRESHOLD`
+- `FEEDBACK_EVIDENCE_THRESHOLD`
+- `FEEDBACK_EVALUATOR_MAX_RETRIES`
+- `FEEDBACK_WORKSPACE_OVERRIDES_ENABLED`
+- `FEEDBACK_DOMAIN_EXAMPLE_CONFIDENCE_THRESHOLD`
+
 ### MCP behavior defaults
 
 Operational defaults in the MCP layer are:
@@ -184,6 +193,136 @@ Operational defaults in the MCP layer are:
 - resources enabled by default
 - saved queries enabled by default
 
+### Feedback learning behavior defaults
+
+The feedback-learning work completed so far includes:
+
+- optional `feedback_comment` on `POST /api/v1/prompt-feedback`
+- explicit submission status in the response
+- negative feedback responses returning `analysis_pending`
+- storage of the free-text comment under reserved feedback-learning metadata for later analysis
+- typed artifact bundle reconstruction from persisted prompt-feedback, pipeline-trace, and planner-domain conversation sources
+- evaluator prompt building plus strict evaluator response validation/retry handling
+- synchronous Phase 4 analysis endpoint:
+  - `POST /api/v1/feedback-learning/prompt-feedback/<id>/analyze`
+  - requires `ai:admin` access in the active workspace
+  - idempotently reuses an existing completed analysis row
+  - persists normalized semantic/domain candidates and governance decisions
+  - does not mutate curated semantic metadata
+- Phase 5 manual review and override APIs:
+  - `GET /api/v1/feedback-learning/candidates`
+  - `GET /api/v1/feedback-learning/candidates/<id>`
+  - `POST /api/v1/feedback-learning/candidates/<id>/approve`
+  - `POST /api/v1/feedback-learning/candidates/<id>/reject`
+  - `POST /api/v1/feedback-learning/candidates/bulk-approve`
+  - `POST /api/v1/feedback-learning/candidates/bulk-reject`
+  - `GET /api/v1/feedback-learning/semantic-overrides`
+  - `GET /api/v1/feedback-learning/domain-overrides`
+  - `POST /api/v1/feedback-learning/semantic-overrides/<id>/deactivate`
+  - `POST /api/v1/feedback-learning/domain-overrides/<id>/deactivate`
+  - `GET /api/v1/feedback-learning/promotion-audits`
+- Phase 7 promotion and backfill operators:
+  - `app/services/feedback_learning/catalog_promotion_service.py`
+  - `app/services/feedback_learning/analysis_backfill_service.py`
+  - `scripts/promote_override.py`
+  - `scripts/run_feedback_analysis_backfill.py`
+
+Operational notes:
+
+- candidate approval now creates persisted semantic/domain override rows
+- approved active overrides now affect live runtime reads behind `FEEDBACK_WORKSPACE_OVERRIDES_ENABLED`
+- runtime override resolution is applied in the real planner/semantic seams:
+  - `app/services/planner/semantic_catalog_lookup_repository.py`
+  - `app/services/semantic/value_alias_resolution_service.py`
+  - `app/services/planner/semantic_retrieval_service.py`
+  - `app/services/planner_domain/semantic_integration_service.py`
+- runtime merges are additive and do not mutate curated base metadata
+- workspace overrides override global overrides on direct key conflicts
+- supported live runtime behaviors now include:
+  - feedback alias and phrase-hint merge for semantic retrieval / grounding
+  - concept rank boost and penalty score adjustment during semantic retrieval
+  - domain example prompt, lexical hint, and ambiguity note enrichment in semantic candidate payloads
+- candidate rejection now stores required reviewer notes and reason codes
+- override deactivation and promotion-audit listing are available through admin APIs
+- promotion flows are now audited and supported for:
+  - semantic alias promotion into `semantic_concept_alias`
+  - semantic concept rank boost/penalty promotion into `semantic_concept.display_priority`
+  - domain-note/domain-example/domain-lexical promotions into `domain_profile.notes`
+- global domain-profile-targeting overrides remain runtime-only and are blocked from promotion
+- failed promotions now create or update failed audit rows with retry metadata
+- no background analysis jobs are active yet
+- auto-apply eligibility is computed and persisted, but Phase 4 does not create overrides
+- the feedback-learning env variables now affect both governor decisions and runtime override resolution
+
+Operator examples:
+
+```bash
+python3 scripts/promote_override.py --kind semantic --override-id 12 --promoted-by admin
+python3 scripts/promote_override.py --kind domain --override-id 21 --promoted-by admin --notes "approved in review"
+python3 scripts/run_feedback_analysis_backfill.py --limit 100
+python3 scripts/run_feedback_analysis_backfill.py --limit 100 --write --workspace-id ws_123
+```
+
+### Feedback learning rollout checklist
+
+Use this order for local, Docker, and production-like rollout:
+
+1. apply:
+   - `migrations/20260423_feedback_learning_tables.sql`
+   - `migrations/20260423_feedback_learning_review_fields.sql`
+2. verify the new tables exist:
+   - `prompt_failure_analysis`
+   - `semantic_update_candidate`
+   - `semantic_override`
+   - `domain_override`
+   - `catalog_promotion_audit`
+3. deploy the backend code that includes:
+   - prompt-feedback capture extension
+   - feedback-learning analysis/review routes
+   - runtime override resolver integration
+   - promotion/backfill operator scripts
+4. deploy the frontend code that includes `/admin/feedback-learning`
+5. verify env values:
+   - `FEEDBACK_AUTO_APPLY_ENABLED`
+   - `FEEDBACK_CONFIDENCE_THRESHOLD`
+   - `FEEDBACK_EVIDENCE_THRESHOLD`
+   - `FEEDBACK_EVALUATOR_MAX_RETRIES`
+   - `FEEDBACK_WORKSPACE_OVERRIDES_ENABLED`
+   - `FEEDBACK_DOMAIN_EXAMPLE_CONFIDENCE_THRESHOLD`
+6. run smoke verification:
+   - submit negative prompt feedback
+   - analyze the feedback row
+   - list candidates
+   - approve/reject a candidate
+   - list/deactivate overrides
+   - list promotion audits
+7. run promotion/backfill scripts only with an explicit operator identity
+
+### Feedback learning operational cautions
+
+- `FEEDBACK_WORKSPACE_OVERRIDES_ENABLED` controls whether approved overrides affect live planner/semantic runtime behavior.
+- Approved overrides are additive runtime merges and do not mutate curated semantic records directly.
+- Promotion is still an explicit operator/reviewer action. Runtime approval is not the same as curated metadata promotion.
+- Global domain-profile-targeting overrides remain runtime-only and are intentionally blocked from promotion.
+- Promotion and backfill operators should be treated as privileged actions and should run with explicit `--promoted-by` or equivalent actor context.
+
+### Feedback learning smoke commands
+
+Example API/operator flow after deployment:
+
+```bash
+curl -X POST "http://localhost:5000/api/v1/feedback-learning/prompt-feedback/41/analyze" \
+  -H "Authorization: Bearer <token>" \
+  -H "X-Workspace-Id: ws_123"
+
+curl "http://localhost:5000/api/v1/feedback-learning/candidates?page=1&page_size=50" \
+  -H "Authorization: Bearer <token>" \
+  -H "X-Workspace-Id: ws_123"
+
+python3 scripts/promote_override.py --kind semantic --override-id 12 --promoted-by admin@example.com
+python3 scripts/run_feedback_analysis_backfill.py --limit 100 --write --workspace-id ws_123
+```
+
 ## Nginx
 
 Nginx is treated as a first-class runtime layer.
@@ -192,6 +331,7 @@ Recommended production host split:
 
 - `api.query-forge.com` → Flask API
 - `mcp.query-forge.com` → standalone MCP server
+- browser app host → proxied `/api/v1/*` requests to the Flask API
 
 A starter MCP virtual host is provided at:
 
@@ -201,18 +341,20 @@ The MCP endpoint should be proxied to:
 
 - `http://127.0.0.1:8001/mcp`
 
+The feedback-learning admin UI does not require a dedicated Nginx location. It uses the same authenticated `/api/v1` browser proxy path as the rest of the admin frontend.
+
 ## Tests
 
 ### Full backend suite
 
 ```bash
-pytest -q
+./scripts/pytest.sh -q
 ```
 
 ### Focused MCP suite
 
 ```bash
-pytest -q mcp_server/tests
+./scripts/pytest.sh -q mcp_server/tests
 ```
 
 ### Lint
@@ -224,7 +366,7 @@ pytest -q mcp_server/tests
 ### Single test
 
 ```bash
-pytest tests/path/to/test_file.py::test_name -v
+./scripts/pytest.sh tests/path/to/test_file.py::test_name -v
 ```
 
 ## Versioning

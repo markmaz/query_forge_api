@@ -13,6 +13,7 @@ FEATURE_MODULES = [
     "app.features.forge_match.routes",
     "app.features.planner.routes",
     "app.features.ai.routes",
+    "app.features.feedback_learning.routes",
     "app.features.exports.routes",
     "app.features.semantic.routes",
     "app.features.ingestion.routes",

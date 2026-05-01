@@ -47,6 +47,7 @@ class PromptFeedbackRequest(BaseModel):
     vote: str
     normalized_prompt: Optional[str] = None
     prompt_text: Optional[str] = None
+    feedback_comment: Optional[str] = None
     response_json: Dict[str, Any]
     meta: Optional[PromptFeedbackMeta] = None
 
@@ -78,7 +79,7 @@ class PromptFeedbackRequest(BaseModel):
             raise ValueError("vote must be one of: up, down, thumbs_up, thumbs_down")
         return _VOTE_ALIASES[text]
 
-    @field_validator("normalized_prompt", "prompt_text", mode="before")
+    @field_validator("normalized_prompt", "prompt_text", "feedback_comment", mode="before")
     @classmethod
     def _validate_optional_text(cls, value: Any) -> Optional[str]:
         if value is None:
@@ -97,5 +98,6 @@ class PromptFeedbackRequest(BaseModel):
 class PromptFeedbackResponse(BaseModel):
     id: int
     vote: Literal["up", "down"]
+    status: Literal["recorded", "analysis_pending"]
     created_at: datetime
     updated_at: datetime

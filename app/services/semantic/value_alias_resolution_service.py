@@ -5,13 +5,22 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.feedback_learning.runtime_override_resolver import (
+    RuntimeOverrideResolver,
+)
 
 
 class ValueAliasResolutionService:
-    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+    def __init__(
+        self,
+        *,
+        sql: Optional[ForgeQueryPort] = None,
+        runtime_override_resolver: Optional[RuntimeOverrideResolver] = None,
+    ) -> None:
         self._sql = sql or ForgeMetaSQL()
+        self._runtime_override_resolver = runtime_override_resolver
 
-    def resolve(self, *, prompt: str) -> List[Dict[str, Any]]:
+    def resolve(self, *, prompt: str, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
         ngrams = _build_ngrams(prompt)
         if not ngrams:
             return []
@@ -55,6 +64,31 @@ class ValueAliasResolutionService:
                         "matched_alias": alias_value,
                         "matched_ngram": ngram,
                         "match_kind": str(row.get("match_kind") or "").strip().lower() or "contains",
+                        "weight": _to_float(row.get("weight")) or 0.0,
+                    }
+                )
+
+        if self._runtime_override_resolver is not None:
+            for row in self._runtime_override_resolver.resolve_prompt_alias_rows(
+                prompt=prompt,
+                workspace_id=workspace_id,
+            ):
+                concept_key = str(row.get("concept_key") or "").strip().upper()
+                canonical_value = str(row.get("canonical_value") or "").strip()
+                alias_value = str(row.get("alias_value") or "").strip()
+                if concept_key == "" or canonical_value == "" or alias_value == "":
+                    continue
+                candidates.append(
+                    {
+                        "concept_key": concept_key,
+                        "semantic_concept_id": _to_int_or_none(
+                            row.get("semantic_concept_id")
+                        ),
+                        "canonical_value": canonical_value,
+                        "matched_alias": alias_value,
+                        "matched_ngram": str(row.get("matched_ngram") or alias_value),
+                        "match_kind": str(row.get("match_kind") or "").strip().lower()
+                        or "contains",
                         "weight": _to_float(row.get("weight")) or 0.0,
                     }
                 )

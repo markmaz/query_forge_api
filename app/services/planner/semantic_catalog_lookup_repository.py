@@ -6,6 +6,9 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.feedback_learning.runtime_override_resolver import (
+    RuntimeOverrideResolver,
+)
 
 from app.services.planner.semantic_retrieval_helpers import (
     build_in_clause,
@@ -13,12 +16,18 @@ from app.services.planner.semantic_retrieval_helpers import (
 
 
 class SemanticCatalogLookupRepository:
-    def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
+    def __init__(
+        self,
+        *,
+        sql: Optional[ForgeQueryPort] = None,
+        runtime_override_resolver: Optional[RuntimeOverrideResolver] = None,
+    ) -> None:
         self._sql = sql or ForgeMetaSQL()
         self._relationship_fk_target_cache: Optional[str] = None
+        self._runtime_override_resolver = runtime_override_resolver
 
-    def load_concepts(self) -> List[Dict[str, Any]]:
-        return self._sql.execute_query_mappings(
+    def load_concepts(self, *, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        rows = self._sql.execute_query_mappings(
             """
             SELECT
               id,
@@ -33,10 +42,16 @@ class SemanticCatalogLookupRepository:
             """,
             {},
         )
+        if self._runtime_override_resolver is None:
+            return rows
+        return self._runtime_override_resolver.resolve_concept_rows(
+            base_rows=rows,
+            workspace_id=workspace_id,
+        )
 
-    def load_aliases(self) -> List[Dict[str, Any]]:
+    def load_aliases(self, *, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
         try:
-            return self._sql.execute_query_mappings(
+            rows = self._sql.execute_query_mappings(
                 """
                 SELECT
                   UPPER(TRIM(concept_key)) AS concept_key,
@@ -52,7 +67,7 @@ class SemanticCatalogLookupRepository:
         except (OSError, RuntimeError, ValueError, SQLAlchemyError) as exc:
             if not _is_schema_compatibility_error(exc, "match_kind"):
                 raise
-            return self._sql.execute_query_mappings(
+            rows = self._sql.execute_query_mappings(
                 """
                 SELECT
                   UPPER(TRIM(concept_key)) AS concept_key,
@@ -65,6 +80,12 @@ class SemanticCatalogLookupRepository:
                 """,
                 {},
             )
+        if self._runtime_override_resolver is None:
+            return rows
+        return self._runtime_override_resolver.resolve_alias_rows(
+            base_rows=rows,
+            workspace_id=workspace_id,
+        )
 
     def load_relationships(self) -> List[Dict[str, Any]]:
         fk_target = self._get_relationship_fk_target()

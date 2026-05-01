@@ -68,6 +68,7 @@ def test_save_feedback_updates_existing_on_same_workspace_user_trace() -> None:
 
     assert out.id == 7
     assert out.vote == "down"
+    assert out.status == "analysis_pending"
     assert out.created is False
     assert len(sql.insert_calls) == 1
 
@@ -99,9 +100,36 @@ def test_save_feedback_allows_multiple_rows_with_null_trace() -> None:
 
     assert first.id == 100
     assert second.id == 101
+    assert first.status == "recorded"
+    assert second.status == "analysis_pending"
     assert first.created is True and second.created is True
     assert "ON DUPLICATE KEY UPDATE" not in sql.insert_calls[0].query
     assert "ON DUPLICATE KEY UPDATE" not in sql.insert_calls[1].query
+
+
+def test_save_feedback_merges_feedback_comment_into_reserved_meta_key() -> None:
+    sql = FakeForgeQueryPort()
+    sql.query_mappings_responses = [
+        [],
+        [_row(feedback_id=55, vote="down")],
+    ]
+    sql.insert_responses = [ForgeExecResult(rowcount=1, lastrowid=55)]
+
+    svc = PromptFeedbackService(sql=sql, max_payload_bytes=1024)
+    out = svc.save_feedback(
+        workspace_id="ws-1",
+        user_id="user-1",
+        trace_id="trace-55",
+        vote="down",
+        response_json={"answer": "bad"},
+        feedback_comment="The domain was wrong",
+        meta={"intent": "attendance"},
+    )
+
+    assert out.status == "analysis_pending"
+    assert sql.insert_calls[0].params["meta_json"] == (
+        '{"intent":"attendance","_feedback_learning":{"feedback_comment":"The domain was wrong"}}'
+    )
 
 
 def test_save_feedback_rejects_large_response_payload() -> None:

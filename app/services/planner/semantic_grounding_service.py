@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional
@@ -72,7 +73,10 @@ class SemanticGroundingService:
         alias_constraints: List[Dict[str, Any]] = []
 
         if include_alias_constraints:
-            alias_constraints = self.resolve_alias_constraints(prompt=prompt)
+            alias_constraints = self.resolve_alias_constraints(
+                prompt=prompt,
+                workspace_id=workspace_id,
+            )
 
         if include_candidates:
             try:
@@ -97,10 +101,13 @@ class SemanticGroundingService:
         self,
         *,
         prompt: str,
+        workspace_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         try:
-            rows = self._value_alias_resolver.resolve(
+            rows = _resolve_alias_rows(
+                self._value_alias_resolver,
                 prompt=prompt,
+                workspace_id=workspace_id,
             )
         except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
             logger.warning("semantic grounding alias resolution failed err=%s", exc)
@@ -114,25 +121,60 @@ def _rows_to_alias_constraints(rows: List[Mapping[str, Any]] | List[Dict[str, An
     for row in list(rows or []):
         if not isinstance(row, Mapping):
             continue
-        canonical = str(row.get("canonical_value") or "").strip()
-        if canonical == "":
-            continue
         concept_key = str(row.get("concept_key") or "").strip().upper()
-        matched_alias = str(row.get("matched_alias") or "").strip()
+        explicit_canonical = str(row.get("canonical_value") or "").strip()
+        canonical = str(explicit_canonical or row.get("value_hint") or "").strip()
+        matched_alias = str(row.get("matched_alias") or row.get("text") or "").strip()
+        if canonical == "" and matched_alias == "":
+            continue
+        canonical = canonical or matched_alias
+        display_text = (
+            canonical
+            if explicit_canonical and concept_key == ""
+            else (matched_alias or canonical)
+        )
         dedupe_key = (concept_key, canonical.lower(), matched_alias.lower())
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
         constraints.append(
             {
-                "kind": "unknown",
-                "text": matched_alias or canonical,
-                "op": "eq",
+                "kind": (
+                    str(row.get("kind") or "unknown")
+                    if concept_key
+                    else "unknown"
+                ),
+                "text": display_text,
+                "op": str(row.get("op") or "eq"),
                 "value_hint": canonical,
-                "notes": f"semantic_alias:{concept_key}" if concept_key else "semantic_alias",
+                "notes": (
+                    (
+                        str(row.get("notes") or "").strip()
+                        if concept_key
+                        else ""
+                    )
+                    or (f"semantic_alias:{concept_key}" if concept_key else "semantic_alias")
+                ),
             }
         )
     return constraints
+
+
+def _resolve_alias_rows(
+    resolver: Any,
+    *,
+    prompt: str,
+    workspace_id: Optional[str],
+):
+    resolve = getattr(resolver, "resolve")
+    try:
+        signature = inspect.signature(resolve)
+    except (TypeError, ValueError):
+        signature = None
+
+    if signature is not None and "workspace_id" not in signature.parameters:
+        return resolve(prompt=prompt)
+    return resolve(prompt=prompt, workspace_id=workspace_id)
 
 
 __all__ = ["SemanticGroundingBundle", "SemanticGroundingService"]
