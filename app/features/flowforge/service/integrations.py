@@ -35,6 +35,7 @@ class FlowForgeIntegrationServiceMixin:
         if mode not in {"production", "test"}:
             raise ForgeError("mode must be production or test.", status_code=400)
         settings = dict(payload.get("settings") if isinstance(payload.get("settings"), dict) else {})
+        settings["source_events"] = self._normalize_source_events(payload.get("source_events"))
         settings["source_fields"] = self._normalize_source_fields(payload.get("source_fields"))
         webhook_secret = "ffjot_" + secrets.token_urlsafe(32)
         webhook_public_id = "ffj_" + secrets.token_urlsafe(18)
@@ -158,6 +159,7 @@ class FlowForgeIntegrationServiceMixin:
         )
         webhook_url = f"{webhook_base_url.rstrip('/')}{webhook_path}" if webhook_base_url and webhook_path else webhook_path
         settings = row.get("settings") or row.get("settings_json") or {}
+        source_events = self._source_events_from_settings(settings)
         source_fields = self._source_fields_from_settings(settings)
         out = {
             "id": row.get("id"),
@@ -172,6 +174,7 @@ class FlowForgeIntegrationServiceMixin:
             "webhook_path": webhook_path,
             "webhook_url": webhook_url,
             "field_mapping": row.get("field_mapping") or row.get("field_mapping_json") or {},
+            "source_events": source_events,
             "source_fields": source_fields,
             "test_recipient_overrides": row.get("test_recipient_overrides")
             or row.get("test_recipient_overrides_json")
@@ -181,6 +184,32 @@ class FlowForgeIntegrationServiceMixin:
         if include_secret:
             out["webhook_secret"] = None
         return out
+
+    def _source_events_from_settings(self, settings: dict[str, Any]) -> list[dict[str, Any]]:
+        if not isinstance(settings, dict):
+            return []
+        return self._normalize_source_events(settings.get("source_events"))
+
+    def _normalize_source_events(self, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        normalized: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            event_key = str(item.get("event_key") or item.get("key") or "").strip()
+            if not event_key or event_key in seen:
+                continue
+            seen.add(event_key)
+            normalized.append(
+                {
+                    "event_key": event_key,
+                    "display_name": str(item.get("display_name") or item.get("label") or event_key.replace("_", " ")).strip(),
+                    "description": self._optional_string(item.get("description")),
+                }
+            )
+        return normalized
 
     def _source_fields_from_settings(self, settings: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(settings, dict):

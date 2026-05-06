@@ -41,6 +41,14 @@ def register_integration_models(namespace, *, run_event):
             "sensitive": fields.Boolean(required=True, description="Whether this field may contain sensitive data."),
         },
     )
+    integration_source_event = namespace.model(
+        "FlowForgeIntegrationSourceEvent",
+        {
+            "event_key": fields.String(required=True, description="Stable event key this integration can emit."),
+            "display_name": fields.String(required=True, description="Human-readable event name for workflow intake nodes."),
+            "description": fields.String(required=False, description="Optional event description."),
+        },
+    )
     integration_config = namespace.model(
         "FlowForgeIntegrationConfig",
         {
@@ -56,6 +64,11 @@ def register_integration_models(namespace, *, run_event):
             "webhook_path": fields.String(required=True, description="Relative webhook path for provider configuration."),
             "webhook_url": fields.String(required=True, description="Absolute webhook URL when a base URL is configured, otherwise path."),
             "field_mapping": fields.Raw(required=True, description="Provider-to-normalized-field mapping configuration."),
+            "source_events": fields.List(
+                fields.Nested(integration_source_event),
+                required=True,
+                description="Known provider events available to intake nodes.",
+            ),
             "source_fields": fields.List(
                 fields.Nested(integration_source_field),
                 required=True,

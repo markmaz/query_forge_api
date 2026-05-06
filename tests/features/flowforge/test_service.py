@@ -369,6 +369,10 @@ class _IntegrationRepo:
                 "test_recipient_overrides_json": ["ops@example.com"],
                 "settings_json": {
                     "trigger_policy": "all_matching",
+                    "source_events": [
+                        {"event_key": "intake_submitted", "display_name": "Intake Submitted"},
+                        {"event_key": "intake_updated", "display_name": "Intake Updated", "description": "Follow-up update."},
+                    ],
                     "source_fields": [
                         {"path": "serviceRequested", "label": "Requested Service", "type": "text", "required": True},
                         {"path": "summary", "label": "Clinical Summary", "type": "text", "sensitive": True},
@@ -1096,6 +1100,10 @@ def test_flowforge_service_lists_integrations_without_webhook_secret():
 
     assert result[0]["integration_key"] == "intake-form"
     assert result[0]["webhook_path"] == "/api/v1/flowforge/webhooks/jotform/ffj_public"
+    assert result[0]["source_events"] == [
+        {"event_key": "intake_submitted", "display_name": "Intake Submitted", "description": None},
+        {"event_key": "intake_updated", "display_name": "Intake Updated", "description": "Follow-up update."},
+    ]
     assert result[0]["source_fields"] == [
         {
             "path": "serviceRequested",
@@ -1131,6 +1139,10 @@ def test_flowforge_service_creates_jotform_integration_with_one_time_secret():
             "external_form_id": "form-1",
             "mode": "test",
             "field_mapping": {"patient": "patientName"},
+            "source_events": [
+                {"event_key": "intake_submitted", "display_name": "Intake Submitted"},
+                {"event_key": "intake_updated", "display_name": "Intake Updated", "description": "Follow-up update."},
+            ],
             "source_fields": [
                 {"path": "fields.name", "label": "Patient Name", "type": "text", "required": True},
                 {"path": "fields.notes", "label": "Notes", "type": "long_text", "sensitive": True},
@@ -1146,6 +1158,10 @@ def test_flowforge_service_creates_jotform_integration_with_one_time_secret():
     assert repo.created_config["created_by"] == "user-1"
     assert repo.created_config["secret_hash"] != result["webhook_secret"]
     assert len(repo.created_config["secret_hash"]) == 64
+    assert result["source_events"] == [
+        {"event_key": "intake_submitted", "display_name": "Intake Submitted", "description": None},
+        {"event_key": "intake_updated", "display_name": "Intake Updated", "description": "Follow-up update."},
+    ]
     assert result["source_fields"] == [
         {
             "path": "fields.name",
