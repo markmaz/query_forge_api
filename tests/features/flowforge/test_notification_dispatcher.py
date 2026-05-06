@@ -99,6 +99,11 @@ def test_notification_dispatcher_renders_human_task_action_link_without_intake_d
         "payload_summary_json": {
             "resource_display_name": "Jane Resource",
             "action_url": "http://localhost:3000/flowforge/actions/ffact_123",
+            "action_urls": {
+                "open_task": "http://localhost:3000/flowforge/actions/ffact_123",
+                "accept": "http://localhost:3000/flowforge/actions/ffact_123?action=accept",
+                "decline": "http://localhost:3000/flowforge/actions/ffact_123?action=decline",
+            },
             "patient_name": "Jane Patient",
         },
     }
@@ -129,6 +134,11 @@ def test_notification_dispatcher_renders_active_custom_template():
             "resource_display_name": "Dr. Lane",
             "source_record_key": "therapist-1",
             "action_url": "http://localhost:3000/flowforge/actions/ffact_123",
+            "action_urls": {
+                "open_task": "http://localhost:3000/flowforge/actions/ffact_123",
+                "accept": "http://localhost:3000/flowforge/actions/ffact_123?action=accept",
+                "decline": "http://localhost:3000/flowforge/actions/ffact_123?action=decline",
+            },
             "expires_at": "2026-05-06T18:00:00Z",
         },
     }
@@ -167,5 +177,7 @@ def test_notification_dispatcher_renders_active_custom_template():
     assert sent_messages[0][1] == "Task for Dr. Lane"
     assert "Hello Dr. Lane" in sent_messages[0][2]
     assert "2026-05-06T18:00:00Z" in sent_messages[0][2]
-    assert '<a href="http://localhost:3000/flowforge/actions/ffact_123">Accept</a>' in sent_messages[0][2]
-    assert '<a href="http://localhost:3000/flowforge/actions/ffact_123">Decline</a>' in sent_messages[0][2]
+    assert 'href="http://localhost:3000/flowforge/actions/ffact_123?action=accept"' in sent_messages[0][2]
+    assert 'data-flowforge-action="accept"' in sent_messages[0][2]
+    assert 'href="http://localhost:3000/flowforge/actions/ffact_123?action=decline"' in sent_messages[0][2]
+    assert 'data-flowforge-action="decline"' in sent_messages[0][2]

@@ -5,6 +5,7 @@ import secrets
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlencode
 
 from app.config import FRONTEND_BASE_URL
 from app.features.flowforge.repositories import FlowForgeResourceRepository, FlowForgeRuntimeRepository, FlowForgeWorkflowRepository
@@ -365,6 +366,7 @@ class FlowForgeHumanResponseRuntime:
                     "resource_display_name": resource.get("display_name"),
                     "source_record_key": source_record_key,
                     "action_url": self._action_url(token),
+                    "action_urls": self._action_urls(token, allowed_actions=["accept", "decline"]),
                     "expires_at": due_at.isoformat(),
                 },
             )
@@ -436,6 +438,16 @@ class FlowForgeHumanResponseRuntime:
     @staticmethod
     def _action_url(token: str) -> str:
         return f"{str(FRONTEND_BASE_URL or '').rstrip('/')}/flowforge/actions/{token}"
+
+    @classmethod
+    def _action_urls(cls, token: str, *, allowed_actions: list[str]) -> dict[str, str]:
+        base_url = cls._action_url(token)
+        action_urls = {"open_task": base_url}
+        for action in allowed_actions:
+            action_key = str(action or "").strip().lower()
+            if action_key:
+                action_urls[action_key] = f"{base_url}?{urlencode({'action': action_key})}"
+        return action_urls
 
     @staticmethod
     def _enqueue_run_dispatch(workspace_id: str, run_id: int) -> None:

@@ -63,11 +63,18 @@ def test_communication_template_renderer_renders_runtime_action_links():
             "intake": {"requested_date": "Friday"},
         },
         action_url="http://localhost:3000/flowforge/actions/ffact_123",
+        action_urls={
+            "open_task": "http://localhost:3000/flowforge/actions/ffact_123",
+            "accept": "http://localhost:3000/flowforge/actions/ffact_123?action=accept",
+            "decline": "http://localhost:3000/flowforge/actions/ffact_123?action=decline",
+        },
     )
 
     assert rendered["subject"] == "New task for Dr. Lane"
-    assert '<a href="http://localhost:3000/flowforge/actions/ffact_123">Accept</a>' in rendered["html"]
-    assert '<a href="http://localhost:3000/flowforge/actions/ffact_123">Decline</a>' in rendered["html"]
+    assert 'href="http://localhost:3000/flowforge/actions/ffact_123?action=accept"' in rendered["html"]
+    assert 'data-flowforge-action="accept"' in rendered["html"]
+    assert 'href="http://localhost:3000/flowforge/actions/ffact_123?action=decline"' in rendered["html"]
+    assert 'data-flowforge-action="decline"' in rendered["html"]
 
 
 def test_communication_template_renderer_rejects_unknown_fields_and_actions():

@@ -608,6 +608,12 @@ def test_dispatcher_executes_matching_node_and_persists_candidate_results():
     assert runtime_repo.notifications[0]["recipient"] == "jane@example.com"
     assert runtime_repo.notifications[0]["template_key"] == "flowforge.custom_task"
     assert "action_url" in runtime_repo.notifications[0]["payload_summary"]
+    action_url = runtime_repo.notifications[0]["payload_summary"]["action_url"]
+    assert runtime_repo.notifications[0]["payload_summary"]["action_urls"] == {
+        "open_task": action_url,
+        "accept": f"{action_url}?action=accept",
+        "decline": f"{action_url}?action=decline",
+    }
     assert resource_repo.offered[0]["source_record_key"] == "resource-1"
 
 

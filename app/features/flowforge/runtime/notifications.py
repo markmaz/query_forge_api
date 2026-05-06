@@ -114,6 +114,7 @@ class FlowForgeNotificationDispatcher:
                 template=self._template_contract(custom_template),
                 context=self._render_context(notification=notification, payload_summary=payload_summary),
                 action_url=self._safe_summary_value(payload_summary, "action_url"),
+                action_urls=self._action_urls(payload_summary),
             )
             return rendered["subject"] or "FlowForge workflow notification", rendered["html"]
 
@@ -185,6 +186,21 @@ class FlowForgeNotificationDispatcher:
             return None
         value = str(payload_summary.get(key) or "").strip()
         return value or None
+
+    @staticmethod
+    def _action_urls(payload_summary: Any) -> dict[str, str] | None:
+        if not isinstance(payload_summary, dict):
+            return None
+        raw_action_urls = payload_summary.get("action_urls")
+        if not isinstance(raw_action_urls, dict):
+            return None
+        action_urls: dict[str, str] = {}
+        for action, url in raw_action_urls.items():
+            action_key = str(action or "").strip()
+            url_value = str(url or "").strip()
+            if action_key and url_value:
+                action_urls[action_key] = url_value
+        return action_urls or None
 
     @staticmethod
     def _escape(value: str) -> str:

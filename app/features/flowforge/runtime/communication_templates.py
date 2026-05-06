@@ -10,6 +10,20 @@ ALLOWED_CHANNELS = {"email"}
 ALLOWED_PURPOSES = {"human_task", "notification", "approval", "alert", "report"}
 ALLOWED_BLOCK_TYPES = {"heading", "text", "field_value", "field_list", "divider", "action_buttons"}
 ALLOWED_ACTIONS = {"accept", "decline", "approve", "reject", "open_task"}
+ACTION_LABELS = {
+    "accept": "Accept",
+    "decline": "Decline",
+    "approve": "Approve",
+    "reject": "Reject",
+    "open_task": "Open Task",
+}
+RECOMMENDED_ACTIONS_BY_PURPOSE = {
+    "human_task": {"accept", "decline", "open_task"},
+    "approval": {"approve", "reject", "open_task"},
+    "notification": {"open_task"},
+    "alert": {"open_task"},
+    "report": set(),
+}
 MERGE_FIELD_PATTERN = re.compile(r"{{\s*([A-Za-z0-9_.-]+)\s*}}")
 RUNTIME_FIELD_PREFIXES = {"intake", "context"}
 RUNTIME_FIELDS = {
@@ -113,6 +127,14 @@ class CommunicationTemplateRenderer:
                 errors.append(f"Merge field '{field}' is not available for this template.")
         if purpose == "human_task" and not referenced_actions:
             warnings.append("Human task templates should include an action button block.")
+        recommended_actions = RECOMMENDED_ACTIONS_BY_PURPOSE.get(purpose)
+        if recommended_actions is not None:
+            unexpected_actions = sorted(referenced_actions - recommended_actions)
+            if unexpected_actions:
+                warnings.append(
+                    "Template references actions that are not normally available for "
+                    f"{purpose} templates: {', '.join(unexpected_actions)}."
+                )
 
         return CommunicationTemplateValidation(
             valid=not errors,
@@ -136,12 +158,18 @@ class CommunicationTemplateRenderer:
         template: dict[str, Any],
         context: dict[str, Any] | None = None,
         action_url: str | None = None,
+        action_urls: dict[str, str] | None = None,
     ) -> dict[str, str]:
         render_context = context if isinstance(context, dict) else {}
         subject = self._render_text(str(template.get("subject") or ""), context=render_context)
         return {
             "subject": subject,
-            "html": self._render_blocks(template=template, context=render_context, action_url=action_url),
+            "html": self._render_blocks(
+                template=template,
+                context=render_context,
+                action_url=action_url,
+                action_urls=action_urls,
+            ),
         }
 
     def _render_blocks(
@@ -150,8 +178,10 @@ class CommunicationTemplateRenderer:
         template: dict[str, Any],
         context: dict[str, Any],
         action_url: str | None,
+        action_urls: dict[str, str] | None = None,
     ) -> str:
         html_parts: list[str] = []
+        resolved_action_urls = self._normalize_action_urls(action_urls)
         for block in template.get("body_blocks") or []:
             if not isinstance(block, dict):
                 continue
@@ -183,26 +213,51 @@ class CommunicationTemplateRenderer:
                     for action in block.get("actions") or []
                     if str(action or "").strip()
                 ]
-                if action_url:
-                    safe_url = html.escape(str(action_url), quote=True)
-                    html_parts.append(
-                        "<p>"
-                        + " ".join(
-                            f'<a href="{safe_url}">{html.escape(action.replace("_", " ").title())}</a>'
-                            for action in actions
-                        )
-                        + "</p>"
-                    )
-                else:
-                    html_parts.append(
-                        "<p>"
-                        + " ".join(
-                            f"<button>{html.escape(action.replace('_', ' ').title())}</button>"
-                            for action in actions
-                        )
-                        + "</p>"
-                    )
+                html_parts.append(self._render_action_buttons(actions=actions, action_url=action_url, action_urls=resolved_action_urls))
         return "".join(html_parts)
+
+    def _render_action_buttons(
+        self,
+        *,
+        actions: list[str],
+        action_url: str | None,
+        action_urls: dict[str, str],
+    ) -> str:
+        parts: list[str] = []
+        for action in actions:
+            label = html.escape(ACTION_LABELS.get(action, action.replace("_", " ").title()))
+            url = action_urls.get(action)
+            if url is None and not action_urls and action_url:
+                url = str(action_url)
+            if url:
+                safe_url = html.escape(url, quote=True)
+                safe_action = html.escape(action, quote=True)
+                parts.append(
+                    f'<a href="{safe_url}" data-flowforge-action="{safe_action}" '
+                    'style="display:inline-block;margin:0 8px 8px 0;padding:10px 14px;'
+                    'border-radius:8px;background:#2b5f60;color:#ffffff;text-decoration:none;'
+                    f'font-weight:700;">{label}</a>'
+                )
+            else:
+                parts.append(
+                    '<span aria-disabled="true" '
+                    'style="display:inline-block;margin:0 8px 8px 0;padding:10px 14px;'
+                    'border-radius:8px;background:#e5e7eb;color:#6b7280;font-weight:700;">'
+                    f"{label}</span>"
+                )
+        return "<p>" + " ".join(parts) + "</p>"
+
+    @staticmethod
+    def _normalize_action_urls(action_urls: dict[str, str] | None) -> dict[str, str]:
+        if not isinstance(action_urls, dict):
+            return {}
+        normalized: dict[str, str] = {}
+        for action, url in action_urls.items():
+            action_key = str(action or "").strip()
+            url_value = str(url or "").strip()
+            if action_key in ALLOWED_ACTIONS and url_value:
+                normalized[action_key] = url_value
+        return normalized
 
     @staticmethod
     def _fields_in_text(value: str) -> set[str]:
