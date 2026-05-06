@@ -125,32 +125,84 @@ class CommunicationTemplateRenderer:
     def render_preview(self, *, template: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, str]:
         render_context = context if isinstance(context, dict) else {}
         subject = self._render_text(str(template.get("subject") or ""), context=render_context)
+        return {
+            "subject": subject,
+            "html": self._render_blocks(template=template, context=render_context, action_url=None),
+        }
+
+    def render_email(
+        self,
+        *,
+        template: dict[str, Any],
+        context: dict[str, Any] | None = None,
+        action_url: str | None = None,
+    ) -> dict[str, str]:
+        render_context = context if isinstance(context, dict) else {}
+        subject = self._render_text(str(template.get("subject") or ""), context=render_context)
+        return {
+            "subject": subject,
+            "html": self._render_blocks(template=template, context=render_context, action_url=action_url),
+        }
+
+    def _render_blocks(
+        self,
+        *,
+        template: dict[str, Any],
+        context: dict[str, Any],
+        action_url: str | None,
+    ) -> str:
         html_parts: list[str] = []
         for block in template.get("body_blocks") or []:
             if not isinstance(block, dict):
                 continue
             block_type = str(block.get("type") or "").strip()
             if block_type == "heading":
-                html_parts.append(f"<h2>{self._escape_rendered(block.get('content'), render_context)}</h2>")
+                html_parts.append(f"<h2>{self._escape_rendered(block.get('content'), context)}</h2>")
             elif block_type == "text":
-                html_parts.append(f"<p>{self._escape_rendered(block.get('content'), render_context)}</p>")
+                html_parts.append(f"<p>{self._escape_rendered(block.get('content'), context)}</p>")
             elif block_type == "field_value":
                 label = str(block.get("label") or block.get("field") or "Value").strip()
-                value = self._value_at_path(render_context, str(block.get("field") or ""))
-                html_parts.append(f"<p><strong>{html.escape(label)}:</strong> {html.escape(self._string_value(value))}</p>")
+                value = self._value_at_path(context, str(block.get("field") or ""))
+                html_parts.append(
+                    f"<p><strong>{html.escape(label)}:</strong> {html.escape(self._string_value(value))}</p>"
+                )
             elif block_type == "field_list":
                 items = []
                 for field in block.get("fields") or []:
                     field_key = str(field or "").strip()
-                    value = self._value_at_path(render_context, field_key)
-                    items.append(f"<li><strong>{html.escape(field_key)}:</strong> {html.escape(self._string_value(value))}</li>")
+                    value = self._value_at_path(context, field_key)
+                    items.append(
+                        f"<li><strong>{html.escape(field_key)}:</strong> {html.escape(self._string_value(value))}</li>"
+                    )
                 html_parts.append("<ul>" + "".join(items) + "</ul>")
             elif block_type == "divider":
                 html_parts.append("<hr>")
             elif block_type == "action_buttons":
-                actions = [str(action or "").strip() for action in block.get("actions") or [] if str(action or "").strip()]
-                html_parts.append("<p>" + " ".join(f"<button>{html.escape(action.replace('_', ' ').title())}</button>" for action in actions) + "</p>")
-        return {"subject": subject, "html": "".join(html_parts)}
+                actions = [
+                    str(action or "").strip()
+                    for action in block.get("actions") or []
+                    if str(action or "").strip()
+                ]
+                if action_url:
+                    safe_url = html.escape(str(action_url), quote=True)
+                    html_parts.append(
+                        "<p>"
+                        + " ".join(
+                            f'<a href="{safe_url}">{html.escape(action.replace("_", " ").title())}</a>'
+                            for action in actions
+                        )
+                        + "</p>"
+                    )
+                else:
+                    html_parts.append(
+                        "<p>"
+                        + " ".join(
+                            f"<button>{html.escape(action.replace('_', ' ').title())}</button>"
+                            for action in actions
+                        )
+                        + "</p>"
+                    )
+        return "".join(html_parts)
 
     @staticmethod
     def _fields_in_text(value: str) -> set[str]:

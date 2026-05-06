@@ -73,6 +73,36 @@ class FlowForgeCommunicationTemplateRepository:
             return None
         return self._decode_template(rows[0])
 
+    def get_active_template_by_key(
+        self,
+        *,
+        workspace_id: str,
+        template_key: str,
+        channel: str = "email",
+    ) -> dict[str, Any] | None:
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT *
+            FROM flowforge_communication_templates
+            WHERE workspace_id = :workspace_id
+              AND template_key = :template_key
+              AND channel = :channel
+              AND status = 'active'
+              AND validation_status = 'valid'
+              AND archived_at IS NULL
+            ORDER BY activated_at DESC, updated_at DESC, id DESC
+            LIMIT 1
+            """,
+            {
+                "workspace_id": str(workspace_id or "").strip(),
+                "template_key": str(template_key or "").strip(),
+                "channel": str(channel or "email").strip(),
+            },
+        )
+        if not rows:
+            return None
+        return self._decode_template(rows[0])
+
     def create_template(
         self,
         *,

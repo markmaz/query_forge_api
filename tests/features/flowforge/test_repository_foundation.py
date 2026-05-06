@@ -175,6 +175,39 @@ def test_flowforge_communication_template_repository_creates_and_lists_templates
     assert rows[0]["validation_result_json"]["valid"] is True
 
 
+def test_flowforge_communication_template_repository_gets_active_template_by_key():
+    sql = _SQL(
+        rows=[
+            {
+                "id": 501,
+                "workspace_id": "ws-1",
+                "template_key": "therapist-task",
+                "display_name": "Therapist Task",
+                "description": None,
+                "channel": "email",
+                "purpose": "human_task",
+                "resource_set_id": 30,
+                "subject": "New task",
+                "body_blocks_json": '[{"type":"text","content":"Hello"}]',
+                "status": "active",
+                "validation_status": "valid",
+                "validation_result_json": '{"valid":true,"errors":[],"warnings":[]}',
+                "metadata_json": "{}",
+            }
+        ],
+    )
+    repo = FlowForgeCommunicationTemplateRepository(sql=sql)
+
+    row = repo.get_active_template_by_key(workspace_id="ws-1", template_key="therapist-task", channel="email")
+
+    query, params = sql.queries[0]
+    assert row is not None
+    assert row["template_key"] == "therapist-task"
+    assert "status = 'active'" in query
+    assert "validation_status = 'valid'" in query
+    assert params == {"workspace_id": "ws-1", "template_key": "therapist-task", "channel": "email"}
+
+
 def test_flowforge_communication_template_repository_creates_ai_draft():
     sql = _SQL(lastrowid=601)
     repo = FlowForgeCommunicationTemplateRepository(sql=sql)

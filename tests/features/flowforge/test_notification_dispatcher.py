@@ -39,12 +39,23 @@ class _RuntimeRepo:
         return len(self.events)
 
 
+class _TemplateRepo:
+    def __init__(self, template: dict | None = None) -> None:
+        self.template = template
+        self.lookups = []
+
+    def get_active_template_by_key(self, **payload):
+        self.lookups.append(payload)
+        return self.template
+
+
 def test_notification_dispatcher_sends_minimal_email_and_marks_sent():
     repo = _RuntimeRepo()
     sent_messages = []
 
     dispatcher = FlowForgeNotificationDispatcher(
         runtime_repository=repo,
+        communication_template_repository=_TemplateRepo(),
         email_sender=lambda recipient, subject, html: sent_messages.append((recipient, subject, html)),
     )
 
@@ -65,7 +76,11 @@ def test_notification_dispatcher_marks_failed_when_sender_raises():
     def _raise(*args, **kwargs):
         raise RuntimeError("smtp unavailable")
 
-    dispatcher = FlowForgeNotificationDispatcher(runtime_repository=repo, email_sender=_raise)
+    dispatcher = FlowForgeNotificationDispatcher(
+        runtime_repository=repo,
+        communication_template_repository=_TemplateRepo(),
+        email_sender=_raise,
+    )
 
     result = dispatcher.dispatch_pending(limit=25)
 
@@ -90,6 +105,7 @@ def test_notification_dispatcher_renders_human_task_action_link_without_intake_d
     sent_messages = []
     dispatcher = FlowForgeNotificationDispatcher(
         runtime_repository=repo,
+        communication_template_repository=_TemplateRepo(),
         email_sender=lambda recipient, subject, html: sent_messages.append((recipient, subject, html)),
     )
 
@@ -100,3 +116,56 @@ def test_notification_dispatcher_renders_human_task_action_link_without_intake_d
     assert "FlowForge workflow task" in sent_messages[0][1]
     assert "http://localhost:3000/flowforge/actions/ffact_123" in sent_messages[0][2]
     assert "Jane Patient" not in sent_messages[0][2]
+
+
+def test_notification_dispatcher_renders_active_custom_template():
+    repo = _RuntimeRepo()
+    repo.notifications[0] = {
+        **repo.notifications[0],
+        "template_key": "therapist-task",
+        "recipient": "therapist@example.com",
+        "human_task_id": 301,
+        "payload_summary_json": {
+            "resource_display_name": "Dr. Lane",
+            "source_record_key": "therapist-1",
+            "action_url": "http://localhost:3000/flowforge/actions/ffact_123",
+            "expires_at": "2026-05-06T18:00:00Z",
+        },
+    }
+    template_repo = _TemplateRepo(
+        {
+            "id": 501,
+            "workspace_id": "ws-1",
+            "template_key": "therapist-task",
+            "channel": "email",
+            "purpose": "human_task",
+            "subject": "Task for {{selected_resource.display_name}}",
+            "body_blocks_json": [
+                {"type": "heading", "content": "Hello {{selected_resource.display_name}}"},
+                {"type": "text", "content": "Please respond by {{task.due_at}}."},
+                {"type": "action_buttons", "actions": ["accept", "decline"]},
+            ],
+            "status": "active",
+            "validation_status": "valid",
+        }
+    )
+    sent_messages = []
+    dispatcher = FlowForgeNotificationDispatcher(
+        runtime_repository=repo,
+        communication_template_repository=template_repo,
+        email_sender=lambda recipient, subject, html: sent_messages.append((recipient, subject, html)),
+    )
+
+    result = dispatcher.dispatch_pending(limit=25)
+
+    assert result["sent"] == 1
+    assert template_repo.lookups[0] == {
+        "workspace_id": "ws-1",
+        "template_key": "therapist-task",
+        "channel": "email",
+    }
+    assert sent_messages[0][1] == "Task for Dr. Lane"
+    assert "Hello Dr. Lane" in sent_messages[0][2]
+    assert "2026-05-06T18:00:00Z" in sent_messages[0][2]
+    assert '<a href="http://localhost:3000/flowforge/actions/ffact_123">Accept</a>' in sent_messages[0][2]
+    assert '<a href="http://localhost:3000/flowforge/actions/ffact_123">Decline</a>' in sent_messages[0][2]

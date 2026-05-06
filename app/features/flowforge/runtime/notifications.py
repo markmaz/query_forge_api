@@ -3,7 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from app.features.flowforge.repositories import FlowForgeRuntimeRepository
+from app.features.flowforge.repositories import FlowForgeCommunicationTemplateRepository, FlowForgeRuntimeRepository
+from app.features.flowforge.runtime.communication_templates import CommunicationTemplateRenderer
 
 EmailSender = Callable[[str, str, str], Any]
 
@@ -13,9 +14,13 @@ class FlowForgeNotificationDispatcher:
         self,
         *,
         runtime_repository: FlowForgeRuntimeRepository | None = None,
+        communication_template_repository: FlowForgeCommunicationTemplateRepository | None = None,
+        communication_template_renderer: CommunicationTemplateRenderer | None = None,
         email_sender: EmailSender | None = None,
     ) -> None:
         self._runtime_repository = runtime_repository or FlowForgeRuntimeRepository()
+        self._communication_template_repository = communication_template_repository or FlowForgeCommunicationTemplateRepository()
+        self._communication_template_renderer = communication_template_renderer or CommunicationTemplateRenderer()
         self._email_sender = email_sender or self._send_email
 
     def dispatch_pending(self, *, limit: int = 25) -> dict[str, Any]:
@@ -99,6 +104,19 @@ class FlowForgeNotificationDispatcher:
     def _render_email(self, notification: dict[str, Any]) -> tuple[str, str]:
         template_key = str(notification.get("template_key") or "flowforge.notification").strip()
         payload_summary = notification.get("payload_summary") or notification.get("payload_summary_json") or {}
+        custom_template = self._communication_template_repository.get_active_template_by_key(
+            workspace_id=str(notification.get("workspace_id") or "").strip(),
+            template_key=template_key,
+            channel=str(notification.get("channel") or "email").strip(),
+        )
+        if custom_template is not None:
+            rendered = self._communication_template_renderer.render_email(
+                template=self._template_contract(custom_template),
+                context=self._render_context(notification=notification, payload_summary=payload_summary),
+                action_url=self._safe_summary_value(payload_summary, "action_url"),
+            )
+            return rendered["subject"] or "FlowForge workflow notification", rendered["html"]
+
         reason = self._safe_summary_value(payload_summary, "reason") or "A FlowForge workflow requires attention."
         subject = "FlowForge workflow notification"
         if template_key == "flowforge.human_task":
@@ -118,6 +136,48 @@ class FlowForgeNotificationDispatcher:
             "<p>Open QueryForge to review the full workflow context.</p>"
         )
         return subject, html
+
+    @staticmethod
+    def _template_contract(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "template_key": str(row.get("template_key") or ""),
+            "channel": str(row.get("channel") or "email"),
+            "purpose": str(row.get("purpose") or "notification"),
+            "subject": str(row.get("subject") or ""),
+            "body_blocks": row.get("body_blocks") or row.get("body_blocks_json") or [],
+        }
+
+    def _render_context(self, *, notification: dict[str, Any], payload_summary: Any) -> dict[str, Any]:
+        payload = payload_summary if isinstance(payload_summary, dict) else {}
+        selected_resource = self._selected_resource_context(payload)
+        task_due_at = self._safe_summary_value(payload, "expires_at")
+        return {
+            "context": payload,
+            "notification": {
+                "id": notification.get("id"),
+                "template_key": notification.get("template_key"),
+            },
+            "run": {
+                "id": notification.get("run_id"),
+            },
+            "task": {
+                "id": notification.get("human_task_id"),
+                "type": "human_task" if notification.get("human_task_id") is not None else "notification",
+                "due_at": task_due_at,
+            },
+            "resource": selected_resource,
+            "selected_resource": selected_resource,
+        }
+
+    @staticmethod
+    def _selected_resource_context(payload: dict[str, Any]) -> dict[str, Any]:
+        resource = payload.get("selected_resource") or payload.get("resource")
+        if isinstance(resource, dict):
+            return dict(resource)
+        return {
+            "display_name": payload.get("resource_display_name"),
+            "source_record_key": payload.get("source_record_key"),
+        }
 
     @staticmethod
     def _safe_summary_value(payload_summary: Any, key: str) -> str | None:

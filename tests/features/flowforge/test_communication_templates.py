@@ -52,6 +52,24 @@ def test_communication_template_renderer_validates_and_renders_preview():
     assert "Anxiety" in preview["html"]
 
 
+def test_communication_template_renderer_renders_runtime_action_links():
+    renderer = CommunicationTemplateRenderer()
+
+    rendered = renderer.render_email(
+        template=_template(),
+        context={
+            "resource": {"display_name": "Dr. Lane", "attributes": {"specialty": "Anxiety"}},
+            "task": {"due_at": "2026-05-06T18:00:00Z"},
+            "intake": {"requested_date": "Friday"},
+        },
+        action_url="http://localhost:3000/flowforge/actions/ffact_123",
+    )
+
+    assert rendered["subject"] == "New task for Dr. Lane"
+    assert '<a href="http://localhost:3000/flowforge/actions/ffact_123">Accept</a>' in rendered["html"]
+    assert '<a href="http://localhost:3000/flowforge/actions/ffact_123">Decline</a>' in rendered["html"]
+
+
 def test_communication_template_renderer_rejects_unknown_fields_and_actions():
     renderer = CommunicationTemplateRenderer()
 
