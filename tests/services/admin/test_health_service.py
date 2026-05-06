@@ -8,7 +8,13 @@ from app.services.admin.health_service import AdminHealthService
 
 
 class _FakeSQL:
-    def __init__(self, *, fail: bool = False, flowforge_metrics: Dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail: bool = False,
+        flowforge_metrics: Dict[str, Any] | None = None,
+        unavailable_flowforge_metrics: set[str] | None = None,
+    ) -> None:
         self._fail = fail
         self._flowforge_metrics = flowforge_metrics or {
             "pending_notification_count": 0,
@@ -22,6 +28,7 @@ class _FakeSQL:
             "expired_artifact_count": 0,
             "artifact_retention_pending_count": 0,
         }
+        self._unavailable_flowforge_metrics = unavailable_flowforge_metrics or set()
 
     def execute_query(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Tuple]:
         if self._fail:
@@ -31,7 +38,36 @@ class _FakeSQL:
     def execute_query_mappings(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         if self._fail:
             raise RuntimeError("connection refused")
+        if "AS metric_count" in query:
+            metric_name = _metric_name_for_query(query)
+            if metric_name in self._unavailable_flowforge_metrics:
+                raise RuntimeError(f"Table for {metric_name} is missing")
+            return [{"metric_count": self._flowforge_metrics.get(metric_name, 0)}]
         return [dict(self._flowforge_metrics)]
+
+
+def _metric_name_for_query(query: str) -> str:
+    if "flowforge_notifications" in query and "status = 'pending'" in query:
+        return "pending_notification_count"
+    if "flowforge_notifications" in query and "status = 'failed'" in query:
+        return "failed_notification_count"
+    if "flowforge_runs" in query and "status IN ('queued', 'waiting', 'running')" in query:
+        return "stuck_run_count"
+    if "flowforge_runs" in query and "status = 'failed'" in query:
+        return "failed_run_count"
+    if "flowforge_schedule_runs" in query:
+        return "schedule_backlog_count"
+    if "flowforge_data_movement_audit" in query and "action_type = 'import'" in query:
+        return "failed_import_count"
+    if "flowforge_data_movement_audit" in query and "action_type = 'export'" in query:
+        return "failed_export_count"
+    if "flowforge_human_tasks" in query:
+        return "stuck_approval_count"
+    if "flowforge_dataset_artifacts" in query and "status = 'expired'" in query:
+        return "expired_artifact_count"
+    if "flowforge_dataset_artifacts" in query and "expires_at IS NOT NULL" in query:
+        return "artifact_retention_pending_count"
+    return "unknown_metric"
 
 
 _FLOWFORGE_HEALTHY = {
@@ -84,6 +120,42 @@ class _ErrorResponse:
         raise HTTPError("503 Server Error")
 
 
+class _FakeWorkspaceLLMService:
+    def __init__(self, *, fail_ids: set[int] | None = None, rows: list[dict[str, Any]] | None = None) -> None:
+        self._fail_ids = fail_ids or set()
+        self._rows = rows or [
+            {
+                "id": 11,
+                "workspace_id": "ws-1",
+                "name": "Planner GPT",
+                "provider": "openai",
+                "model_name": "gpt-4o",
+                "role": "planner",
+                "endpoint_url": None,
+                "is_active": True,
+            },
+            {
+                "id": 12,
+                "workspace_id": "ws-1",
+                "name": "Local NER",
+                "provider": "ollama",
+                "model_name": "llama3.1",
+                "role": "ner",
+                "endpoint_url": "http://localhost:11434",
+                "is_active": True,
+            },
+        ]
+
+    def get_all_for_workspace(self, workspace_id: str) -> list[dict[str, Any]]:
+        assert workspace_id == "ws-1"
+        return [dict(row) for row in self._rows]
+
+    def test_connection(self, llm_id: int) -> dict[str, Any]:
+        if llm_id in self._fail_ids:
+            return {"success": False, "message": "connection refused"}
+        return {"success": True, "message": f"Connected to {llm_id}"}
+
+
 def test_check_all_healthy():
     with patch("app.services.admin.health_service.requests.get") as mock_get:
         with patch.object(
@@ -103,15 +175,19 @@ def test_check_all_healthy():
                 vllm_model="qwen25-7b",
                 qdrant_url="http://fake-qdrant:6333",
                 mcp_resource_url="http://fake-mcp:8001",
+                workspace_llm_service=_FakeWorkspaceLLMService(),
             )
-            result = svc.check_all()
+            result = svc.check_all(workspace_id="ws-1")
 
     assert result["overall"] == "healthy"
     assert result["checks"]["app"]["status"] == "ok"
     assert result["checks"]["mysql"]["status"] == "ok"
     assert result["checks"]["mysql"]["latency_ms"] >= 0
-    assert result["checks"]["vllm"]["status"] == "ok"
-    assert result["checks"]["vllm"]["model"] == "qwen25-7b"
+    assert result["checks"]["llms"]["status"] == "ok"
+    assert result["checks"]["llms"]["total_count"] == 2
+    assert result["checks"]["llms"]["active_count"] == 2
+    assert result["checks"]["llms"]["llms"][0]["name"] == "Planner GPT"
+    assert result["checks"]["llms"]["llms"][0]["endpoint"] == "https://api.openai.com/v1"
     assert result["checks"]["qdrant"]["status"] == "ok"
     assert result["checks"]["mcp"]["status"] == "ok"
     assert result["checks"]["mcp"]["url"] == "http://fake-mcp:8001"
@@ -133,41 +209,39 @@ def test_check_all_mysql_down():
                 vllm_base_url="http://fake-llm:8000",
                 qdrant_url="http://fake-qdrant:6333",
                 mcp_resource_url="http://fake-mcp:8001",
+                workspace_llm_service=_FakeWorkspaceLLMService(),
             )
-            result = svc.check_all()
+            result = svc.check_all(workspace_id="ws-1")
 
     assert result["overall"] == "degraded"
     assert result["checks"]["mysql"]["status"] == "error"
     assert "connection refused" in result["checks"]["mysql"]["error"]
 
 
-def test_check_all_vllm_down():
+def test_check_all_workspace_llm_down():
     with patch("app.services.admin.health_service.requests.get") as mock_get:
         with patch.object(
             AdminHealthService,
             "check_broker",
             return_value={"status": "ok", "ok": True, "valkey": {"ping_ok": True}, "celery": {"broker_connect_ok": True}},
         ), patch("app.services.admin.health_service.get_flowforge_worker_health", return_value=_FLOWFORGE_HEALTHY):
-            def _route(url: str, **kwargs: Any) -> Any:
-                if "/v1/models" in url:
-                    raise ConnectionError("vLLM unreachable")
-                return _OkResponse()
-
-            mock_get.side_effect = _route
+            mock_get.return_value = _OkResponse()
             svc = AdminHealthService(
                 sql=_FakeSQL(),
-                vllm_base_url="http://fake-llm:8000",
                 qdrant_url="http://fake-qdrant:6333",
                 mcp_resource_url="http://fake-mcp:8001",
+                workspace_llm_service=_FakeWorkspaceLLMService(fail_ids={12}),
             )
-            result = svc.check_all()
+            result = svc.check_all(workspace_id="ws-1")
 
     assert result["overall"] == "degraded"
-    assert result["checks"]["vllm"]["status"] == "error"
+    assert result["checks"]["llms"]["status"] == "degraded"
+    assert result["checks"]["llms"]["failed_count"] == 1
+    assert result["checks"]["llms"]["llms"][1]["status"] == "error"
 
 
 def test_check_all_everything_down():
-    """App always returns ok, so with mysql+vllm+qdrant down, overall is degraded."""
+    """App always returns ok, so with mysql+llms+qdrant down, overall is degraded."""
     with patch("app.services.admin.health_service.requests.get") as mock_get:
         with patch.object(
             AdminHealthService,
@@ -180,12 +254,13 @@ def test_check_all_everything_down():
                 vllm_base_url="http://fake-llm:8000",
                 qdrant_url="http://fake-qdrant:6333",
                 mcp_resource_url="http://fake-mcp:8001",
+                workspace_llm_service=_FakeWorkspaceLLMService(fail_ids={11, 12}),
             )
-            result = svc.check_all()
+            result = svc.check_all(workspace_id="ws-1")
 
     assert result["overall"] == "degraded"
     assert result["checks"]["mysql"]["status"] == "error"
-    assert result["checks"]["vllm"]["status"] == "error"
+    assert result["checks"]["llms"]["status"] == "degraded"
     assert result["checks"]["qdrant"]["status"] == "error"
     assert result["checks"]["app"]["status"] == "ok"
 
@@ -256,6 +331,31 @@ def test_check_flowforge_reports_stale_worker_and_operational_backlog():
     assert any("export" in issue for issue in result["issues"])
     assert any("approval" in issue for issue in result["issues"])
     assert any("retention" in issue for issue in result["issues"])
+
+
+def test_check_flowforge_degrades_when_optional_operations_tables_are_missing():
+    svc = AdminHealthService(
+        sql=_FakeSQL(
+            unavailable_flowforge_metrics={
+                "schedule_backlog_count",
+                "failed_import_count",
+                "failed_export_count",
+                "expired_artifact_count",
+                "artifact_retention_pending_count",
+            }
+        )
+    )
+
+    with patch("app.services.admin.health_service.get_flowforge_worker_health", return_value=_FLOWFORGE_HEALTHY):
+        result = svc._check_flowforge()
+
+    assert result["status"] == "degraded"
+    assert result["metrics"]["schedule_backlog_count"] is None
+    assert result["metrics"]["failed_import_count"] is None
+    assert result["metrics"]["failed_export_count"] is None
+    assert result["metrics"]["expired_artifact_count"] is None
+    assert result["metrics"]["artifact_retention_pending_count"] is None
+    assert any("migrations" in issue for issue in result["issues"])
 
 
 class _FakeValkeyClient:

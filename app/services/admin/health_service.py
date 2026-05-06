@@ -17,6 +17,7 @@ from app.config import QDRANT_URL, VALKEY_ADDRESS, VALKEY_CONFIG, VALKEY_PORT, V
 from app.config.mcp_oauth_config import load_mcp_oauth_config
 from app.features.flowforge.runtime.health import get_flowforge_worker_health
 from app.ports.sql_executor import ForgeQueryPort
+from app.services.tenancy.workspace_llm_service import WorkspaceLLMService
 
 logger = logging.getLogger(__name__)
 
@@ -30,18 +31,20 @@ class AdminHealthService:
         vllm_model: Optional[str] = None,
         qdrant_url: Optional[str] = None,
         mcp_resource_url: Optional[str] = None,
+        workspace_llm_service: Optional[WorkspaceLLMService] = None,
     ) -> None:
         self._sql = sql or ForgeMetaSQL()
         self._vllm_base_url = vllm_base_url or VLLM_BASE_URL
         self._vllm_model = vllm_model or VLLM_MODEL
         self._qdrant_url = qdrant_url or QDRANT_URL
         self._mcp_resource_url = (mcp_resource_url or load_mcp_oauth_config().mcp_resource_url).rstrip("/")
+        self._workspace_llm_service = workspace_llm_service or WorkspaceLLMService()
 
-    def check_all(self) -> Dict[str, Any]:
+    def check_all(self, *, workspace_id: Optional[str] = None) -> Dict[str, Any]:
         checks: Dict[str, Any] = {}
         checks["app"] = self._check_app()
         checks["mysql"] = self._check_mysql()
-        checks["vllm"] = self._check_vllm()
+        checks["llms"] = self._check_workspace_llms(workspace_id=workspace_id)
         checks["qdrant"] = self._check_qdrant()
         checks["mcp"] = self._check_mcp()
         checks["broker"] = self.check_broker()
@@ -90,6 +93,103 @@ class AdminHealthService:
             latency_ms = int((time.perf_counter() - start) * 1000)
             logger.exception("vLLM health check failed")
             return {"status": "error", "latency_ms": latency_ms, "error": str(exc)}
+
+    def _check_workspace_llms(self, *, workspace_id: Optional[str]) -> Dict[str, Any]:
+        ws = str(workspace_id or "").strip()
+        if not ws:
+            return {
+                "status": "degraded",
+                "workspace_id": None,
+                "total_count": 0,
+                "active_count": 0,
+                "healthy_count": 0,
+                "failed_count": 0,
+                "active_failed_count": 0,
+                "latency_ms": None,
+                "llms": [],
+                "issues": ["Workspace LLM health requires X-Workspace-Id."],
+            }
+
+        try:
+            configs = self._workspace_llm_service.get_all_for_workspace(ws)
+        except (SQLAlchemyError, OSError, RuntimeError, ValueError) as exc:
+            logger.exception("Workspace LLM health list failed")
+            return {
+                "status": "error",
+                "workspace_id": ws,
+                "total_count": None,
+                "active_count": None,
+                "healthy_count": None,
+                "failed_count": None,
+                "active_failed_count": None,
+                "latency_ms": None,
+                "llms": [],
+                "error": str(exc),
+                "issues": ["Workspace LLM configurations could not be loaded."],
+            }
+
+        checks: list[dict[str, Any]] = []
+        total_latency_ms = 0
+        for cfg in configs:
+            llm_id = _to_int_or_none(cfg.get("id"))
+            start = time.perf_counter()
+            if llm_id is None:
+                result = {"success": False, "message": "LLM configuration is missing an id."}
+            else:
+                try:
+                    result = self._workspace_llm_service.test_connection(llm_id)
+                except (SQLAlchemyError, OSError, RuntimeError, ValueError) as exc:
+                    logger.exception("Workspace LLM health check failed llm_id=%s", llm_id)
+                    result = {"success": False, "message": str(exc)}
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            total_latency_ms += latency_ms
+            ok = bool(result.get("success"))
+            checks.append(
+                {
+                    "id": llm_id,
+                    "name": str(cfg.get("name") or "").strip() or f"LLM {llm_id or '-'}",
+                    "provider": str(cfg.get("provider") or "").strip(),
+                    "model": str(cfg.get("model_name") or "").strip(),
+                    "role": str(cfg.get("role") or "").strip(),
+                    "endpoint": _display_llm_endpoint(cfg),
+                    "active": bool(cfg.get("is_active")),
+                    "status": "ok" if ok else "error",
+                    "latency_ms": latency_ms,
+                    "message": str(result.get("message") or "").strip(),
+                }
+            )
+
+        total_count = len(checks)
+        active_count = sum(1 for item in checks if item["active"])
+        healthy_count = sum(1 for item in checks if item["status"] == "ok")
+        failed_count = total_count - healthy_count
+        active_failed_count = sum(1 for item in checks if item["active"] and item["status"] != "ok")
+
+        issues: list[str] = []
+        if total_count == 0:
+            issues.append("No workspace LLM configurations are defined.")
+        if active_count == 0 and total_count > 0:
+            issues.append("No active workspace LLM configurations are enabled.")
+        if failed_count > 0:
+            issues.append(f"{failed_count} workspace LLM configuration(s) failed health checks.")
+
+        if total_count == 0 or active_count == 0 or failed_count > 0:
+            status = "degraded"
+        else:
+            status = "ok"
+
+        return {
+            "status": status,
+            "workspace_id": ws,
+            "total_count": total_count,
+            "active_count": active_count,
+            "healthy_count": healthy_count,
+            "failed_count": failed_count,
+            "active_failed_count": active_failed_count,
+            "latency_ms": int(total_latency_ms / total_count) if total_count else None,
+            "llms": checks,
+            "issues": issues,
+        }
 
     def _check_qdrant(self) -> Dict[str, Any]:
         url = f"{self._qdrant_url}/healthz"
@@ -232,6 +332,20 @@ class AdminHealthService:
             issues.append(f"{metrics['stuck_approval_count']} approval task(s) are overdue or stalled.")
         if int(metrics.get("artifact_retention_pending_count") or 0) > 0:
             issues.append(f"{metrics['artifact_retention_pending_count']} dataset artifact(s) are past retention.")
+        unavailable_metrics = [
+            key
+            for key in (
+                "schedule_backlog_count",
+                "failed_import_count",
+                "failed_export_count",
+                "stuck_approval_count",
+                "expired_artifact_count",
+                "artifact_retention_pending_count",
+            )
+            if metrics.get(key) is None
+        ]
+        if unavailable_metrics:
+            issues.append("Some FlowForge operations metrics are unavailable; apply the latest FlowForge migrations.")
 
         return {
             "status": "ok" if not issues else "degraded",
@@ -242,79 +356,139 @@ class AdminHealthService:
 
     def _query_flowforge_operational_metrics(self) -> Dict[str, Any]:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
-        rows = self._sql.execute_query_mappings(
-            """
-            SELECT
-              (SELECT COUNT(*)
-                 FROM flowforge_notifications
-                WHERE status = 'pending') AS pending_notification_count,
-              (SELECT COUNT(*)
-                 FROM flowforge_notifications
-                WHERE status = 'failed') AS failed_notification_count,
-              (SELECT COUNT(*)
-                 FROM flowforge_runs
-                WHERE status IN ('queued', 'waiting', 'running')
-                  AND updated_at <= :stuck_cutoff) AS stuck_run_count,
-              (SELECT COUNT(*)
-                 FROM flowforge_runs
+        params = {
+            "stuck_cutoff": now - timedelta(minutes=30),
+            "failure_cutoff": now - timedelta(hours=24),
+            "schedule_backlog_cutoff": now - timedelta(minutes=5),
+            "approval_due_cutoff": now,
+            "approval_stale_cutoff": now - timedelta(hours=24),
+        }
+        return {
+            "pending_notification_count": self._query_optional_flowforge_count(
+                """
+                SELECT COUNT(*) AS metric_count
+                FROM flowforge_notifications
+                WHERE status = 'pending'
+                """,
+                {},
+                metric_name="pending_notification_count",
+            ),
+            "failed_notification_count": self._query_optional_flowforge_count(
+                """
+                SELECT COUNT(*) AS metric_count
+                FROM flowforge_notifications
                 WHERE status = 'failed'
-                  AND COALESCE(failed_at, updated_at, started_at) >= :failure_cutoff) AS failed_run_count,
-              (SELECT COUNT(*)
-                 FROM flowforge_schedule_runs
+                """,
+                {},
+                metric_name="failed_notification_count",
+            ),
+            "stuck_run_count": self._query_optional_flowforge_count(
+                """
+                SELECT COUNT(*) AS metric_count
+                FROM flowforge_runs
+                WHERE status IN ('queued', 'waiting', 'running')
+                  AND updated_at <= :stuck_cutoff
+                """,
+                params,
+                metric_name="stuck_run_count",
+            ),
+            "failed_run_count": self._query_optional_flowforge_count(
+                """
+                SELECT COUNT(*) AS metric_count
+                FROM flowforge_runs
+                WHERE status = 'failed'
+                  AND COALESCE(failed_at, updated_at, started_at) >= :failure_cutoff
+                """,
+                params,
+                metric_name="failed_run_count",
+            ),
+            "schedule_backlog_count": self._query_optional_flowforge_count(
+                """
+                SELECT COUNT(*) AS metric_count
+                FROM flowforge_schedule_runs
                 WHERE status IN ('pending', 'started')
-                  AND scheduled_for <= :schedule_backlog_cutoff) AS schedule_backlog_count,
-              (SELECT COUNT(*)
-                 FROM flowforge_data_movement_audit
+                  AND scheduled_for <= :schedule_backlog_cutoff
+                """,
+                params,
+                metric_name="schedule_backlog_count",
+            ),
+            "failed_import_count": self._query_optional_flowforge_count(
+                """
+                SELECT COUNT(*) AS metric_count
+                FROM flowforge_data_movement_audit
                 WHERE action_type = 'import'
                   AND status = 'failed'
-                  AND COALESCE(completed_at, started_at, created_at) >= :failure_cutoff) AS failed_import_count,
-              (SELECT COUNT(*)
-                 FROM flowforge_data_movement_audit
+                  AND COALESCE(completed_at, started_at, created_at) >= :failure_cutoff
+                """,
+                params,
+                metric_name="failed_import_count",
+            ),
+            "failed_export_count": self._query_optional_flowforge_count(
+                """
+                SELECT COUNT(*) AS metric_count
+                FROM flowforge_data_movement_audit
                 WHERE action_type = 'export'
                   AND status = 'failed'
-                  AND COALESCE(completed_at, started_at, created_at) >= :failure_cutoff) AS failed_export_count,
-              (SELECT COUNT(*)
-                 FROM flowforge_human_tasks
+                  AND COALESCE(completed_at, started_at, created_at) >= :failure_cutoff
+                """,
+                params,
+                metric_name="failed_export_count",
+            ),
+            "stuck_approval_count": self._query_optional_flowforge_count(
+                """
+                SELECT COUNT(*) AS metric_count
+                FROM flowforge_human_tasks
                 WHERE task_type = 'approval'
                   AND status IN ('pending', 'waiting')
                   AND (
                     (due_at IS NOT NULL AND due_at <= :approval_due_cutoff)
                     OR (due_at IS NULL AND created_at <= :approval_stale_cutoff)
-                  )) AS stuck_approval_count,
-              (SELECT COUNT(*)
-                 FROM flowforge_dataset_artifacts
-                WHERE status = 'expired') AS expired_artifact_count,
-              (SELECT COUNT(*)
-                 FROM flowforge_dataset_artifacts
+                  )
+                """,
+                params,
+                metric_name="stuck_approval_count",
+            ),
+            "expired_artifact_count": self._query_optional_flowforge_count(
+                """
+                SELECT COUNT(*) AS metric_count
+                FROM flowforge_dataset_artifacts
+                WHERE status = 'expired'
+                """,
+                {},
+                metric_name="expired_artifact_count",
+            ),
+            "artifact_retention_pending_count": self._query_optional_flowforge_count(
+                """
+                SELECT COUNT(*) AS metric_count
+                FROM flowforge_dataset_artifacts
                 WHERE expires_at IS NOT NULL
                   AND expires_at <= CURRENT_TIMESTAMP
-                  AND status NOT IN ('expired', 'deleted')) AS artifact_retention_pending_count
-            """,
-            {
-                "stuck_cutoff": now - timedelta(minutes=30),
-                "failure_cutoff": now - timedelta(hours=24),
-                "schedule_backlog_cutoff": now - timedelta(minutes=5),
-                "approval_due_cutoff": now,
-                "approval_stale_cutoff": now - timedelta(hours=24),
-            },
-        )
-        row = dict(rows[0]) if rows else {}
-        return {
-            "pending_notification_count": int(row.get("pending_notification_count") or 0),
-            "failed_notification_count": int(row.get("failed_notification_count") or 0),
-            "stuck_run_count": int(row.get("stuck_run_count") or 0),
-            "failed_run_count": int(row.get("failed_run_count") or 0),
-            "schedule_backlog_count": int(row.get("schedule_backlog_count") or 0),
-            "failed_import_count": int(row.get("failed_import_count") or 0),
-            "failed_export_count": int(row.get("failed_export_count") or 0),
-            "stuck_approval_count": int(row.get("stuck_approval_count") or 0),
-            "expired_artifact_count": int(row.get("expired_artifact_count") or 0),
-            "artifact_retention_pending_count": int(row.get("artifact_retention_pending_count") or 0),
+                  AND status NOT IN ('expired', 'deleted')
+                """,
+                {},
+                metric_name="artifact_retention_pending_count",
+            ),
             "stuck_run_threshold_minutes": 30,
             "failed_run_window_hours": 24,
             "schedule_backlog_threshold_minutes": 5,
             "approval_stale_threshold_hours": 24,
         }
+
+    def _query_optional_flowforge_count(
+        self,
+        query: str,
+        params: dict[str, Any],
+        *,
+        metric_name: str,
+    ) -> int | None:
+        try:
+            rows = self._sql.execute_query_mappings(query, params)
+        except (SQLAlchemyError, OSError, RuntimeError, ValueError) as exc:
+            logger.warning("FlowForge health metric unavailable: %s (%s)", metric_name, exc)
+            return None
+        row = dict(rows[0]) if rows else {}
+        value = row.get("metric_count")
+        return int(value) if value is not None else 0
 
 
 def _safe_json(resp: requests.Response) -> Dict[str, Any]:
@@ -323,6 +497,26 @@ def _safe_json(resp: requests.Response) -> Dict[str, Any]:
     except ValueError:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _display_llm_endpoint(cfg: dict[str, Any]) -> str:
+    provider = str(cfg.get("provider") or "").strip().lower()
+    endpoint = str(cfg.get("endpoint_url") or "").strip()
+    if endpoint:
+        return endpoint
+    if provider == "openai":
+        return "https://api.openai.com/v1"
+    if provider == "anthropic":
+        return "https://api.anthropic.com/v1"
+    return ""
+
+
+def _to_int_or_none(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _mask_broker_url(raw_url: str) -> str:

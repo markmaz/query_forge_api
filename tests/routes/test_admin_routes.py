@@ -50,13 +50,14 @@ def test_healthz(client):
 
 def test_detailed_health_returns_checks(client, monkeypatch):
     class _FakeHealthSvc:
-        def check_all(self):
+        def check_all(self, *, workspace_id=None):
+            assert workspace_id == "ws-1"
             return {
                 "overall": "healthy",
                 "checks": {
                     "app": {"status": "ok"},
                     "mysql": {"status": "ok", "latency_ms": 1},
-                    "vllm": {"status": "ok", "model": "qwen25-7b"},
+                    "llms": {"status": "ok", "total_count": 1, "llms": []},
                     "qdrant": {"status": "ok", "latency_ms": 2},
                     "mcp": {"status": "ok", "latency_ms": 3, "url": "http://localhost:8001"},
                     "broker": {"status": "ok", "ok": True},
@@ -74,13 +75,14 @@ def test_detailed_health_returns_checks(client, monkeypatch):
 
 def test_detailed_health_degraded(client, monkeypatch):
     class _FakeHealthSvc:
-        def check_all(self):
+        def check_all(self, *, workspace_id=None):
+            assert workspace_id == "ws-1"
             return {
                 "overall": "degraded",
                 "checks": {
                     "app": {"status": "ok"},
                     "mysql": {"status": "error", "error": "connection refused"},
-                    "vllm": {"status": "ok"},
+                    "llms": {"status": "ok", "total_count": 1, "llms": []},
                     "qdrant": {"status": "ok"},
                     "mcp": {"status": "error", "error": "HTTP 503"},
                     "broker": {"status": "error", "ok": False},
@@ -95,7 +97,8 @@ def test_detailed_health_degraded(client, monkeypatch):
 
 def test_detailed_health_allows_workspace_admin(client, monkeypatch):
     class _FakeHealthSvc:
-        def check_all(self):
+        def check_all(self, *, workspace_id=None):
+            assert workspace_id == "ws-1"
             return {"overall": "healthy", "checks": {"app": {"status": "ok"}}}
 
     monkeypatch.setattr(admin_routes, "AdminHealthService", _FakeHealthSvc)

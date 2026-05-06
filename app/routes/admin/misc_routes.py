@@ -25,7 +25,7 @@ class DetailedHealth(Resource):
     @require_admin()
     def get(self):
         _require_admin()
-        result = admin_health_service().check_all()
+        result = admin_health_service().check_all(workspace_id=extract_workspace_id())
         return result, 200
 
 
