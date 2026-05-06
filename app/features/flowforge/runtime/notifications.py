@@ -151,9 +151,11 @@ class FlowForgeNotificationDispatcher:
     def _render_context(self, *, notification: dict[str, Any], payload_summary: Any) -> dict[str, Any]:
         payload = payload_summary if isinstance(payload_summary, dict) else {}
         selected_resource = self._selected_resource_context(payload)
+        intake = payload.get("intake") if isinstance(payload.get("intake"), dict) else {}
         task_due_at = self._safe_summary_value(payload, "expires_at")
         return {
             "context": payload,
+            "intake": dict(intake),
             "notification": {
                 "id": notification.get("id"),
                 "template_key": notification.get("template_key"),

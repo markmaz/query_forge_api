@@ -140,6 +140,10 @@ def test_notification_dispatcher_renders_active_custom_template():
                 "decline": "http://localhost:3000/flowforge/actions/ffact_123?action=decline",
             },
             "expires_at": "2026-05-06T18:00:00Z",
+            "intake": {
+                "requested_service": "Anxiety therapy",
+                "preferred_days": "Monday, Wednesday",
+            },
         },
     }
     template_repo = _TemplateRepo(
@@ -153,6 +157,7 @@ def test_notification_dispatcher_renders_active_custom_template():
             "body_blocks_json": [
                 {"type": "heading", "content": "Hello {{selected_resource.display_name}}"},
                 {"type": "text", "content": "Please respond by {{task.due_at}}."},
+                {"type": "field_list", "fields": ["intake.requested_service", "intake.preferred_days"]},
                 {"type": "action_buttons", "actions": ["accept", "decline"]},
             ],
             "status": "active",
@@ -176,6 +181,8 @@ def test_notification_dispatcher_renders_active_custom_template():
     }
     assert sent_messages[0][1] == "Task for Dr. Lane"
     assert "Hello Dr. Lane" in sent_messages[0][2]
+    assert "Anxiety therapy" in sent_messages[0][2]
+    assert "Monday, Wednesday" in sent_messages[0][2]
     assert "2026-05-06T18:00:00Z" in sent_messages[0][2]
     assert 'href="http://localhost:3000/flowforge/actions/ffact_123?action=accept"' in sent_messages[0][2]
     assert 'data-flowforge-action="accept"' in sent_messages[0][2]

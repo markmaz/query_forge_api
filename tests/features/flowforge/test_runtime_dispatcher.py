@@ -455,6 +455,16 @@ def test_dispatcher_routes_import_nodes_through_import_executor():
 
 def test_dispatcher_executes_matching_node_and_persists_candidate_results():
     runtime_repo = _RuntimeRepo()
+    runtime_repo.run["run_context_json"] = {
+        "intake": {"fields": {"caseType": "new"}},
+        "communication_context": {
+            "intake": {
+                "requested_service": "Anxiety therapy",
+                "preferred_days": "Monday",
+            }
+        },
+        "communication_fields": ["intake.requested_service", "intake.preferred_days"],
+    }
 
     class _MatchingRepo:
         def get_policy_version(self, *, workspace_id: str, version_id: int):
@@ -607,6 +617,11 @@ def test_dispatcher_executes_matching_node_and_persists_candidate_results():
     assert runtime_repo.tokens[0]["allowed_actions"] == ["accept", "decline"]
     assert runtime_repo.notifications[0]["recipient"] == "jane@example.com"
     assert runtime_repo.notifications[0]["template_key"] == "flowforge.custom_task"
+    assert runtime_repo.notifications[0]["payload_summary"]["intake"] == {
+        "requested_service": "Anxiety therapy",
+        "preferred_days": "Monday",
+    }
+    assert runtime_repo.notifications[0]["payload_summary"]["selected_resource"]["display_name"] == "Jane Resource"
     assert "action_url" in runtime_repo.notifications[0]["payload_summary"]
     action_url = runtime_repo.notifications[0]["payload_summary"]["action_url"]
     assert runtime_repo.notifications[0]["payload_summary"]["action_urls"] == {

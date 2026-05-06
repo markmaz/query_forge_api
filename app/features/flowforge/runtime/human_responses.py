@@ -363,6 +363,8 @@ class FlowForgeHumanResponseRuntime:
                 status="pending",
                 idempotency_key=f"run:{run_id}:offer:{task_id}:notification",
                 payload_summary={
+                    "intake": self._communication_intake_context(matching_context),
+                    "selected_resource": self._notification_resource_context(resource),
                     "resource_display_name": resource.get("display_name"),
                     "source_record_key": source_record_key,
                     "action_url": self._action_url(token),
@@ -421,6 +423,30 @@ class FlowForgeHumanResponseRuntime:
                 resource_set_id=int(resource_set_id),
                 source_record_key=source_record_key,
             )
+
+    @staticmethod
+    def _communication_intake_context(matching_context: dict[str, Any]) -> dict[str, Any]:
+        communication_context = matching_context.get("communication_context")
+        if not isinstance(communication_context, dict):
+            return {}
+        intake = communication_context.get("intake")
+        return dict(intake) if isinstance(intake, dict) else {}
+
+    @staticmethod
+    def _notification_resource_context(resource: dict[str, Any]) -> dict[str, Any]:
+        allowed_keys = {
+            "source_record_key",
+            "display_name",
+            "primary_email",
+            "primary_phone",
+            "availability_status",
+            "capacity_available",
+            "service_area",
+            "timezone",
+            "attributes",
+            "normalized_profile",
+        }
+        return {key: resource.get(key) for key in allowed_keys if resource.get(key) is not None}
 
     @staticmethod
     def _recipient_for_resource(resource: dict[str, Any]) -> str | None:

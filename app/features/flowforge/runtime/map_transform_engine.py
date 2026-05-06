@@ -15,6 +15,14 @@ class MapTransformResult:
     validation_summary: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class ContextTransformResult:
+    context_update: dict[str, Any]
+    communication_context: dict[str, Any]
+    communication_fields: list[str]
+    validation_summary: dict[str, Any]
+
+
 class MapTransformEngine:
     def transform(
         self, *, rows: list[dict[str, Any]], config: dict[str, Any]
@@ -54,6 +62,46 @@ class MapTransformEngine:
             },
         )
 
+    def transform_context(self, *, context: dict[str, Any], config: dict[str, Any]) -> ContextTransformResult:
+        field_mapping = config.get("field_mapping") or config.get("mapping") or {}
+        mapped = self._map_context(context=context, field_mapping=field_mapping)
+        validations = config.get("validations") or []
+        if not isinstance(validations, list):
+            validations = []
+        context_update = self._nested_from_flat(mapped)
+        errors = self._validate_row(row=context_update, validations=validations)
+        if errors:
+            return ContextTransformResult(
+                context_update={},
+                communication_context={},
+                communication_fields=[],
+                validation_summary={
+                    "input_context": "run_context",
+                    "mapped_field_count": len(mapped),
+                    "accepted": False,
+                    "validation_count": len(validations),
+                    "errors": errors,
+                },
+            )
+
+        communication_fields = self._communication_fields(config=config, mapped=mapped)
+        communication_context = self._communication_context(mapped=mapped, communication_fields=communication_fields)
+        if communication_context:
+            context_update["communication_context"] = communication_context
+            context_update["communication_fields"] = communication_fields
+        return ContextTransformResult(
+            context_update=context_update,
+            communication_context=communication_context,
+            communication_fields=communication_fields,
+            validation_summary={
+                "input_context": "run_context",
+                "mapped_field_count": len(mapped),
+                "accepted": True,
+                "validation_count": len(validations),
+                "communication_field_count": len(communication_fields),
+            },
+        )
+
     def _map_row(
         self, *, row: dict[str, Any], field_mapping: Any, include_unmapped: bool
     ) -> dict[str, Any]:
@@ -88,6 +136,55 @@ class MapTransformEngine:
                 if target:
                     entries.append((target, source, rule.get("default")))
         return entries
+
+    def _map_context(self, *, context: dict[str, Any], field_mapping: Any) -> dict[str, Any]:
+        mapped: dict[str, Any] = {}
+        for target, source, default in self._mapping_entries(field_mapping):
+            target_key = str(target or "").strip()
+            if not target_key:
+                continue
+            value = self._path_value(context, source)
+            mapped[target_key] = default if value is None and default is not None else value
+        return mapped
+
+    def _communication_fields(self, *, config: dict[str, Any], mapped: dict[str, Any]) -> list[str]:
+        configured = config.get("communication_fields") or config.get("template_fields") or []
+        if isinstance(configured, list):
+            fields = [str(field or "").strip() for field in configured if str(field or "").strip()]
+        else:
+            fields = []
+        if bool(config.get("expose_all_mapped_to_templates")):
+            fields.extend(mapped.keys())
+        allowed = [field for field in fields if field.startswith("intake.") and field in mapped]
+        return sorted(set(allowed))
+
+    def _communication_context(self, *, mapped: dict[str, Any], communication_fields: list[str]) -> dict[str, Any]:
+        output: dict[str, Any] = {}
+        for field in communication_fields:
+            value = mapped.get(field)
+            if value is not None:
+                self._set_path(output, field, value)
+        return output
+
+    def _nested_from_flat(self, values: dict[str, Any]) -> dict[str, Any]:
+        output: dict[str, Any] = {}
+        for path, value in values.items():
+            self._set_path(output, path, value)
+        return output
+
+    @staticmethod
+    def _set_path(output: dict[str, Any], path: str, value: Any) -> None:
+        pieces = [piece for piece in str(path or "").split(".") if piece]
+        if not pieces:
+            return
+        current = output
+        for piece in pieces[:-1]:
+            next_value = current.get(piece)
+            if not isinstance(next_value, dict):
+                next_value = {}
+                current[piece] = next_value
+            current = next_value
+        current[pieces[-1]] = value
 
     def _validate_row(
         self, *, row: dict[str, Any], validations: list[Any]

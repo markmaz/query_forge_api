@@ -222,6 +222,12 @@ class FlowForgeRuntimeMatchingExecutor:
             ),
             "offer_timeout_minutes": max(1, int(config.get("timeout_minutes") or config.get("offer_timeout_minutes") or 1440)),
             "communication_template_key": str(config.get("communication_template_key") or "flowforge.human_task").strip(),
+            "communication_context": run_context.get("communication_context")
+            if isinstance(run_context.get("communication_context"), dict)
+            else {},
+            "communication_fields": run_context.get("communication_fields")
+            if isinstance(run_context.get("communication_fields"), list)
+            else [],
         }
         self._runtime_repository.update_run_context(
             workspace_id=workspace_id,
@@ -293,6 +299,11 @@ class FlowForgeRuntimeMatchingExecutor:
                 status="pending",
                 idempotency_key=f"run:{run_id}:offer:{task_id}:notification",
                 payload_summary={
+                    "intake": self._communication_intake_context(run_context),
+                    "selected_resource": self._notification_resource_context(
+                        selected_resource=selected_resource,
+                        selected_candidate=selected_candidate,
+                    ),
                     "resource_display_name": selected_candidate.get("display_name"),
                     "source_record_key": source_record_key,
                     "action_url": self._action_url(token),
@@ -334,6 +345,35 @@ class FlowForgeRuntimeMatchingExecutor:
             if str(resource.get("source_record_key") or "").strip() == source_record_key:
                 return resource
         return None
+
+    @staticmethod
+    def _communication_intake_context(run_context: dict[str, Any]) -> dict[str, Any]:
+        communication_context = run_context.get("communication_context")
+        if not isinstance(communication_context, dict):
+            return {}
+        intake = communication_context.get("intake")
+        return dict(intake) if isinstance(intake, dict) else {}
+
+    @staticmethod
+    def _notification_resource_context(
+        *,
+        selected_resource: dict[str, Any] | None,
+        selected_candidate: dict[str, Any],
+    ) -> dict[str, Any]:
+        source = selected_resource if isinstance(selected_resource, dict) else selected_candidate
+        allowed_keys = {
+            "source_record_key",
+            "display_name",
+            "primary_email",
+            "primary_phone",
+            "availability_status",
+            "capacity_available",
+            "service_area",
+            "timezone",
+            "attributes",
+            "normalized_profile",
+        }
+        return {key: source.get(key) for key in allowed_keys if source.get(key) is not None}
 
     @staticmethod
     def _recipient_for_resource(resource: dict[str, Any] | None) -> str | None:

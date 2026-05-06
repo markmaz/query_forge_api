@@ -43,6 +43,13 @@ class FlowForgeMapTransformExecutor:
     ) -> NodeExecutionResult:
         node_id = str(node.get("id") or "").strip()
         config = self._node_config(node)
+        if self._is_context_mode(config):
+            return self._execute_context_transform(
+                node_id=node_id,
+                config=config,
+                outgoing_edges=outgoing_edges,
+                run_context=run_context,
+            )
         try:
             input_artifact = self._resolve_input_artifact(
                 workspace_id=workspace_id, config=config, run_context=run_context
@@ -152,6 +159,34 @@ class FlowForgeMapTransformExecutor:
             },
         )
 
+    def _execute_context_transform(
+        self,
+        *,
+        node_id: str,
+        config: dict[str, Any],
+        outgoing_edges: list[dict[str, Any]],
+        run_context: dict[str, Any],
+    ) -> NodeExecutionResult:
+        result = self._transform_engine.transform_context(context=run_context, config=config)
+        if not result.validation_summary.get("accepted"):
+            errors = result.validation_summary.get("errors") or []
+            raise FlowForgeNodeExecutionError(f"Map transform validation failed: {errors}")
+        next_node_id = self._first_target(outgoing_edges)
+        return NodeExecutionResult(
+            status="advance" if next_node_id else "completed",
+            next_node_id=next_node_id,
+            event_payload={
+                "node_type": "map_transform",
+                "next_node_id": next_node_id,
+                "context_transform": {
+                    "execution_status": "completed",
+                    "mapped_field_count": result.validation_summary["mapped_field_count"],
+                    "communication_fields": result.communication_fields,
+                },
+            },
+            run_context_update=result.context_update,
+        )
+
     def _resolve_input_artifact(
         self,
         *,
@@ -250,6 +285,11 @@ class FlowForgeMapTransformExecutor:
         data = node.get("data") if isinstance(node.get("data"), dict) else {}
         config = node.get("config") if isinstance(node.get("config"), dict) else {}
         return {**data, **config}
+
+    @staticmethod
+    def _is_context_mode(config: dict[str, Any]) -> bool:
+        mode = str(config.get("mode") or config.get("transform_mode") or "").strip()
+        return mode in {"run_context", "context"}
 
     @staticmethod
     def _field_mapping_count(field_mapping: Any) -> int:

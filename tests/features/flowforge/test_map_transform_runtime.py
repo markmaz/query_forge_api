@@ -85,6 +85,42 @@ def test_map_transform_engine_maps_fields_and_rejects_invalid_rows():
     assert result.rejected_rows[0]["errors"][0]["rule"] == "required"
 
 
+def test_map_transform_engine_maps_run_context_for_communication_templates():
+    result = MapTransformEngine().transform_context(
+        context={
+            "intake": {
+                "fields": {
+                    "serviceRequested": "Anxiety therapy",
+                    "preferredDays": "Monday, Wednesday",
+                    "insurance": "BCBS",
+                },
+                "raw": {"unsafe": "do-not-email"},
+            }
+        },
+        config={
+            "mode": "run_context",
+            "field_mapping": [
+                {"target": "intake.requested_service", "source": "intake.fields.serviceRequested"},
+                {"target": "intake.preferred_days", "source": "intake.fields.preferredDays"},
+                {"target": "intake.insurance", "source": "intake.fields.insurance"},
+            ],
+            "template_fields": ["intake.requested_service", "intake.preferred_days"],
+            "validations": [{"field": "intake.requested_service", "rule": "required"}],
+        },
+    )
+
+    assert result.context_update["intake"]["requested_service"] == "Anxiety therapy"
+    assert result.context_update["intake"]["preferred_days"] == "Monday, Wednesday"
+    assert result.communication_context == {
+        "intake": {
+            "requested_service": "Anxiety therapy",
+            "preferred_days": "Monday, Wednesday",
+        }
+    }
+    assert result.communication_fields == ["intake.preferred_days", "intake.requested_service"]
+    assert "raw" not in result.communication_context["intake"]
+
+
 def test_map_transform_executor_creates_transformed_artifact_and_audit():
     data_repo = _DataMovementRepo()
     executor = FlowForgeMapTransformExecutor(data_movement_repository=data_repo)
@@ -131,6 +167,50 @@ def test_map_transform_executor_creates_transformed_artifact_and_audit():
     assert data_repo.audits[0]["status"] == "completed"
     assert data_repo.audits[0]["source_key"] == "artifact:501"
     assert data_repo.audits[0]["result"]["rejected_row_count"] == 2
+
+
+def test_map_transform_executor_updates_run_context_in_context_mode():
+    executor = FlowForgeMapTransformExecutor(data_movement_repository=_DataMovementRepo())
+
+    result = executor.execute(
+        workspace_id="ws-1",
+        run_id=90,
+        node={
+            "id": "normalize-intake",
+            "type": "map_transform",
+            "data": {
+                "mode": "run_context",
+                "field_mapping": {
+                    "intake.requested_service": "intake.fields.serviceRequested",
+                    "intake.clinical_summary": "intake.fields.summary",
+                },
+                "template_fields": ["intake.requested_service", "intake.clinical_summary"],
+            },
+        },
+        outgoing_edges=[{"id": "e1", "source": "normalize-intake", "target": "match"}],
+        run_context={
+            "intake": {
+                "fields": {
+                    "serviceRequested": "Trauma therapy",
+                    "summary": "Seeking afternoon appointments.",
+                }
+            }
+        },
+    )
+
+    assert result.status == "advance"
+    assert result.next_node_id == "match"
+    assert result.run_context_update["intake"]["requested_service"] == "Trauma therapy"
+    assert result.run_context_update["communication_context"] == {
+        "intake": {
+            "requested_service": "Trauma therapy",
+            "clinical_summary": "Seeking afternoon appointments.",
+        }
+    }
+    assert result.event_payload["context_transform"]["communication_fields"] == [
+        "intake.clinical_summary",
+        "intake.requested_service",
+    ]
 
 
 def test_map_transform_executor_requires_input_artifact_and_records_failed_audit():
