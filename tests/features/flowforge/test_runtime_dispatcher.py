@@ -396,6 +396,63 @@ def test_dispatcher_advances_data_movement_nodes_and_waits_for_approval():
     )
 
 
+def test_dispatcher_routes_import_nodes_through_import_executor():
+    runtime_repo = _RuntimeRepo()
+
+    class _ImportExecutor:
+        def execute(
+            self,
+            *,
+            workspace_id: str,
+            run_id: int,
+            node: dict,
+            outgoing_edges: list,
+            run_context: dict,
+        ):
+            del workspace_id, run_id, node, outgoing_edges, run_context
+            return NodeExecutionResult(
+                status="advance",
+                next_node_id="done",
+                event_payload={
+                    "node_type": "import",
+                    "data_movement": {
+                        "artifact": {"artifact_id": 701},
+                        "activation": {"resource_set_id": 20},
+                    },
+                },
+                run_context_update={
+                    "artifacts": {"import": {"artifact_id": 701}},
+                    "last_artifact": {"artifact_id": 701},
+                },
+            )
+
+    dispatcher = FlowForgeRuntimeDispatcher(
+        runtime_repository=runtime_repo,
+        workflow_repository=_WorkflowRepo(
+            graph={
+                "nodes": [
+                    {"id": "import", "type": "import"},
+                    {"id": "done", "type": "end"},
+                ],
+                "edges": [{"id": "e1", "source": "import", "target": "done"}],
+            }
+        ),
+        import_executor=_ImportExecutor(),
+    )
+    runtime_repo.run["current_node_id"] = "import"
+
+    result = dispatcher.dispatch_run(workspace_id="ws-1", run_id=101)
+
+    assert result["status"] == "completed"
+    assert result["visited_node_ids"] == ["import", "done"]
+    assert (
+        runtime_repo.context_updates[0]["run_context"]["artifacts"]["import"][
+            "artifact_id"
+        ]
+        == 701
+    )
+
+
 def test_dispatcher_executes_matching_node_and_persists_candidate_results():
     runtime_repo = _RuntimeRepo()
 

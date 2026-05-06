@@ -66,6 +66,36 @@ class DatasetArtifactMetadataBuilder:
             },
         }
 
+    def build_import_metadata(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        columns: list[dict[str, Any]],
+        source_ref: dict[str, Any],
+        validation_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized_rows = self._json_safe(rows)
+        normalized_columns = self._json_safe(columns)
+        normalized_validation = self._json_safe(validation_summary)
+        return {
+            "row_count": len(normalized_rows),
+            "checksum": self._checksum(
+                {"columns": normalized_columns, "rows": normalized_rows}
+            ),
+            "schema": {
+                "columns": normalized_columns,
+                "sensitivity": self._sensitivity_metadata(normalized_columns),
+                "validation": normalized_validation,
+            },
+            "storage_ref": {
+                "storage_kind": "preview_metadata",
+                "source": self._json_safe(source_ref),
+                "validation_summary": normalized_validation,
+                "columns": normalized_columns,
+                "rows": normalized_rows,
+            },
+        }
+
     def _artifact_descriptor(self, artifact: dict[str, Any]) -> dict[str, Any]:
         return {
             "artifact_id": artifact.get("id"),

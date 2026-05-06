@@ -15,6 +15,7 @@ from app.features.flowforge.runtime.idempotency import (
 )
 from app.features.flowforge.runtime.locks import FlowForgeRuntimeLock
 from app.features.flowforge.runtime.approval import FlowForgeApprovalGateExecutor
+from app.features.flowforge.runtime.data_import import FlowForgeImportExecutor
 from app.features.flowforge.runtime.export import FlowForgeExportExecutor
 from app.features.flowforge.runtime.map_transform import FlowForgeMapTransformExecutor
 from app.features.flowforge.runtime.matching import FlowForgeRuntimeMatchingExecutor
@@ -41,6 +42,7 @@ class FlowForgeRuntimeDispatcher:
         query_extract_executor: FlowForgeQueryExtractExecutor | None = None,
         map_transform_executor: FlowForgeMapTransformExecutor | None = None,
         export_executor: FlowForgeExportExecutor | None = None,
+        import_executor: FlowForgeImportExecutor | None = None,
         approval_executor: FlowForgeApprovalGateExecutor | None = None,
         max_steps: int = 50,
     ) -> None:
@@ -67,6 +69,10 @@ class FlowForgeRuntimeDispatcher:
         )
         self._export_executor = export_executor or FlowForgeExportExecutor(
             data_movement_repository=self._data_movement_repository,
+        )
+        self._import_executor = import_executor or FlowForgeImportExecutor(
+            data_movement_repository=self._data_movement_repository,
+            resource_repository=resource_repository,
         )
         self._approval_executor = approval_executor or FlowForgeApprovalGateExecutor(
             runtime_repository=self._runtime_repository,
@@ -194,6 +200,16 @@ class FlowForgeRuntimeDispatcher:
                     )
                 elif str(node.get("type") or "").strip() == "export":
                     result = self._export_executor.execute(
+                        workspace_id=workspace_id,
+                        run_id=run_id,
+                        node=node,
+                        outgoing_edges=outgoing_edges,
+                        run_context=run_context
+                        if isinstance(run_context, dict)
+                        else {},
+                    )
+                elif str(node.get("type") or "").strip() == "import":
+                    result = self._import_executor.execute(
                         workspace_id=workspace_id,
                         run_id=run_id,
                         node=node,
