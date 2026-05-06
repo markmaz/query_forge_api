@@ -16,3 +16,9 @@ class RequestContext(BaseModel):
     trace_id: str = Field(min_length=1)
     effective_roles: List[str] = Field(default_factory=list)
     is_admin: bool = False
+    principal_type: str = "user"
+    principal_id: str = Field(default="")
+    client_id: str = Field(default="")
+    oauth_scopes: List[str] = Field(default_factory=list)
+    allowed_tools: List[str] = Field(default_factory=list)
+    preview_row_limit: int = 100

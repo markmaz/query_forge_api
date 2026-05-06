@@ -80,6 +80,89 @@ def test_get_organization_serializes_datetime_fields():
     assert row["updated_at"] == now.isoformat()
 
 
+def test_list_organization_memberships_includes_user_profile_fields():
+    class _SQL:
+        def execute_query_mappings(self, query, _params=None):
+            if "FROM organization\n" in query and "WHERE id = :id" in query:
+                return [
+                    {
+                        "id": "org-1",
+                        "name": "Acme",
+                        "slug": "acme",
+                        "description": None,
+                        "is_active": 1,
+                        "created_at": None,
+                        "updated_at": None,
+                    }
+                ]
+            if "COUNT(*) AS total" in query:
+                return [{"total": 1}]
+            if "FROM organization_membership om" in query:
+                assert "LEFT JOIN users u ON u.user_id = om.user_id" in query
+                return [
+                    {
+                        "id": 10,
+                        "organization_id": "org-1",
+                        "user_id": "user-1",
+                        "role": "org_admin",
+                        "is_active": 1,
+                        "created_at": None,
+                        "updated_at": None,
+                        "username": "taylor",
+                        "email": "taylor@example.com",
+                        "first_name": "Taylor",
+                        "last_name": "Jordan",
+                        "display_name": "Taylor Jordan",
+                    }
+                ]
+            return []
+
+    svc = TenancyAdminService(sql=_SQL())
+    out = svc.list_organization_memberships(organization_id="org-1")
+
+    assert out["rows"][0]["user_id"] == "user-1"
+    assert out["rows"][0]["email"] == "taylor@example.com"
+    assert out["rows"][0]["first_name"] == "Taylor"
+    assert out["rows"][0]["last_name"] == "Jordan"
+    assert out["rows"][0]["display_name"] == "Taylor Jordan"
+
+
+def test_list_workspace_memberships_includes_user_profile_fields():
+    class _SQL:
+        def execute_query_mappings(self, query, _params=None):
+            if "FROM workspace WHERE id = :id" in query:
+                return [{"id": "ws-1"}]
+            if "COUNT(*) AS total" in query:
+                return [{"total": 1}]
+            if "FROM workspace_membership wm" in query:
+                assert "LEFT JOIN users u ON u.user_id = wm.user_id" in query
+                return [
+                    {
+                        "id": 11,
+                        "workspace_id": "ws-1",
+                        "user_id": "user-2",
+                        "role": "admin",
+                        "is_active": 1,
+                        "is_default": 0,
+                        "created_at": None,
+                        "updated_at": None,
+                        "username": "jamie",
+                        "email": "jamie@example.com",
+                        "first_name": "Jamie",
+                        "last_name": "Rivera",
+                        "display_name": "Jamie Rivera",
+                    }
+                ]
+            return []
+
+    svc = TenancyAdminService(sql=_SQL())
+    out = svc.list_workspace_memberships(workspace_id="ws-1")
+
+    assert out["rows"][0]["user_id"] == "user-2"
+    assert out["rows"][0]["email"] == "jamie@example.com"
+    assert out["rows"][0]["display_name"] == "Jamie Rivera"
+
+
 def test_delete_datasource_soft_sets_inactive():
     class _SQL:
         def __init__(self):

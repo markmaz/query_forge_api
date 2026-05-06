@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from app.exceptions.forge_error import ForgeError
 from app.repositories.feedback_learning import PromptFeedbackRepository

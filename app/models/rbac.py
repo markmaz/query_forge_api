@@ -8,6 +8,7 @@ Role resolution rules (enforced in decorators, not models):
   workspace_admin   → bypass feature checks + implies all feature :user roles
   feature:admin     → implies feature:user for that feature
   feature:user      → explicit access to that feature
+  flowforge:*        → feature-local viewer/operator/designer/admin hierarchy
 
 Seam notes:
   db     — app.extensions._DB shim (DeclarativeBase + scoped_session)
@@ -44,6 +45,29 @@ class _QueryProperty:
 # ---------------------------------------------------------------------------
 
 GLOBAL_ROLES = ("super_admin", "library_admin")
+MCP_ROLE_DEFINITIONS = (
+    {
+        "name": "queryforge_mcp:user",
+        "display_name": "QueryForge MCP User",
+        "description": "Allows a user to connect and use non-preview QueryForge MCP tools for an enabled workspace.",
+        "feature_key": "queryforge_mcp",
+        "is_system": True,
+    },
+    {
+        "name": "queryforge_mcp:preview",
+        "display_name": "QueryForge MCP Preview",
+        "description": "Allows a user to preview governed query results through QueryForge MCP when normal Query Studio access also passes.",
+        "feature_key": "queryforge_mcp",
+        "is_system": True,
+    },
+    {
+        "name": "queryforge_mcp:admin",
+        "display_name": "QueryForge MCP Admin",
+        "description": "Reserved for future MCP administration and diagnostics.",
+        "feature_key": "queryforge_mcp",
+        "is_system": True,
+    },
+)
 
 FEATURE_KEYS = (
     "catalog",
@@ -52,6 +76,7 @@ FEATURE_KEYS = (
     "forge_insights",
     "query_studio",
     "skills",
+    "flowforge",
     "planner",
     "semantic",
     "ingestion",
@@ -61,12 +86,33 @@ FEATURE_KEYS = (
     "system",
 )
 
+FLOWFORGE_ROLE_SUFFIXES = ("admin", "designer", "operator", "viewer", "user")
+FLOWFORGE_ROLE_IMPLICATIONS: dict[str, set[str]] = {
+    "flowforge:admin": {
+        "flowforge:designer",
+        "flowforge:operator",
+        "flowforge:viewer",
+        "flowforge:user",
+    },
+    "flowforge:designer": {"flowforge:viewer", "flowforge:user"},
+    "flowforge:operator": {"flowforge:viewer", "flowforge:user"},
+    "flowforge:user": {"flowforge:viewer"},
+}
+
+WORKSPACE_FEATURE_KEYS = (
+    *FEATURE_KEYS,
+    "queryforge_mcp",
+)
+
 ALL_ROLE_NAMES = (
     "super_admin",
     "library_admin",
     "workspace_admin",
-    *[f"{f}:admin" for f in FEATURE_KEYS],
-    *[f"{f}:user" for f in FEATURE_KEYS],
+    *[
+        f"{feature_key}:{role_suffix}"
+        for feature_key in FEATURE_KEYS
+        for role_suffix in (FLOWFORGE_ROLE_SUFFIXES if feature_key == "flowforge" else ("admin", "user"))
+    ],
 )
 
 ROLE_DEFINITIONS = (
@@ -91,18 +137,17 @@ ROLE_DEFINITIONS = (
         "feature_key": None,
         "is_system": True,
     },
+    *MCP_ROLE_DEFINITIONS,
     *[
         {
             "name": f"{feature_key}:{role_suffix}",
-            "display_name": f"{feature_key.replace('_', ' ').title()} {role_suffix.title()}",
-            "description": (
-                f"System role granting {role_suffix} access to the {feature_key} feature."
-            ),
+            "display_name": f"{'FlowForge' if feature_key == 'flowforge' else feature_key.replace('_', ' ').title()} {role_suffix.title()}",
+            "description": f"System role granting {role_suffix} access to the {feature_key} feature.",
             "feature_key": feature_key,
             "is_system": True,
         }
         for feature_key in FEATURE_KEYS
-        for role_suffix in ("admin", "user")
+        for role_suffix in (FLOWFORGE_ROLE_SUFFIXES if feature_key == "flowforge" else ("admin", "user"))
     ],
 )
 

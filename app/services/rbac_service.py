@@ -14,6 +14,9 @@ Resolution rules:
   workspace_admin   → has_feature() always True + implies all feature :user roles
   feature:admin     → implies feature:user for the same feature
   feature:user      → explicit access only
+  flowforge:admin   → implies designer, operator, viewer, and legacy user
+  flowforge:designer/operator → imply viewer and legacy user
+  flowforge:user    → legacy read role that implies viewer
 
 Seam notes:
   user_id      — str (matches users.user_id VARCHAR PK)
@@ -30,7 +33,16 @@ from typing import Any
 from sqlalchemy import and_, or_, text
 from valkey.exceptions import ValkeyError
 
-from app.models.rbac import FEATURE_KEYS, GLOBAL_ROLES, ROLE_DEFINITIONS, Role, UserRole, WorkspaceFeature
+from app.models.rbac import (
+    FEATURE_KEYS,
+    FLOWFORGE_ROLE_IMPLICATIONS,
+    FLOWFORGE_ROLE_SUFFIXES,
+    GLOBAL_ROLES,
+    ROLE_DEFINITIONS,
+    Role,
+    UserRole,
+    WorkspaceFeature,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +167,8 @@ def get_effective_roles(user_id: str, workspace_id: str | None = None) -> set[st
         for fk in FEATURE_KEYS:
             effective.add(f"{fk}:admin")
             effective.add(f"{fk}:user")
+        for suffix in FLOWFORGE_ROLE_SUFFIXES:
+            effective.add(f"flowforge:{suffix}")
         effective.add("workspace_admin")
         return effective
 
@@ -170,6 +184,9 @@ def get_effective_roles(user_id: str, workspace_id: str | None = None) -> set[st
     for fk in FEATURE_KEYS:
         if f"{fk}:admin" in assigned:
             effective.add(f"{fk}:user")
+
+    for role_name in set(effective):
+        effective.update(FLOWFORGE_ROLE_IMPLICATIONS.get(role_name, set()))
 
     return effective
 

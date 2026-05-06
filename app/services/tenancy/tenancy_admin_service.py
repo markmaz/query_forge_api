@@ -35,6 +35,43 @@ _SUPPORTED_DATASOURCE_TYPES = {"databricks", "snowflake", "mysql", "postgres", "
 TENANCY_ADMIN_FALLBACK_ERRORS = (ForgeError, OSError, RuntimeError, ValueError)
 JSON_PARSE_ERRORS = (json.JSONDecodeError,)
 
+_ORGANIZATION_MEMBERSHIP_SELECT = """
+            SELECT
+              om.id,
+              om.organization_id,
+              om.user_id,
+              om.role,
+              COALESCE(om.is_active, 1) AS is_active,
+              om.created_at,
+              om.updated_at,
+              u.username,
+              u.email,
+              u.first_name,
+              u.last_name,
+              CONCAT_WS(' ', NULLIF(u.first_name, ''), NULLIF(u.last_name, '')) AS display_name
+            FROM organization_membership om
+            LEFT JOIN users u ON u.user_id = om.user_id
+"""
+
+_WORKSPACE_MEMBERSHIP_SELECT = """
+            SELECT
+              wm.id,
+              wm.workspace_id,
+              wm.user_id,
+              wm.role,
+              COALESCE(wm.is_active, 1) AS is_active,
+              COALESCE(wm.is_default, 0) AS is_default,
+              wm.created_at,
+              wm.updated_at,
+              u.username,
+              u.email,
+              u.first_name,
+              u.last_name,
+              CONCAT_WS(' ', NULLIF(u.first_name, ''), NULLIF(u.last_name, '')) AS display_name
+            FROM workspace_membership wm
+            LEFT JOIN users u ON u.user_id = wm.user_id
+"""
+
 
 class TenancyAdminService:
     def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
@@ -188,12 +225,11 @@ class TenancyAdminService:
             "offset": page_offset,
         }
         rows = self._sql.execute_query_mappings(
-            """
-            SELECT id, organization_id, user_id, role, COALESCE(is_active, 1) AS is_active, created_at, updated_at
-            FROM organization_membership
-            WHERE organization_id = :organization_id
-              AND (:include_inactive = 1 OR COALESCE(is_active, 1) = 1)
-            ORDER BY id DESC
+            _ORGANIZATION_MEMBERSHIP_SELECT
+            + """
+            WHERE om.organization_id = :organization_id
+              AND (:include_inactive = 1 OR COALESCE(om.is_active, 1) = 1)
+            ORDER BY om.id DESC
             LIMIT :limit OFFSET :offset
             """,
             params,
@@ -242,10 +278,9 @@ class TenancyAdminService:
             },
         )
         rows = self._sql.execute_query_mappings(
-            """
-            SELECT id, organization_id, user_id, role, COALESCE(is_active, 1) AS is_active, created_at, updated_at
-            FROM organization_membership
-            WHERE organization_id = :organization_id AND user_id = :user_id
+            _ORGANIZATION_MEMBERSHIP_SELECT
+            + """
+            WHERE om.organization_id = :organization_id AND om.user_id = :user_id
             LIMIT 1
             """,
             {"organization_id": oid, "user_id": uid},
@@ -833,12 +868,11 @@ class TenancyAdminService:
             "offset": page_offset,
         }
         rows = self._sql.execute_query_mappings(
-            """
-            SELECT id, workspace_id, user_id, role, COALESCE(is_active, 1) AS is_active, COALESCE(is_default, 0) AS is_default, created_at, updated_at
-            FROM workspace_membership
-            WHERE workspace_id = :workspace_id
-              AND (:include_inactive = 1 OR COALESCE(is_active, 1) = 1)
-            ORDER BY id DESC
+            _WORKSPACE_MEMBERSHIP_SELECT
+            + """
+            WHERE wm.workspace_id = :workspace_id
+              AND (:include_inactive = 1 OR COALESCE(wm.is_active, 1) = 1)
+            ORDER BY wm.id DESC
             LIMIT :limit OFFSET :offset
             """,
             params,
@@ -895,10 +929,9 @@ class TenancyAdminService:
             },
         )
         rows = self._sql.execute_query_mappings(
-            """
-            SELECT id, workspace_id, user_id, role, COALESCE(is_active, 1) AS is_active, COALESCE(is_default, 0) AS is_default, created_at, updated_at
-            FROM workspace_membership
-            WHERE workspace_id = :workspace_id AND user_id = :user_id
+            _WORKSPACE_MEMBERSHIP_SELECT
+            + """
+            WHERE wm.workspace_id = :workspace_id AND wm.user_id = :user_id
             LIMIT 1
             """,
             {"workspace_id": ws, "user_id": uid},
@@ -1028,10 +1061,9 @@ class TenancyAdminService:
         oid = _required_text(organization_id, "organization_id")
         mid = int(membership_id)
         rows = self._sql.execute_query_mappings(
-            """
-            SELECT id, organization_id, user_id, role, COALESCE(is_active, 1) AS is_active, created_at, updated_at
-            FROM organization_membership
-            WHERE id = :id AND organization_id = :organization_id
+            _ORGANIZATION_MEMBERSHIP_SELECT
+            + """
+            WHERE om.id = :id AND om.organization_id = :organization_id
             LIMIT 1
             """,
             {"id": mid, "organization_id": oid},
@@ -1044,10 +1076,9 @@ class TenancyAdminService:
         ws = _required_text(workspace_id, "workspace_id")
         mid = int(membership_id)
         rows = self._sql.execute_query_mappings(
-            """
-            SELECT id, workspace_id, user_id, role, COALESCE(is_active, 1) AS is_active, COALESCE(is_default, 0) AS is_default, created_at, updated_at
-            FROM workspace_membership
-            WHERE id = :id AND workspace_id = :workspace_id
+            _WORKSPACE_MEMBERSHIP_SELECT
+            + """
+            WHERE wm.id = :id AND wm.workspace_id = :workspace_id
             LIMIT 1
             """,
             {"id": mid, "workspace_id": ws},

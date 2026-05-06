@@ -54,4 +54,20 @@ beat_schedule["dispatch-due-skills"] = {
     "task": "qf.skills.dispatch_due",
     "schedule": 60.0,
 }
+beat_schedule["flowforge-dispatch-due-timeouts"] = {
+    "task": "qf.flowforge.dispatch_due_timeouts",
+    "schedule": 60.0,
+}
+beat_schedule["flowforge-dispatch-due-schedules"] = {
+    "task": "qf.flowforge.dispatch_due_schedules",
+    "schedule": 60.0,
+}
+beat_schedule["flowforge-dispatch-notifications"] = {
+    "task": "qf.flowforge.dispatch_notifications",
+    "schedule": 60.0,
+}
+beat_schedule["flowforge-purge-expired-raw-payloads"] = {
+    "task": "qf.flowforge.purge_expired_raw_payloads",
+    "schedule": 3600.0,
+}
 celery.conf.beat_schedule = beat_schedule

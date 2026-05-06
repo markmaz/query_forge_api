@@ -5,6 +5,7 @@ from flask_restx import Resource
 
 from app.decorators.rbac import require_admin, require_role
 from app.decorators.security import token_required
+from app.exceptions.forge_error import ForgeError
 from app.models.tenancy.tenancy_admin import (
     DatasourceCreateRequest,
     DatasourceUpdateRequest,
@@ -26,6 +27,7 @@ from .helpers import (
     _as_bool,
     _assert_workspace_admin_datasource_access,
     _assert_workspace_admin_organization_access,
+    _assert_workspace_admin_workspace_access,
     _current_workspace_binding,
     _is_super_admin_request,
     _matches_scoped_organization_row,
@@ -152,16 +154,18 @@ class OrganizationDetail(Resource):
 @admin_ns.route("/organizations/<string:organization_id>/memberships")
 class OrganizationMembershipListCreate(Resource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def get(self, organization_id: str):
         _require_admin()
+        service = tenancy_admin_service()
+        _assert_workspace_admin_organization_access(service, organization_id)
         include_inactive = _as_bool(
             request.args.get("include_inactive"),
             default=False,
         )
         limit = request.args.get("limit", default=200, type=int) or 200
         offset = request.args.get("offset", default=0, type=int) or 0
-        result = tenancy_admin_service().list_organization_memberships(
+        result = service.list_organization_memberships(
             organization_id=organization_id,
             include_inactive=include_inactive,
             limit=limit,
@@ -170,12 +174,14 @@ class OrganizationMembershipListCreate(Resource):
         return result, 200
 
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     @admin_ns.expect(organization_membership_create_model, validate=False)
     def post(self, organization_id: str):
         _require_admin()
+        service = tenancy_admin_service()
+        _assert_workspace_admin_organization_access(service, organization_id)
         req = OrganizationMembershipCreateRequest(**(request.get_json(silent=True) or {}))
-        result = tenancy_admin_service().upsert_organization_membership(
+        result = service.upsert_organization_membership(
             organization_id=organization_id,
             req=req,
         )
@@ -185,12 +191,14 @@ class OrganizationMembershipListCreate(Resource):
 @admin_ns.route("/organizations/<string:organization_id>/memberships/<int:membership_id>")
 class OrganizationMembershipDetail(Resource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     @admin_ns.expect(organization_membership_update_model, validate=False)
     def patch(self, organization_id: str, membership_id: int):
         _require_admin()
+        service = tenancy_admin_service()
+        _assert_workspace_admin_organization_access(service, organization_id)
         req = OrganizationMembershipUpdateRequest(**(request.get_json(silent=True) or {}))
-        result = tenancy_admin_service().update_organization_membership(
+        result = service.update_organization_membership(
             organization_id=organization_id,
             membership_id=membership_id,
             req=req,
@@ -198,10 +206,12 @@ class OrganizationMembershipDetail(Resource):
         return result, 200
 
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def delete(self, organization_id: str, membership_id: int):
         _require_admin()
-        result = tenancy_admin_service().delete_organization_membership(
+        service = tenancy_admin_service()
+        _assert_workspace_admin_organization_access(service, organization_id)
+        result = service.delete_organization_membership(
             organization_id=organization_id,
             membership_id=membership_id,
         )
@@ -341,18 +351,33 @@ class WorkspaceBindingList(Resource):
 @admin_ns.route("/workspaces/<string:workspace_id>/binding")
 class WorkspaceBindingDetail(Resource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def get(self, workspace_id: str):
         _require_admin()
-        return tenancy_admin_service().get_workspace_binding(workspace_id), 200
+        service = tenancy_admin_service()
+        _assert_workspace_admin_workspace_access(service, workspace_id)
+        return service.get_workspace_binding(workspace_id), 200
 
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     @admin_ns.expect(workspace_binding_update_model, validate=False)
     def patch(self, workspace_id: str):
         _require_admin()
+        service = tenancy_admin_service()
+        _assert_workspace_admin_workspace_access(service, workspace_id)
         req = WorkspaceBindingUpdateRequest(**(request.get_json(silent=True) or {}))
-        result = tenancy_admin_service().update_workspace_binding(
+        if not _is_super_admin_request():
+            scoped_binding = _current_workspace_binding(service)
+            scoped_org_id = str(scoped_binding.get("organization_id") or "").strip()
+            requested_org_id = str(req.organization_id or scoped_org_id).strip()
+            if requested_org_id != scoped_org_id:
+                raise ForgeError(
+                    "Workspace admin access is limited to the current workspace organization",
+                    status_code=403,
+                )
+            if req.datasource_id is not None:
+                _assert_workspace_admin_datasource_access(service, int(req.datasource_id))
+        result = service.update_workspace_binding(
             workspace_id=workspace_id,
             req=req,
         )
@@ -376,16 +401,18 @@ class WorkspaceDetail(Resource):
 @admin_ns.route("/workspaces/<string:workspace_id>/memberships")
 class WorkspaceMembershipListCreate(Resource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def get(self, workspace_id: str):
         _require_admin()
+        service = tenancy_admin_service()
+        _assert_workspace_admin_workspace_access(service, workspace_id)
         include_inactive = _as_bool(
             request.args.get("include_inactive"),
             default=False,
         )
         limit = request.args.get("limit", default=200, type=int) or 200
         offset = request.args.get("offset", default=0, type=int) or 0
-        result = tenancy_admin_service().list_workspace_memberships(
+        result = service.list_workspace_memberships(
             workspace_id=workspace_id,
             include_inactive=include_inactive,
             limit=limit,
@@ -394,12 +421,14 @@ class WorkspaceMembershipListCreate(Resource):
         return result, 200
 
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     @admin_ns.expect(workspace_membership_create_model, validate=False)
     def post(self, workspace_id: str):
         _require_admin()
+        service = tenancy_admin_service()
+        _assert_workspace_admin_workspace_access(service, workspace_id)
         req = WorkspaceMembershipCreateRequest(**(request.get_json(silent=True) or {}))
-        result = tenancy_admin_service().upsert_workspace_membership(
+        result = service.upsert_workspace_membership(
             workspace_id=workspace_id,
             req=req,
         )
@@ -409,12 +438,14 @@ class WorkspaceMembershipListCreate(Resource):
 @admin_ns.route("/workspaces/<string:workspace_id>/memberships/<int:membership_id>")
 class WorkspaceMembershipDetail(Resource):
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     @admin_ns.expect(workspace_membership_update_model, validate=False)
     def patch(self, workspace_id: str, membership_id: int):
         _require_admin()
+        service = tenancy_admin_service()
+        _assert_workspace_admin_workspace_access(service, workspace_id)
         req = WorkspaceMembershipUpdateRequest(**(request.get_json(silent=True) or {}))
-        result = tenancy_admin_service().update_workspace_membership(
+        result = service.update_workspace_membership(
             workspace_id=workspace_id,
             membership_id=membership_id,
             req=req,
@@ -422,10 +453,12 @@ class WorkspaceMembershipDetail(Resource):
         return result, 200
 
     @token_required
-    @require_role("system:admin")
+    @require_admin()
     def delete(self, workspace_id: str, membership_id: int):
         _require_admin()
-        result = tenancy_admin_service().delete_workspace_membership(
+        service = tenancy_admin_service()
+        _assert_workspace_admin_workspace_access(service, workspace_id)
+        result = service.delete_workspace_membership(
             workspace_id=workspace_id,
             membership_id=membership_id,
         )

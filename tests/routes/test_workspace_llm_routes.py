@@ -45,6 +45,7 @@ def test_get_llm_roles(client, auth_headers):
     assert isinstance(data, list)
     assert any(r["value"] == "planner" for r in data)
     assert any(r["value"] == "ner" for r in data)
+    assert any(r["value"] == "flowforge_rule_drafting" for r in data)
 
 
 def test_get_llm_providers(client, auth_headers):

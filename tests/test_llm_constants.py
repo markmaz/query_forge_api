@@ -7,7 +7,8 @@ def test_llm_role_all_contains_all_roles():
     assert LLMRole.SUMMARIZER in LLMRole.ALL
     assert LLMRole.QUERY_GENERATOR in LLMRole.ALL
     assert LLMRole.ENRICHMENT in LLMRole.ALL
-    assert len(LLMRole.ALL) == 5
+    assert LLMRole.FLOWFORGE_RULE_DRAFTING in LLMRole.ALL
+    assert len(LLMRole.ALL) == 6
 
 
 def test_llm_provider_all_contains_supported_providers():

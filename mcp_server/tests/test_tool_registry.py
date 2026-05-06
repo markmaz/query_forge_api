@@ -15,6 +15,26 @@ from mcp_server.resource_registry import execute_resource
 from mcp_server.tool_registry import execute_tool
 
 
+class _RateLimiter:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def enforce(self, *, name, request_context):
+        self.calls.append({"name": name, "principal_id": request_context.principal_id})
+        return [f"bucket:{name}"]
+
+
+class _AuditLogger:
+    def __init__(self) -> None:
+        self.events = []
+
+    def begin(self) -> float:
+        return 1.0
+
+    def emit(self, **kwargs):
+        self.events.append(kwargs)
+
+
 def _request_context() -> RequestContext:
     return RequestContext(
         user_id="user-1",
@@ -23,8 +43,14 @@ def _request_context() -> RequestContext:
         can_preview=True,
         can_run_saved_queries=True,
         trace_id="trace-1",
-        effective_roles=["query_studio:user"],
+        effective_roles=["query_studio:user", "queryforge_mcp:user", "queryforge_mcp:preview"],
         is_admin=False,
+        principal_type="user",
+        principal_id="user-1",
+        client_id="client-1",
+        oauth_scopes=["qf:mcp:read", "qf:mcp:plan", "qf:mcp:preview"],
+        allowed_tools=[],
+        preview_row_limit=100,
     )
 
 
@@ -41,9 +67,13 @@ class _RowsResponse(BaseModel):
 
 
 def test_execute_tool_returns_model_payload():
+    rate_limiter = _RateLimiter()
+    audit_logger = _AuditLogger()
     deps = MCPDependencies(
         settings=MCPSettings(audit_logging=False),
         auth_resolver=lambda workspace_id, ctx: _request_context(),
+        rate_limiter=rate_limiter,
+        audit_logger=audit_logger,
     )
 
     payload = asyncio.run(
@@ -59,6 +89,8 @@ def test_execute_tool_returns_model_payload():
     )
 
     assert payload == {"rows": [{"school_name": "Barksdale"}]}
+    assert rate_limiter.calls == [{"name": "preview_query", "principal_id": "user-1"}]
+    assert audit_logger.events[0]["rate_limit_buckets"] == ["bucket:preview_query"]
 
 
 def test_execute_tool_maps_forge_error_payload():
@@ -87,9 +119,11 @@ def test_execute_tool_maps_forge_error_payload():
 
 
 def test_execute_resource_serializes_success_payload():
+    rate_limiter = _RateLimiter()
     deps = MCPDependencies(
         settings=MCPSettings(audit_logging=False),
         auth_resolver=lambda workspace_id, ctx: _request_context(),
+        rate_limiter=rate_limiter,
     )
 
     payload = asyncio.run(
@@ -104,3 +138,4 @@ def test_execute_resource_serializes_success_payload():
     )
 
     assert '"workspace_id": "ws-1"' in payload
+    assert rate_limiter.calls == [{"name": "workspace_domains_index", "principal_id": "user-1"}]

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from types import SimpleNamespace
 
 from mcp_server.config import MCPSettings
@@ -45,6 +44,17 @@ def test_create_mcp_server_registers_expected_tools():
             run_saved_query=lambda **kwargs: {"query_id": "q1", "columns": [], "rows": [], "truncated": False},
             saved_queries_resource=lambda **kwargs: {"workspace_id": "ws-1", "items": []},
         ),
+        flowforge_adapter_factory=lambda: SimpleNamespace(
+            list_runs=lambda **kwargs: {"workspace_id": "ws-1", "runs": []},
+            get_run=lambda **kwargs: {"workspace_id": "ws-1", "run": {}},
+            get_run_timeline=lambda **kwargs: {"workspace_id": "ws-1", "events": []},
+            list_human_tasks=lambda **kwargs: {"workspace_id": "ws-1", "tasks": []},
+            get_needs_attention=lambda **kwargs: {"workspace_id": "ws-1", "runs": []},
+            get_resource_profile=lambda **kwargs: {"workspace_id": "ws-1", "record": {}},
+            get_matching_summary=lambda **kwargs: {"workspace_id": "ws-1", "policies": []},
+            get_report_summary=lambda **kwargs: {"workspace_id": "ws-1", "metrics": {}},
+            add_operator_note=lambda **kwargs: {"workspace_id": "ws-1", "event": {}},
+        ),
         policy_resource_factory=lambda: SimpleNamespace(summary=lambda workspace_id: {"workspace_id": workspace_id, "families": []}),
         semantic_resource_factory=lambda: SimpleNamespace(summary=lambda concept_key: {"concept_key": concept_key, "aliases": []}),
     )
@@ -63,6 +73,15 @@ def test_create_mcp_server_registers_expected_tools():
         "preview_query",
         "list_saved_queries",
         "run_saved_query",
+        "flowforge_list_runs",
+        "flowforge_get_run",
+        "flowforge_get_run_timeline",
+        "flowforge_list_human_tasks",
+        "flowforge_get_needs_attention",
+        "flowforge_get_resource_profile",
+        "flowforge_get_matching_summary",
+        "flowforge_get_report_summary",
+        "flowforge_add_operator_note",
     }
 
 

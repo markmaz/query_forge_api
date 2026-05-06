@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from app.services.domain_resolver import DomainResolver
 from app.services.query_forge.service import QueryForgeService
 from app.services.query_tree.saved_query_read_service import SavedQueryReadService

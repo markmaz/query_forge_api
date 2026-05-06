@@ -45,7 +45,7 @@ class TokenLifecycleService:
             self._secret,
             algorithms=[self._algorithm],
             leeway=self._leeway_seconds,
-            options={"verify_iat": self._verify_iat},
+            options={"verify_iat": self._verify_iat, "verify_aud": False},
         )
 
     def _log_token_timing(self, payload: dict[str, Any], context: str) -> None:

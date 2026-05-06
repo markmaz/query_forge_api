@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 from urllib.parse import urlsplit, urlunsplit
 
@@ -13,6 +14,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.celery_app import celery
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import QDRANT_URL, VALKEY_ADDRESS, VALKEY_CONFIG, VALKEY_PORT, VLLM_BASE_URL, VLLM_MODEL
+from app.config.mcp_oauth_config import load_mcp_oauth_config
+from app.features.flowforge.runtime.health import get_flowforge_worker_health
 from app.ports.sql_executor import ForgeQueryPort
 
 logger = logging.getLogger(__name__)
@@ -26,11 +29,13 @@ class AdminHealthService:
         vllm_base_url: Optional[str] = None,
         vllm_model: Optional[str] = None,
         qdrant_url: Optional[str] = None,
+        mcp_resource_url: Optional[str] = None,
     ) -> None:
         self._sql = sql or ForgeMetaSQL()
         self._vllm_base_url = vllm_base_url or VLLM_BASE_URL
         self._vllm_model = vllm_model or VLLM_MODEL
         self._qdrant_url = qdrant_url or QDRANT_URL
+        self._mcp_resource_url = (mcp_resource_url or load_mcp_oauth_config().mcp_resource_url).rstrip("/")
 
     def check_all(self) -> Dict[str, Any]:
         checks: Dict[str, Any] = {}
@@ -38,7 +43,9 @@ class AdminHealthService:
         checks["mysql"] = self._check_mysql()
         checks["vllm"] = self._check_vllm()
         checks["qdrant"] = self._check_qdrant()
+        checks["mcp"] = self._check_mcp()
         checks["broker"] = self.check_broker()
+        checks["flowforge"] = self._check_flowforge()
 
         statuses = [c["status"] for c in checks.values()]
         if all(s == "ok" for s in statuses):
@@ -98,6 +105,31 @@ class AdminHealthService:
             logger.exception("Qdrant health check failed")
             return {"status": "error", "latency_ms": latency_ms, "error": str(exc)}
 
+    def _check_mcp(self) -> Dict[str, Any]:
+        url = f"{self._mcp_resource_url}/healthz"
+        start = time.perf_counter()
+        try:
+            resp = requests.get(url, timeout=5)
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            if resp.status_code == 200:
+                payload = _safe_json(resp)
+                return {
+                    "status": "ok",
+                    "latency_ms": latency_ms,
+                    "url": self._mcp_resource_url,
+                    "version": str(payload.get("version") or ""),
+                }
+            return {
+                "status": "error",
+                "latency_ms": latency_ms,
+                "url": self._mcp_resource_url,
+                "error": f"HTTP {resp.status_code}",
+            }
+        except (RequestException, OSError, ValueError) as exc:
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            logger.exception("MCP health check failed")
+            return {"status": "error", "latency_ms": latency_ms, "url": self._mcp_resource_url, "error": str(exc)}
+
     def check_broker(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {
             "broker_url": _mask_broker_url(VALKEY_CONFIG),
@@ -156,6 +188,84 @@ class AdminHealthService:
         else:
             out["status"] = "error"
         return out
+
+    def _check_flowforge(self) -> Dict[str, Any]:
+        heartbeat = get_flowforge_worker_health()
+        try:
+            metrics = self._query_flowforge_operational_metrics()
+        except (SQLAlchemyError, OSError, RuntimeError, ValueError) as exc:
+            logger.exception("FlowForge health metrics failed")
+            return {
+                "status": "error",
+                "worker": heartbeat,
+                "error": str(exc),
+                "metrics": {
+                    "pending_notification_count": None,
+                    "failed_notification_count": None,
+                    "stuck_run_count": None,
+                    "failed_run_count": None,
+                },
+            }
+
+        issues: list[str] = []
+        if not heartbeat.get("healthy"):
+            issues.append(str(heartbeat.get("reason") or "FlowForge worker heartbeat is unhealthy."))
+        if int(metrics.get("stuck_run_count") or 0) > 0:
+            issues.append(f"{metrics['stuck_run_count']} workflow run(s) appear stuck.")
+        if int(metrics.get("failed_run_count") or 0) > 0:
+            issues.append(f"{metrics['failed_run_count']} workflow run(s) failed in the last 24 hours.")
+        if int(metrics.get("failed_notification_count") or 0) > 0:
+            issues.append(f"{metrics['failed_notification_count']} FlowForge notification side effect(s) failed.")
+
+        return {
+            "status": "ok" if not issues else "degraded",
+            "worker": heartbeat,
+            "metrics": metrics,
+            "issues": issues,
+        }
+
+    def _query_flowforge_operational_metrics(self) -> Dict[str, Any]:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT
+              (SELECT COUNT(*)
+                 FROM flowforge_notifications
+                WHERE status = 'pending') AS pending_notification_count,
+              (SELECT COUNT(*)
+                 FROM flowforge_notifications
+                WHERE status = 'failed') AS failed_notification_count,
+              (SELECT COUNT(*)
+                 FROM flowforge_runs
+                WHERE status IN ('queued', 'waiting', 'running')
+                  AND updated_at <= :stuck_cutoff) AS stuck_run_count,
+              (SELECT COUNT(*)
+                 FROM flowforge_runs
+                WHERE status = 'failed'
+                  AND COALESCE(failed_at, updated_at, started_at) >= :failure_cutoff) AS failed_run_count
+            """,
+            {
+                "stuck_cutoff": now - timedelta(minutes=30),
+                "failure_cutoff": now - timedelta(hours=24),
+            },
+        )
+        row = dict(rows[0]) if rows else {}
+        return {
+            "pending_notification_count": int(row.get("pending_notification_count") or 0),
+            "failed_notification_count": int(row.get("failed_notification_count") or 0),
+            "stuck_run_count": int(row.get("stuck_run_count") or 0),
+            "failed_run_count": int(row.get("failed_run_count") or 0),
+            "stuck_run_threshold_minutes": 30,
+            "failed_run_window_hours": 24,
+        }
+
+
+def _safe_json(resp: requests.Response) -> Dict[str, Any]:
+    try:
+        payload = resp.json()
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _mask_broker_url(raw_url: str) -> str:

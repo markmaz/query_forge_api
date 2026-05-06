@@ -7,8 +7,9 @@ class LLMRole:
     SUMMARIZER = "summarizer"
     QUERY_GENERATOR = "query_generator"
     ENRICHMENT = "enrichment"
+    FLOWFORGE_RULE_DRAFTING = "flowforge_rule_drafting"
 
-    ALL = (PLANNER, NER, SUMMARIZER, QUERY_GENERATOR, ENRICHMENT)
+    ALL = (PLANNER, NER, SUMMARIZER, QUERY_GENERATOR, ENRICHMENT, FLOWFORGE_RULE_DRAFTING)
 
     DISPLAY_NAMES = {
         PLANNER: "Planner",
@@ -16,6 +17,7 @@ class LLMRole:
         SUMMARIZER: "Summarizer",
         QUERY_GENERATOR: "Query Generator",
         ENRICHMENT: "Enrichment",
+        FLOWFORGE_RULE_DRAFTING: "FlowForge Rule Drafting",
     }
 
 

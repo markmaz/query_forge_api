@@ -646,6 +646,31 @@ Columns:
 - `revoked_at`
 - `rotation_required_at`
 
+### `mcp_oauth_audit_log`
+
+Indefinite DB-backed audit trail for OAuth and MCP authorization decisions.
+
+Columns:
+
+- `id`
+- `event_type`
+- `principal_type`
+- `principal_id`
+- `client_id`
+- `workspace_id`
+- `requested_resource`
+- `requested_scopes`
+- `tool_name`
+- `domain_key`
+- `saved_query_id`
+- `decision`
+- `denial_reason`
+- `row_count_returned`
+- `rate_limit_bucket`
+- `trace_id`
+- `details_json`
+- `created_at`
+
 ## Nginx Topology
 
 Production routing:
@@ -778,6 +803,42 @@ Retention:
 - workspace admin enables MCP but does not grant a user `queryforge_mcp:user`
 - workspace admin disables MCP after OAuth consent and refresh token issuance
 
+## Phase 0 Test Matrix
+
+The implementation should begin with focused tests before live OAuth endpoint wiring.
+
+Phase 1 foundation tests:
+
+- MCP OAuth config defaults are production-safe:
+  - global MCP disabled by default
+  - workspace enablement required by default
+  - channel grants required by default
+  - raw SQL disabled by default
+  - refresh tokens and app-client auth are configurable
+- MCP OAuth config normalizes invalid integer, CSV, and URL values safely.
+- MCP SQLAlchemy models expose stable public table names.
+- `workspace_mcp_settings` captures workspace enablement, preview limits, and sensitive-domain policy.
+- `mcp_principal_grants` captures app-principal workspace/domain/tool/preview grants.
+- OAuth code/refresh/consent models capture PKCE, rotation, expiry, revocation, and consent expiry.
+- App client and audit models capture credential lifecycle and indefinite DB-backed audit shape.
+- RBAC defines `queryforge_mcp:user`, `queryforge_mcp:preview`, and `queryforge_mcp:admin`.
+- `workspace_admin` / `super_admin` do not implicitly receive `queryforge_mcp:*` end-user roles.
+
+Later endpoint/evaluator tests:
+
+- protected-resource metadata and authorization-server metadata are standards-shaped
+- dynamic client registration validates redirect hosts
+- authorization codes are one-time-use and PKCE-bound
+- token exchange enforces `resource`, `aud`, `typ`, expiry, and scopes
+- global MCP kill switch denies all MCP calls
+- disabled workspace MCP setting denies all MCP calls for that workspace
+- human MCP calls require `queryforge_mcp:user`
+- preview calls require `queryforge_mcp:preview` and `query_studio`
+- app principals are denied outside explicit workspace/domain/tool grants
+- saved queries are limited to user-owned plus explicitly shared entries
+- rate-limit decisions are audited
+- revocation invalidates refresh-token and app-principal flows
+
 ## App Principal Future Path
 
 Full app-principal authentication is in v1, not a future-only schema placeholder.
@@ -834,6 +895,14 @@ Admin UX:
 - Add `WWW-Authenticate` challenge behavior.
 - Add focused tests for metadata and token rejection.
 
+Implementation status:
+
+- Implemented `GET /.well-known/oauth-protected-resource` in the standalone MCP app.
+- Implemented `GET /.well-known/oauth-authorization-server` in the Flask API.
+- Added documented Swagger-visible alias `GET /api/v1/mcp-oauth/authorization-server-metadata`.
+- MCP bearer middleware now accepts only `mcp_access` tokens whose `aud` matches `MCP_RESOURCE_URL`.
+- MCP metadata discovery remains public; protected MCP calls return a `WWW-Authenticate` challenge with `resource_metadata`.
+
 ### Phase 3: Dynamic Client Registration
 
 - Implement `/oauth/register`.
@@ -841,6 +910,15 @@ Admin UX:
 - Validate redirect URI host allowlist.
 - Add cleanup path for expired clients.
 - Add tests for valid/invalid DCR.
+
+Implementation status:
+
+- Implemented unauthenticated `POST /oauth/register` under the Flask API.
+- Dynamic registrations validate `redirect_uris` against `OAUTH_ALLOWED_REDIRECT_HOSTS`.
+- Registrations reject unsupported grant types, response types, scopes, and token endpoint auth methods.
+- Public PKCE clients use `token_endpoint_auth_method=none` and receive no client secret.
+- Confidential registrations using `client_secret_basic` or `client_secret_post` receive a one-time plaintext client secret; only a SHA-256 hash is persisted.
+- Expired dynamic client rows are deleted opportunistically before storing a new valid registration.
 
 ### Phase 4: Authorization Code + PKCE
 
@@ -850,6 +928,14 @@ Admin UX:
 - Validate and echo `resource`.
 - Add tests for PKCE and code replay.
 
+Implementation status:
+
+- Implemented `GET /oauth/authorize` to validate client, redirect URI, scopes, resource, and PKCE before rendering a backend-hosted login/consent form.
+- Implemented `POST /oauth/authorize` to validate QueryForge credentials, require consent, check TOTP when enabled, persist a hashed one-time authorization code, and redirect to the registered client redirect URI.
+- Authorization codes store only the SHA-256 code hash, PKCE challenge/method, principal, redirect URI, resource, scopes, nonce, optional state hash, expiry, and consumed timestamp.
+- Added one-time consumption support for authorization codes so replayed codes are rejected by the service/repository seam used by the Phase 5 token endpoint.
+- `resource` is validated against `MCP_RESOURCE_URL` and echoed back to the client redirect.
+
 ### Phase 5: Token and Revocation Endpoints
 
 - Implement `/oauth/token`.
@@ -857,6 +943,16 @@ Admin UX:
 - Issue rotating refresh tokens when `OAUTH_ENABLE_REFRESH_TOKENS=true`.
 - Implement `/oauth/revoke`.
 - Add tests for token claims, refresh rotation, revocation, and audience binding.
+
+Implementation status:
+
+- Implemented `POST /oauth/token` for `authorization_code` and `refresh_token` grants.
+- Authorization-code exchange consumes one-time authorization codes, validates the registered client, validates confidential client secrets when required, checks the original redirect URI, validates the `resource` value against the authorization code and `MCP_RESOURCE_URL`, and enforces PKCE verifier matching.
+- Issued access tokens are MCP-only JWTs with `typ=mcp_access`, `iss=OAUTH_ISSUER_URL`, `aud=MCP_RESOURCE_URL`, client id, principal type/id, resource, scopes, `iat`, `exp`, and `jti`.
+- Refresh tokens are opaque values stored only as SHA-256 hashes in `oauth_refresh_tokens`.
+- Refresh-token grant use requires `OAUTH_ENABLE_REFRESH_TOKENS=true`, validates the active token hash, rotates the stored token, revokes the old token row, persists the replacement hash, and issues a fresh MCP access token.
+- Implemented `POST /oauth/revoke` for idempotent persisted refresh-token revocation. Access-token revocation is accepted as a v1 no-op because access tokens are short-lived JWTs and the MCP verifier currently relies on expiry/audience/type validation.
+- Added focused unit coverage for token claims, PKCE failures, confidential client auth, refresh rotation, refresh disablement, refresh revocation, repository behavior, and route wiring.
 
 ### Phase 6: MCP Principal Grants and App Auth
 
@@ -867,6 +963,18 @@ Admin UX:
 - Add app credential/token exchange support.
 - Add tests for channel access, workspace access, domain access, preview access, app grant enforcement, and app credential revocation.
 
+Implementation status:
+
+- Added repositories for `workspace_mcp_settings`, `mcp_principal_grants`, and `mcp_app_clients`.
+- Added `MCPOAuthAccessService` for global MCP enablement, workspace MCP settings, and active app-principal grant lookup.
+- Added `client_credentials` support to `POST /oauth/token` when `OAUTH_ENABLE_APP_CLIENT_AUTH=true`.
+- App credentials are checked against active `mcp_app_clients` rows using SHA-256 secret hashes and issue MCP-only access tokens with `principal_type=app`.
+- MCP request context now carries `principal_type`, `principal_id`, OAuth scopes, app-granted tools, preview row limit, and granted domain keys.
+- MCP authenticator now enforces `MCP_ENABLED`, workspace MCP enablement, `queryforge_mcp:user` for human users, and `queryforge_mcp:preview` plus Query Studio access for preview capability.
+- App principals bypass human workspace membership/RBAC but require an active `mcp_principal_grants` row for the requested workspace.
+- Added a central MCP operation policy for tools/resources that enforces OAuth scopes, preview permission, app-granted tools, and app-granted domain keys before adapter execution.
+- Added focused tests for repository decoding, app credential token issuance, disabled app auth, human channel-role denial, user preview gating, app grant context resolution, scope denial, tool denial, and domain denial.
+
 ### Phase 7: Admin UI, Rate Limits, Nginx, Docker, and Ops Docs
 
 - Add admin UI for MCP access management.
@@ -875,6 +983,18 @@ Admin UX:
 - Update Docker env templates.
 - Update backend and MCP READMEs.
 - Add deployment checklist and smoke-test commands.
+
+Implementation status:
+
+- Started Phase 7 with backend runtime safety controls before admin UI.
+- Added `MCPRateLimiter` at the MCP tool/resource execution boundary.
+- MCP calls now enforce per-principal, per-client, and preview-specific Valkey-backed rate-limit buckets before adapter execution.
+- Rate-limit failures return MCP `RATE_LIMITED` errors and preserve retry metadata from the underlying rate-limit service.
+- Added `MCPOAuthAuditRepository` for durable inserts into `mcp_oauth_audit_log`.
+- MCP audit logging now persists allow/deny tool/resource events with principal, client, workspace, scopes, tool/resource name, domain/saved-query hints, decision, denial reason, preview row count, rate-limit buckets, trace id, and compact request details.
+- Audit persistence is fail-open with warning logs so transient DB insert failures do not bypass authorization or break governed reads.
+- Updated backend and MCP README runtime behavior documentation.
+- Remaining Phase 7 work: admin UI/API management surfaces, nginx examples, Docker env templates, deployment checklist, and smoke-test commands.
 
 ### Phase 8: ChatGPT End-to-End Validation
 

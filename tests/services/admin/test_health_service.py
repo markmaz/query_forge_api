@@ -8,13 +8,42 @@ from app.services.admin.health_service import AdminHealthService
 
 
 class _FakeSQL:
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(self, *, fail: bool = False, flowforge_metrics: Dict[str, Any] | None = None) -> None:
         self._fail = fail
+        self._flowforge_metrics = flowforge_metrics or {
+            "pending_notification_count": 0,
+            "failed_notification_count": 0,
+            "stuck_run_count": 0,
+            "failed_run_count": 0,
+        }
 
     def execute_query(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Tuple]:
         if self._fail:
             raise RuntimeError("connection refused")
         return [(1,)]
+
+    def execute_query_mappings(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        if self._fail:
+            raise RuntimeError("connection refused")
+        return [dict(self._flowforge_metrics)]
+
+
+_FLOWFORGE_HEALTHY = {
+    "healthy": True,
+    "reason": None,
+    "last_dispatch_at": "2026-05-05T10:00:00+00:00",
+    "seconds_since_dispatch": 12,
+    "task_name": "qf.flowforge.dispatch_notifications",
+}
+
+
+_FLOWFORGE_STALE = {
+    "healthy": False,
+    "reason": "Last FlowForge worker heartbeat was 500s ago.",
+    "last_dispatch_at": "2026-05-05T09:50:00+00:00",
+    "seconds_since_dispatch": 500,
+    "task_name": "qf.flowforge.dispatch_notifications",
+}
 
 
 class _OkResponse:
@@ -55,7 +84,7 @@ def test_check_all_healthy():
             AdminHealthService,
             "check_broker",
             return_value={"status": "ok", "ok": True, "valkey": {"ping_ok": True}, "celery": {"broker_connect_ok": True}},
-        ):
+        ), patch("app.services.admin.health_service.get_flowforge_worker_health", return_value=_FLOWFORGE_HEALTHY):
             def _route(url: str, **kwargs: Any) -> Any:
                 if "/v1/models" in url:
                     return _VllmOkResponse()
@@ -67,6 +96,7 @@ def test_check_all_healthy():
                 vllm_base_url="http://fake-llm:8000",
                 vllm_model="qwen25-7b",
                 qdrant_url="http://fake-qdrant:6333",
+                mcp_resource_url="http://fake-mcp:8001",
             )
             result = svc.check_all()
 
@@ -77,7 +107,11 @@ def test_check_all_healthy():
     assert result["checks"]["vllm"]["status"] == "ok"
     assert result["checks"]["vllm"]["model"] == "qwen25-7b"
     assert result["checks"]["qdrant"]["status"] == "ok"
+    assert result["checks"]["mcp"]["status"] == "ok"
+    assert result["checks"]["mcp"]["url"] == "http://fake-mcp:8001"
     assert result["checks"]["broker"]["status"] == "ok"
+    assert result["checks"]["flowforge"]["status"] == "ok"
+    assert result["checks"]["flowforge"]["worker"]["task_name"] == "qf.flowforge.dispatch_notifications"
 
 
 def test_check_all_mysql_down():
@@ -86,9 +120,14 @@ def test_check_all_mysql_down():
             AdminHealthService,
             "check_broker",
             return_value={"status": "ok", "ok": True, "valkey": {"ping_ok": True}, "celery": {"broker_connect_ok": True}},
-        ):
+        ), patch("app.services.admin.health_service.get_flowforge_worker_health", return_value=_FLOWFORGE_HEALTHY):
             mock_get.return_value = _OkResponse()
-            svc = AdminHealthService(sql=_FakeSQL(fail=True), vllm_base_url="http://fake-llm:8000", qdrant_url="http://fake-qdrant:6333")
+            svc = AdminHealthService(
+                sql=_FakeSQL(fail=True),
+                vllm_base_url="http://fake-llm:8000",
+                qdrant_url="http://fake-qdrant:6333",
+                mcp_resource_url="http://fake-mcp:8001",
+            )
             result = svc.check_all()
 
     assert result["overall"] == "degraded"
@@ -102,14 +141,19 @@ def test_check_all_vllm_down():
             AdminHealthService,
             "check_broker",
             return_value={"status": "ok", "ok": True, "valkey": {"ping_ok": True}, "celery": {"broker_connect_ok": True}},
-        ):
+        ), patch("app.services.admin.health_service.get_flowforge_worker_health", return_value=_FLOWFORGE_HEALTHY):
             def _route(url: str, **kwargs: Any) -> Any:
                 if "/v1/models" in url:
                     raise ConnectionError("vLLM unreachable")
                 return _OkResponse()
 
             mock_get.side_effect = _route
-            svc = AdminHealthService(sql=_FakeSQL(), vllm_base_url="http://fake-llm:8000", qdrant_url="http://fake-qdrant:6333")
+            svc = AdminHealthService(
+                sql=_FakeSQL(),
+                vllm_base_url="http://fake-llm:8000",
+                qdrant_url="http://fake-qdrant:6333",
+                mcp_resource_url="http://fake-mcp:8001",
+            )
             result = svc.check_all()
 
     assert result["overall"] == "degraded"
@@ -123,9 +167,14 @@ def test_check_all_everything_down():
             AdminHealthService,
             "check_broker",
             return_value={"status": "error", "ok": False, "valkey": {"ping_ok": False}, "celery": {"broker_connect_ok": False}},
-        ):
+        ), patch("app.services.admin.health_service.get_flowforge_worker_health", return_value=_FLOWFORGE_HEALTHY):
             mock_get.side_effect = ConnectionError("unreachable")
-            svc = AdminHealthService(sql=_FakeSQL(fail=True), vllm_base_url="http://fake-llm:8000", qdrant_url="http://fake-qdrant:6333")
+            svc = AdminHealthService(
+                sql=_FakeSQL(fail=True),
+                vllm_base_url="http://fake-llm:8000",
+                qdrant_url="http://fake-qdrant:6333",
+                mcp_resource_url="http://fake-mcp:8001",
+            )
             result = svc.check_all()
 
     assert result["overall"] == "degraded"
@@ -149,6 +198,41 @@ def test_check_qdrant_directly():
         result = svc._check_qdrant()
 
     assert result["status"] == "ok"
+
+
+def test_check_mcp_directly():
+    with patch("app.services.admin.health_service.requests.get") as mock_get:
+        mock_get.return_value = _OkResponse()
+        svc = AdminHealthService(sql=_FakeSQL(), mcp_resource_url="http://fake-mcp:8001")
+        result = svc._check_mcp()
+
+    assert result["status"] == "ok"
+    assert result["url"] == "http://fake-mcp:8001"
+
+
+def test_check_flowforge_reports_stale_worker_and_operational_backlog():
+    svc = AdminHealthService(
+        sql=_FakeSQL(
+            flowforge_metrics={
+                "pending_notification_count": 8,
+                "failed_notification_count": 2,
+                "stuck_run_count": 1,
+                "failed_run_count": 3,
+            }
+        )
+    )
+
+    with patch("app.services.admin.health_service.get_flowforge_worker_health", return_value=_FLOWFORGE_STALE):
+        result = svc._check_flowforge()
+
+    assert result["status"] == "degraded"
+    assert result["worker"]["healthy"] is False
+    assert result["metrics"]["pending_notification_count"] == 8
+    assert result["metrics"]["failed_notification_count"] == 2
+    assert result["metrics"]["stuck_run_count"] == 1
+    assert result["metrics"]["failed_run_count"] == 3
+    assert any("heartbeat" in issue for issue in result["issues"])
+    assert any("stuck" in issue for issue in result["issues"])
 
 
 class _FakeValkeyClient:

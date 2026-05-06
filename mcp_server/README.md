@@ -30,6 +30,18 @@ It does not support:
 python -m mcp_server
 ```
 
+This command runs the wrapped ASGI app through `uvicorn`, not `FastMCP.run()` directly. The wrapper is required because it mounts the MCP streamable HTTP endpoint and the operational endpoints below.
+
+## Health Check
+
+The standalone MCP process exposes:
+
+- `GET /healthz`
+
+This endpoint is intentionally unauthenticated so local probes, nginx upstream checks, Docker healthchecks, and backend admin health checks can verify the MCP process without requiring an MCP OAuth token.
+
+The backend admin health payload reads `MCP_RESOURCE_URL`, calls `${MCP_RESOURCE_URL}/healthz`, and exposes the result as `checks.mcp` on `/api/v1/admin/health/detailed`.
+
 Main implementation files:
 
 - `mcp_server/server.py`
@@ -52,6 +64,17 @@ The v1 tool set is:
 - `preview_query`
 - `list_saved_queries`
 - `run_saved_query`
+- `flowforge_list_runs`
+- `flowforge_get_run`
+- `flowforge_get_run_timeline`
+- `flowforge_list_human_tasks`
+- `flowforge_get_needs_attention`
+- `flowforge_get_resource_profile`
+- `flowforge_get_matching_summary`
+- `flowforge_get_report_summary`
+- `flowforge_add_operator_note`
+
+FlowForge tools call `FlowForgeService` rather than raw runtime tables. Human read calls require the existing MCP channel grant plus `flowforge:user` or `flowforge:admin`; `flowforge_add_operator_note` requires `flowforge:admin` for human callers. App principals remain controlled by `mcp_principal_grants.allowed_tools`.
 
 ## Resources
 
@@ -66,10 +89,15 @@ The v1 resource set is:
 ## Auth Model
 
 - bearer token required for all non-OPTIONS requests
-- authenticated user context is resolved before every tool/resource execution
-- workspace access is verified against QueryForge services
-- visible domains are derived server-side
-- preview and saved-query permissions are derived server-side
+- MCP tokens must use `typ=mcp_access` and an audience matching `MCP_RESOURCE_URL`
+- global `MCP_ENABLED` and workspace MCP settings are enforced before any tool/resource execution
+- human callers require the workspace-scoped `queryforge_mcp:user` RBAC role
+- preview tools require `queryforge_mcp:preview` plus normal Query Studio access by default
+- app principals use `client_credentials` tokens and active `mcp_principal_grants` rows
+- app-principal grants constrain workspace, tools, domain keys, preview permission, and preview row limits
+- workspace access and visible domains for human callers are derived server-side
+- per-principal, per-client, and preview-specific coarse rate limits are enforced before adapter execution
+- audit events are persisted to `mcp_oauth_audit_log` when `MCP_AUDIT_LOGGING=true`
 
 No MCP tool trusts client-supplied visibility.
 
@@ -86,12 +114,15 @@ No MCP tool trusts client-supplied visibility.
 - `MCP_ENABLE_RESOURCES`
 - `MCP_ENABLE_SAVED_QUERIES`
 - `MCP_AUDIT_LOGGING`
+- `MCP_RATE_LIMIT_PER_USER_PER_MINUTE`
+- `MCP_RATE_LIMIT_PER_CLIENT_PER_MINUTE`
+- `MCP_RATE_LIMIT_PREVIEW_PER_USER_PER_MINUTE`
 - `MCP_DEBUG`
 
 ## Testing
 
 ```bash
-pytest -q mcp_server/tests
+./scripts/pytest.sh -q mcp_server/tests
 ```
 
 The MCP tests cover:

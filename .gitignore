@@ -7,6 +7,7 @@ log_file
 .env.*.local
 venv/
 .DS_Store
+.coverage
 .venv
 /models/
 infra/qdrant/storage/

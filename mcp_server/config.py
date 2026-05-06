@@ -31,6 +31,11 @@ def _env_csv(name: str) -> Tuple[str, ...]:
     return tuple(part.strip().rstrip("/") for part in raw.split(",") if part.strip())
 
 
+def _env_url(name: str, default: str) -> str:
+    raw = str(os.getenv(name, default) or default).strip()
+    return raw.rstrip("/") or default.rstrip("/")
+
+
 def _read_backend_version() -> str:
     version_path = Path(__file__).resolve().parents[1] / "version.json"
     try:
@@ -61,6 +66,16 @@ class MCPSettings:
     json_response: bool = True
     allowed_origins: Tuple[str, ...] = ()
     backend_version: str = "0.0.0"
+    resource_url: str = "http://localhost:8001"
+    authorization_server_url: str = "http://localhost:5000"
+    rate_limit_per_user_per_minute: int = 60
+    rate_limit_per_client_per_minute: int = 120
+    rate_limit_preview_per_user_per_minute: int = 10
+    oauth_scopes_supported: Tuple[str, ...] = (
+        "qf:mcp:read",
+        "qf:mcp:plan",
+        "qf:mcp:preview",
+    )
 
     @classmethod
     def from_env(cls) -> "MCPSettings":
@@ -88,4 +103,14 @@ class MCPSettings:
             json_response=_env_bool("MCP_JSON_RESPONSE", True),
             allowed_origins=allowed_origins,
             backend_version=backend_version,
+            resource_url=_env_url("MCP_RESOURCE_URL", "http://localhost:8001"),
+            authorization_server_url=_env_url(
+                "MCP_AUTHORIZATION_SERVER_URL",
+                _env_url("OAUTH_ISSUER_URL", "http://localhost:5000"),
+            ),
+            rate_limit_per_user_per_minute=max(1, _env_int("MCP_RATE_LIMIT_PER_USER_PER_MINUTE", 60)),
+            rate_limit_per_client_per_minute=max(1, _env_int("MCP_RATE_LIMIT_PER_CLIENT_PER_MINUTE", 120)),
+            rate_limit_preview_per_user_per_minute=max(1, _env_int("MCP_RATE_LIMIT_PREVIEW_PER_USER_PER_MINUTE", 10)),
+            oauth_scopes_supported=_env_csv("MCP_OAUTH_SCOPES_SUPPORTED")
+            or ("qf:mcp:read", "qf:mcp:plan", "qf:mcp:preview"),
         )

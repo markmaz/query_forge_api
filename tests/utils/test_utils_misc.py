@@ -22,6 +22,8 @@ def test_token_utils_round_trip() -> None:
 
 
 def test_resolve_request_username(app) -> None:
+    assert resolve_request_username() == "unknown_user"
+
     with app.app_context():
         assert resolve_request_username() == "unknown_user"
         g.user_data = {"username": "alice"}

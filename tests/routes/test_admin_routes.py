@@ -58,6 +58,7 @@ def test_detailed_health_returns_checks(client, monkeypatch):
                     "mysql": {"status": "ok", "latency_ms": 1},
                     "vllm": {"status": "ok", "model": "qwen25-7b"},
                     "qdrant": {"status": "ok", "latency_ms": 2},
+                    "mcp": {"status": "ok", "latency_ms": 3, "url": "http://localhost:8001"},
                     "broker": {"status": "ok", "ok": True},
                 },
             }
@@ -68,6 +69,7 @@ def test_detailed_health_returns_checks(client, monkeypatch):
     data = resp.json
     assert data["overall"] == "healthy"
     assert data["checks"]["mysql"]["status"] == "ok"
+    assert data["checks"]["mcp"]["status"] == "ok"
 
 
 def test_detailed_health_degraded(client, monkeypatch):
@@ -80,6 +82,7 @@ def test_detailed_health_degraded(client, monkeypatch):
                     "mysql": {"status": "error", "error": "connection refused"},
                     "vllm": {"status": "ok"},
                     "qdrant": {"status": "ok"},
+                    "mcp": {"status": "error", "error": "HTTP 503"},
                     "broker": {"status": "error", "ok": False},
                 },
             }
@@ -1123,6 +1126,49 @@ def test_admin_organization_datasource_list_blocks_workspace_admin_for_other_org
     assert "current workspace organization" in resp.json["error"]
 
 
+def test_admin_organization_membership_list_allows_workspace_admin_for_current_org(client, monkeypatch):
+    class _FakeSvc:
+        def get_workspace_binding(self, workspace_id):
+            assert workspace_id == "ws-1"
+            return {"workspace_id": "ws-1", "organization_id": "org-1"}
+
+        def list_organization_memberships(self, **kwargs):
+            assert kwargs["organization_id"] == "org-1"
+            return {
+                "rows": [{"id": 88, "organization_id": "org-1", "user_id": "user-2"}],
+                "count": 1,
+                "total": 1,
+                "limit": 200,
+                "offset": 0,
+            }
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/organizations/org-1/memberships?include_inactive=true",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json["rows"][0]["user_id"] == "user-2"
+
+
+def test_admin_organization_membership_list_blocks_workspace_admin_for_other_org(client, monkeypatch):
+    class _FakeSvc:
+        def get_workspace_binding(self, workspace_id):
+            assert workspace_id == "ws-1"
+            return {"workspace_id": "ws-1", "organization_id": "org-1"}
+
+        def list_organization_memberships(self, **kwargs):
+            raise AssertionError("membership list should not run for another organization")
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/organizations/org-2/memberships",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 403
+    assert "current workspace organization" in resp.json["error"]
+
+
 def test_admin_datasource_connection_test(client, monkeypatch):
     class _FakeSvc:
         def test_datasource(self, *, datasource_id):
@@ -1206,6 +1252,49 @@ def test_admin_workspace_membership_create(client, monkeypatch):
     assert resp.json["id"] == 7
 
 
+def test_admin_workspace_membership_list_allows_workspace_admin_for_current_workspace(client, monkeypatch):
+    class _FakeSvc:
+        def get_workspace_binding(self, workspace_id):
+            assert workspace_id == "ws-1"
+            return {"workspace_id": "ws-1", "organization_id": "org-1"}
+
+        def list_workspace_memberships(self, **kwargs):
+            assert kwargs["workspace_id"] == "ws-1"
+            return {
+                "rows": [{"id": 7, "workspace_id": "ws-1", "user_id": "user-2"}],
+                "count": 1,
+                "total": 1,
+                "limit": 200,
+                "offset": 0,
+            }
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/workspaces/ws-1/memberships?include_inactive=true",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json["rows"][0]["user_id"] == "user-2"
+
+
+def test_admin_workspace_membership_list_blocks_workspace_admin_for_other_workspace(client, monkeypatch):
+    class _FakeSvc:
+        def get_workspace_binding(self, workspace_id):
+            assert workspace_id == "ws-1"
+            return {"workspace_id": "ws-1", "organization_id": "org-1"}
+
+        def list_workspace_memberships(self, **kwargs):
+            raise AssertionError("membership list should not run for another workspace")
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/workspaces/ws-2/memberships",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 403
+    assert "current workspace" in resp.json["error"]
+
+
 def test_admin_organization_membership_create_null_role_defaults_member(client, monkeypatch):
     class _FakeSvc:
         def upsert_organization_membership(self, *, organization_id, req):
@@ -1277,6 +1366,41 @@ def test_admin_workspace_binding_list_allows_workspace_admin_in_current_workspac
     assert resp.json["rows"][0]["workspace_id"] == "ws-1"
 
 
+def test_admin_workspace_binding_detail_allows_workspace_admin_for_current_workspace(client, monkeypatch):
+    class _FakeSvc:
+        def get_workspace_binding(self, workspace_id):
+            assert workspace_id == "ws-1"
+            return {
+                "workspace_id": "ws-1",
+                "workspace_name": "Workspace One",
+                "organization_id": "org-1",
+                "datasource_id": 8,
+            }
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/workspaces/ws-1/binding",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json["workspace_id"] == "ws-1"
+
+
+def test_admin_workspace_binding_detail_blocks_workspace_admin_for_other_workspace(client, monkeypatch):
+    class _FakeSvc:
+        def get_workspace_binding(self, workspace_id):
+            assert workspace_id == "ws-1"
+            return {"workspace_id": "ws-1", "organization_id": "org-1"}
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.get(
+        "/api/v1/admin/workspaces/ws-2/binding",
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 403
+    assert "current workspace" in resp.json["error"]
+
+
 def test_admin_workspace_create(client, monkeypatch):
     class _FakeSvc:
         def create_workspace(self, req):
@@ -1326,6 +1450,55 @@ def test_admin_workspace_binding_update(client, monkeypatch):
     )
     assert resp.status_code == 200
     assert resp.json["datasource_id"] == 8
+
+
+def test_admin_workspace_binding_update_allows_workspace_admin_for_current_workspace_and_org(client, monkeypatch):
+    class _FakeSvc:
+        def get_workspace_binding(self, workspace_id):
+            assert workspace_id == "ws-1"
+            return {"workspace_id": "ws-1", "organization_id": "org-1"}
+
+        def get_datasource(self, datasource_id):
+            assert datasource_id == 8
+            return {"datasource_id": 8, "organization_id": "org-1"}
+
+        def update_workspace_binding(self, *, workspace_id, req):
+            assert workspace_id == "ws-1"
+            assert req.organization_id == "org-1"
+            assert req.datasource_id == 8
+            return {
+                "workspace_id": workspace_id,
+                "organization_id": req.organization_id,
+                "datasource_id": req.datasource_id,
+            }
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.patch(
+        "/api/v1/admin/workspaces/ws-1/binding",
+        json={"organization_id": "org-1", "datasource_id": 8},
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json["datasource_id"] == 8
+
+
+def test_admin_workspace_binding_update_blocks_workspace_admin_cross_org(client, monkeypatch):
+    class _FakeSvc:
+        def get_workspace_binding(self, workspace_id):
+            assert workspace_id == "ws-1"
+            return {"workspace_id": "ws-1", "organization_id": "org-1"}
+
+        def update_workspace_binding(self, **_kwargs):
+            raise AssertionError("workspace binding update should not run cross-org")
+
+    monkeypatch.setattr(admin_routes, "TenancyAdminService", _FakeSvc)
+    resp = client.patch(
+        "/api/v1/admin/workspaces/ws-1/binding",
+        json={"organization_id": "org-2"},
+        headers=_headers(monkeypatch, is_admin=False, roles={"workspace_admin"}),
+    )
+    assert resp.status_code == 403
+    assert "current workspace organization" in resp.json["error"]
 
 
 def test_admin_tenancy_routes_require_admin(client, monkeypatch):
