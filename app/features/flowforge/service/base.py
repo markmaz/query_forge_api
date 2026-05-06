@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from app.config.llm_resolver import ResolvedLLMRuntime, build_llm_client_for_role
 from app.exceptions.forge_error import ForgeError
+from app.features.flowforge.communication_template_drafting import CommunicationTemplateDraftGenerator
 from app.features.flowforge.llm_drafting import MatchingPolicyDraftGenerator
 from app.features.flowforge.matching import MatchingPolicyEngine
 from app.features.flowforge.repositories import (
@@ -35,6 +36,7 @@ class FlowForgeServiceBase:
         matching_engine: MatchingPolicyEngine | None = None,
         communication_template_renderer: CommunicationTemplateRenderer | None = None,
         matching_policy_draft_generator: MatchingPolicyDraftGenerator | None = None,
+        communication_template_draft_generator: CommunicationTemplateDraftGenerator | None = None,
         llm_runtime_builder: Callable[..., ResolvedLLMRuntime] | None = None,
     ) -> None:
         self._resource_repository = resource_repository or FlowForgeResourceRepository()
@@ -48,6 +50,7 @@ class FlowForgeServiceBase:
         self._matching_engine = matching_engine or MatchingPolicyEngine()
         self._communication_template_renderer = communication_template_renderer or CommunicationTemplateRenderer()
         self._matching_policy_draft_generator = matching_policy_draft_generator or MatchingPolicyDraftGenerator()
+        self._communication_template_draft_generator = communication_template_draft_generator or CommunicationTemplateDraftGenerator()
         self._llm_runtime_builder = llm_runtime_builder or build_llm_client_for_role
 
     def _optional_string(self, value: Any) -> str | None:

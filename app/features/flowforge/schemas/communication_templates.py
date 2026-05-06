@@ -52,8 +52,32 @@ def register_communication_template_models(namespace):
             "preview": fields.Raw(required=False),
         },
     )
+    communication_template_ai_draft = namespace.model(
+        "FlowForgeCommunicationTemplateAIDraft",
+        {
+            "id": fields.Integer(required=True),
+            "workspace_id": fields.String(required=True),
+            "purpose": fields.String(required=True),
+            "channel": fields.String(required=True),
+            "resource_set_id": fields.Integer(required=False),
+            "prompt": fields.String(required=True),
+            "tone": fields.String(required=False),
+            "required_actions": fields.List(fields.String, required=True),
+            "subject": fields.String(required=True),
+            "body_blocks": fields.Raw(required=True),
+            "plain_language_summary": fields.String(required=False),
+            "validation_status": fields.String(required=True),
+            "validation_result": fields.Raw(required=True),
+            "model_provider": fields.String(required=False),
+            "model_name": fields.String(required=False),
+            "status": fields.String(required=True),
+            "draft_source": fields.String(required=False),
+            "created_at": fields.Raw(required=False),
+        },
+    )
     return {
         "communication_template": communication_template,
         "communication_template_upsert": communication_template_upsert,
         "communication_template_validation": communication_template_validation,
+        "communication_template_ai_draft": communication_template_ai_draft,
     }

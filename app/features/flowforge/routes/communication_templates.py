@@ -68,6 +68,41 @@ class FlowForgeCommunicationTemplateList(Resource):
             return exc.to_dict(), exc.status_code
 
 
+@flowforge_ns.route("/communication-templates/ai-drafts")
+class FlowForgeCommunicationTemplateAIDraft(Resource):
+    @flowforge_ns.doc(
+        summary="Generate and store a FlowForge communication template AI draft",
+        description=(
+            "Creates an auditable draft communication template from admin instructions. The generated subject "
+            "and body blocks are validated and stored with prompt/model metadata, but no reusable template is "
+            "created or activated until an admin applies and saves it."
+        ),
+        responses={
+            201: "Communication template AI draft generated and stored.",
+            400: "Invalid draft request.",
+            401: "Authentication required.",
+            403: "FlowForge designer access required.",
+            404: "Resource set or workspace LLM not found.",
+        },
+    )
+    @flowforge_ns.marshal_with(models["communication_template_ai_draft"])
+    @token_required
+    @require_access("flowforge", role="designer")
+    def post(self):
+        try:
+            payload = request.get_json(silent=True) or {}
+            return (
+                _service().create_communication_template_ai_draft(
+                    workspace_id=_workspace_id(),
+                    payload=payload if isinstance(payload, dict) else {},
+                    actor_user_id=_actor_user_id(),
+                ),
+                201,
+            )
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+
+
 @flowforge_ns.route("/communication-templates/<int:template_id>")
 @flowforge_ns.param("template_id", "Communication template id.")
 class FlowForgeCommunicationTemplateDetail(Resource):

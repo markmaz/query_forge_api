@@ -112,3 +112,14 @@ def test_flowforge_communication_template_migration_defines_template_contract():
     assert "validation_result_json JSON NOT NULL" in sql
     assert "UNIQUE KEY uidx_ff_comm_template_key" in sql
     assert "KEY idx_ff_comm_template_workspace_purpose" in sql
+
+
+def test_flowforge_communication_template_ai_draft_migration_defines_audit_contract():
+    sql = _migration_text("20260506_flowforge_communication_template_ai_drafts.sql")
+
+    assert "CREATE TABLE IF NOT EXISTS flowforge_communication_template_ai_drafts" in sql
+    assert "prompt TEXT NOT NULL" in sql
+    assert "required_actions_json JSON NOT NULL" in sql
+    assert "generated_body_blocks_json JSON NOT NULL" in sql
+    assert "model_provider VARCHAR(64) NULL" in sql
+    assert "KEY idx_ff_comm_template_ai_draft_purpose" in sql

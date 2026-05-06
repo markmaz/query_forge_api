@@ -175,6 +175,36 @@ def test_flowforge_communication_template_repository_creates_and_lists_templates
     assert rows[0]["validation_result_json"]["valid"] is True
 
 
+def test_flowforge_communication_template_repository_creates_ai_draft():
+    sql = _SQL(lastrowid=601)
+    repo = FlowForgeCommunicationTemplateRepository(sql=sql)
+
+    created = repo.create_ai_draft(
+        workspace_id="ws-1",
+        purpose="human_task",
+        channel="email",
+        resource_set_id=30,
+        prompt="Write a task email.",
+        tone="concise",
+        required_actions=["accept", "decline"],
+        generated_subject="Action requested",
+        generated_body_blocks=[{"type": "action_buttons", "actions": ["accept", "decline"]}],
+        plain_language_summary="Generated a task email.",
+        validation_status="valid",
+        validation_result={"valid": True, "errors": [], "warnings": []},
+        model_provider="heuristic",
+        model_name="flowforge-local-communication-template-draft-generator",
+        status="drafted",
+        created_by="user-1",
+    )
+
+    query, params = sql.inserts[0]
+    assert created["id"] == 601
+    assert "INSERT INTO flowforge_communication_template_ai_drafts" in query
+    assert json.loads(params["required_actions_json"]) == ["accept", "decline"]
+    assert json.loads(params["generated_body_blocks_json"])[0]["type"] == "action_buttons"
+
+
 def test_flowforge_workflow_repository_serializes_graph_when_creating_version():
     sql = _SQL(lastrowid=44)
     repo = FlowForgeWorkflowRepository(sql=sql)

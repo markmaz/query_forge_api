@@ -169,6 +169,29 @@ def test_flowforge_communication_template_routes_create_validate_and_activate(cl
     assert activate_resp.json["status"] == "active"
 
 
+def test_flowforge_communication_template_ai_draft_route_creates_draft(client, monkeypatch):
+    service = _TemplateService()
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: service)
+
+    resp = client.post(
+        "/api/v1/flowforge/communication-templates/ai-drafts",
+        headers=_headers(monkeypatch, roles={"flowforge:designer"}),
+        json={
+            "prompt": "Write a task email.",
+            "purpose": "human_task",
+            "channel": "email",
+            "resource_set_id": 30,
+            "required_actions": ["accept", "decline"],
+            "tone": "concise",
+        },
+    )
+
+    assert resp.status_code == 201
+    assert resp.json["subject"] == "Action requested"
+    assert service.created_ai_draft["workspace_id"] == "ws-1"
+    assert service.created_ai_draft["actor_user_id"] == "user-1"
+
+
 def test_flowforge_run_inspector_returns_event_first_placeholder(client, monkeypatch):
     resp = client.get(
         "/api/v1/flowforge/workflows/therapist-routing/run-inspector",
@@ -183,6 +206,7 @@ def test_flowforge_run_inspector_returns_event_first_placeholder(client, monkeyp
 class _TemplateService:
     def __init__(self) -> None:
         self.created_payload = None
+        self.created_ai_draft = None
 
     def list_communication_templates(self, *, workspace_id: str, status: str | None, purpose: str | None, channel: str | None, resource_set_id: int | None):
         return [
@@ -221,6 +245,28 @@ class _TemplateService:
             "validation_status": "valid",
             "validation_result": {"valid": True, "errors": [], "warnings": []},
             "metadata": {},
+        }
+
+    def create_communication_template_ai_draft(self, *, workspace_id: str, payload, actor_user_id: str):
+        self.created_ai_draft = {"workspace_id": workspace_id, "payload": payload, "actor_user_id": actor_user_id}
+        return {
+            "id": 601,
+            "workspace_id": workspace_id,
+            "purpose": payload["purpose"],
+            "channel": payload["channel"],
+            "resource_set_id": payload["resource_set_id"],
+            "prompt": payload["prompt"],
+            "tone": payload["tone"],
+            "required_actions": payload["required_actions"],
+            "subject": "Action requested",
+            "body_blocks": [{"type": "action_buttons", "actions": ["accept", "decline"]}],
+            "plain_language_summary": "Generated a task email.",
+            "validation_status": "valid",
+            "validation_result": {"valid": True, "errors": [], "warnings": []},
+            "model_provider": "heuristic",
+            "model_name": "flowforge-local-communication-template-draft-generator",
+            "status": "drafted",
+            "draft_source": "heuristic",
         }
 
     def validate_communication_template(self, *, workspace_id: str, template_id: int, payload):

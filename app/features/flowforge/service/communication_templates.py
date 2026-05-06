@@ -3,8 +3,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.config.llm_resolver import ResolvedLLMRuntime
+from app.constants.llm_roles import LLMRole
 from app.exceptions.forge_error import ForgeError
+from app.features.flowforge.communication_template_drafting import CommunicationTemplateDraftGenerator, normalize_generated_communication_template
 from app.features.flowforge.runtime.communication_templates import ALLOWED_CHANNELS, ALLOWED_PURPOSES
+from app.features.flowforge.runtime.communication_templates import ALLOWED_ACTIONS
 
 
 TEMPLATE_STATUSES = {"draft", "active", "archived"}
@@ -144,6 +148,75 @@ class FlowForgeCommunicationTemplateServiceMixin:
         refreshed = self._communication_template_repository.get_template(workspace_id=workspace_id, template_id=template_id)
         return self._serialize_communication_template(refreshed or {**template, "status": "active", "validation_status": "valid"})
 
+    def create_communication_template_ai_draft(
+        self,
+        *,
+        workspace_id: str,
+        payload: dict[str, Any],
+        actor_user_id: str,
+    ) -> dict[str, Any]:
+        prompt = str(payload.get("prompt") or "").strip()
+        if not prompt:
+            raise ForgeError("prompt is required.", status_code=400)
+        purpose = str(payload.get("purpose") or "notification").strip()
+        channel = str(payload.get("channel") or "email").strip()
+        if purpose not in ALLOWED_PURPOSES:
+            raise ForgeError(f"Unsupported purpose '{purpose}'.", status_code=400)
+        if channel not in ALLOWED_CHANNELS:
+            raise ForgeError(f"Unsupported channel '{channel}'.", status_code=400)
+        resource_set_id = self._optional_positive_int(payload.get("resource_set_id"), field_name="resource_set_id")
+        if resource_set_id is not None and self._resource_repository.get_resource_set(workspace_id=workspace_id, resource_set_id=resource_set_id) is None:
+            raise ForgeError(f"Resource set '{resource_set_id}' was not found.", status_code=404)
+        required_actions = self._communication_required_actions(payload.get("required_actions"))
+        tone = self._optional_string(payload.get("tone"))
+        use_llm = bool(payload.get("use_llm"))
+        resource_fields = sorted(self._resource_field_keys(workspace_id=workspace_id, resource_set_id=resource_set_id) or [])
+        generator = self._communication_template_draft_generator
+        runtime: ResolvedLLMRuntime | None = None
+        if use_llm:
+            runtime = self._llm_runtime_builder(workspace_id=workspace_id, role=LLMRole.FLOWFORGE_RULE_DRAFTING)
+            generator = CommunicationTemplateDraftGenerator(llm_client=runtime.client)
+        generated = generator.generate(
+            prompt=prompt,
+            purpose=purpose,
+            channel=channel,
+            resource_set_id=resource_set_id,
+            resource_fields=resource_fields,
+            required_actions=required_actions,
+            tone=tone,
+            use_llm=use_llm,
+        )
+        normalized = normalize_generated_communication_template(generated, purpose=purpose, required_actions=required_actions)
+        template = {
+            "channel": channel,
+            "purpose": purpose,
+            "resource_set_id": resource_set_id,
+            "subject": normalized["subject"],
+            "body_blocks": normalized["body_blocks"],
+        }
+        validation = self._validate_template_payload(workspace_id=workspace_id, template=template)
+        saved = self._communication_template_repository.create_ai_draft(
+            workspace_id=workspace_id,
+            purpose=purpose,
+            channel=channel,
+            resource_set_id=resource_set_id,
+            prompt=prompt,
+            tone=tone,
+            required_actions=required_actions,
+            generated_subject=normalized["subject"],
+            generated_body_blocks=normalized["body_blocks"],
+            plain_language_summary=self._optional_string(generated.get("plain_language_summary")),
+            validation_status="valid" if validation["valid"] else "invalid",
+            validation_result=validation,
+            model_provider=self._optional_string(runtime.provider if runtime is not None else generated.get("model_provider")),
+            model_name=self._optional_string(runtime.model if runtime is not None else generated.get("model_name")),
+            status="drafted",
+            created_by=str(actor_user_id or "").strip() or None,
+        )
+        serialized = self._serialize_communication_template_ai_draft(saved)
+        serialized["draft_source"] = generated.get("draft_source")
+        return serialized
+
     def _normalize_template_payload(
         self,
         *,
@@ -215,6 +288,19 @@ class FlowForgeCommunicationTemplateServiceMixin:
         return fields
 
     @staticmethod
+    def _communication_required_actions(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        actions: list[str] = []
+        for action in value:
+            clean_action = str(action or "").strip()
+            if clean_action not in ALLOWED_ACTIONS:
+                raise ForgeError(f"Unsupported communication action '{clean_action}'.", status_code=400)
+            if clean_action not in actions:
+                actions.append(clean_action)
+        return actions
+
+    @staticmethod
     def _template_key(display_name: str) -> str:
         return SLUG_PATTERN.sub("-", str(display_name or "").lower()).strip("-")[:96] or "communication-template"
 
@@ -247,4 +333,26 @@ class FlowForgeCommunicationTemplateServiceMixin:
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
             "activated_at": row.get("activated_at"),
+        }
+
+    @staticmethod
+    def _serialize_communication_template_ai_draft(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": int(row.get("id") or 0),
+            "workspace_id": str(row.get("workspace_id") or ""),
+            "purpose": str(row.get("purpose") or "notification"),
+            "channel": str(row.get("channel") or "email"),
+            "resource_set_id": row.get("resource_set_id"),
+            "prompt": str(row.get("prompt") or ""),
+            "tone": row.get("tone"),
+            "required_actions": row.get("required_actions") or row.get("required_actions_json") or [],
+            "subject": str(row.get("subject") or row.get("generated_subject") or ""),
+            "body_blocks": row.get("body_blocks") or row.get("generated_body_blocks_json") or [],
+            "plain_language_summary": row.get("plain_language_summary"),
+            "validation_status": str(row.get("validation_status") or "pending"),
+            "validation_result": row.get("validation_result") or row.get("validation_result_json") or {},
+            "model_provider": row.get("model_provider"),
+            "model_name": row.get("model_name"),
+            "status": str(row.get("status") or "drafted"),
+            "created_at": row.get("created_at"),
         }

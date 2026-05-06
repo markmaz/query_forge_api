@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.exceptions.forge_error import ForgeError
+from app.features.flowforge.communication_template_drafting import CommunicationTemplateDraftGenerator
 from app.features.flowforge.runtime.communication_templates import CommunicationTemplateRenderer
 from app.features.flowforge.service import FlowForgeService
 
@@ -69,9 +70,28 @@ def test_communication_template_renderer_rejects_unknown_fields_and_actions():
     assert "unsupported action 'custom_link'" in " ".join(validation.errors)
 
 
+def test_communication_template_draft_generator_produces_structured_blocks():
+    generator = CommunicationTemplateDraftGenerator()
+
+    draft = generator.generate(
+        prompt="Write a warm task email with a due date.",
+        purpose="human_task",
+        channel="email",
+        resource_set_id=30,
+        resource_fields=["resource.display_name", "task.due_at"],
+        required_actions=["accept", "decline", "open_task"],
+        tone="warm",
+    )
+
+    assert draft["subject"] == "Action requested for {{resource.display_name}}"
+    assert draft["body_blocks"][-1] == {"type": "action_buttons", "actions": ["accept", "decline", "open_task"]}
+    assert draft["draft_source"] == "heuristic"
+
+
 class _TemplateRepo:
     def __init__(self) -> None:
         self.created = None
+        self.created_ai_draft = None
         self.templates = {
             501: {
                 "id": 501,
@@ -99,6 +119,27 @@ class _TemplateRepo:
             "body_blocks_json": payload["body_blocks"],
             "validation_result_json": payload["validation_result"],
             "metadata_json": payload["metadata"],
+        }
+
+    def create_ai_draft(self, **payload):
+        self.created_ai_draft = payload
+        return {
+            "id": 601,
+            "workspace_id": payload["workspace_id"],
+            "purpose": payload["purpose"],
+            "channel": payload["channel"],
+            "resource_set_id": payload["resource_set_id"],
+            "prompt": payload["prompt"],
+            "tone": payload["tone"],
+            "required_actions_json": payload["required_actions"],
+            "generated_subject": payload["generated_subject"],
+            "generated_body_blocks_json": payload["generated_body_blocks"],
+            "plain_language_summary": payload["plain_language_summary"],
+            "validation_status": payload["validation_status"],
+            "validation_result_json": payload["validation_result"],
+            "model_provider": payload["model_provider"],
+            "model_name": payload["model_name"],
+            "status": payload["status"],
         }
 
     def update_template(self, **kwargs):
@@ -147,3 +188,27 @@ def test_flowforge_service_rejects_invalid_communication_template_activation():
         service.activate_communication_template(workspace_id="ws-1", template_id=501, actor_user_id="user-1")
 
     assert exc.value.status_code == 400
+
+
+def test_flowforge_service_creates_communication_template_ai_draft():
+    repo = _TemplateRepo()
+    service = FlowForgeService(communication_template_repository=repo, resource_repository=_ResourceRepo())
+
+    result = service.create_communication_template_ai_draft(
+        workspace_id="ws-1",
+        payload={
+            "prompt": "Write a task email with accept and decline actions.",
+            "purpose": "human_task",
+            "channel": "email",
+            "resource_set_id": 30,
+            "required_actions": ["accept", "decline"],
+            "tone": "concise",
+        },
+        actor_user_id="user-1",
+    )
+
+    assert result["id"] == 601
+    assert result["validation_status"] == "valid"
+    assert result["draft_source"] == "heuristic"
+    assert repo.created_ai_draft["created_by"] == "user-1"
+    assert repo.created_ai_draft["model_provider"] == "heuristic"

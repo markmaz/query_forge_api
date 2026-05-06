@@ -77,6 +77,7 @@ def register_models(namespace):
         "communication_template": models["communication_template"],
         "communication_template_upsert": models["communication_template_upsert"],
         "communication_template_validation": models["communication_template_validation"],
+        "communication_template_ai_draft": models["communication_template_ai_draft"],
     }
 
 

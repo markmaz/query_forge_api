@@ -8,7 +8,13 @@ from app.ports.sql_executor import ForgeQueryPort
 
 
 class FlowForgeCommunicationTemplateRepository:
-    _JSON_KEYS = {"body_blocks_json", "validation_result_json", "metadata_json"}
+    _JSON_KEYS = {
+        "body_blocks_json",
+        "generated_body_blocks_json",
+        "metadata_json",
+        "required_actions_json",
+        "validation_result_json",
+    }
 
     def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
         self._sql = sql or ForgeMetaSQL()
@@ -230,6 +236,102 @@ class FlowForgeCommunicationTemplateRepository:
             },
         )
         return int(updated or 0) > 0
+
+    def create_ai_draft(
+        self,
+        *,
+        workspace_id: str,
+        purpose: str,
+        channel: str,
+        resource_set_id: int | None,
+        prompt: str,
+        tone: str | None,
+        required_actions: list[str],
+        generated_subject: str,
+        generated_body_blocks: list[dict[str, Any]],
+        plain_language_summary: str | None,
+        validation_status: str,
+        validation_result: dict[str, Any],
+        model_provider: str | None,
+        model_name: str | None,
+        status: str,
+        created_by: str | None,
+    ) -> dict[str, Any]:
+        result = self._sql.execute_insert(
+            """
+            INSERT INTO flowforge_communication_template_ai_drafts (
+              workspace_id,
+              purpose,
+              channel,
+              resource_set_id,
+              prompt,
+              tone,
+              required_actions_json,
+              generated_subject,
+              generated_body_blocks_json,
+              plain_language_summary,
+              validation_status,
+              validation_result_json,
+              model_provider,
+              model_name,
+              status,
+              created_by
+            ) VALUES (
+              :workspace_id,
+              :purpose,
+              :channel,
+              :resource_set_id,
+              :prompt,
+              :tone,
+              :required_actions_json,
+              :generated_subject,
+              :generated_body_blocks_json,
+              :plain_language_summary,
+              :validation_status,
+              :validation_result_json,
+              :model_provider,
+              :model_name,
+              :status,
+              :created_by
+            )
+            """,
+            {
+                "workspace_id": str(workspace_id or "").strip(),
+                "purpose": str(purpose or "notification").strip(),
+                "channel": str(channel or "email").strip(),
+                "resource_set_id": int(resource_set_id) if resource_set_id is not None else None,
+                "prompt": str(prompt or "").strip(),
+                "tone": tone,
+                "required_actions_json": _json_or_none(required_actions),
+                "generated_subject": str(generated_subject or "").strip(),
+                "generated_body_blocks_json": _json_or_none(generated_body_blocks),
+                "plain_language_summary": plain_language_summary,
+                "validation_status": str(validation_status or "pending").strip(),
+                "validation_result_json": _json_or_none(validation_result),
+                "model_provider": model_provider,
+                "model_name": model_name,
+                "status": str(status or "drafted").strip(),
+                "created_by": created_by,
+            },
+        )
+        return {
+            "id": _lastrowid(result),
+            "workspace_id": str(workspace_id or "").strip(),
+            "purpose": str(purpose or "notification").strip(),
+            "channel": str(channel or "email").strip(),
+            "resource_set_id": int(resource_set_id) if resource_set_id is not None else None,
+            "prompt": str(prompt or "").strip(),
+            "tone": tone,
+            "required_actions_json": required_actions,
+            "generated_subject": str(generated_subject or "").strip(),
+            "generated_body_blocks_json": generated_body_blocks,
+            "plain_language_summary": plain_language_summary,
+            "validation_status": str(validation_status or "pending").strip(),
+            "validation_result_json": validation_result,
+            "model_provider": model_provider,
+            "model_name": model_name,
+            "status": str(status or "drafted").strip(),
+        }
 
     def _decode_template(self, raw: dict[str, Any]) -> dict[str, Any]:
         row = dict(raw)
