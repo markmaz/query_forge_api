@@ -31,6 +31,16 @@ def register_integration_models(namespace, *, run_event):
             ),
         },
     )
+    integration_source_field = namespace.model(
+        "FlowForgeIntegrationSourceField",
+        {
+            "path": fields.String(required=True, description="Provider payload field path relative to the normalized intake fields object."),
+            "label": fields.String(required=True, description="Human-readable field label for designer mapping."),
+            "type": fields.String(required=True, description="Field type: text, number, boolean, date, datetime, email, phone, json, or unknown."),
+            "required": fields.Boolean(required=True, description="Whether this provider field is expected for this integration."),
+            "sensitive": fields.Boolean(required=True, description="Whether this field may contain sensitive data."),
+        },
+    )
     integration_config = namespace.model(
         "FlowForgeIntegrationConfig",
         {
@@ -46,6 +56,11 @@ def register_integration_models(namespace, *, run_event):
             "webhook_path": fields.String(required=True, description="Relative webhook path for provider configuration."),
             "webhook_url": fields.String(required=True, description="Absolute webhook URL when a base URL is configured, otherwise path."),
             "field_mapping": fields.Raw(required=True, description="Provider-to-normalized-field mapping configuration."),
+            "source_fields": fields.List(
+                fields.Nested(integration_source_field),
+                required=True,
+                description="Known provider fields available to intake map/transform nodes.",
+            ),
             "test_recipient_overrides": fields.Raw(required=True, description="Optional test-mode notification recipient overrides."),
             "settings": fields.Raw(required=True, description="Provider-specific settings."),
         },

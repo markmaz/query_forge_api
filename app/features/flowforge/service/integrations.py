@@ -34,6 +34,8 @@ class FlowForgeIntegrationServiceMixin:
         mode = str(payload.get("mode") or "production").strip()
         if mode not in {"production", "test"}:
             raise ForgeError("mode must be production or test.", status_code=400)
+        settings = dict(payload.get("settings") if isinstance(payload.get("settings"), dict) else {})
+        settings["source_fields"] = self._normalize_source_fields(payload.get("source_fields"))
         webhook_secret = "ffjot_" + secrets.token_urlsafe(32)
         webhook_public_id = "ffj_" + secrets.token_urlsafe(18)
         row = self._integration_repository.create_integration_config(
@@ -49,7 +51,7 @@ class FlowForgeIntegrationServiceMixin:
             test_recipient_overrides=(
                 payload.get("test_recipient_overrides") if isinstance(payload.get("test_recipient_overrides"), list) else []
             ),
-            settings=payload.get("settings") if isinstance(payload.get("settings"), dict) else {},
+            settings=settings,
             created_by=str(actor_user_id or "").strip() or None,
         )
         serialized = self._serialize_integration_config(row, include_secret=True)
@@ -155,6 +157,8 @@ class FlowForgeIntegrationServiceMixin:
             str(current_app.config.get("FLOWFORGE_WEBHOOK_BASE_URL") or "").strip() if has_app_context() else ""
         )
         webhook_url = f"{webhook_base_url.rstrip('/')}{webhook_path}" if webhook_base_url and webhook_path else webhook_path
+        settings = row.get("settings") or row.get("settings_json") or {}
+        source_fields = self._source_fields_from_settings(settings)
         out = {
             "id": row.get("id"),
             "workspace_id": row.get("workspace_id"),
@@ -168,14 +172,47 @@ class FlowForgeIntegrationServiceMixin:
             "webhook_path": webhook_path,
             "webhook_url": webhook_url,
             "field_mapping": row.get("field_mapping") or row.get("field_mapping_json") or {},
+            "source_fields": source_fields,
             "test_recipient_overrides": row.get("test_recipient_overrides")
             or row.get("test_recipient_overrides_json")
             or [],
-            "settings": row.get("settings") or row.get("settings_json") or {},
+            "settings": settings,
         }
         if include_secret:
             out["webhook_secret"] = None
         return out
+
+    def _source_fields_from_settings(self, settings: dict[str, Any]) -> list[dict[str, Any]]:
+        if not isinstance(settings, dict):
+            return []
+        return self._normalize_source_fields(settings.get("source_fields"))
+
+    def _normalize_source_fields(self, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        normalized: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        valid_types = {"text", "number", "boolean", "date", "datetime", "email", "phone", "json", "unknown"}
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path") or item.get("key") or "").strip().strip(".")
+            if not path or path in seen:
+                continue
+            field_type = str(item.get("type") or "text").strip().lower()
+            if field_type not in valid_types:
+                field_type = "unknown"
+            seen.add(path)
+            normalized.append(
+                {
+                    "path": path,
+                    "label": str(item.get("label") or path.replace("_", " ").replace(".", " ")).strip(),
+                    "type": field_type,
+                    "required": bool(item.get("required")),
+                    "sensitive": bool(item.get("sensitive")),
+                }
+            )
+        return normalized
 
     def _serialize_integration_trigger(self, row: dict[str, Any]) -> dict[str, Any]:
         return {

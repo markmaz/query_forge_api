@@ -1331,6 +1331,9 @@ class _IntegrationService:
                 "webhook_path": "/api/v1/flowforge/webhooks/jotform/ffj_public",
                 "webhook_url": "/api/v1/flowforge/webhooks/jotform/ffj_public",
                 "field_mapping": {"patient": "patientName"},
+                "source_fields": [
+                    {"path": "serviceRequested", "label": "Requested Service", "type": "text", "required": True, "sensitive": False}
+                ],
                 "test_recipient_overrides": ["ops@example.com"],
                 "settings": {},
             }
@@ -1356,6 +1359,7 @@ class _IntegrationService:
             "webhook_url": "/api/v1/flowforge/webhooks/jotform/ffj_public",
             "webhook_secret": "ffjot_secret",
             "field_mapping": payload.get("field_mapping", {}),
+            "source_fields": payload.get("source_fields", []),
             "test_recipient_overrides": [],
             "settings": {},
         }
@@ -1453,6 +1457,7 @@ def test_flowforge_integrations_route_lists_configs(client, monkeypatch):
     assert resp.status_code == 200
     assert resp.json[0]["integration_key"] == "intake-form"
     assert resp.json[0]["webhook_path"] == "/api/v1/flowforge/webhooks/jotform/ffj_public"
+    assert resp.json[0]["source_fields"][0]["path"] == "serviceRequested"
     assert "webhook_secret" not in resp.json[0]
 
 
@@ -1466,6 +1471,7 @@ def test_flowforge_jotform_integration_route_creates_config(client, monkeypatch)
         "external_form_id": "form-1",
         "mode": "test",
         "field_mapping": {"patient": "patientName"},
+        "source_fields": [{"path": "serviceRequested", "label": "Requested Service", "type": "text"}],
     }
     resp = client.post(
         "/api/v1/flowforge/integrations/jotform",
