@@ -162,6 +162,53 @@ _REPORTING_DOMAINS: list[dict[str, Any]] = [
             {"key": "status", "label": "Status"},
         ],
     },
+    {
+        "domain_key": "flowforge_dataset_artifacts",
+        "display_name": "FlowForge Dataset Artifacts",
+        "description": "Dataset artifact lifecycle, volume, storage kind, expiry, and run linkage for import/export operations.",
+        "read_model": "v_flowforge_report_dataset_artifacts",
+        "default_filters": [{"field": "run_mode", "operator": "equals", "value": "production"}],
+        "sensitive_excluded_fields": ["storage_ref_json", "schema_json", "checksum"],
+        "query_studio_prompts": [
+            "Which FlowForge dataset artifacts are past retention?",
+            "Show data movement artifact counts by status and storage kind.",
+            "How many rows were exported by FlowForge this week?",
+        ],
+        "metrics": [
+            {"key": "dataset_artifact_count", "label": "Dataset Artifacts"},
+            {"key": "expired_dataset_artifact_count", "label": "Expired Dataset Artifacts"},
+            {"key": "retention_pending_artifact_count", "label": "Past-Retention Artifacts"},
+        ],
+        "dimensions": [
+            {"key": "artifact_type", "label": "Artifact Type"},
+            {"key": "storage_kind", "label": "Storage Kind"},
+            {"key": "status", "label": "Artifact Status"},
+        ],
+    },
+    {
+        "domain_key": "flowforge_data_movement_audit",
+        "display_name": "FlowForge Data Movement Audit",
+        "description": "Operational import/export audit rows with action status, source/destination references, and timing.",
+        "read_model": "v_flowforge_report_data_movement_audit",
+        "default_filters": [{"field": "run_mode", "operator": "equals", "value": "production"}],
+        "sensitive_excluded_fields": ["request_json", "result_json", "idempotency_key"],
+        "query_studio_prompts": [
+            "Which FlowForge imports failed in the last day?",
+            "Which FlowForge exports failed in the last day?",
+            "Show import and export counts by source and destination.",
+        ],
+        "metrics": [
+            {"key": "data_movement_audit_count", "label": "Data Movement Audit Rows"},
+            {"key": "failed_import_count", "label": "Failed Imports"},
+            {"key": "failed_export_count", "label": "Failed Exports"},
+        ],
+        "dimensions": [
+            {"key": "action_type", "label": "Action Type"},
+            {"key": "status", "label": "Action Status"},
+            {"key": "source_key", "label": "Source"},
+            {"key": "destination_key", "label": "Destination"},
+        ],
+    },
 ]
 
 

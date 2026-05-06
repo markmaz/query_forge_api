@@ -15,6 +15,12 @@ class _FakeSQL:
             "failed_notification_count": 0,
             "stuck_run_count": 0,
             "failed_run_count": 0,
+            "schedule_backlog_count": 0,
+            "failed_import_count": 0,
+            "failed_export_count": 0,
+            "stuck_approval_count": 0,
+            "expired_artifact_count": 0,
+            "artifact_retention_pending_count": 0,
         }
 
     def execute_query(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Tuple]:
@@ -218,6 +224,12 @@ def test_check_flowforge_reports_stale_worker_and_operational_backlog():
                 "failed_notification_count": 2,
                 "stuck_run_count": 1,
                 "failed_run_count": 3,
+                "schedule_backlog_count": 4,
+                "failed_import_count": 5,
+                "failed_export_count": 6,
+                "stuck_approval_count": 7,
+                "expired_artifact_count": 8,
+                "artifact_retention_pending_count": 9,
             }
         )
     )
@@ -231,8 +243,19 @@ def test_check_flowforge_reports_stale_worker_and_operational_backlog():
     assert result["metrics"]["failed_notification_count"] == 2
     assert result["metrics"]["stuck_run_count"] == 1
     assert result["metrics"]["failed_run_count"] == 3
+    assert result["metrics"]["schedule_backlog_count"] == 4
+    assert result["metrics"]["failed_import_count"] == 5
+    assert result["metrics"]["failed_export_count"] == 6
+    assert result["metrics"]["stuck_approval_count"] == 7
+    assert result["metrics"]["expired_artifact_count"] == 8
+    assert result["metrics"]["artifact_retention_pending_count"] == 9
     assert any("heartbeat" in issue for issue in result["issues"])
     assert any("stuck" in issue for issue in result["issues"])
+    assert any("scheduled" in issue for issue in result["issues"])
+    assert any("import" in issue for issue in result["issues"])
+    assert any("export" in issue for issue in result["issues"])
+    assert any("approval" in issue for issue in result["issues"])
+    assert any("retention" in issue for issue in result["issues"])
 
 
 class _FakeValkeyClient:

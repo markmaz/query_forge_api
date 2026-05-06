@@ -70,4 +70,8 @@ beat_schedule["flowforge-purge-expired-raw-payloads"] = {
     "task": "qf.flowforge.purge_expired_raw_payloads",
     "schedule": 3600.0,
 }
+beat_schedule["flowforge-expire-dataset-artifacts"] = {
+    "task": "qf.flowforge.expire_dataset_artifacts",
+    "schedule": 3600.0,
+}
 celery.conf.beat_schedule = beat_schedule

@@ -5,6 +5,7 @@ from app.tasks.flowforge_tasks import dispatch_flowforge_due_timeouts as dispatc
 from app.tasks.flowforge_tasks import dispatch_flowforge_due_schedules as dispatch_flowforge_due_schedules
 from app.tasks.flowforge_tasks import dispatch_flowforge_notifications as dispatch_flowforge_notifications
 from app.tasks.flowforge_tasks import dispatch_flowforge_run as dispatch_flowforge_run
+from app.tasks.flowforge_tasks import expire_flowforge_dataset_artifacts as expire_flowforge_dataset_artifacts
 from app.tasks.flowforge_tasks import purge_flowforge_expired_raw_payloads as purge_flowforge_expired_raw_payloads
 from app.tasks.skill_runner import dispatch_due_skills_task as dispatch_due_skills_task
 from app.tasks.skill_runner import execute_skill_task as execute_skill_task
@@ -19,6 +20,7 @@ __all__ = [
     "dispatch_flowforge_due_timeouts",
     "dispatch_flowforge_due_schedules",
     "dispatch_flowforge_notifications",
+    "expire_flowforge_dataset_artifacts",
     "purge_flowforge_expired_raw_payloads",
     "execute_skill_task",
     "dispatch_due_skills_task",

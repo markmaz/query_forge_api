@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.celery_app import celery
-from app.features.flowforge.repositories import FlowForgeIntegrationRepository
+from app.features.flowforge.repositories import FlowForgeDataMovementRepository, FlowForgeIntegrationRepository
 from app.features.flowforge.runtime import FlowForgeRuntimeDispatcher
 from app.features.flowforge.runtime.health import record_flowforge_worker_heartbeat
 from app.features.flowforge.runtime.human_responses import FlowForgeHumanResponseRuntime
@@ -44,6 +44,13 @@ def purge_flowforge_expired_raw_payloads(limit: int = 500) -> dict[str, Any]:
     record_flowforge_worker_heartbeat(task_name="qf.flowforge.purge_expired_raw_payloads")
     purged = FlowForgeIntegrationRepository().purge_expired_raw_payloads(limit=int(limit or 500))
     return {"purged": purged}
+
+
+@celery.task(name="qf.flowforge.expire_dataset_artifacts")
+def expire_flowforge_dataset_artifacts(limit: int = 500) -> dict[str, Any]:
+    record_flowforge_worker_heartbeat(task_name="qf.flowforge.expire_dataset_artifacts")
+    expired = FlowForgeDataMovementRepository().expire_dataset_artifacts(limit=int(limit or 500))
+    return {"expired": expired}
 
 
 def enqueue_flowforge_run_dispatch(*, workspace_id: str, run_id: int) -> None:

@@ -636,6 +636,12 @@ class _RuntimeRepo:
             "notification_count": 12,
             "pending_notification_count": 3,
             "failed_notification_count": 1,
+            "dataset_artifact_count": 11,
+            "expired_dataset_artifact_count": 2,
+            "retention_pending_artifact_count": 1,
+            "data_movement_audit_count": 13,
+            "failed_import_count": 1,
+            "failed_export_count": 2,
         }
 
 
@@ -1605,6 +1611,8 @@ def test_flowforge_service_returns_reporting_domains_and_summary():
     assert "raw_payload_json" in sensitive_fields
     assert "recipient" in sensitive_fields
     assert "sensitive_profile_json" in sensitive_fields
+    assert "request_json" in sensitive_fields
+    assert "storage_ref_json" in sensitive_fields
     assert summary["mode"] == "production"
     assert summary["default_filters"] == [{"field": "mode", "operator": "equals", "value": "production"}]
     assert summary["metrics"]["run_count"] == 10
@@ -1620,6 +1628,8 @@ def test_flowforge_service_returns_reporting_dashboard_metrics():
     assert dashboard["metrics"]["intake_event_count"] == 9
     assert dashboard["metrics"]["offer_count"] == 6
     assert dashboard["metrics"]["assignment_count"] == 4
+    assert dashboard["metrics"]["dataset_artifact_count"] == 11
+    assert dashboard["metrics"]["failed_export_count"] == 2
     assert {domain["domain_key"] for domain in dashboard["domains"]} >= {
         "flowforge_intake_events",
         "flowforge_matching_evaluations",
@@ -1627,6 +1637,8 @@ def test_flowforge_service_returns_reporting_dashboard_metrics():
         "flowforge_offers_responses",
         "flowforge_assignments",
         "flowforge_notifications",
+        "flowforge_dataset_artifacts",
+        "flowforge_data_movement_audit",
     }
 
 

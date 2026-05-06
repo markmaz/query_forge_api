@@ -204,6 +204,12 @@ class AdminHealthService:
                     "failed_notification_count": None,
                     "stuck_run_count": None,
                     "failed_run_count": None,
+                    "schedule_backlog_count": None,
+                    "failed_import_count": None,
+                    "failed_export_count": None,
+                    "stuck_approval_count": None,
+                    "expired_artifact_count": None,
+                    "artifact_retention_pending_count": None,
                 },
             }
 
@@ -216,6 +222,16 @@ class AdminHealthService:
             issues.append(f"{metrics['failed_run_count']} workflow run(s) failed in the last 24 hours.")
         if int(metrics.get("failed_notification_count") or 0) > 0:
             issues.append(f"{metrics['failed_notification_count']} FlowForge notification side effect(s) failed.")
+        if int(metrics.get("schedule_backlog_count") or 0) > 0:
+            issues.append(f"{metrics['schedule_backlog_count']} scheduled FlowForge trigger(s) are backlogged.")
+        if int(metrics.get("failed_import_count") or 0) > 0:
+            issues.append(f"{metrics['failed_import_count']} data import(s) failed in the last 24 hours.")
+        if int(metrics.get("failed_export_count") or 0) > 0:
+            issues.append(f"{metrics['failed_export_count']} data export(s) failed in the last 24 hours.")
+        if int(metrics.get("stuck_approval_count") or 0) > 0:
+            issues.append(f"{metrics['stuck_approval_count']} approval task(s) are overdue or stalled.")
+        if int(metrics.get("artifact_retention_pending_count") or 0) > 0:
+            issues.append(f"{metrics['artifact_retention_pending_count']} dataset artifact(s) are past retention.")
 
         return {
             "status": "ok" if not issues else "degraded",
@@ -242,11 +258,44 @@ class AdminHealthService:
               (SELECT COUNT(*)
                  FROM flowforge_runs
                 WHERE status = 'failed'
-                  AND COALESCE(failed_at, updated_at, started_at) >= :failure_cutoff) AS failed_run_count
+                  AND COALESCE(failed_at, updated_at, started_at) >= :failure_cutoff) AS failed_run_count,
+              (SELECT COUNT(*)
+                 FROM flowforge_schedule_runs
+                WHERE status IN ('pending', 'started')
+                  AND scheduled_for <= :schedule_backlog_cutoff) AS schedule_backlog_count,
+              (SELECT COUNT(*)
+                 FROM flowforge_data_movement_audit
+                WHERE action_type = 'import'
+                  AND status = 'failed'
+                  AND COALESCE(completed_at, started_at, created_at) >= :failure_cutoff) AS failed_import_count,
+              (SELECT COUNT(*)
+                 FROM flowforge_data_movement_audit
+                WHERE action_type = 'export'
+                  AND status = 'failed'
+                  AND COALESCE(completed_at, started_at, created_at) >= :failure_cutoff) AS failed_export_count,
+              (SELECT COUNT(*)
+                 FROM flowforge_human_tasks
+                WHERE task_type = 'approval'
+                  AND status IN ('pending', 'waiting')
+                  AND (
+                    (due_at IS NOT NULL AND due_at <= :approval_due_cutoff)
+                    OR (due_at IS NULL AND created_at <= :approval_stale_cutoff)
+                  )) AS stuck_approval_count,
+              (SELECT COUNT(*)
+                 FROM flowforge_dataset_artifacts
+                WHERE status = 'expired') AS expired_artifact_count,
+              (SELECT COUNT(*)
+                 FROM flowforge_dataset_artifacts
+                WHERE expires_at IS NOT NULL
+                  AND expires_at <= CURRENT_TIMESTAMP
+                  AND status NOT IN ('expired', 'deleted')) AS artifact_retention_pending_count
             """,
             {
                 "stuck_cutoff": now - timedelta(minutes=30),
                 "failure_cutoff": now - timedelta(hours=24),
+                "schedule_backlog_cutoff": now - timedelta(minutes=5),
+                "approval_due_cutoff": now,
+                "approval_stale_cutoff": now - timedelta(hours=24),
             },
         )
         row = dict(rows[0]) if rows else {}
@@ -255,8 +304,16 @@ class AdminHealthService:
             "failed_notification_count": int(row.get("failed_notification_count") or 0),
             "stuck_run_count": int(row.get("stuck_run_count") or 0),
             "failed_run_count": int(row.get("failed_run_count") or 0),
+            "schedule_backlog_count": int(row.get("schedule_backlog_count") or 0),
+            "failed_import_count": int(row.get("failed_import_count") or 0),
+            "failed_export_count": int(row.get("failed_export_count") or 0),
+            "stuck_approval_count": int(row.get("stuck_approval_count") or 0),
+            "expired_artifact_count": int(row.get("expired_artifact_count") or 0),
+            "artifact_retention_pending_count": int(row.get("artifact_retention_pending_count") or 0),
             "stuck_run_threshold_minutes": 30,
             "failed_run_window_hours": 24,
+            "schedule_backlog_threshold_minutes": 5,
+            "approval_stale_threshold_hours": 24,
         }
 
 

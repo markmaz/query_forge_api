@@ -109,6 +109,21 @@ def test_flowforge_integration_repository_purges_expired_raw_payloads():
     assert params == {"limit": 250}
 
 
+def test_flowforge_data_movement_repository_expires_dataset_artifacts():
+    sql = _SQL(write_count=4)
+    repo = FlowForgeDataMovementRepository(sql=sql)
+
+    expired = repo.expire_dataset_artifacts(limit=250)
+
+    query, params = sql.writes[0]
+    assert expired == 4
+    assert "UPDATE flowforge_dataset_artifacts" in query
+    assert "SET status = 'expired'" in query
+    assert "expires_at <= CURRENT_TIMESTAMP" in query
+    assert "status NOT IN ('expired', 'deleted')" in query
+    assert params == {"limit": 250}
+
+
 def test_flowforge_workflow_repository_serializes_graph_when_creating_version():
     sql = _SQL(lastrowid=44)
     repo = FlowForgeWorkflowRepository(sql=sql)
@@ -250,6 +265,12 @@ def test_flowforge_runtime_repository_dashboard_metrics_are_production_scoped_an
                 "notification_count": 12,
                 "pending_notification_count": 3,
                 "failed_notification_count": 1,
+                "dataset_artifact_count": 11,
+                "expired_dataset_artifact_count": 2,
+                "retention_pending_artifact_count": 1,
+                "data_movement_audit_count": 13,
+                "failed_import_count": 1,
+                "failed_export_count": 2,
             }
         ]
     )
@@ -262,6 +283,8 @@ def test_flowforge_runtime_repository_dashboard_metrics_are_production_scoped_an
     assert params == {"workspace_id": "ws-1", "mode": "production"}
     assert "flowforge_intake_events" in query
     assert "flowforge_assignments" in query
+    assert "flowforge_dataset_artifacts" in query
+    assert "flowforge_data_movement_audit" in query
     assert "raw_payload_json" not in query
     assert "recipient" not in query
     assert "sensitive_profile_json" not in query

@@ -5,6 +5,7 @@ from app.tasks.flowforge_tasks import (
     dispatch_flowforge_due_timeouts,
     dispatch_flowforge_notifications,
     dispatch_flowforge_run,
+    expire_flowforge_dataset_artifacts,
 )
 
 
@@ -71,3 +72,19 @@ def test_dispatch_flowforge_due_schedules_task_delegates_to_schedule_runtime(mon
 
     assert result == {"status": "completed", "scanned": 1, "due": 1, "created": 1, "skipped": []}
     assert observed == {"limit": 25}
+
+
+def test_expire_flowforge_dataset_artifacts_task_delegates_to_repository(monkeypatch):
+    observed: dict[str, object] = {}
+
+    class _Repository:
+        def expire_dataset_artifacts(self, *, limit: int):
+            observed["limit"] = limit
+            return 3
+
+    monkeypatch.setattr("app.tasks.flowforge_tasks.FlowForgeDataMovementRepository", lambda: _Repository())
+
+    result = expire_flowforge_dataset_artifacts(limit=250)
+
+    assert result == {"expired": 3}
+    assert observed == {"limit": 250}

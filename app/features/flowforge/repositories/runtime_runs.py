@@ -358,7 +358,57 @@ class FlowForgeRuntimeRunRepositoryMixin:
                   AND r.id = n.run_id
                 WHERE n.workspace_id = :workspace_id
                   AND r.mode = :mode
-                  AND n.status = 'failed') AS failed_notification_count
+                  AND n.status = 'failed') AS failed_notification_count,
+              (SELECT COUNT(*)
+                 FROM flowforge_dataset_artifacts a
+                 LEFT JOIN flowforge_runs r
+                   ON r.workspace_id = a.workspace_id
+                  AND r.id = a.run_id
+                WHERE a.workspace_id = :workspace_id
+                  AND COALESCE(r.mode, :mode) = :mode) AS dataset_artifact_count,
+              (SELECT COUNT(*)
+                 FROM flowforge_dataset_artifacts a
+                 LEFT JOIN flowforge_runs r
+                   ON r.workspace_id = a.workspace_id
+                  AND r.id = a.run_id
+                WHERE a.workspace_id = :workspace_id
+                  AND COALESCE(r.mode, :mode) = :mode
+                  AND a.status = 'expired') AS expired_dataset_artifact_count,
+              (SELECT COUNT(*)
+                 FROM flowforge_dataset_artifacts a
+                 LEFT JOIN flowforge_runs r
+                   ON r.workspace_id = a.workspace_id
+                  AND r.id = a.run_id
+                WHERE a.workspace_id = :workspace_id
+                  AND COALESCE(r.mode, :mode) = :mode
+                  AND a.expires_at IS NOT NULL
+                  AND a.expires_at <= CURRENT_TIMESTAMP
+                  AND a.status NOT IN ('expired', 'deleted')) AS retention_pending_artifact_count,
+              (SELECT COUNT(*)
+                 FROM flowforge_data_movement_audit a
+                 LEFT JOIN flowforge_runs r
+                   ON r.workspace_id = a.workspace_id
+                  AND r.id = a.run_id
+                WHERE a.workspace_id = :workspace_id
+                  AND COALESCE(r.mode, :mode) = :mode) AS data_movement_audit_count,
+              (SELECT COUNT(*)
+                 FROM flowforge_data_movement_audit a
+                 LEFT JOIN flowforge_runs r
+                   ON r.workspace_id = a.workspace_id
+                  AND r.id = a.run_id
+                WHERE a.workspace_id = :workspace_id
+                  AND COALESCE(r.mode, :mode) = :mode
+                  AND a.action_type = 'import'
+                  AND a.status = 'failed') AS failed_import_count,
+              (SELECT COUNT(*)
+                 FROM flowforge_data_movement_audit a
+                 LEFT JOIN flowforge_runs r
+                   ON r.workspace_id = a.workspace_id
+                  AND r.id = a.run_id
+                WHERE a.workspace_id = :workspace_id
+                  AND COALESCE(r.mode, :mode) = :mode
+                  AND a.action_type = 'export'
+                  AND a.status = 'failed') AS failed_export_count
             """,
             {
                 "workspace_id": str(workspace_id or "").strip(),
