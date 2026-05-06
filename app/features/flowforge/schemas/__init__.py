@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.features.flowforge.schemas.communication_templates import register_communication_template_models
 from app.features.flowforge.schemas.data_movement import register_data_movement_models
 from app.features.flowforge.schemas.integrations import register_integration_models
 from app.features.flowforge.schemas.matching import register_matching_models
@@ -12,6 +13,7 @@ from app.features.flowforge.schemas.workflows import register_workflow_models
 
 def register_models(namespace):
     models = register_workflow_models(namespace)
+    models.update(register_communication_template_models(namespace))
     models.update(register_integration_models(namespace, run_event=models["run_event"]))
     models.update(register_resource_models(namespace))
     models.update(register_matching_models(namespace))
@@ -72,6 +74,9 @@ def register_models(namespace):
         "matching_simulation": models["matching_simulation"],
         "workspace_settings": models["workspace_settings"],
         "workspace_settings_update": models["workspace_settings_update"],
+        "communication_template": models["communication_template"],
+        "communication_template_upsert": models["communication_template_upsert"],
+        "communication_template_validation": models["communication_template_validation"],
     }
 
 

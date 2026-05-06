@@ -100,3 +100,15 @@ def test_flowforge_data_movement_migration_defines_phase_one_contract_tables():
     assert "window_end DATETIME NULL" in sql
     assert "config_json JSON NULL" in sql
     assert "trigger_payload_json JSON NULL" in sql
+
+
+def test_flowforge_communication_template_migration_defines_template_contract():
+    sql = _migration_text("20260506_flowforge_communication_templates.sql")
+
+    assert "CREATE TABLE IF NOT EXISTS flowforge_communication_templates" in sql
+    assert "template_key VARCHAR(128) NOT NULL" in sql
+    assert "communication" not in sql.split("CREATE TABLE IF NOT EXISTS flowforge_communication_templates", 1)[0]
+    assert "body_blocks_json JSON NOT NULL" in sql
+    assert "validation_result_json JSON NOT NULL" in sql
+    assert "UNIQUE KEY uidx_ff_comm_template_key" in sql
+    assert "KEY idx_ff_comm_template_workspace_purpose" in sql

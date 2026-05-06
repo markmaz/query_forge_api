@@ -8,6 +8,7 @@ from app.exceptions.forge_error import ForgeError
 from app.features.flowforge.llm_drafting import MatchingPolicyDraftGenerator
 from app.features.flowforge.matching import MatchingPolicyEngine
 from app.features.flowforge.repositories import (
+    FlowForgeCommunicationTemplateRepository,
     FlowForgeDataMovementRepository,
     FlowForgeIntegrationRepository,
     FlowForgeMatchingRepository,
@@ -16,6 +17,7 @@ from app.features.flowforge.repositories import (
     FlowForgeSettingsRepository,
     FlowForgeWorkflowRepository,
 )
+from app.features.flowforge.runtime.communication_templates import CommunicationTemplateRenderer
 
 
 class FlowForgeServiceBase:
@@ -29,7 +31,9 @@ class FlowForgeServiceBase:
         settings_repository: FlowForgeSettingsRepository | None = None,
         workflow_repository: FlowForgeWorkflowRepository | None = None,
         data_movement_repository: FlowForgeDataMovementRepository | None = None,
+        communication_template_repository: FlowForgeCommunicationTemplateRepository | None = None,
         matching_engine: MatchingPolicyEngine | None = None,
+        communication_template_renderer: CommunicationTemplateRenderer | None = None,
         matching_policy_draft_generator: MatchingPolicyDraftGenerator | None = None,
         llm_runtime_builder: Callable[..., ResolvedLLMRuntime] | None = None,
     ) -> None:
@@ -40,7 +44,9 @@ class FlowForgeServiceBase:
         self._settings_repository = settings_repository or FlowForgeSettingsRepository()
         self._workflow_repository = workflow_repository or FlowForgeWorkflowRepository()
         self._data_movement_repository = data_movement_repository or FlowForgeDataMovementRepository()
+        self._communication_template_repository = communication_template_repository or FlowForgeCommunicationTemplateRepository()
         self._matching_engine = matching_engine or MatchingPolicyEngine()
+        self._communication_template_renderer = communication_template_renderer or CommunicationTemplateRenderer()
         self._matching_policy_draft_generator = matching_policy_draft_generator or MatchingPolicyDraftGenerator()
         self._llm_runtime_builder = llm_runtime_builder or build_llm_client_for_role
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.features.flowforge.service.approval_tasks import FlowForgeApprovalTaskServiceMixin
 from app.features.flowforge.service.base import FlowForgeServiceBase
+from app.features.flowforge.service.communication_templates import FlowForgeCommunicationTemplateServiceMixin
 from app.features.flowforge.service.data_movement import FlowForgeDataMovementServiceMixin
 from app.features.flowforge.service.integrations import FlowForgeIntegrationServiceMixin
 from app.features.flowforge.service.matching_policies import FlowForgeMatchingPolicyServiceMixin
@@ -19,6 +20,7 @@ from app.features.flowforge.service.workflows import FlowForgeWorkflowServiceMix
 class FlowForgeService(
     FlowForgeWorkflowServiceMixin,
     FlowForgeApprovalTaskServiceMixin,
+    FlowForgeCommunicationTemplateServiceMixin,
     FlowForgeDataMovementServiceMixin,
     FlowForgeIntegrationServiceMixin,
     FlowForgeResourceServiceMixin,

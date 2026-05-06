@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from app.adapters.query_port import QueryExecResult
 from app.features.flowforge.repositories import (
+    FlowForgeCommunicationTemplateRepository,
     FlowForgeDataMovementRepository,
     FlowForgeIntegrationRepository,
     FlowForgeMatchingRepository,
@@ -122,6 +123,56 @@ def test_flowforge_data_movement_repository_expires_dataset_artifacts():
     assert "expires_at <= CURRENT_TIMESTAMP" in query
     assert "status NOT IN ('expired', 'deleted')" in query
     assert params == {"limit": 250}
+
+
+def test_flowforge_communication_template_repository_creates_and_lists_templates():
+    sql = _SQL(
+        rows=[
+            {
+                "id": 501,
+                "workspace_id": "ws-1",
+                "template_key": "therapist-task",
+                "display_name": "Therapist Task",
+                "description": None,
+                "channel": "email",
+                "purpose": "human_task",
+                "resource_set_id": 30,
+                "subject": "New task",
+                "body_blocks_json": '[{"type":"text","content":"Hello"}]',
+                "status": "draft",
+                "validation_status": "valid",
+                "validation_result_json": '{"valid":true,"errors":[],"warnings":[]}',
+                "metadata_json": "{}",
+            }
+        ],
+        lastrowid=501,
+    )
+    repo = FlowForgeCommunicationTemplateRepository(sql=sql)
+
+    created = repo.create_template(
+        workspace_id="ws-1",
+        template_key="therapist-task",
+        display_name="Therapist Task",
+        description=None,
+        channel="email",
+        purpose="human_task",
+        resource_set_id=30,
+        subject="New task",
+        body_blocks=[{"type": "text", "content": "Hello"}],
+        status="draft",
+        validation_status="valid",
+        validation_result={"valid": True, "errors": [], "warnings": []},
+        metadata={},
+        created_by="user-1",
+    )
+    rows = repo.list_templates(workspace_id="ws-1", status="draft", purpose="human_task", channel="email", resource_set_id=30)
+
+    insert_query, params = sql.inserts[0]
+    assert created["id"] == 501
+    assert "INSERT INTO flowforge_communication_templates" in insert_query
+    assert json.loads(params["body_blocks_json"]) == [{"type": "text", "content": "Hello"}]
+    assert rows[0]["body_blocks_json"] == [{"type": "text", "content": "Hello"}]
+    assert rows[0]["validation_result_json"]["valid"] is True
 
 
 def test_flowforge_workflow_repository_serializes_graph_when_creating_version():

@@ -136,6 +136,39 @@ def test_flowforge_designer_and_operator_roles_are_separate(client, monkeypatch)
     assert operator_note_resp.status_code == 201
 
 
+def test_flowforge_communication_template_routes_create_validate_and_activate(client, monkeypatch):
+    service = _TemplateService()
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: service)
+    headers = _headers(monkeypatch, roles={"flowforge:designer"})
+    payload = {
+        "template_key": "therapist-task",
+        "display_name": "Therapist Task",
+        "channel": "email",
+        "purpose": "human_task",
+        "resource_set_id": 30,
+        "subject": "New task for {{resource.display_name}}",
+        "body_blocks": [{"type": "action_buttons", "actions": ["accept", "decline"]}],
+    }
+
+    list_resp = client.get("/api/v1/flowforge/communication-templates?status=active", headers=headers)
+    create_resp = client.post("/api/v1/flowforge/communication-templates", headers=headers, json=payload)
+    validate_resp = client.post(
+        "/api/v1/flowforge/communication-templates/501/validate",
+        headers=headers,
+        json={"preview_context": {"resource": {"display_name": "Dr. Lane"}}},
+    )
+    activate_resp = client.post("/api/v1/flowforge/communication-templates/501/activate", headers=headers)
+
+    assert list_resp.status_code == 200
+    assert create_resp.status_code == 201
+    assert create_resp.json["template_key"] == "therapist-task"
+    assert service.created_payload["workspace_id"] == "ws-1"
+    assert validate_resp.status_code == 200
+    assert validate_resp.json["preview"]["subject"] == "New task for Dr. Lane"
+    assert activate_resp.status_code == 200
+    assert activate_resp.json["status"] == "active"
+
+
 def test_flowforge_run_inspector_returns_event_first_placeholder(client, monkeypatch):
     resp = client.get(
         "/api/v1/flowforge/workflows/therapist-routing/run-inspector",
@@ -145,6 +178,71 @@ def test_flowforge_run_inspector_returns_event_first_placeholder(client, monkeyp
     assert resp.status_code == 200
     assert resp.json["workflow_id"] == "therapist-routing"
     assert resp.json["events"][0]["event_type"] == "workflow.run.started"
+
+
+class _TemplateService:
+    def __init__(self) -> None:
+        self.created_payload = None
+
+    def list_communication_templates(self, *, workspace_id: str, status: str | None, purpose: str | None, channel: str | None, resource_set_id: int | None):
+        return [
+            {
+                "id": 501,
+                "workspace_id": workspace_id,
+                "template_key": "therapist-task",
+                "display_name": "Therapist Task",
+                "description": None,
+                "channel": channel or "email",
+                "purpose": purpose or "human_task",
+                "resource_set_id": resource_set_id,
+                "subject": "New task for {{resource.display_name}}",
+                "body_blocks": [{"type": "action_buttons", "actions": ["accept", "decline"]}],
+                "status": status or "active",
+                "validation_status": "valid",
+                "validation_result": {"valid": True, "errors": [], "warnings": []},
+                "metadata": {},
+            }
+        ]
+
+    def create_communication_template(self, *, workspace_id: str, payload, actor_user_id: str):
+        self.created_payload = {"workspace_id": workspace_id, "payload": payload, "actor_user_id": actor_user_id}
+        return {
+            "id": 501,
+            "workspace_id": workspace_id,
+            "template_key": payload["template_key"],
+            "display_name": payload["display_name"],
+            "description": None,
+            "channel": payload["channel"],
+            "purpose": payload["purpose"],
+            "resource_set_id": payload["resource_set_id"],
+            "subject": payload["subject"],
+            "body_blocks": payload["body_blocks"],
+            "status": "draft",
+            "validation_status": "valid",
+            "validation_result": {"valid": True, "errors": [], "warnings": []},
+            "metadata": {},
+        }
+
+    def validate_communication_template(self, *, workspace_id: str, template_id: int, payload):
+        return {
+            "valid": True,
+            "errors": [],
+            "warnings": [],
+            "referenced_fields": ["resource.display_name"],
+            "referenced_actions": ["accept", "decline"],
+            "preview": {"subject": "New task for Dr. Lane", "html": "<p>Preview</p>"},
+        }
+
+    def activate_communication_template(self, *, workspace_id: str, template_id: int, actor_user_id: str):
+        template = self.list_communication_templates(
+            workspace_id=workspace_id,
+            status="active",
+            purpose="human_task",
+            channel="email",
+            resource_set_id=None,
+        )[0]
+        template["status"] = "active"
+        return template
 
 
 class _RunService:
