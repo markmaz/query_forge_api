@@ -538,8 +538,14 @@ def test_dispatcher_executes_matching_node_and_persists_candidate_results():
                         "type": "matching",
                         "data": {
                             "matching_policy_version_id": 77,
-                            "offer_template_key": "flowforge.custom_offer",
-                            "offer_timeout_minutes": 60,
+                        },
+                    },
+                    {
+                        "id": "offer",
+                        "type": "human_task",
+                        "data": {
+                            "communication_template_key": "flowforge.custom_task",
+                            "timeout_minutes": 60,
                         },
                     },
                     {"id": "done", "type": "end"},
@@ -550,9 +556,10 @@ def test_dispatcher_executes_matching_node_and_persists_candidate_results():
                     {
                         "id": "e2",
                         "source": "match",
-                        "target": "done",
+                        "target": "offer",
                         "branch": "matched",
                     },
+                    {"id": "e4", "source": "offer", "target": "done"},
                     {
                         "id": "e3",
                         "source": "match",
@@ -568,8 +575,8 @@ def test_dispatcher_executes_matching_node_and_persists_candidate_results():
 
     result = dispatcher.dispatch_run(workspace_id="ws-1", run_id=101)
 
-    assert result["status"] == "completed"
-    assert result["visited_node_ids"] == ["intake", "match", "done"]
+    assert result["status"] == "waiting"
+    assert result["visited_node_ids"] == ["intake", "match", "offer"]
     assert (
         runtime_repo.matching_evaluations[0]["selected_source_record_key"]
         == "resource-1"
@@ -582,9 +589,9 @@ def test_dispatcher_executes_matching_node_and_persists_candidate_results():
     ] == ["resource-1"]
     assert (
         runtime_repo.context_updates[0]["run_context"]["flowforge_matching"][
-            "offer_template_key"
+            "communication_template_key"
         ]
-        == "flowforge.custom_offer"
+        == "flowforge.custom_task"
     )
     assert (
         runtime_repo.context_updates[0]["run_context"]["flowforge_matching"][
@@ -599,7 +606,7 @@ def test_dispatcher_executes_matching_node_and_persists_candidate_results():
     )
     assert runtime_repo.tokens[0]["allowed_actions"] == ["accept", "decline"]
     assert runtime_repo.notifications[0]["recipient"] == "jane@example.com"
-    assert runtime_repo.notifications[0]["template_key"] == "flowforge.custom_offer"
+    assert runtime_repo.notifications[0]["template_key"] == "flowforge.custom_task"
     assert "action_url" in runtime_repo.notifications[0]["payload_summary"]
     assert resource_repo.offered[0]["source_record_key"] == "resource-1"
 

@@ -75,11 +75,11 @@ def test_notification_dispatcher_marks_failed_when_sender_raises():
     assert repo.events[0]["event_type"] == "workflow.notification.failed"
 
 
-def test_notification_dispatcher_renders_offer_action_link_without_intake_details():
+def test_notification_dispatcher_renders_human_task_action_link_without_intake_details():
     repo = _RuntimeRepo()
     repo.notifications[0] = {
         **repo.notifications[0],
-        "template_key": "flowforge.offer",
+        "template_key": "flowforge.human_task",
         "recipient": "therapist@example.com",
         "payload_summary_json": {
             "resource_display_name": "Jane Resource",
@@ -97,6 +97,6 @@ def test_notification_dispatcher_renders_offer_action_link_without_intake_detail
 
     assert result["sent"] == 1
     assert sent_messages[0][0] == "therapist@example.com"
-    assert "FlowForge workflow offer" in sent_messages[0][1]
+    assert "FlowForge workflow task" in sent_messages[0][1]
     assert "http://localhost:3000/flowforge/actions/ffact_123" in sent_messages[0][2]
     assert "Jane Patient" not in sent_messages[0][2]

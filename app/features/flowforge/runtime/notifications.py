@@ -101,12 +101,12 @@ class FlowForgeNotificationDispatcher:
         payload_summary = notification.get("payload_summary") or notification.get("payload_summary_json") or {}
         reason = self._safe_summary_value(payload_summary, "reason") or "A FlowForge workflow requires attention."
         subject = "FlowForge workflow notification"
-        if template_key == "flowforge.offer":
+        if template_key == "flowforge.human_task":
             action_url = self._safe_summary_value(payload_summary, "action_url")
-            subject = "FlowForge workflow offer"
+            subject = "FlowForge workflow task"
             html = (
-                "<p>A FlowForge workflow offer is waiting for your response.</p>"
-                + (f'<p><a href="{self._escape(action_url)}">Review this offer</a></p>' if action_url else "")
+                "<p>A FlowForge workflow task is waiting for your response.</p>"
+                + (f'<p><a href="{self._escape(action_url)}">Review this task</a></p>' if action_url else "")
                 + "<p>Open QueryForge to review the full workflow context.</p>"
             )
             return subject, html

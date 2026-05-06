@@ -177,6 +177,10 @@ class FlowForgeRuntimeDispatcher:
                         run_context=run_context
                         if isinstance(run_context, dict)
                         else {},
+                        offer_config=self._matched_human_task_config(
+                            nodes=nodes,
+                            outgoing_edges=outgoing_edges,
+                        ),
                     )
                 elif str(node.get("type") or "").strip() == "query_extract":
                     result = self._query_extract_executor.execute(
@@ -446,6 +450,40 @@ class FlowForgeRuntimeDispatcher:
         return [
             edge for edge in edges if str(edge.get("source") or "").strip() == node_id
         ]
+
+    @classmethod
+    def _matched_human_task_config(
+        cls, *, nodes: dict[str, dict[str, Any]], outgoing_edges: list[dict[str, Any]]
+    ) -> dict[str, Any] | None:
+        target_node = cls._target_node_for_branch(
+            nodes=nodes,
+            outgoing_edges=outgoing_edges,
+            branch="matched",
+        )
+        if target_node is None or str(target_node.get("type") or "").strip() != "human_task":
+            return None
+        data = target_node.get("data") if isinstance(target_node.get("data"), dict) else {}
+        config = target_node.get("config") if isinstance(target_node.get("config"), dict) else {}
+        return {**data, **config, "node_id": str(target_node.get("id") or "").strip()}
+
+    @staticmethod
+    def _target_node_for_branch(
+        *,
+        nodes: dict[str, dict[str, Any]],
+        outgoing_edges: list[dict[str, Any]],
+        branch: str,
+    ) -> dict[str, Any] | None:
+        for edge in sorted(outgoing_edges, key=lambda row: str(row.get("id") or "")):
+            edge_branch = str(edge.get("branch") or edge.get("condition") or "").strip()
+            if edge_branch == branch:
+                target = str(edge.get("target") or "").strip()
+                return nodes.get(target) if target else None
+        for edge in sorted(outgoing_edges, key=lambda row: str(row.get("id") or "")):
+            edge_branch = str(edge.get("branch") or edge.get("condition") or "").strip()
+            if not edge_branch:
+                target = str(edge.get("target") or "").strip()
+                return nodes.get(target) if target else None
+        return None
 
     @staticmethod
     def _first_node_id(graph: dict[str, Any]) -> str | None:

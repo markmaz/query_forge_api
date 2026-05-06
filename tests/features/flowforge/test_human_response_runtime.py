@@ -20,7 +20,7 @@ class _RuntimeRepo:
                     "current_candidate_index": 0,
                     "exhausted_candidate_keys": [],
                     "offer_timeout_minutes": 90,
-                    "offer_template_key": "flowforge.next_offer",
+                    "communication_template_key": "flowforge.next_task",
                 }
             },
         }
@@ -225,7 +225,7 @@ def test_human_response_runtime_decline_creates_next_candidate_offer_without_adv
     assert repo.context_updates[0]["run_context"]["flowforge_matching"]["exhausted_candidate_keys"] == ["resource-1"]
     assert repo.human_tasks[0]["source_record_key"] == "resource-2"
     assert repo.human_tasks[0]["idempotency_key"] == "run:101:offer:resource-2:task"
-    assert repo.notifications[0]["template_key"] == "flowforge.next_offer"
+    assert repo.notifications[0]["template_key"] == "flowforge.next_task"
     assert repo.notifications[0]["recipient"] == "next@example.com"
     assert resource_repo.declined[0]["source_record_key"] == "resource-1"
     assert resource_repo.offered[0]["source_record_key"] == "resource-2"

@@ -38,6 +38,7 @@ class FlowForgeRuntimeMatchingExecutor:
         node: dict[str, Any],
         outgoing_edges: list[dict[str, Any]],
         run_context: dict[str, Any],
+        offer_config: dict[str, Any] | None = None,
     ) -> NodeExecutionResult:
         config = self._node_config(node)
         policy_version = self._resolve_policy_version(workspace_id=workspace_id, config=config)
@@ -98,6 +99,7 @@ class FlowForgeRuntimeMatchingExecutor:
             run_id=run_id,
             run_context=run_context,
             node=node,
+            offer_config=offer_config,
             result=result,
             evaluation_id=evaluation_id,
             resource_set_id=resource_set_id,
@@ -114,6 +116,7 @@ class FlowForgeRuntimeMatchingExecutor:
                 run_id=run_id,
                 node=node,
                 run_context=runtime_context,
+                offer_config=offer_config,
                 resource_set_id=resource_set_id,
                 selected_candidate=selected,
                 selected_resource=selected_resource,
@@ -196,12 +199,14 @@ class FlowForgeRuntimeMatchingExecutor:
         run_id: int,
         run_context: dict[str, Any],
         node: dict[str, Any],
+        offer_config: dict[str, Any] | None,
         result: dict[str, Any],
         evaluation_id: int,
         resource_set_id: int,
         snapshot_batch_id: int,
     ) -> dict[str, Any]:
         ranked = [row for row in result.get("ranked_candidates") or [] if isinstance(row, dict)]
+        config = self._offer_config(node=node, offer_config=offer_config)
         context = dict(run_context)
         context["flowforge_matching"] = {
             "node_id": str(node.get("id") or "").strip(),
@@ -214,8 +219,8 @@ class FlowForgeRuntimeMatchingExecutor:
             "selected_source_record_key": (
                 str(ranked[0].get("source_record_key") or "").strip() if ranked else None
             ),
-            "offer_timeout_minutes": max(1, int(self._node_config(node).get("offer_timeout_minutes") or self._node_config(node).get("timeout_minutes") or 1440)),
-            "offer_template_key": str(self._node_config(node).get("offer_template_key") or "flowforge.offer").strip(),
+            "offer_timeout_minutes": max(1, int(config.get("timeout_minutes") or config.get("offer_timeout_minutes") or 1440)),
+            "communication_template_key": str(config.get("communication_template_key") or "flowforge.human_task").strip(),
         }
         self._runtime_repository.update_run_context(
             workspace_id=workspace_id,
@@ -231,6 +236,7 @@ class FlowForgeRuntimeMatchingExecutor:
         run_id: int,
         node: dict[str, Any],
         run_context: dict[str, Any],
+        offer_config: dict[str, Any] | None,
         resource_set_id: int,
         selected_candidate: dict[str, Any],
         selected_resource: dict[str, Any] | None,
@@ -238,9 +244,9 @@ class FlowForgeRuntimeMatchingExecutor:
         source_record_key = str(selected_candidate.get("source_record_key") or "").strip()
         if not source_record_key:
             return None
-        config = self._node_config(node)
-        timeout_minutes = max(1, int(config.get("offer_timeout_minutes") or config.get("timeout_minutes") or 1440))
-        template_key = str(config.get("offer_template_key") or "flowforge.offer").strip()
+        config = self._offer_config(node=node, offer_config=offer_config)
+        timeout_minutes = max(1, int(config.get("timeout_minutes") or config.get("offer_timeout_minutes") or 1440))
+        template_key = str(config.get("communication_template_key") or "flowforge.human_task").strip()
         due_at = datetime.now(UTC) + timedelta(minutes=timeout_minutes)
         task_idempotency_key = f"run:{run_id}:offer:{source_record_key}:task"
         task_id = self._runtime_repository.create_human_task(
@@ -314,6 +320,11 @@ class FlowForgeRuntimeMatchingExecutor:
             "source_record_key": source_record_key,
             "expires_at": due_at.isoformat(),
         }
+
+    @classmethod
+    def _offer_config(cls, *, node: dict[str, Any], offer_config: dict[str, Any] | None) -> dict[str, Any]:
+        node_config = cls._node_config(node)
+        return {**node_config, **(offer_config or {})}
 
     @staticmethod
     def _resource_by_key(*, resources: list[dict[str, Any]], source_record_key: str) -> dict[str, Any] | None:

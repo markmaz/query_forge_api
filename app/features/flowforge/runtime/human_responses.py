@@ -320,7 +320,7 @@ class FlowForgeHumanResponseRuntime:
         matching_context: dict[str, Any],
     ) -> dict[str, Any]:
         timeout_minutes = max(1, int(matching_context.get("offer_timeout_minutes") or 1440))
-        template_key = str(matching_context.get("offer_template_key") or "flowforge.offer").strip()
+        template_key = str(matching_context.get("communication_template_key") or "flowforge.human_task").strip()
         due_at = datetime.now(UTC) + timedelta(minutes=timeout_minutes)
         task_idempotency_key = f"run:{run_id}:offer:{source_record_key}:task"
         task_id = self._runtime_repository.create_human_task(
