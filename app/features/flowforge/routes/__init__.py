@@ -12,6 +12,7 @@ from app.features.flowforge.routes.common import (
 )
 
 # Import endpoint modules for their Flask-RESTX route registration side effects.
+from app.features.flowforge.routes import data_movement as _data_movement  # noqa: F401,E402
 from app.features.flowforge.routes import integrations as _integrations  # noqa: F401,E402
 from app.features.flowforge.routes import human_tasks as _human_tasks  # noqa: F401,E402
 from app.features.flowforge.routes import matching as _matching  # noqa: F401,E402

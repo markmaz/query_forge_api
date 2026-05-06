@@ -28,7 +28,8 @@ class FlowForgeDataMovementServiceMixin(
             raise ForgeError("artifact_type is required.", status_code=400)
         status = str(payload.get("status") or "ready").strip()
         if status not in self._ARTIFACT_STATUSES:
-            raise ForgeError("status must be one of pending, ready, failed, or expired.", status_code=400)
+            options = ", ".join(sorted(self._ARTIFACT_STATUSES))
+            raise ForgeError(f"status must be one of {options}.", status_code=400)
         row = self._data_movement_repository.create_dataset_artifact(
             workspace_id=workspace_id,
             run_id=self._optional_positive_int(payload.get("run_id"), field_name="run_id"),
@@ -164,6 +165,15 @@ class FlowForgeDataMovementServiceMixin(
     def list_data_sources(self, *, workspace_id: str) -> list[dict[str, Any]]:
         return [self._serialize_data_source(row) for row in self._data_movement_repository.list_data_sources(workspace_id=workspace_id)]
 
+    def test_data_source(self, *, workspace_id: str, source_key: str) -> dict[str, Any]:
+        normalized_key = str(source_key or "").strip()
+        if not normalized_key:
+            raise ForgeError("source_key is required.", status_code=400)
+        row = self._data_movement_repository.get_data_source_by_key(workspace_id=workspace_id, source_key=normalized_key)
+        if row is None:
+            raise ForgeError(f"Data source '{normalized_key}' was not found.", status_code=404)
+        return self._data_movement_test_result(row=row, kind="source")
+
     def set_data_source_enabled(self, *, workspace_id: str, source_key: str, enabled: bool, actor_user_id: str) -> dict[str, Any]:
         normalized_key = str(source_key or "").strip()
         if not normalized_key:
@@ -211,6 +221,18 @@ class FlowForgeDataMovementServiceMixin(
             for row in self._data_movement_repository.list_data_destinations(workspace_id=workspace_id)
         ]
 
+    def test_data_destination(self, *, workspace_id: str, destination_key: str) -> dict[str, Any]:
+        normalized_key = str(destination_key or "").strip()
+        if not normalized_key:
+            raise ForgeError("destination_key is required.", status_code=400)
+        row = self._data_movement_repository.get_data_destination_by_key(
+            workspace_id=workspace_id,
+            destination_key=normalized_key,
+        )
+        if row is None:
+            raise ForgeError(f"Data destination '{normalized_key}' was not found.", status_code=404)
+        return self._data_movement_test_result(row=row, kind="destination")
+
     def set_data_destination_enabled(
         self,
         *,
@@ -232,3 +254,26 @@ class FlowForgeDataMovementServiceMixin(
             raise ForgeError(f"Data destination '{normalized_key}' was not found.", status_code=404)
         row = self._data_movement_repository.get_data_destination_by_key(workspace_id=workspace_id, destination_key=normalized_key)
         return self._serialize_data_destination(row or {"destination_key": normalized_key, "enabled": bool(enabled)})
+
+    def _data_movement_test_result(self, *, row: dict[str, Any], kind: str) -> dict[str, Any]:
+        key_field = f"{kind}_key"
+        type_field = f"{kind}_type"
+        key = str(row.get(key_field) or "").strip()
+        connection_type = str(row.get(type_field) or "").strip()
+        enabled = bool(row.get("enabled"))
+        mode = str(row.get("mode") or "test").strip()
+        config = row.get("config_json") or row.get("config") or {}
+        has_config = isinstance(config, dict) and bool(config)
+        return {
+            "ok": enabled and has_config,
+            "key": key,
+            "kind": kind,
+            "type": connection_type,
+            "mode": mode,
+            "enabled": enabled,
+            "message": (
+                f"{kind.title()} '{key}' is enabled and has testable configuration."
+                if enabled and has_config
+                else f"{kind.title()} '{key}' needs enabled state and configuration before runtime use."
+            ),
+        }

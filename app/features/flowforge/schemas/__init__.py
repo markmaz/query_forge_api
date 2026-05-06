@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.features.flowforge.schemas.data_movement import register_data_movement_models
 from app.features.flowforge.schemas.integrations import register_integration_models
 from app.features.flowforge.schemas.matching import register_matching_models
 from app.features.flowforge.schemas.reports import register_report_models
@@ -15,6 +16,7 @@ def register_models(namespace):
     models.update(register_resource_models(namespace))
     models.update(register_matching_models(namespace))
     models.update(register_run_models(namespace))
+    models.update(register_data_movement_models(namespace))
     models.update(register_report_models(namespace))
     models.update(register_settings_models(namespace))
     return {
@@ -37,6 +39,16 @@ def register_models(namespace):
         "public_signed_action": models["public_signed_action"],
         "public_signed_action_result": models["public_signed_action_result"],
         "notification_list": models["notification_list"],
+        "data_source": models["data_source"],
+        "data_source_upsert": models["data_source_upsert"],
+        "data_destination": models["data_destination"],
+        "data_destination_upsert": models["data_destination_upsert"],
+        "data_movement_enabled_update": models["data_movement_enabled_update"],
+        "data_movement_connection_test": models["data_movement_connection_test"],
+        "dataset_artifact": models["dataset_artifact"],
+        "dataset_artifact_list": models["dataset_artifact_list"],
+        "data_movement_audit": models["data_movement_audit"],
+        "data_movement_audit_list": models["data_movement_audit_list"],
         "no_match_escalation_request": models["no_match_escalation_request"],
         "no_match_escalation_response": models["no_match_escalation_response"],
         "reporting_domain": models["reporting_domain"],

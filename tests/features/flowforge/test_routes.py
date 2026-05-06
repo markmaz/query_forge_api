@@ -477,6 +477,204 @@ class _RunService:
         }
 
 
+class _DataMovementService(_RunService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.source_payload = None
+        self.destination_payload = None
+        self.source_enabled_payload = None
+        self.destination_enabled_payload = None
+
+    def list_data_sources(self, *, workspace_id: str):
+        return [
+            {
+                "id": 1,
+                "workspace_id": workspace_id,
+                "source_key": "local-import",
+                "display_name": "Local Import",
+                "source_type": "local_file_test",
+                "enabled": True,
+                "mode": "test",
+                "config": {"base_dir": "/tmp/flowforge-imports"},
+            }
+        ]
+
+    def upsert_data_source(self, *, workspace_id: str, payload, actor_user_id: str):
+        self.source_payload = {
+            "workspace_id": workspace_id,
+            "payload": payload,
+            "actor_user_id": actor_user_id,
+        }
+        return {
+            "id": 2,
+            "workspace_id": workspace_id,
+            "source_key": payload["source_key"],
+            "display_name": payload["display_name"],
+            "source_type": payload["source_type"],
+            "enabled": payload.get("enabled", True),
+            "mode": payload.get("mode", "test"),
+            "config": payload.get("config", {}),
+        }
+
+    def set_data_source_enabled(self, *, workspace_id: str, source_key: str, enabled: bool, actor_user_id: str):
+        self.source_enabled_payload = {
+            "workspace_id": workspace_id,
+            "source_key": source_key,
+            "enabled": enabled,
+            "actor_user_id": actor_user_id,
+        }
+        return {
+            "id": 1,
+            "workspace_id": workspace_id,
+            "source_key": source_key,
+            "display_name": "Local Import",
+            "source_type": "local_file_test",
+            "enabled": enabled,
+            "mode": "test",
+            "config": {"base_dir": "/tmp/flowforge-imports"},
+        }
+
+    def test_data_source(self, *, workspace_id: str, source_key: str):
+        return {
+            "ok": True,
+            "key": source_key,
+            "kind": "source",
+            "type": "local_file_test",
+            "mode": "test",
+            "enabled": True,
+            "message": f"Source '{source_key}' is enabled and has testable configuration.",
+        }
+
+    def list_data_destinations(self, *, workspace_id: str):
+        return [
+            {
+                "id": 3,
+                "workspace_id": workspace_id,
+                "destination_key": "local-export",
+                "display_name": "Local Export",
+                "destination_type": "local_file_test",
+                "enabled": True,
+                "mode": "test",
+                "config": {"base_dir": "/tmp/flowforge-exports"},
+            }
+        ]
+
+    def upsert_data_destination(self, *, workspace_id: str, payload, actor_user_id: str):
+        self.destination_payload = {
+            "workspace_id": workspace_id,
+            "payload": payload,
+            "actor_user_id": actor_user_id,
+        }
+        return {
+            "id": 4,
+            "workspace_id": workspace_id,
+            "destination_key": payload["destination_key"],
+            "display_name": payload["display_name"],
+            "destination_type": payload["destination_type"],
+            "enabled": payload.get("enabled", True),
+            "mode": payload.get("mode", "test"),
+            "config": payload.get("config", {}),
+        }
+
+    def set_data_destination_enabled(
+        self, *, workspace_id: str, destination_key: str, enabled: bool, actor_user_id: str
+    ):
+        self.destination_enabled_payload = {
+            "workspace_id": workspace_id,
+            "destination_key": destination_key,
+            "enabled": enabled,
+            "actor_user_id": actor_user_id,
+        }
+        return {
+            "id": 3,
+            "workspace_id": workspace_id,
+            "destination_key": destination_key,
+            "display_name": "Local Export",
+            "destination_type": "local_file_test",
+            "enabled": enabled,
+            "mode": "test",
+            "config": {"base_dir": "/tmp/flowforge-exports"},
+        }
+
+    def test_data_destination(self, *, workspace_id: str, destination_key: str):
+        return {
+            "ok": True,
+            "key": destination_key,
+            "kind": "destination",
+            "type": "local_file_test",
+            "mode": "test",
+            "enabled": True,
+            "message": f"Destination '{destination_key}' is enabled and has testable configuration.",
+        }
+
+    def list_dataset_artifacts(self, *, workspace_id: str, run_id: int | None, limit: int, offset: int):
+        return {
+            "run_id": run_id,
+            "limit": limit,
+            "offset": offset,
+            "artifacts": [
+                {
+                    "id": 701,
+                    "workspace_id": workspace_id,
+                    "run_id": run_id,
+                    "node_id": "import",
+                    "artifact_key": "run:90:node:import",
+                    "artifact_type": "import",
+                    "storage_kind": "preview_metadata",
+                    "storage_ref": {"rows": [{"source_record_key": "r1"}]},
+                    "schema": {"validation": {"invalid_row_count": 0, "invalid_rows": []}},
+                    "row_count": 1,
+                    "byte_count": 44,
+                    "checksum": "abc",
+                    "status": "staged",
+                }
+            ],
+        }
+
+    def get_dataset_artifact(self, *, workspace_id: str, artifact_id: int):
+        return {
+            "id": artifact_id,
+            "workspace_id": workspace_id,
+            "run_id": 90,
+            "node_id": "import",
+            "artifact_key": "run:90:node:import",
+            "artifact_type": "import",
+            "storage_kind": "preview_metadata",
+            "storage_ref": {"rows": [{"display_name": "Missing Key"}]},
+            "schema": {"validation": {"invalid_row_count": 1, "invalid_rows": [{"row_number": 1}]}},
+            "row_count": 1,
+            "byte_count": 22,
+            "checksum": "def",
+            "status": "validation_failed",
+        }
+
+    def list_data_movement_audit(self, *, workspace_id: str, run_id: int | None, limit: int, offset: int):
+        return {
+            "run_id": run_id,
+            "limit": limit,
+            "offset": offset,
+            "audit": [
+                {
+                    "id": 901,
+                    "workspace_id": workspace_id,
+                    "run_id": run_id,
+                    "node_id": "export",
+                    "action_type": "export",
+                    "status": "completed",
+                    "source_key": "artifact:701",
+                    "destination_key": "local-export",
+                    "dataset_artifact_id": 702,
+                    "resource_set_id": None,
+                    "actor_type": "system",
+                    "actor_id": "flowforge",
+                    "request": {"format": "csv"},
+                    "result": {"row_count": 1},
+                    "error_message": None,
+                }
+            ],
+        }
+
+
 def test_flowforge_runs_route_lists_runs(client, monkeypatch):
     monkeypatch.setattr(flowforge_routes, "_service", lambda: _RunService())
 
@@ -631,6 +829,97 @@ def test_flowforge_run_notifications_route_lists_notifications(client, monkeypat
     assert resp.status_code == 200
     assert resp.json["notifications"][0]["template_key"] == "flowforge.no_match"
     assert resp.json["notifications"][0]["payload_summary"] == {"reason": "No eligible resources."}
+
+
+def test_flowforge_data_source_routes_configure_toggle_and_test(client, monkeypatch):
+    service = _DataMovementService()
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: service)
+
+    listed = client.get("/api/v1/flowforge/data-sources", headers=_headers(monkeypatch))
+    created = client.post(
+        "/api/v1/flowforge/data-sources",
+        headers=_headers(monkeypatch, roles={"flowforge:designer"}),
+        json={
+            "source_key": "local-import",
+            "display_name": "Local Import",
+            "source_type": "local_file_test",
+            "mode": "test",
+            "enabled": True,
+            "config": {"base_dir": "/tmp/flowforge-imports"},
+        },
+    )
+    toggled = client.patch(
+        "/api/v1/flowforge/data-sources/local-import",
+        headers=_headers(monkeypatch, roles={"flowforge:designer"}),
+        json={"enabled": False},
+    )
+    tested = client.post(
+        "/api/v1/flowforge/data-sources/local-import/test",
+        headers=_headers(monkeypatch, roles={"flowforge:designer"}),
+    )
+
+    assert listed.status_code == 200
+    assert listed.json[0]["source_key"] == "local-import"
+    assert created.status_code == 200
+    assert service.source_payload["actor_user_id"] == "user-1"
+    assert toggled.status_code == 200
+    assert service.source_enabled_payload["enabled"] is False
+    assert tested.status_code == 200
+    assert tested.json["ok"] is True
+
+
+def test_flowforge_data_destination_routes_configure_toggle_and_test(client, monkeypatch):
+    service = _DataMovementService()
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: service)
+
+    listed = client.get("/api/v1/flowforge/data-destinations", headers=_headers(monkeypatch))
+    created = client.post(
+        "/api/v1/flowforge/data-destinations",
+        headers=_headers(monkeypatch, roles={"flowforge:designer"}),
+        json={
+            "destination_key": "local-export",
+            "display_name": "Local Export",
+            "destination_type": "local_file_test",
+            "mode": "test",
+            "enabled": True,
+            "config": {"base_dir": "/tmp/flowforge-exports"},
+        },
+    )
+    toggled = client.patch(
+        "/api/v1/flowforge/data-destinations/local-export",
+        headers=_headers(monkeypatch, roles={"flowforge:designer"}),
+        json={"enabled": False},
+    )
+    tested = client.post(
+        "/api/v1/flowforge/data-destinations/local-export/test",
+        headers=_headers(monkeypatch, roles={"flowforge:designer"}),
+    )
+
+    assert listed.status_code == 200
+    assert listed.json[0]["destination_key"] == "local-export"
+    assert created.status_code == 200
+    assert service.destination_payload["actor_user_id"] == "user-1"
+    assert toggled.status_code == 200
+    assert service.destination_enabled_payload["enabled"] is False
+    assert tested.status_code == 200
+    assert tested.json["kind"] == "destination"
+
+
+def test_flowforge_dataset_artifact_and_data_movement_audit_routes(client, monkeypatch):
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: _DataMovementService())
+
+    artifacts = client.get("/api/v1/flowforge/dataset-artifacts?run_id=90&limit=25&offset=5", headers=_headers(monkeypatch))
+    artifact = client.get("/api/v1/flowforge/dataset-artifacts/701", headers=_headers(monkeypatch))
+    audit = client.get("/api/v1/flowforge/data-movement-audit?run_id=90&limit=25&offset=5", headers=_headers(monkeypatch))
+
+    assert artifacts.status_code == 200
+    assert artifacts.json["run_id"] == 90
+    assert artifacts.json["artifacts"][0]["status"] == "staged"
+    assert artifact.status_code == 200
+    assert artifact.json["schema"]["validation"]["invalid_row_count"] == 1
+    assert audit.status_code == 200
+    assert audit.json["audit"][0]["action_type"] == "export"
+    assert audit.json["audit"][0]["destination_key"] == "local-export"
 
 
 def test_flowforge_no_match_escalation_route_creates_notifications(client, monkeypatch):
