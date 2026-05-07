@@ -150,6 +150,37 @@ def test_dispatcher_advances_simple_run_to_completion_with_idempotent_events():
     assert len(runtime_repo.events_by_key) == 10
 
 
+def test_dispatcher_routes_decision_node_by_last_decision_outcome():
+    runtime_repo = _RuntimeRepo()
+    runtime_repo.run["current_node_id"] = "triage"
+    runtime_repo.run["run_context_json"] = {"workflow_decision": {"outcome": "declined"}}
+    dispatcher = FlowForgeRuntimeDispatcher(
+        runtime_repository=runtime_repo,
+        workflow_repository=_WorkflowRepo(
+            graph={
+                "nodes": [
+                    {"id": "triage", "type": "decision", "data": {"outcomes": ["accepted", "declined"]}},
+                    {"id": "assign", "type": "end"},
+                    {"id": "decline", "type": "end"},
+                ],
+                "edges": [
+                    {"id": "accepted", "source": "triage", "target": "assign", "branch": "accepted"},
+                    {"id": "declined", "source": "triage", "target": "decline", "branch": "declined"},
+                ],
+            }
+        ),
+    )
+
+    result = dispatcher.dispatch_run(workspace_id="ws-1", run_id=101)
+
+    assert result["status"] == "completed"
+    assert result["visited_node_ids"] == ["triage", "decline"]
+    assert runtime_repo.completed["current_node_id"] == "decline"
+    completed_event = runtime_repo.events_by_key["flowforge:run:101:node:triage:completed"]
+    assert completed_event["event_payload"]["outcome"] == "declined"
+    assert completed_event["event_payload"]["next_node_id"] == "decline"
+
+
 def test_dispatcher_creates_pending_notifications_for_notification_nodes():
     runtime_repo = _RuntimeRepo()
     runtime_repo.run["run_context_json"] = {

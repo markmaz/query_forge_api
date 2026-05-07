@@ -114,6 +114,7 @@ class FlowForgeWorkflowServiceMixin:
             errors.append("Graph must contain at least one node.")
 
         node_ids: set[str] = set()
+        nodes_by_id: dict[str, dict[str, Any]] = {}
         for node in nodes:
             if not isinstance(node, dict):
                 errors.append("Every node must be an object.")
@@ -125,6 +126,7 @@ class FlowForgeWorkflowServiceMixin:
             if node_id in node_ids:
                 errors.append(f"Duplicate node id '{node_id}'.")
             node_ids.add(node_id)
+            nodes_by_id[node_id] = node
             if not str(node.get("type") or "").strip():
                 errors.append(f"Node '{node_id}' must have a type.")
                 continue
@@ -184,12 +186,88 @@ class FlowForgeWorkflowServiceMixin:
             if node_type in FLOWFORGE_TRIGGER_NODE_TYPES and outgoing_counts.get(node_id, 0) == 0:
                 warnings.append(f"Trigger node '{node_id}' has no outgoing edge.")
 
+        self._validate_decision_edges(
+            nodes_by_id=nodes_by_id,
+            edges=edges,
+            errors=errors,
+            warnings=warnings,
+        )
+
         if has_cycle:
             warnings.append(
                 "Graph contains a loop. FlowForge allows this, but runtime execution must use state-machine semantics."
             )
 
         return {"valid": not errors, "errors": errors, "warnings": warnings}
+
+    def _validate_decision_edges(
+        self,
+        *,
+        nodes_by_id: dict[str, dict[str, Any]],
+        edges: list[Any],
+        errors: list[str],
+        warnings: list[str],
+    ) -> None:
+        outgoing_by_source: dict[str, list[dict[str, Any]]] = {}
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+            source = str(edge.get("source") or "").strip()
+            outgoing_by_source.setdefault(source, []).append(edge)
+
+        for node_id, node in nodes_by_id.items():
+            if str(node.get("type") or "").strip() != "decision":
+                continue
+            config = self._node_config(node)
+            outcomes = self._decision_outcomes(config.get("outcomes"))
+            outgoing_edges = outgoing_by_source.get(node_id, [])
+            if not outgoing_edges:
+                warnings.append(f"Decision node '{node_id}' has no outgoing edge.")
+                continue
+
+            branches: dict[str, str] = {}
+            unconfigured_count = 0
+            for edge in outgoing_edges:
+                edge_id = str(edge.get("id") or "<unknown>")
+                branch = self._edge_branch(edge)
+                if not branch:
+                    unconfigured_count += 1
+                    continue
+                if branch in branches:
+                    errors.append(
+                        f"Decision node '{node_id}' has duplicate branch '{branch}' on edges {branches[branch]} and {edge_id}."
+                    )
+                branches[branch] = edge_id
+                if outcomes and branch not in outcomes:
+                    warnings.append(
+                        f"Decision edge {edge_id} uses branch '{branch}' that is not listed in decision node '{node_id}' outcomes."
+                    )
+
+            if len(outgoing_edges) > 1 and unconfigured_count:
+                warnings.append(f"Decision node '{node_id}' has {unconfigured_count} outgoing edge(s) without an outcome route.")
+            for outcome in sorted(outcomes - set(branches)):
+                warnings.append(f"Decision node '{node_id}' outcome '{outcome}' has no outgoing route.")
+
+    @staticmethod
+    def _decision_outcomes(raw: Any) -> set[str]:
+        if not isinstance(raw, list):
+            return set()
+        return {
+            str(outcome or "").strip().lower().replace(" ", "_").replace("-", "_")
+            for outcome in raw
+            if str(outcome or "").strip()
+        }
+
+    @staticmethod
+    def _edge_branch(edge: dict[str, Any]) -> str:
+        data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
+        return (
+            str(edge.get("branch") or edge.get("condition") or data.get("branch") or "")
+            .strip()
+            .lower()
+            .replace(" ", "_")
+            .replace("-", "_")
+        )
 
     def create_workflow_ai_draft(
         self,

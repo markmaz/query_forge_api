@@ -27,6 +27,8 @@ def register_workflow_models(namespace):
             "source": fields.String(required=True, description="Source node id."),
             "target": fields.String(required=True, description="Target node id."),
             "label": fields.String(required=False, description="Optional branch or transition label."),
+            "branch": fields.String(required=False, description="Optional runtime branch/outcome key for routed edges."),
+            "condition": fields.String(required=False, description="Optional runtime condition key for routed edges."),
         },
     )
     workflow_graph = namespace.model(

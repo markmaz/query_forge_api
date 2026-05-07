@@ -1194,6 +1194,33 @@ def test_flowforge_validation_rejects_unknown_edge_endpoint():
     assert result["errors"] == ["Edge a-b has an unknown target."]
 
 
+def test_flowforge_validation_warns_for_unmapped_decision_outcomes_and_rejects_duplicates():
+    result = FlowForgeService().validate_graph(
+        graph={
+            "nodes": [
+                {
+                    "id": "decision",
+                    "type": "decision",
+                    "label": "Accepted?",
+                    "position": {"x": 0, "y": 0},
+                    "data": {"outcomes": ["accepted", "declined", "timed_out"]},
+                },
+                {"id": "assign", "type": "end", "label": "Assign", "position": {"x": 200, "y": 0}, "data": {}},
+                {"id": "decline", "type": "end", "label": "Decline", "position": {"x": 200, "y": 120}, "data": {}},
+            ],
+            "edges": [
+                {"id": "accepted-1", "source": "decision", "target": "assign", "branch": "accepted"},
+                {"id": "accepted-2", "source": "decision", "target": "decline", "branch": "accepted"},
+            ],
+        }
+    )
+
+    assert result["valid"] is False
+    assert "duplicate branch 'accepted'" in result["errors"][0]
+    assert "outcome 'declined' has no outgoing route" in " ".join(result["warnings"])
+    assert "outcome 'timed_out' has no outgoing route" in " ".join(result["warnings"])
+
+
 def test_flowforge_validation_accepts_governed_data_movement_nodes():
     result = FlowForgeService().validate_graph(
         graph={

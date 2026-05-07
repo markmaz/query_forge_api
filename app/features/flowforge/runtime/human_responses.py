@@ -91,6 +91,14 @@ class FlowForgeHumanResponseRuntime:
                 "action": normalized_action,
             }
 
+        self._persist_last_decision(
+            workspace_id=workspace_id,
+            run_id=int(run_id),
+            run=run,
+            action=normalized_action,
+            human_task_id=human_task_id,
+            source_record_key=source_record_key,
+        )
         self._runtime_repository.update_run_status(
             workspace_id=workspace_id,
             run_id=int(run_id),
@@ -206,6 +214,42 @@ class FlowForgeHumanResponseRuntime:
             "no_match": {"no_match", "no-match", "no match"},
         }
         return aliases_by_action.get(action_key, {action_key})
+
+    def _persist_last_decision(
+        self,
+        *,
+        workspace_id: str,
+        run_id: int,
+        run: dict[str, Any],
+        action: str,
+        human_task_id: int | None,
+        source_record_key: str | None,
+    ) -> None:
+        context = dict(run.get("run_context") or run.get("run_context_json") or {})
+        outcome = self._decision_outcome_for_action(action)
+        context["workflow_decision"] = {
+            "action": action,
+            "outcome": outcome,
+            "human_task_id": int(human_task_id) if human_task_id is not None else None,
+            "source_record_key": source_record_key,
+        }
+        context["last_decision_outcome"] = outcome
+        self._runtime_repository.update_run_context(
+            workspace_id=workspace_id,
+            run_id=run_id,
+            run_context=context,
+        )
+
+    @staticmethod
+    def _decision_outcome_for_action(action: str) -> str:
+        action_key = str(action or "").strip().lower()
+        if action_key in {"accept", "approve"}:
+            return "accepted"
+        if action_key in {"decline", "reject"}:
+            return "declined"
+        if action_key == "timeout":
+            return "timed_out"
+        return action_key
 
     @staticmethod
     def _outgoing_edges(*, graph: dict[str, Any], node_id: str) -> list[dict[str, Any]]:
