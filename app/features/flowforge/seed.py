@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from app.features.flowforge.models import WorkflowDefinition, WorkflowRunEvent
+from app.features.flowforge.models import WorkflowDefinition
 
 THERAPIST_ROUTING_WORKFLOW: WorkflowDefinition = {
     "id": "therapist-routing",
     "name": "Therapist Intake Routing",
-    "description": "Sequential offer workflow for matching patients with eligible therapists.",
-    "status": "draft",
+    "description": "Starter workflow for matching intake records with eligible therapists and requesting a response.",
+    "status": "starter",
     "graph": {
         "nodes": [
             {
@@ -17,32 +17,22 @@ THERAPIST_ROUTING_WORKFLOW: WorkflowDefinition = {
                 "data": {"source": "", "event": ""},
             },
             {
-                "id": "score",
-                "type": "scoring",
-                "label": "Compatibility Scoring",
-                "position": {"x": 300, "y": 40},
-                "data": {"criteria": ["availability", "specialty", "preferences"]},
-            },
-            {
-                "id": "eligible",
-                "type": "filter",
-                "label": "Eligible Therapists",
-                "position": {"x": 580, "y": 40},
-                "data": {"excludes": ["inactive", "unavailable", "outside_specialty"]},
-            },
-            {
-                "id": "rank",
-                "type": "ranking",
-                "label": "Fair Ranking",
-                "position": {"x": 860, "y": 120},
-                "data": {"factors": ["compatibility", "workload", "round_robin", "fair_distribution"]},
+                "id": "match",
+                "type": "matching",
+                "label": "Find Matching Therapist",
+                "position": {"x": 360, "y": 90},
+                "data": {"matching_policy_id": ""},
             },
             {
                 "id": "offer",
                 "type": "human_task",
-                "label": "Send Offer",
+                "label": "Request Response",
                 "position": {"x": 860, "y": 330},
-                "data": {"timeout_minutes": 120, "offer_mode": "sequential"},
+                "data": {
+                    "timeout_minutes": 120,
+                    "task_mode": "sequential",
+                    "communication_template_key": "flowforge.human_task",
+                },
             },
             {
                 "id": "decision",
@@ -74,10 +64,9 @@ THERAPIST_ROUTING_WORKFLOW: WorkflowDefinition = {
             },
         ],
         "edges": [
-            {"id": "intake-score", "source": "intake", "target": "score"},
-            {"id": "score-eligible", "source": "score", "target": "eligible"},
-            {"id": "eligible-rank", "source": "eligible", "target": "rank"},
-            {"id": "rank-offer", "source": "rank", "target": "offer"},
+            {"id": "intake-match", "source": "intake", "target": "match"},
+            {"id": "match-offer", "source": "match", "target": "offer", "label": "Matched", "branch": "matched"},
+            {"id": "match-decline", "source": "match", "target": "decline", "label": "No match", "branch": "no_match"},
             {"id": "offer-decision", "source": "offer", "target": "decision"},
             {"id": "decision-assign", "source": "decision", "target": "assign", "label": "Accepted"},
             {"id": "decision-decline", "source": "decision", "target": "decline", "label": "Declined/Timed out"},
@@ -86,30 +75,3 @@ THERAPIST_ROUTING_WORKFLOW: WorkflowDefinition = {
         ],
     },
 }
-
-THERAPIST_ROUTING_RUN_EVENTS: list[WorkflowRunEvent] = [
-    {
-        "id": "evt-intake",
-        "event_type": "workflow.run.started",
-        "node_id": "intake",
-        "message": "Intake received.",
-        "timestamp": "2026-05-04T10:00:00Z",
-        "data": {"source": ""},
-    },
-    {
-        "id": "evt-eligibility",
-        "event_type": "workflow.node.pending",
-        "node_id": "eligible",
-        "message": "Eligibility filtering is ready for execution.",
-        "timestamp": "2026-05-04T10:00:01Z",
-        "data": {"status": "placeholder"},
-    },
-    {
-        "id": "evt-offer",
-        "event_type": "workflow.human_task.waiting",
-        "node_id": "offer",
-        "message": "Offer loop will wait for therapist accept, decline, or timeout.",
-        "timestamp": "2026-05-04T10:00:02Z",
-        "data": {"timeout_minutes": 120},
-    },
-]

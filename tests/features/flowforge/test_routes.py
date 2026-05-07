@@ -52,7 +52,7 @@ class _IntegrationCatalogRepo:
         ]
 
 
-def test_flowforge_workflow_list_returns_seeded_workflow(client, monkeypatch):
+def test_flowforge_workflow_list_returns_builtin_starter_workflow(client, monkeypatch):
     resp = client.get("/api/v1/flowforge/workflows", headers=_headers(monkeypatch))
 
     assert resp.status_code == 200
@@ -224,7 +224,7 @@ def test_flowforge_communication_template_ai_draft_route_creates_draft(client, m
     assert service.created_ai_draft["actor_user_id"] == "user-1"
 
 
-def test_flowforge_run_inspector_returns_event_first_placeholder(client, monkeypatch):
+def test_flowforge_run_inspector_returns_design_preview(client, monkeypatch):
     resp = client.get(
         "/api/v1/flowforge/workflows/therapist-routing/run-inspector",
         headers=_headers(monkeypatch),
@@ -232,7 +232,8 @@ def test_flowforge_run_inspector_returns_event_first_placeholder(client, monkeyp
 
     assert resp.status_code == 200
     assert resp.json["workflow_id"] == "therapist-routing"
-    assert resp.json["events"][0]["event_type"] == "workflow.run.started"
+    assert resp.json["mode"] == "design_preview"
+    assert resp.json["events"][0]["event_type"].startswith("workflow.preview.")
 
 
 class _TemplateService:
@@ -337,7 +338,7 @@ class _RunService:
                 "id": "therapist-routing",
                 "name": "Therapist Intake Routing",
                 "description": "Routes intake submissions.",
-                "status": "seeded",
+                "status": "starter",
                 "graph": {"nodes": [{"id": "intake"}], "edges": []},
             }
         ]

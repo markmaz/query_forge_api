@@ -14,8 +14,8 @@ class FlowForgeWorkflowList(Resource):
     @flowforge_ns.doc(
         summary="List FlowForge workflow definitions",
         description=(
-            "Returns workflow definitions available to the current workspace. The initial implementation "
-            "returns the seeded Therapist Intake Routing workflow while persistence is being designed."
+            "Returns persisted workflow definitions available to the current workspace, followed by built-in "
+            "starter workflows that can be copied into a persisted draft."
         ),
         responses={
             200: "Workflow definitions returned.",
@@ -93,7 +93,7 @@ class FlowForgeWorkflowDetail(Resource):
         description=(
             "Soft-deletes a workspace-scoped workflow definition by setting its archive metadata. Archived "
             "workflows are removed from normal workflow lists but retained for auditability and future recovery "
-            "workflows. Seeded workflows such as the built-in therapist routing example cannot be deleted."
+            "workflows. Built-in starter workflows cannot be deleted."
         ),
         responses={
             200: "Workflow definition archived.",
@@ -250,13 +250,13 @@ class FlowForgeWorkflowVersionPublish(Resource):
 @flowforge_ns.param("workflow_id", "Workflow definition id.")
 class FlowForgeRunInspector(Resource):
     @flowforge_ns.doc(
-        summary="Get the FlowForge run inspector placeholder",
+        summary="Get the FlowForge workflow design preview",
         description=(
-            "Returns event-first placeholder data for the selected workflow. This is intentionally read-only "
-            "until durable workflow run persistence and execution simulation are implemented."
+            "Returns a read-only design-time preview for the selected workflow graph. Persisted run history "
+            "is available through the run detail endpoints after a workflow starts."
         ),
         responses={
-            200: "Run inspector placeholder returned.",
+            200: "Workflow design preview returned.",
             404: "Workflow definition not found.",
         },
     )

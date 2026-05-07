@@ -12,8 +12,8 @@ from app.features.flowforge.service import FlowForgeService
 flowforge_ns = Namespace(
     "flowforge",
     description=(
-        "FlowForge workflow studio endpoints. These routes expose the initial "
-        "workspace-gated workflow definition catalog, graph validation, and run-inspector placeholder."
+        "FlowForge workflow studio endpoints. These routes expose the workspace-gated workflow definition "
+        "catalog, graph validation, design-time previews, and persisted runtime operations."
     ),
 )
 models = register_models(flowforge_ns)

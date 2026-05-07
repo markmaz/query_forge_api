@@ -898,15 +898,15 @@ class _FakeFlowForgeRuleDraftingLLM:
         }
 
 
-def test_flowforge_service_lists_seeded_therapist_routing_workflow():
+def test_flowforge_service_lists_builtin_therapist_routing_starter_workflow():
     workflows = FlowForgeService().list_definitions(workspace_id="ws-1")
 
     assert workflows[0]["id"] == "therapist-routing"
     assert workflows[0]["name"] == "Therapist Intake Routing"
-    assert any(node["id"] == "offer" for node in workflows[0]["graph"]["nodes"])
+    assert any(node["id"] == "match" for node in workflows[0]["graph"]["nodes"])
 
 
-def test_flowforge_service_lists_persisted_workflows_before_seed():
+def test_flowforge_service_lists_persisted_workflows_before_builtin_starters():
     service = FlowForgeService(workflow_repository=_WorkflowRepo())
 
     workflows = service.list_definitions(workspace_id="ws-1")
@@ -914,6 +914,18 @@ def test_flowforge_service_lists_persisted_workflows_before_seed():
     assert workflows[0]["id"] == "12"
     assert workflows[0]["name"] == "Intake Routing"
     assert workflows[-1]["id"] == "therapist-routing"
+
+
+def test_flowforge_service_returns_design_preview_for_persisted_workflow():
+    service = FlowForgeService(workflow_repository=_WorkflowRepo())
+
+    result = service.get_run_inspector(workspace_id="ws-1", workflow_id="12")
+
+    assert result is not None
+    assert result["mode"] == "design_preview"
+    assert result["status"] == "ready"
+    assert result["events"][0]["event_type"] == "workflow.preview.node"
+    assert result["notes"][0] == "This preview summarizes the workflow graph before runtime execution."
 
 
 def test_flowforge_validation_allows_loops_as_warnings():

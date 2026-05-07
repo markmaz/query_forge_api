@@ -71,8 +71,7 @@ class FlowForgeMatchingPolicyList(Resource):
         summary="Create a FlowForge matching policy",
         description=(
             "Creates a workspace-scoped matching policy header and optionally saves the first draft policy "
-            "version when a policy JSON payload is supplied. The policy JSON is validated before persistence. "
-            "Publishing is intentionally not implemented in this phase and remains an explicit future action."
+            "version when a policy JSON payload is supplied. The policy JSON is validated before persistence."
         ),
         responses={
             201: "Matching policy created.",

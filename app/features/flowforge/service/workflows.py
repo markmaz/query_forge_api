@@ -8,7 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.exceptions.forge_error import ForgeError
 from app.features.flowforge.models import WorkflowDefinition, WorkflowValidationResult
-from app.features.flowforge.seed import THERAPIST_ROUTING_RUN_EVENTS, THERAPIST_ROUTING_WORKFLOW
+from app.features.flowforge.seed import THERAPIST_ROUTING_WORKFLOW
 
 logger = logging.getLogger(__name__)
 
@@ -407,19 +407,53 @@ class FlowForgeWorkflowServiceMixin:
         return {**data, **config}
 
     def get_run_inspector(self, *, workspace_id: str, workflow_id: str) -> dict[str, Any] | None:
-        del workspace_id
-        if workflow_id != THERAPIST_ROUTING_WORKFLOW["id"]:
+        workflow = self.get_definition(workspace_id=workspace_id, workflow_id=workflow_id)
+        if workflow is None:
             return None
+        graph = workflow.get("graph") if isinstance(workflow.get("graph"), dict) else {}
         return {
             "workflow_id": workflow_id,
-            "mode": "placeholder",
-            "status": "not_started",
-            "events": deepcopy(THERAPIST_ROUTING_RUN_EVENTS),
+            "mode": "design_preview",
+            "status": "ready",
+            "events": self._workflow_preview_events(graph=graph),
             "notes": [
-                "Runtime persistence is intentionally not implemented yet.",
-                "Future execution should persist state transitions and events before dispatching side effects.",
+                "This preview summarizes the workflow graph before runtime execution.",
+                "Persisted run history is available from the run detail page after the workflow starts.",
             ],
         }
+
+    def _workflow_preview_events(self, *, graph: dict[str, Any]) -> list[dict[str, Any]]:
+        nodes = graph.get("nodes") if isinstance(graph.get("nodes"), list) else []
+        if not nodes:
+            return [
+                {
+                    "id": "preview-empty",
+                    "event_type": "workflow.preview.empty",
+                    "node_id": None,
+                    "message": "Workflow has no nodes configured.",
+                    "timestamp": "2026-05-04T10:00:00Z",
+                    "data": {"status": "empty"},
+                }
+            ]
+
+        preview_events: list[dict[str, Any]] = []
+        for index, node in enumerate(nodes[:8]):
+            if not isinstance(node, dict):
+                continue
+            node_id = str(node.get("id") or f"node-{index + 1}").strip()
+            node_type = str(node.get("type") or "node").strip()
+            label = str(node.get("label") or node_id).strip()
+            preview_events.append(
+                {
+                    "id": f"preview-{index + 1}",
+                    "event_type": f"workflow.preview.{node_type}",
+                    "node_id": node_id,
+                    "message": f"{label} is part of the design preview.",
+                    "timestamp": f"2026-05-04T10:00:{index:02d}Z",
+                    "data": {"node_type": node_type, "status": "preview"},
+                }
+            )
+        return preview_events
 
     def list_workflow_versions(self, *, workspace_id: str, workflow_definition_id: int) -> list[dict[str, Any]]:
         rows = self._workflow_repository.list_workflow_versions(
