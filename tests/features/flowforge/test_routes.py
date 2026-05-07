@@ -647,6 +647,36 @@ class _RunService:
             "settings": {"created_by": actor_user_id},
         }
 
+    def create_workflow_ai_draft(self, *, workspace_id: str, payload, actor_user_id: str):
+        return {
+            "prompt": payload["prompt"],
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "intake",
+                        "type": "intake",
+                        "label": "Patient Intake",
+                        "position": {"x": 40, "y": 120},
+                        "data": {"source": "intake-form", "event": "intake_submitted"},
+                    },
+                    {
+                        "id": "approval",
+                        "type": "approval",
+                        "label": "Approval Gate",
+                        "position": {"x": 280, "y": 120},
+                        "data": {"approver_role": "flowforge:operator"},
+                    },
+                ],
+                "edges": [{"id": "intake-approval", "source": "intake", "target": "approval"}],
+            },
+            "plain_language_summary": f"Drafted by {actor_user_id} in {workspace_id}.",
+            "validation_status": "valid",
+            "validation_result": {"valid": True, "errors": [], "warnings": []},
+            "model_provider": "openai",
+            "model_name": "workflow-drafter",
+            "draft_source": "llm",
+        }
+
     def publish_workflow_version(
         self,
         *,
@@ -1205,6 +1235,26 @@ def test_flowforge_workflow_authoring_routes_create_definition_and_version(clien
     assert created.json["graph"]["edges"] == []
     assert version.status_code == 201
     assert version.json["version_number"] == 2
+
+
+def test_flowforge_workflow_ai_draft_route_uses_workspace_llm_path(client, monkeypatch):
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: _RunService())
+
+    resp = client.post(
+        "/api/v1/flowforge/workflows/ai-drafts",
+        headers=_headers(monkeypatch, roles={"flowforge:designer"}),
+        json={
+            "prompt": "Add an approval gate.",
+            "use_llm": True,
+            "graph": {"nodes": [{"id": "intake", "type": "intake"}], "edges": []},
+        },
+    )
+
+    assert resp.status_code == 201
+    assert resp.json["draft_source"] == "llm"
+    assert resp.json["model_provider"] == "openai"
+    assert resp.json["graph"]["nodes"][1]["type"] == "approval"
+    assert resp.json["plain_language_summary"] == "Drafted by user-1 in ws-1."
 
 
 def test_flowforge_workflow_delete_route_archives_definition(client, monkeypatch):

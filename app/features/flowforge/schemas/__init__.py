@@ -24,6 +24,8 @@ def register_models(namespace):
     return {
         "workflow_definition": models["workflow_definition"],
         "workflow_definition_create": models["workflow_definition_create"],
+        "workflow_ai_draft_request": models["workflow_ai_draft_request"],
+        "workflow_ai_draft": models["workflow_ai_draft"],
         "workflow_version": models["workflow_version"],
         "workflow_version_create": models["workflow_version_create"],
         "validation_result": models["validation_result"],

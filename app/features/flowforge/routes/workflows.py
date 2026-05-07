@@ -148,6 +148,39 @@ class FlowForgeWorkflowValidation(Resource):
             return exc.to_dict(), exc.status_code
 
 
+@flowforge_ns.route("/workflows/ai-drafts")
+class FlowForgeWorkflowAIDraft(Resource):
+    @flowforge_ns.doc(
+        summary="Generate a FlowForge workflow graph AI draft",
+        description=(
+            "Uses the workspace FlowForge LLM role to generate or modify the current designer graph from "
+            "plain-language instructions. The generated graph is returned with validation results for local review."
+        ),
+        responses={
+            201: "Workflow graph draft generated.",
+            400: "Invalid draft request.",
+            401: "Authentication required.",
+            403: "FlowForge designer access required.",
+        },
+    )
+    @flowforge_ns.expect(models["workflow_ai_draft_request"], validate=False)
+    @token_required
+    @require_access("flowforge", role="designer")
+    def post(self):
+        try:
+            payload = request.get_json(silent=True) or {}
+            return (
+                _service().create_workflow_ai_draft(
+                    workspace_id=_workspace_id(),
+                    payload=payload if isinstance(payload, dict) else {},
+                    actor_user_id=_actor_user_id(),
+                ),
+                201,
+            )
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+
+
 @flowforge_ns.route("/workflows/<int:workflow_definition_id>/versions")
 @flowforge_ns.param("workflow_definition_id", "Persisted workflow definition id.")
 class FlowForgeWorkflowVersionList(Resource):

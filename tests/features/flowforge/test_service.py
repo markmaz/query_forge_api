@@ -4,7 +4,50 @@ from types import SimpleNamespace
 import pytest
 
 from app.exceptions.forge_error import ForgeError
+from app.config.llm_resolver import ResolvedLLMRuntime
 from app.features.flowforge.service import FlowForgeService
+
+
+class _WorkflowDraftLLMClient:
+    _model = "workflow-drafter"
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    def chat_json(self, **payload):
+        self.calls.append(payload)
+        return {
+            "plain_language_summary": "Added an approval gate after intake.",
+            "graph": {
+                "nodes": [
+                    {"id": "intake", "type": "intake", "label": "Intake", "position": {"x": 0, "y": 0}, "data": {}},
+                    {
+                        "id": "approval",
+                        "type": "approval",
+                        "label": "Approval Gate",
+                        "position": {"x": 240, "y": 0},
+                        "data": {"approver_role": "flowforge:operator"},
+                    },
+                ],
+                "edges": [{"id": "intake-approval", "source": "intake", "target": "approval"}],
+            },
+        }
+
+
+def _workflow_draft_runtime_builder(client: _WorkflowDraftLLMClient):
+    def _builder(**payload):
+        return ResolvedLLMRuntime(
+            client=client,
+            source="workspace_role",
+            role=payload["role"],
+            workspace_id=payload["workspace_id"],
+            llm_id=88,
+            provider="openai",
+            model="workflow-drafter",
+            endpoint="https://example.invalid/v1",
+        )
+
+    return _builder
 
 
 class _ResourceRepo:
@@ -1053,6 +1096,60 @@ def test_flowforge_service_saves_invalid_workflow_draft_version():
     assert repo.created_version["validation_status"] == "invalid"
     assert "requires a configured source integration" in result["validation_result"]["errors"][0]
     assert repo.current_draft["version_id"] == 45
+
+
+def test_flowforge_service_creates_workflow_ai_draft_through_workspace_llm():
+    llm_client = _WorkflowDraftLLMClient()
+    service = FlowForgeService(
+        integration_repository=_IntegrationRepo(),
+        llm_runtime_builder=_workflow_draft_runtime_builder(llm_client),
+    )
+
+    result = service.create_workflow_ai_draft(
+        workspace_id="ws-1",
+        payload={
+            "prompt": "Add an approval gate after intake.",
+            "use_llm": True,
+            "graph": {
+                "nodes": [
+                    {"id": "intake", "type": "intake", "data": {"source": "intake-form", "event": "intake_submitted"}}
+                ],
+                "edges": [],
+            },
+        },
+        actor_user_id="user-1",
+    )
+
+    assert llm_client.calls
+    assert result["draft_source"] == "llm"
+    assert result["model_provider"] == "openai"
+    assert result["model_name"] == "workflow-drafter"
+    assert result["plain_language_summary"] == "Added an approval gate after intake."
+    assert result["graph"]["nodes"][1]["type"] == "approval"
+    assert result["validation_status"] == "invalid"
+    assert "requires a configured source integration" in result["validation_result"]["errors"][0]
+
+
+def test_flowforge_service_creates_workflow_ai_draft_with_heuristic_fallback():
+    service = FlowForgeService(integration_repository=_IntegrationRepo())
+
+    result = service.create_workflow_ai_draft(
+        workspace_id="ws-1",
+        payload={
+            "prompt": "Schedule a daily export.",
+            "graph": {
+                "nodes": [
+                    {"id": "intake", "type": "intake", "data": {"source": "intake-form", "event": "intake_submitted"}}
+                ],
+                "edges": [],
+            },
+        },
+        actor_user_id="user-1",
+    )
+
+    assert result["draft_source"] == "heuristic"
+    assert result["graph"]["nodes"][-1]["type"] == "schedule_trigger"
+    assert result["graph"]["edges"][-1]["target"] == result["graph"]["nodes"][-1]["id"]
 
 
 def test_flowforge_validation_rejects_unknown_edge_endpoint():

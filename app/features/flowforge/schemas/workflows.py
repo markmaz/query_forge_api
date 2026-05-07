@@ -56,12 +56,33 @@ def register_workflow_models(namespace):
             "settings": fields.Raw(required=False, description="Optional workflow settings JSON."),
         },
     )
+    workflow_ai_draft_request = namespace.model(
+        "FlowForgeWorkflowAIDraftRequest",
+        {
+            "prompt": fields.String(required=True, description="Plain-language workflow designer instruction."),
+            "graph": fields.Nested(workflow_graph, required=True, description="Current workflow graph to modify."),
+            "use_llm": fields.Boolean(required=False, description="Use the workspace FlowForge LLM role when true."),
+        },
+    )
     validation_result = namespace.model(
         "FlowForgeValidationResult",
         {
             "valid": fields.Boolean(required=True, description="True when the graph has no blocking validation errors."),
             "errors": fields.List(fields.String, required=True, description="Blocking graph validation errors."),
             "warnings": fields.List(fields.String, required=True, description="Non-blocking warnings, including loop detection."),
+        },
+    )
+    workflow_ai_draft = namespace.model(
+        "FlowForgeWorkflowAIDraft",
+        {
+            "prompt": fields.String(required=True),
+            "graph": fields.Nested(workflow_graph, required=True),
+            "plain_language_summary": fields.String(required=True),
+            "validation_status": fields.String(required=True),
+            "validation_result": fields.Nested(validation_result, required=True),
+            "model_provider": fields.String(required=False),
+            "model_name": fields.String(required=False),
+            "draft_source": fields.String(required=True),
         },
     )
     run_event = namespace.model(
@@ -113,6 +134,8 @@ def register_workflow_models(namespace):
     return {
         "workflow_definition": workflow_definition,
         "workflow_definition_create": workflow_definition_create,
+        "workflow_ai_draft_request": workflow_ai_draft_request,
+        "workflow_ai_draft": workflow_ai_draft,
         "validation_result": validation_result,
         "run_event": run_event,
         "run_inspector": run_inspector,

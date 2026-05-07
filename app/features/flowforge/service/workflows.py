@@ -5,8 +5,11 @@ from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.config.llm_resolver import ResolvedLLMRuntime
+from app.constants.llm_roles import LLMRole
 from app.exceptions.forge_error import ForgeError
 from app.features.flowforge.models import WorkflowDefinition, WorkflowValidationResult
+from app.features.flowforge.workflow_drafting import normalize_generated_workflow_graph
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +191,41 @@ class FlowForgeWorkflowServiceMixin:
             )
 
         return {"valid": not errors, "errors": errors, "warnings": warnings}
+
+    def create_workflow_ai_draft(
+        self,
+        *,
+        workspace_id: str,
+        payload: dict[str, Any],
+        actor_user_id: str,
+    ) -> dict[str, Any]:
+        del actor_user_id
+        prompt = str(payload.get("prompt") or "").strip()
+        if not prompt:
+            raise ForgeError("prompt is required.", status_code=400)
+        current_graph = payload.get("graph") if isinstance(payload.get("graph"), dict) else {"nodes": [], "edges": []}
+        use_llm = bool(payload.get("use_llm"))
+        generator = self._workflow_graph_draft_generator
+        runtime: ResolvedLLMRuntime | None = None
+        if use_llm:
+            runtime = self._llm_runtime_builder(workspace_id=workspace_id, role=LLMRole.FLOWFORGE_RULE_DRAFTING)
+            generator = type(generator)(llm_client=runtime.client)
+        generated = generator.generate(prompt=prompt, current_graph=current_graph, use_llm=use_llm)
+        graph = normalize_generated_workflow_graph(
+            generated.get("graph") if isinstance(generated.get("graph"), dict) else {},
+            fallback_graph=current_graph,
+        )
+        validation = self.validate_graph(graph=graph, workspace_id=workspace_id)
+        return {
+            "prompt": prompt,
+            "graph": graph,
+            "plain_language_summary": self._optional_string(generated.get("plain_language_summary")) or "Workflow graph drafted.",
+            "validation_status": "valid" if validation["valid"] else "invalid",
+            "validation_result": validation,
+            "model_provider": self._optional_string(runtime.provider if runtime is not None else generated.get("model_provider")),
+            "model_name": self._optional_string(runtime.model if runtime is not None else generated.get("model_name")),
+            "draft_source": generated.get("draft_source") or ("llm" if runtime is not None else "heuristic"),
+        }
 
     def _validate_node_config(
         self,
