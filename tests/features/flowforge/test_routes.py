@@ -1423,6 +1423,32 @@ class _IntegrationService:
             "settings": {},
         }
 
+    def create_webhook_integration(self, *, workspace_id: str, payload, actor_user_id: str):
+        self.created_payload = {
+            "workspace_id": workspace_id,
+            "payload": payload,
+            "actor_user_id": actor_user_id,
+        }
+        return {
+            "id": 12,
+            "workspace_id": workspace_id,
+            "provider": "webhook",
+            "integration_key": payload["integration_key"],
+            "display_name": payload["display_name"],
+            "external_form_id": payload.get("external_form_id"),
+            "enabled": True,
+            "mode": payload.get("mode", "production"),
+            "webhook_public_id": "ffw_public",
+            "webhook_path": "/api/v1/flowforge/webhooks/generic/ffw_public",
+            "webhook_url": "/api/v1/flowforge/webhooks/generic/ffw_public",
+            "webhook_secret": "ffweb_secret",
+            "field_mapping": payload.get("field_mapping", {}),
+            "source_events": payload.get("source_events", []),
+            "source_fields": payload.get("source_fields", []),
+            "test_recipient_overrides": [],
+            "settings": {},
+        }
+
     def list_integration_triggers(self, *, workspace_id: str, integration_config_id: int):
         return [
             {
@@ -1504,6 +1530,41 @@ class _IntegrationService:
             "notes": ["Persisted intake event stored."],
         }
 
+    def accept_generic_integration_webhook(self, *, webhook_public_id: str, payload, token: str, source_ip, headers):
+        self.accepted_webhook = {
+            "webhook_public_id": webhook_public_id,
+            "payload": payload,
+            "token": token,
+            "source_ip": source_ip,
+            "headers": headers,
+        }
+        return {
+            "accepted": True,
+            "duplicate": False,
+            "workspace_id": "ws-1",
+            "integration_id": 12,
+            "integration_key": "webhook-intake",
+            "intake_event_id": 502,
+            "mode": "test",
+            "source": "webhook",
+            "trigger_evaluation": {
+                "matched_trigger_count": 1,
+                "selected_trigger_count": 1,
+                "selected_triggers": [{"id": 66, "trigger_key": "intake-routing"}],
+                "workflow_run_creation": "created",
+            },
+            "workflow_runs": [{"run_id": 902, "trigger_id": 66, "status": "waiting"}],
+            "event": {
+                "id": "webhook:evt-123",
+                "event_type": "flowforge.integration.webhook.received",
+                "node_id": "intake",
+                "message": "Webhook event received.",
+                "timestamp": "2026-05-04T00:00:00Z",
+                "data": {"external_event_id": "evt-123"},
+            },
+            "notes": ["Persisted intake event stored."],
+        }
+
 
 def test_flowforge_integrations_route_lists_configs(client, monkeypatch):
     monkeypatch.setattr(flowforge_routes, "_service", lambda: _IntegrationService())
@@ -1543,6 +1604,34 @@ def test_flowforge_jotform_integration_route_creates_config(client, monkeypatch)
     assert resp.status_code == 201
     assert resp.json["provider"] == "jotform"
     assert resp.json["webhook_secret"] == "ffjot_secret"
+    assert service.created_payload == {
+        "workspace_id": "ws-1",
+        "payload": payload,
+        "actor_user_id": "user-1",
+    }
+
+
+def test_flowforge_webhook_integration_route_creates_config(client, monkeypatch):
+    service = _IntegrationService()
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: service)
+
+    payload = {
+        "integration_key": "webhook-intake",
+        "display_name": "Webhook Intake",
+        "mode": "test",
+        "source_events": [{"event_key": "webhook_received", "display_name": "Webhook Received"}],
+        "source_fields": [{"path": "fields.summary", "label": "Summary", "type": "text"}],
+    }
+    resp = client.post(
+        "/api/v1/flowforge/integrations/webhook",
+        headers=_headers(monkeypatch, roles={"flowforge:admin"}),
+        json=payload,
+    )
+
+    assert resp.status_code == 201
+    assert resp.json["provider"] == "webhook"
+    assert resp.json["webhook_path"] == "/api/v1/flowforge/webhooks/generic/ffw_public"
+    assert resp.json["webhook_secret"] == "ffweb_secret"
     assert service.created_payload == {
         "workspace_id": "ws-1",
         "payload": payload,
@@ -1608,6 +1697,29 @@ def test_flowforge_public_jotform_webhook_uses_persisted_integration(client, mon
     assert service.accepted_webhook["webhook_public_id"] == "ffj_public"
     assert service.accepted_webhook["token"] == "ffjot_secret"
     assert service.accepted_webhook["payload"] == {"submissionID": "sub-123"}
+
+
+def test_flowforge_public_generic_webhook_uses_persisted_integration(client, monkeypatch):
+    service = _IntegrationService()
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: service)
+
+    resp = client.post(
+        "/api/v1/flowforge/webhooks/generic/ffw_public?token=ffweb_secret",
+        json={"event_key": "webhook_received", "event_id": "evt-123", "fields": {"summary": "Ready"}},
+    )
+
+    assert resp.status_code == 202
+    assert resp.json["accepted"] is True
+    assert resp.json["source"] == "webhook"
+    assert resp.json["intake_event_id"] == 502
+    assert resp.json["workflow_runs"][0]["run_id"] == 902
+    assert service.accepted_webhook["webhook_public_id"] == "ffw_public"
+    assert service.accepted_webhook["token"] == "ffweb_secret"
+    assert service.accepted_webhook["payload"] == {
+        "event_key": "webhook_received",
+        "event_id": "evt-123",
+        "fields": {"summary": "Ready"},
+    }
 
 
 def test_flowforge_resource_sets_route_lists_resource_sets(client, monkeypatch):

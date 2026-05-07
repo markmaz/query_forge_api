@@ -25,6 +25,41 @@ class FlowForgeIntegrationServiceMixin:
         payload: dict[str, Any],
         actor_user_id: str,
     ) -> dict[str, Any]:
+        return self._create_webhook_backed_integration(
+            workspace_id=workspace_id,
+            payload=payload,
+            actor_user_id=actor_user_id,
+            provider="jotform",
+            secret_prefix="ffjot_",
+            public_id_prefix="ffj_",
+        )
+
+    def create_webhook_integration(
+        self,
+        *,
+        workspace_id: str,
+        payload: dict[str, Any],
+        actor_user_id: str,
+    ) -> dict[str, Any]:
+        return self._create_webhook_backed_integration(
+            workspace_id=workspace_id,
+            payload=payload,
+            actor_user_id=actor_user_id,
+            provider="webhook",
+            secret_prefix="ffweb_",
+            public_id_prefix="ffw_",
+        )
+
+    def _create_webhook_backed_integration(
+        self,
+        *,
+        workspace_id: str,
+        payload: dict[str, Any],
+        actor_user_id: str,
+        provider: str,
+        secret_prefix: str,
+        public_id_prefix: str,
+    ) -> dict[str, Any]:
         integration_key = str(payload.get("integration_key") or "").strip()
         display_name = str(payload.get("display_name") or "").strip()
         if not integration_key:
@@ -37,11 +72,11 @@ class FlowForgeIntegrationServiceMixin:
         settings = dict(payload.get("settings") if isinstance(payload.get("settings"), dict) else {})
         settings["source_events"] = self._normalize_source_events(payload.get("source_events"))
         settings["source_fields"] = self._normalize_source_fields(payload.get("source_fields"))
-        webhook_secret = "ffjot_" + secrets.token_urlsafe(32)
-        webhook_public_id = "ffj_" + secrets.token_urlsafe(18)
+        webhook_secret = secret_prefix + secrets.token_urlsafe(32)
+        webhook_public_id = public_id_prefix + secrets.token_urlsafe(18)
         row = self._integration_repository.create_integration_config(
             workspace_id=workspace_id,
-            provider="jotform",
+            provider=provider,
             integration_key=integration_key,
             display_name=display_name,
             external_form_id=self._optional_string(payload.get("external_form_id")),
@@ -153,7 +188,10 @@ class FlowForgeIntegrationServiceMixin:
 
     def _serialize_integration_config(self, row: dict[str, Any], *, include_secret: bool) -> dict[str, Any]:
         webhook_public_id = str(row.get("webhook_public_id") or "").strip()
-        webhook_path = f"/api/v1/flowforge/webhooks/jotform/{webhook_public_id}" if webhook_public_id else None
+        webhook_path = self._integration_webhook_path(
+            provider=str(row.get("provider") or "").strip(),
+            webhook_public_id=webhook_public_id,
+        )
         webhook_base_url = (
             str(current_app.config.get("FLOWFORGE_WEBHOOK_BASE_URL") or "").strip() if has_app_context() else ""
         )
@@ -184,6 +222,15 @@ class FlowForgeIntegrationServiceMixin:
         if include_secret:
             out["webhook_secret"] = None
         return out
+
+    def _integration_webhook_path(self, *, provider: str, webhook_public_id: str) -> str | None:
+        if not webhook_public_id:
+            return None
+        provider_path = {
+            "jotform": "jotform",
+            "webhook": "generic",
+        }.get(provider, provider)
+        return f"/api/v1/flowforge/webhooks/{provider_path}/{webhook_public_id}"
 
     def _source_events_from_settings(self, settings: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(settings, dict):

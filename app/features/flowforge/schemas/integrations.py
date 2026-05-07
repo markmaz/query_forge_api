@@ -54,7 +54,7 @@ def register_integration_models(namespace, *, run_event):
         {
             "id": fields.Integer(required=True, description="Internal integration config id."),
             "workspace_id": fields.String(required=True, description="Workspace that owns the integration."),
-            "provider": fields.String(required=True, description="External provider. Phase 5A supports jotform."),
+            "provider": fields.String(required=True, description="External provider, such as webhook or jotform."),
             "integration_key": fields.String(required=True, description="Stable workspace-local integration key."),
             "display_name": fields.String(required=True, description="Human-readable integration name."),
             "external_form_id": fields.String(required=False, description="Provider form id when known."),

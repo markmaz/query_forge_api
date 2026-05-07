@@ -16,9 +16,9 @@ class FlowForgeIntegrationList(Resource):
         description=(
             "Returns workspace-scoped FlowForge integration configurations. The response includes provider, "
             "mode, public webhook id/path/url, field mapping, and safe settings. Stored webhook secret hashes "
-            "are never returned. Use provider=jotform to filter to Jotform integrations."
+            "are never returned. Use provider=jotform or provider=webhook to filter by integration source."
         ),
-        params={"provider": "Optional provider filter. Phase 5A supports jotform."},
+        params={"provider": "Optional provider filter. Supported values include jotform and webhook."},
         responses={
             200: "Integrations returned.",
             400: "Missing workspace context.",
@@ -67,6 +67,41 @@ class FlowForgeJotformIntegrationCreate(Resource):
             payload = request.get_json(silent=True) or {}
             return (
                 _service().create_jotform_integration(
+                    workspace_id=_workspace_id(),
+                    payload=payload if isinstance(payload, dict) else {},
+                    actor_user_id=_actor_user_id(),
+                ),
+                201,
+            )
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+
+
+@flowforge_ns.route("/integrations/webhook")
+class FlowForgeGenericWebhookIntegrationCreate(Resource):
+    @flowforge_ns.doc(
+        summary="Create a generic webhook integration",
+        description=(
+            "Creates a workspace-scoped generic webhook integration with an opaque public webhook id and a "
+            "generated secret. The plaintext secret is returned only once in this create response; only a hash "
+            "is stored. Generic webhooks are for external systems that can POST structured JSON directly to "
+            "FlowForge without a provider-specific adapter."
+        ),
+        responses={
+            201: "Generic webhook integration created.",
+            400: "Invalid integration payload.",
+            401: "Authentication required.",
+            403: "FlowForge designer access required.",
+        },
+    )
+    @flowforge_ns.marshal_with(models["integration_config_create_response"])
+    @token_required
+    @require_access("flowforge", role="designer")
+    def post(self):
+        try:
+            payload = request.get_json(silent=True) or {}
+            return (
+                _service().create_webhook_integration(
                     workspace_id=_workspace_id(),
                     payload=payload if isinstance(payload, dict) else {},
                     actor_user_id=_actor_user_id(),

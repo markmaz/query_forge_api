@@ -399,6 +399,15 @@ class _IntegrationRepo:
         }
 
     def get_integration_config_by_public_id(self, *, webhook_public_id: str):
+        if webhook_public_id == "ffw_public":
+            row = self.list_integration_configs(workspace_id="ws-1")[0]
+            row["id"] = 12
+            row["provider"] = "webhook"
+            row["integration_key"] = "webhook-intake"
+            row["display_name"] = "Webhook Intake"
+            row["external_form_id"] = None
+            row["webhook_public_id"] = "ffw_public"
+            return row
         if webhook_public_id != "ffj_public":
             return None
         row = self.list_integration_configs(workspace_id="ws-1")[0]
@@ -411,7 +420,7 @@ class _IntegrationRepo:
         return self.list_integration_configs(workspace_id=workspace_id)[0]
 
     def list_integration_triggers(self, *, workspace_id: str, integration_config_id: int):
-        if workspace_id != "ws-1" or integration_config_id != 10:
+        if workspace_id != "ws-1" or integration_config_id not in {10, 12}:
             return []
         return [
             {
@@ -1289,6 +1298,36 @@ def test_flowforge_service_creates_jotform_integration_with_one_time_secret():
     ]
 
 
+def test_flowforge_service_creates_webhook_integration_with_one_time_secret():
+    repo = _IntegrationRepo()
+    service = FlowForgeService(
+        resource_repository=_ResourceRepo(),
+        matching_repository=_MatchingRepo(),
+        integration_repository=repo,
+    )
+
+    result = service.create_webhook_integration(
+        workspace_id="ws-1",
+        payload={
+            "integration_key": "webhook-intake",
+            "display_name": "Webhook Intake",
+            "mode": "test",
+            "source_events": [{"event_key": "webhook_received", "display_name": "Webhook Received"}],
+            "source_fields": [{"path": "fields.summary", "label": "Summary", "type": "text"}],
+        },
+        actor_user_id="user-1",
+    )
+
+    assert result["id"] == 11
+    assert result["provider"] == "webhook"
+    assert result["webhook_secret"].startswith("ffweb_")
+    assert result["webhook_path"].startswith("/api/v1/flowforge/webhooks/generic/ffw_")
+    assert repo.created_config["provider"] == "webhook"
+    assert repo.created_config["created_by"] == "user-1"
+    assert repo.created_config["secret_hash"] != result["webhook_secret"]
+    assert len(repo.created_config["secret_hash"]) == 64
+
+
 def test_flowforge_service_rejects_jotform_integration_without_key():
     service = FlowForgeService(
         resource_repository=_ResourceRepo(),
@@ -1483,6 +1522,50 @@ def test_flowforge_service_returns_duplicate_for_existing_public_jotform_webhook
     assert result["intake_event_id"] == 500
     assert result["trigger_evaluation"]["matched_trigger_count"] == 1
     assert integration_repo.created_intake_event is None
+
+
+def test_flowforge_service_persists_public_generic_webhook_intake(monkeypatch):
+    integration_repo = _IntegrationRepo()
+    integration_repo.secret_hash = FlowForgeService()._hash_webhook_secret("ffweb_secret")
+    runtime_repo = _RuntimeRepo()
+    queued_dispatches = []
+    monkeypatch.setattr(
+        "app.tasks.flowforge_tasks.enqueue_flowforge_run_dispatch",
+        lambda workspace_id, run_id: queued_dispatches.append((workspace_id, run_id)),
+    )
+    service = FlowForgeService(
+        resource_repository=_ResourceRepo(),
+        matching_repository=_MatchingRepo(),
+        integration_repository=integration_repo,
+        settings_repository=_SettingsRepo(),
+        runtime_repository=runtime_repo,
+    )
+
+    result = service.accept_generic_integration_webhook(
+        webhook_public_id="ffw_public",
+        token="ffweb_secret",
+        source_ip="203.0.113.7",
+        headers={"User-Agent": "Example"},
+        payload={
+            "event_key": "webhook_received",
+            "event_id": "evt-123",
+            "fields": {"patientType": "new", "summary": "Ready", "serviceRequested": "Therapy"},
+        },
+    )
+
+    assert result["accepted"] is True
+    assert result["duplicate"] is False
+    assert result["source"] == "webhook"
+    assert result["event"]["event_type"] == "flowforge.integration.webhook.received"
+    assert integration_repo.created_intake_event["workspace_id"] == "ws-1"
+    assert integration_repo.created_intake_event["provider"] == "webhook"
+    assert integration_repo.created_intake_event["idempotency_key"] == "webhook:ffw_public:event:evt-123"
+    assert integration_repo.created_intake_event["external_submission_id"] == "evt-123"
+    assert integration_repo.created_intake_event["normalized_payload"]["event_key"] == "webhook_received"
+    assert integration_repo.created_intake_event["normalized_payload"]["fields"]["summary"] == "Ready"
+    assert result["trigger_evaluation"]["workflow_run_creation"] == "created"
+    assert result["workflow_runs"][0]["run_id"] == 901
+    assert queued_dispatches == [("ws-1", 901)]
 
 
 def test_flowforge_service_rejects_public_jotform_webhook_with_bad_secret():
