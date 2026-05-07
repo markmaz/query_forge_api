@@ -143,7 +143,7 @@ class FlowForgeWorkflowValidation(Resource):
         try:
             payload = request.get_json(silent=True) or {}
             graph = payload.get("graph", payload) if isinstance(payload, dict) else {}
-            return _service().validate_graph(graph=graph), 200
+            return _service().validate_graph(graph=graph, workspace_id=_workspace_id()), 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
 

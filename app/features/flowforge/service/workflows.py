@@ -79,7 +79,7 @@ class FlowForgeWorkflowServiceMixin:
         if not name:
             raise ForgeError("name is required.", status_code=400)
         graph = payload.get("graph") if isinstance(payload.get("graph"), dict) else {"nodes": [], "edges": []}
-        validation = self.validate_graph(graph=graph)
+        validation = self.validate_graph(graph=graph, workspace_id=workspace_id)
         if not validation["valid"]:
             raise ForgeError("Workflow graph is invalid.", status_code=400, details=validation)
         workflow_definition_id = self._workflow_repository.create_workflow_definition(
@@ -104,7 +104,7 @@ class FlowForgeWorkflowServiceMixin:
         }
         return None
 
-    def validate_graph(self, *, graph: dict[str, Any]) -> WorkflowValidationResult:
+    def validate_graph(self, *, graph: dict[str, Any], workspace_id: str | None = None) -> WorkflowValidationResult:
         nodes = graph.get("nodes") if isinstance(graph, dict) else None
         edges = graph.get("edges") if isinstance(graph, dict) else None
         errors: list[str] = []
@@ -145,6 +145,16 @@ class FlowForgeWorkflowServiceMixin:
                 node_id=node_id,
                 node_type=node_type,
                 node_config=node_config,
+                errors=errors,
+                warnings=warnings,
+            )
+
+        integration_catalogs = self._integration_catalogs(workspace_id=workspace_id)
+        if workspace_id and integration_catalogs is not None:
+            self._validate_integration_catalog_refs(
+                nodes=nodes,
+                edges=edges,
+                integration_catalogs=integration_catalogs,
                 errors=errors,
                 warnings=warnings,
             )
@@ -221,6 +231,181 @@ class FlowForgeWorkflowServiceMixin:
         ):
             warnings.append(f"Map transform node '{node_id}' has no field mapping or validation rules.")
 
+    def _integration_catalogs(self, *, workspace_id: str | None) -> dict[str, dict[str, Any]] | None:
+        if not workspace_id:
+            return {}
+        try:
+            rows = self._integration_repository.list_integration_configs(workspace_id=workspace_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("flowforge_integration_catalog_validation_load_failed workspace_id=%s", workspace_id)
+            return None
+        catalogs: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            serialized = self._serialize_integration_config(row, include_secret=False)
+            integration_key = str(serialized.get("integration_key") or "").strip()
+            if integration_key:
+                catalogs[integration_key] = serialized
+        return catalogs
+
+    def _validate_integration_catalog_refs(
+        self,
+        *,
+        nodes: list[Any],
+        edges: list[Any],
+        integration_catalogs: dict[str, dict[str, Any]],
+        errors: list[str],
+        warnings: list[str],
+    ) -> None:
+        node_by_id = {
+            str(node.get("id") or "").strip(): node
+            for node in nodes
+            if isinstance(node, dict) and str(node.get("id") or "").strip()
+        }
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            node_id = str(node.get("id") or "").strip()
+            node_type = str(node.get("type") or "").strip()
+            node_config = self._node_config(node)
+            if node_type == "intake":
+                self._validate_intake_catalog_ref(
+                    node_id=node_id,
+                    node_config=node_config,
+                    integration_catalogs=integration_catalogs,
+                    errors=errors,
+                )
+            if node_type == "map_transform":
+                self._validate_map_transform_intake_sources(
+                    node_id=node_id,
+                    node_config=node_config,
+                    nodes_by_id=node_by_id,
+                    edges=edges,
+                    integration_catalogs=integration_catalogs,
+                    errors=errors,
+                    warnings=warnings,
+                )
+
+    def _validate_intake_catalog_ref(
+        self,
+        *,
+        node_id: str,
+        node_config: dict[str, Any],
+        integration_catalogs: dict[str, dict[str, Any]],
+        errors: list[str],
+    ) -> None:
+        source = str(node_config.get("source") or "").strip()
+        event = str(node_config.get("event") or "").strip()
+        if not source:
+            errors.append(f"Intake node '{node_id}' requires a configured source integration.")
+            return
+        integration = integration_catalogs.get(source)
+        if integration is None:
+            errors.append(f"Intake node '{node_id}' references unknown source integration '{source}'.")
+            return
+        source_events = {
+            str(entry.get("event_key") or "").strip()
+            for entry in integration.get("source_events") or []
+            if isinstance(entry, dict)
+        }
+        if not event:
+            errors.append(f"Intake node '{node_id}' requires an event from integration '{source}'.")
+        elif event not in source_events:
+            errors.append(f"Intake node '{node_id}' references unknown event '{event}' for integration '{source}'.")
+
+    def _validate_map_transform_intake_sources(
+        self,
+        *,
+        node_id: str,
+        node_config: dict[str, Any],
+        nodes_by_id: dict[str, dict[str, Any]],
+        edges: list[Any],
+        integration_catalogs: dict[str, dict[str, Any]],
+        errors: list[str],
+        warnings: list[str],
+    ) -> None:
+        mappings = self._field_mapping_entries(node_config.get("field_mapping") or node_config.get("mapping"))
+        intake_sources = sorted({source for _target, source in mappings if source.startswith("intake.fields.")})
+        if not intake_sources:
+            return
+        integration_key = self._upstream_intake_integration_key(node_id=node_id, nodes_by_id=nodes_by_id, edges=edges)
+        if not integration_key:
+            errors.append(f"Map transform node '{node_id}' maps intake fields but has no upstream intake integration.")
+            return
+        integration = integration_catalogs.get(integration_key)
+        if integration is None:
+            errors.append(
+                f"Map transform node '{node_id}' maps intake fields from unknown integration '{integration_key}'."
+            )
+            return
+        allowed_sources = {
+            f"intake.fields.{str(entry.get('path') or '').strip().strip('.')}"
+            for entry in integration.get("source_fields") or []
+            if isinstance(entry, dict) and str(entry.get("path") or "").strip()
+        }
+        if not allowed_sources:
+            warnings.append(f"Map transform node '{node_id}' has no source field catalog for integration '{integration_key}'.")
+            return
+        for source in intake_sources:
+            if source not in allowed_sources:
+                errors.append(
+                    f"Map transform node '{node_id}' references unknown intake source field '{source}' for integration '{integration_key}'."
+                )
+
+    def _upstream_intake_integration_key(
+        self,
+        *,
+        node_id: str,
+        nodes_by_id: dict[str, dict[str, Any]],
+        edges: list[Any],
+    ) -> str | None:
+        queue = [
+            str(edge.get("source") or "").strip()
+            for edge in edges
+            if isinstance(edge, dict) and str(edge.get("target") or "").strip() == node_id
+        ]
+        visited = {node_id}
+        while queue:
+            upstream_id = queue.pop(0)
+            if not upstream_id or upstream_id in visited:
+                continue
+            visited.add(upstream_id)
+            upstream_node = nodes_by_id.get(upstream_id)
+            if not upstream_node:
+                continue
+            if str(upstream_node.get("type") or "").strip() == "intake":
+                source = str(self._node_config(upstream_node).get("source") or "").strip()
+                if source:
+                    return source
+            queue.extend(
+                str(edge.get("source") or "").strip()
+                for edge in edges
+                if isinstance(edge, dict) and str(edge.get("target") or "").strip() == upstream_id
+            )
+        return None
+
+    def _field_mapping_entries(self, field_mapping: Any) -> list[tuple[str, str]]:
+        entries: list[tuple[str, str]] = []
+        if isinstance(field_mapping, dict):
+            for target, rule in field_mapping.items():
+                if isinstance(rule, dict):
+                    entries.append((str(target), str(rule.get("source") or rule.get("from") or target).strip()))
+                else:
+                    entries.append((str(target), str(rule).strip()))
+        elif isinstance(field_mapping, list):
+            for rule in field_mapping:
+                if not isinstance(rule, dict):
+                    continue
+                target = str(rule.get("target") or rule.get("to") or "").strip()
+                source = str(rule.get("source") or rule.get("from") or target).strip()
+                if target:
+                    entries.append((target, source))
+        return entries
+
+    def _node_config(self, node: dict[str, Any]) -> dict[str, Any]:
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        config = node.get("config") if isinstance(node.get("config"), dict) else {}
+        return {**data, **config}
+
     def get_run_inspector(self, *, workspace_id: str, workflow_id: str) -> dict[str, Any] | None:
         del workspace_id
         if workflow_id != THERAPIST_ROUTING_WORKFLOW["id"]:
@@ -260,7 +445,7 @@ class FlowForgeWorkflowServiceMixin:
         graph = payload.get("graph") if isinstance(payload, dict) else None
         if not isinstance(graph, dict):
             raise ForgeError("graph must be an object.", status_code=400)
-        validation = self.validate_graph(graph=graph)
+        validation = self.validate_graph(graph=graph, workspace_id=workspace_id)
         if not validation["valid"]:
             raise ForgeError("Workflow graph is invalid.", status_code=400, details=validation)
         existing_versions = self._workflow_repository.list_workflow_versions(

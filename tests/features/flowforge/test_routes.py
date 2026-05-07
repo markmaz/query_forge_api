@@ -5,6 +5,8 @@ from typing import Dict
 import app.decorators.rbac as rbac_decorators
 import app.decorators.security as security
 import app.features.flowforge.routes as flowforge_routes
+import app.features.flowforge.routes.workflows as flowforge_workflow_routes
+from app.features.flowforge.service import FlowForgeService
 import app.services.rbac_service as rbac_service
 
 
@@ -28,6 +30,28 @@ def _headers(monkeypatch, *, roles: set[str] | None = None, feature_enabled: boo
     return {"Authorization": "Bearer token-1", "X-Workspace-Id": "ws-1"}
 
 
+class _IntegrationCatalogRepo:
+    def list_integration_configs(self, *, workspace_id: str, provider: str | None = None):
+        del provider
+        return [
+            {
+                "id": 10,
+                "workspace_id": workspace_id,
+                "provider": "jotform",
+                "integration_key": "intake-form",
+                "display_name": "Intake Form",
+                "external_form_id": "form-1",
+                "enabled": True,
+                "mode": "test",
+                "webhook_public_id": "ffj_public",
+                "settings_json": {
+                    "source_events": [{"event_key": "intake_submitted", "display_name": "Intake Submitted"}],
+                    "source_fields": [{"path": "serviceRequested", "label": "Requested Service", "type": "text"}],
+                },
+            }
+        ]
+
+
 def test_flowforge_workflow_list_returns_seeded_workflow(client, monkeypatch):
     resp = client.get("/api/v1/flowforge/workflows", headers=_headers(monkeypatch))
 
@@ -43,10 +67,18 @@ def test_flowforge_workflow_detail_returns_404_for_unknown_workflow(client, monk
 
 
 def test_flowforge_validation_returns_loop_warning(client, monkeypatch):
+    service = FlowForgeService(integration_repository=_IntegrationCatalogRepo())
+    monkeypatch.setattr(flowforge_workflow_routes, "_service", lambda: service)
     payload = {
         "graph": {
             "nodes": [
-                {"id": "a", "type": "intake", "label": "A", "position": {"x": 0, "y": 0}, "data": {}},
+                {
+                    "id": "a",
+                    "type": "intake",
+                    "label": "A",
+                    "position": {"x": 0, "y": 0},
+                    "data": {"source": "intake-form", "event": "intake_submitted"},
+                },
                 {"id": "b", "type": "decision", "label": "B", "position": {"x": 1, "y": 1}, "data": {}},
             ],
             "edges": [

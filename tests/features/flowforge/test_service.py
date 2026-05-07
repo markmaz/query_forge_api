@@ -929,7 +929,7 @@ def test_flowforge_validation_allows_loops_as_warnings():
 
 def test_flowforge_service_creates_persisted_workflow_draft():
     repo = _WorkflowRepo()
-    service = FlowForgeService(workflow_repository=repo)
+    service = FlowForgeService(workflow_repository=repo, integration_repository=_IntegrationRepo())
 
     result = service.create_workflow_definition(
         workspace_id="ws-1",
@@ -937,7 +937,12 @@ def test_flowforge_service_creates_persisted_workflow_draft():
             "workflow_key": "new-routing",
             "name": "New Routing",
             "description": "A new workflow.",
-            "graph": {"nodes": [{"id": "intake", "type": "intake"}], "edges": []},
+            "graph": {
+                "nodes": [
+                    {"id": "intake", "type": "intake", "data": {"source": "intake-form", "event": "intake_submitted"}}
+                ],
+                "edges": [],
+            },
         },
         actor_user_id="user-1",
     )
@@ -950,12 +955,19 @@ def test_flowforge_service_creates_persisted_workflow_draft():
 
 def test_flowforge_service_creates_new_workflow_draft_version():
     repo = _WorkflowRepo()
-    service = FlowForgeService(workflow_repository=repo)
+    service = FlowForgeService(workflow_repository=repo, integration_repository=_IntegrationRepo())
 
     result = service.create_workflow_version(
         workspace_id="ws-1",
         workflow_definition_id=12,
-        payload={"graph": {"nodes": [{"id": "intake", "type": "intake"}], "edges": []}},
+        payload={
+            "graph": {
+                "nodes": [
+                    {"id": "intake", "type": "intake", "data": {"source": "intake-form", "event": "intake_submitted"}}
+                ],
+                "edges": [],
+            }
+        },
         actor_user_id="user-1",
     )
 
@@ -1087,6 +1099,80 @@ def test_flowforge_validation_rejects_trigger_with_incoming_edge():
 
     assert result["valid"] is False
     assert "Trigger node 'schedule' cannot have incoming edges." in result["errors"]
+
+
+def test_flowforge_validation_rejects_unknown_intake_catalog_refs():
+    service = FlowForgeService(integration_repository=_IntegrationRepo())
+
+    result = service.validate_graph(
+        workspace_id="ws-1",
+        graph={
+            "nodes": [
+                {
+                    "id": "intake",
+                    "type": "intake",
+                    "label": "Intake",
+                    "position": {"x": 0, "y": 0},
+                    "data": {"source": "intake-form", "event": "missing_event"},
+                },
+                {
+                    "id": "normalize",
+                    "type": "map_transform",
+                    "label": "Normalize",
+                    "position": {"x": 200, "y": 0},
+                    "data": {
+                        "mode": "run_context",
+                        "field_mapping": [
+                            {"target": "intake.requested_service", "source": "intake.fields.unknownField"}
+                        ],
+                    },
+                },
+            ],
+            "edges": [{"id": "e1", "source": "intake", "target": "normalize"}],
+        },
+    )
+
+    assert result["valid"] is False
+    assert "Intake node 'intake' references unknown event 'missing_event' for integration 'intake-form'." in result["errors"]
+    assert (
+        "Map transform node 'normalize' references unknown intake source field "
+        "'intake.fields.unknownField' for integration 'intake-form'."
+    ) in result["errors"]
+
+
+def test_flowforge_validation_accepts_known_intake_catalog_refs():
+    service = FlowForgeService(integration_repository=_IntegrationRepo())
+
+    result = service.validate_graph(
+        workspace_id="ws-1",
+        graph={
+            "nodes": [
+                {
+                    "id": "intake",
+                    "type": "intake",
+                    "label": "Intake",
+                    "position": {"x": 0, "y": 0},
+                    "data": {"source": "intake-form", "event": "intake_submitted"},
+                },
+                {
+                    "id": "normalize",
+                    "type": "map_transform",
+                    "label": "Normalize",
+                    "position": {"x": 200, "y": 0},
+                    "data": {
+                        "mode": "run_context",
+                        "field_mapping": [
+                            {"target": "intake.requested_service", "source": "intake.fields.serviceRequested"}
+                        ],
+                    },
+                },
+            ],
+            "edges": [{"id": "e1", "source": "intake", "target": "normalize"}],
+        },
+    )
+
+    assert result["valid"] is True
+    assert result["errors"] == []
 
 
 def test_flowforge_service_lists_integrations_without_webhook_secret():
