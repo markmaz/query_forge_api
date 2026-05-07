@@ -47,7 +47,6 @@ class FlowForgeWorkflowList(Resource):
         },
     )
     @flowforge_ns.expect(models["workflow_definition_create"], validate=False)
-    @flowforge_ns.marshal_with(models["workflow_definition"])
     @token_required
     @require_access("flowforge", role="designer")
     def post(self):

@@ -1173,7 +1173,18 @@ def test_flowforge_workflow_version_routes_list_and_publish(client, monkeypatch)
 
 def test_flowforge_workflow_authoring_routes_create_definition_and_version(client, monkeypatch):
     monkeypatch.setattr(flowforge_routes, "_service", lambda: _RunService())
-    graph = {"nodes": [{"id": "intake", "type": "intake"}], "edges": []}
+    graph = {
+        "nodes": [
+            {
+                "id": "intake",
+                "type": "intake",
+                "label": "Patient Intake",
+                "position": {"x": 40, "y": 120},
+                "data": {"source": "", "event": ""},
+            }
+        ],
+        "edges": [],
+    }
 
     created = client.post(
         "/api/v1/flowforge/workflows",
@@ -1188,6 +1199,10 @@ def test_flowforge_workflow_authoring_routes_create_definition_and_version(clien
 
     assert created.status_code == 201
     assert created.json["id"] == "12"
+    assert created.json["name"] == "New Routing"
+    assert created.json["graph"]["nodes"][0]["id"] == "intake"
+    assert created.json["graph"]["nodes"][0]["label"] == "Patient Intake"
+    assert created.json["graph"]["edges"] == []
     assert version.status_code == 201
     assert version.json["version_number"] == 2
 
