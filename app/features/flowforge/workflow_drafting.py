@@ -16,7 +16,6 @@ SUPPORTED_NODE_TYPES = {
     "wait",
     "end",
     "decision",
-    "assignment",
     "event_capture",
     "iterator",
     "query_extract",
@@ -33,6 +32,7 @@ DEFAULT_NODE_DATA: dict[str, dict[str, Any]] = {
     "human_task": {"timeout_minutes": 120, "task_mode": "sequential", "communication_template_key": "flowforge.human_task"},
     "notification": {"recipients": [], "reason": "", "communication_template_key": "flowforge.notification"},
     "decision": {"outcomes": ["accepted", "declined"]},
+    "end": {"event_key": "workflow_completed"},
     "approval": {"approver_role": "flowforge:operator", "timeout_minutes": 1440},
     "query_extract": {"saved_query_id": "", "limit": 1000},
     "export": {"destination_key": "", "format": "csv", "include_header": True},
@@ -54,11 +54,10 @@ NODE_LABELS = {
     "export": "Export Data",
     "import": "Import Data",
     "map_transform": "Map Transform",
-    "assignment": "Assignment",
     "event_capture": "Capture Event",
     "iterator": "Next Item",
     "wait": "Wait",
-    "end": "End",
+    "end": "End Event",
 }
 
 

@@ -232,7 +232,7 @@ def test_dispatcher_pauses_wait_node_without_completing_run():
     assert runtime_repo.run["current_node_id"] == "wait-for-response"
 
 
-def test_dispatcher_supports_assignment_iterator_and_event_capture_nodes():
+def test_dispatcher_supports_end_iterator_and_event_capture_nodes():
     runtime_repo = _RuntimeRepo()
     dispatcher = FlowForgeRuntimeDispatcher(
         runtime_repository=runtime_repo,
@@ -241,11 +241,11 @@ def test_dispatcher_supports_assignment_iterator_and_event_capture_nodes():
                 "nodes": [
                     {"id": "capture", "type": "event_capture"},
                     {"id": "next", "type": "iterator"},
-                    {"id": "assign", "type": "assignment"},
+                    {"id": "done", "type": "end", "data": {"event_key": "patient_assigned"}},
                 ],
                 "edges": [
                     {"id": "e1", "source": "capture", "target": "next"},
-                    {"id": "e2", "source": "next", "target": "assign"},
+                    {"id": "e2", "source": "next", "target": "done"},
                 ],
             }
         ),
@@ -255,8 +255,8 @@ def test_dispatcher_supports_assignment_iterator_and_event_capture_nodes():
     result = dispatcher.dispatch_run(workspace_id="ws-1", run_id=101)
 
     assert result["status"] == "completed"
-    assert result["visited_node_ids"] == ["capture", "next", "assign"]
-    assert runtime_repo.completed["current_node_id"] == "assign"
+    assert result["visited_node_ids"] == ["capture", "next", "done"]
+    assert runtime_repo.completed["current_node_id"] == "done"
 
 
 def test_dispatcher_advances_data_movement_nodes_and_waits_for_approval():

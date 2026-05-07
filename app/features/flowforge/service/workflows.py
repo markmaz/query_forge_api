@@ -27,7 +27,6 @@ FLOWFORGE_SUPPORTED_NODE_TYPES = {
     "wait",
     "end",
     "decision",
-    "assignment",
     "event_capture",
     "iterator",
     *FLOWFORGE_DATA_MOVEMENT_NODE_TYPES,

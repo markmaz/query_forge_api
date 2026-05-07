@@ -16,7 +16,6 @@ WorkflowNodeType = Literal[
     "wait",
     "end",
     "decision",
-    "assignment",
     "event_capture",
     "iterator",
     "query_extract",

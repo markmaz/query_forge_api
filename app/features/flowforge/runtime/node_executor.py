@@ -32,7 +32,6 @@ class FlowForgeNodeExecutor:
         "decision",
         "notification",
         "matching",
-        "assignment",
         "event_capture",
         "iterator",
         *DATA_MOVEMENT_NODE_TYPES,
@@ -54,8 +53,8 @@ class FlowForgeNodeExecutor:
         if node_type not in self.SUPPORTED_NODE_TYPES:
             raise FlowForgeNodeExecutionError(f"Unsupported FlowForge node type '{node_type}' for node '{node_id}'.")
 
-        if node_type in {"end", "assignment"}:
-            return NodeExecutionResult(status="completed", event_payload={"node_type": node_type})
+        if node_type == "end":
+            return NodeExecutionResult(status="completed", event_payload=self._end_payload(node=node))
 
         if node_type in {"wait", "human_task", "approval"}:
             return NodeExecutionResult(
@@ -118,6 +117,14 @@ class FlowForgeNodeExecutor:
                 "destination_key": config.get("destination_key"),
                 "destination_id": config.get("destination_id"),
             },
+        }
+
+    def _end_payload(self, *, node: dict[str, Any]) -> dict[str, Any]:
+        config = self._node_config(node)
+        event_key = str(config.get("event_key") or config.get("event") or "workflow_completed").strip()
+        return {
+            "node_type": "end",
+            "event_key": event_key or "workflow_completed",
         }
 
     @staticmethod
