@@ -77,6 +77,26 @@ def test_communication_template_renderer_renders_runtime_action_links():
     assert 'data-flowforge-action="decline"' in rendered["html"]
 
 
+def test_communication_template_renderer_only_links_action_specific_buttons_with_matching_urls():
+    renderer = CommunicationTemplateRenderer()
+
+    rendered = renderer.render_email(
+        template=_template(
+            body_blocks=[
+                {"type": "action_buttons", "actions": ["accept", "decline", "open_task"]},
+            ]
+        ),
+        context={},
+        action_url="http://localhost:3000/flowforge/actions/ffact_123",
+        action_urls={"accept": "http://localhost:3000/flowforge/actions/ffact_123?action=accept"},
+    )
+
+    assert 'href="http://localhost:3000/flowforge/actions/ffact_123?action=accept"' in rendered["html"]
+    assert 'data-flowforge-action="decline"' not in rendered["html"]
+    assert 'data-flowforge-action="open_task"' not in rendered["html"]
+    assert rendered["html"].count('aria-disabled="true"') == 2
+
+
 def test_communication_template_renderer_rejects_unknown_fields_and_actions():
     renderer = CommunicationTemplateRenderer()
 
@@ -95,6 +115,28 @@ def test_communication_template_renderer_rejects_unknown_fields_and_actions():
     assert "unsupported action 'custom_link'" in " ".join(validation.errors)
 
 
+def test_communication_template_renderer_rejects_actions_that_do_not_match_purpose():
+    renderer = CommunicationTemplateRenderer()
+
+    approval_validation = renderer.validate(
+        template=_template(
+            purpose="approval",
+            body_blocks=[{"type": "action_buttons", "actions": ["accept", "decline", "open_task"]}],
+        )
+    )
+    report_validation = renderer.validate(
+        template=_template(
+            purpose="report",
+            body_blocks=[{"type": "action_buttons", "actions": ["open_task"]}],
+        )
+    )
+
+    assert approval_validation.valid is False
+    assert "not available for approval templates: accept, decline" in " ".join(approval_validation.errors)
+    assert report_validation.valid is False
+    assert "not available for report templates: open_task" in " ".join(report_validation.errors)
+
+
 def test_communication_template_draft_generator_produces_structured_blocks():
     generator = CommunicationTemplateDraftGenerator()
 
@@ -111,6 +153,22 @@ def test_communication_template_draft_generator_produces_structured_blocks():
     assert draft["subject"] == "Action requested for {{resource.display_name}}"
     assert draft["body_blocks"][-1] == {"type": "action_buttons", "actions": ["accept", "decline", "open_task"]}
     assert draft["draft_source"] == "heuristic"
+
+
+def test_communication_template_draft_generator_filters_actions_by_purpose():
+    generator = CommunicationTemplateDraftGenerator()
+
+    draft = generator.generate(
+        prompt="Write an approval email.",
+        purpose="approval",
+        channel="email",
+        resource_set_id=30,
+        resource_fields=["task.due_at"],
+        required_actions=["accept", "decline", "open_task"],
+        tone="concise",
+    )
+
+    assert draft["body_blocks"][-1] == {"type": "action_buttons", "actions": ["open_task"]}
 
 
 class _TemplateRepo:
@@ -237,3 +295,22 @@ def test_flowforge_service_creates_communication_template_ai_draft():
     assert result["draft_source"] == "heuristic"
     assert repo.created_ai_draft["created_by"] == "user-1"
     assert repo.created_ai_draft["model_provider"] == "heuristic"
+
+
+def test_flowforge_service_rejects_ai_draft_actions_that_do_not_match_purpose():
+    service = FlowForgeService(communication_template_repository=_TemplateRepo(), resource_repository=_ResourceRepo())
+
+    with pytest.raises(ForgeError) as exc:
+        service.create_communication_template_ai_draft(
+            workspace_id="ws-1",
+            payload={
+                "prompt": "Write an approval email.",
+                "purpose": "approval",
+                "channel": "email",
+                "resource_set_id": 30,
+                "required_actions": ["approve"],
+            },
+            actor_user_id="user-1",
+        )
+
+    assert exc.value.status_code == 400

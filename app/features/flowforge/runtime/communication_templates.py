@@ -9,17 +9,15 @@ from typing import Any
 ALLOWED_CHANNELS = {"email"}
 ALLOWED_PURPOSES = {"human_task", "notification", "approval", "alert", "report"}
 ALLOWED_BLOCK_TYPES = {"heading", "text", "field_value", "field_list", "divider", "action_buttons"}
-ALLOWED_ACTIONS = {"accept", "decline", "approve", "reject", "open_task"}
+ALLOWED_ACTIONS = {"accept", "decline", "open_task"}
 ACTION_LABELS = {
     "accept": "Accept",
     "decline": "Decline",
-    "approve": "Approve",
-    "reject": "Reject",
     "open_task": "Open Task",
 }
-RECOMMENDED_ACTIONS_BY_PURPOSE = {
+ALLOWED_ACTIONS_BY_PURPOSE = {
     "human_task": {"accept", "decline", "open_task"},
-    "approval": {"approve", "reject", "open_task"},
+    "approval": {"open_task"},
     "notification": {"open_task"},
     "alert": {"open_task"},
     "report": set(),
@@ -127,12 +125,12 @@ class CommunicationTemplateRenderer:
                 errors.append(f"Merge field '{field}' is not available for this template.")
         if purpose == "human_task" and not referenced_actions:
             warnings.append("Human task templates should include an action button block.")
-        recommended_actions = RECOMMENDED_ACTIONS_BY_PURPOSE.get(purpose)
-        if recommended_actions is not None:
-            unexpected_actions = sorted(referenced_actions - recommended_actions)
+        purpose_actions = ALLOWED_ACTIONS_BY_PURPOSE.get(purpose)
+        if purpose_actions is not None:
+            unexpected_actions = sorted(referenced_actions - purpose_actions)
             if unexpected_actions:
-                warnings.append(
-                    "Template references actions that are not normally available for "
+                errors.append(
+                    "Template references actions that are not available for "
                     f"{purpose} templates: {', '.join(unexpected_actions)}."
                 )
 
@@ -227,7 +225,7 @@ class CommunicationTemplateRenderer:
         for action in actions:
             label = html.escape(ACTION_LABELS.get(action, action.replace("_", " ").title()))
             url = action_urls.get(action)
-            if url is None and not action_urls and action_url:
+            if url is None and not action_urls and action == "open_task" and action_url:
                 url = str(action_url)
             if url:
                 safe_url = html.escape(url, quote=True)

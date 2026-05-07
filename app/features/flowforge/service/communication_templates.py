@@ -7,7 +7,7 @@ from app.config.llm_resolver import ResolvedLLMRuntime
 from app.constants.llm_roles import LLMRole
 from app.exceptions.forge_error import ForgeError
 from app.features.flowforge.communication_template_drafting import CommunicationTemplateDraftGenerator, normalize_generated_communication_template
-from app.features.flowforge.runtime.communication_templates import ALLOWED_CHANNELS, ALLOWED_PURPOSES
+from app.features.flowforge.runtime.communication_templates import ALLOWED_ACTIONS_BY_PURPOSE, ALLOWED_CHANNELS, ALLOWED_PURPOSES
 from app.features.flowforge.runtime.communication_templates import ALLOWED_ACTIONS
 
 
@@ -167,7 +167,7 @@ class FlowForgeCommunicationTemplateServiceMixin:
         resource_set_id = self._optional_positive_int(payload.get("resource_set_id"), field_name="resource_set_id")
         if resource_set_id is not None and self._resource_repository.get_resource_set(workspace_id=workspace_id, resource_set_id=resource_set_id) is None:
             raise ForgeError(f"Resource set '{resource_set_id}' was not found.", status_code=404)
-        required_actions = self._communication_required_actions(payload.get("required_actions"))
+        required_actions = self._communication_required_actions(payload.get("required_actions"), purpose=purpose)
         tone = self._optional_string(payload.get("tone"))
         use_llm = bool(payload.get("use_llm"))
         resource_fields = sorted(self._resource_field_keys(workspace_id=workspace_id, resource_set_id=resource_set_id) or [])
@@ -288,14 +288,20 @@ class FlowForgeCommunicationTemplateServiceMixin:
         return fields
 
     @staticmethod
-    def _communication_required_actions(value: Any) -> list[str]:
+    def _communication_required_actions(value: Any, *, purpose: str) -> list[str]:
         if not isinstance(value, list):
             return []
+        allowed_actions = ALLOWED_ACTIONS_BY_PURPOSE.get(purpose, set())
         actions: list[str] = []
         for action in value:
             clean_action = str(action or "").strip()
             if clean_action not in ALLOWED_ACTIONS:
                 raise ForgeError(f"Unsupported communication action '{clean_action}'.", status_code=400)
+            if clean_action not in allowed_actions:
+                raise ForgeError(
+                    f"Communication action '{clean_action}' is not available for {purpose} templates.",
+                    status_code=400,
+                )
             if clean_action not in actions:
                 actions.append(clean_action)
         return actions

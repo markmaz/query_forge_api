@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.features.flowforge.runtime.communication_templates import ALLOWED_ACTIONS, ALLOWED_PURPOSES
+from app.features.flowforge.runtime.communication_templates import ALLOWED_ACTIONS, ALLOWED_ACTIONS_BY_PURPOSE, ALLOWED_PURPOSES
 
 
 def _clean_string(value: Any) -> str:
@@ -27,7 +27,7 @@ def normalize_generated_communication_template(payload: dict[str, Any], *, purpo
 
 
 class CommunicationTemplateDraftGenerator:
-    """Generates structured FlowForge communication template drafts."""
+    """Generates structured Workflow Studio communication template drafts."""
 
     def __init__(self, *, llm_client: Any | None = None) -> None:
         self._llm_client = llm_client
@@ -46,8 +46,9 @@ class CommunicationTemplateDraftGenerator:
     ) -> dict[str, Any]:
         clean_prompt = _clean_string(prompt)
         clean_purpose = purpose if purpose in ALLOWED_PURPOSES else "notification"
+        allowed_for_purpose = ALLOWED_ACTIONS_BY_PURPOSE.get(clean_purpose, set())
         actions = [_normalize_action(action) for action in required_actions]
-        actions = [action for action in actions if action]
+        actions = [action for action in actions if action and action in allowed_for_purpose]
         if use_llm and self._llm_client is not None:
             return self._generate_with_llm(
                 prompt=clean_prompt,
@@ -73,7 +74,7 @@ class CommunicationTemplateDraftGenerator:
     ) -> dict[str, Any]:
         payload = self._llm_client.chat_json(
             system_prompt=(
-                "You generate FlowForge communication template JSON. Return JSON only with keys subject, "
+                "You generate Workflow Studio communication template JSON. Return JSON only with keys subject, "
                 "body_blocks, and plain_language_summary. Do not return HTML, markdown, scripts, URLs, or "
                 "custom actions. body_blocks may only use these types: heading, text, field_value, "
                 "field_list, divider, action_buttons. action_buttons may only include the required system "
@@ -110,9 +111,9 @@ class CommunicationTemplateDraftGenerator:
         return {
             "subject": subject,
             "body_blocks": blocks,
-            "plain_language_summary": "Drafted a structured FlowForge communication template using governed blocks and system actions.",
+            "plain_language_summary": "Drafted a structured Workflow Studio communication template using governed blocks and system actions.",
             "model_provider": "heuristic",
-            "model_name": "flowforge-local-communication-template-draft-generator",
+            "model_name": "workflow-studio-local-communication-template-draft-generator",
             "draft_source": "heuristic",
         }
 
@@ -150,23 +151,23 @@ def _default_subject(*, purpose: str) -> str:
     if purpose == "approval":
         return "Approval requested for {{workflow.name}}"
     if purpose == "alert":
-        return "FlowForge alert for {{workflow.name}}"
+        return "Workflow Studio alert for {{workflow.name}}"
     if purpose == "report":
-        return "FlowForge report for {{workflow.name}}"
-    return "FlowForge update for {{workflow.name}}"
+        return "Workflow Studio report for {{workflow.name}}"
+    return "Workflow Studio update for {{workflow.name}}"
 
 
 def _heuristic_blocks(*, purpose: str, required_actions: list[str]) -> list[dict[str, Any]]:
     if purpose in {"human_task", "approval"}:
-        actions = required_actions or (["approve", "reject", "open_task"] if purpose == "approval" else ["accept", "decline", "open_task"])
+        actions = required_actions or (["open_task"] if purpose == "approval" else ["accept", "decline", "open_task"])
         return [
             {"type": "heading", "content": "{{workflow.name}}"},
-            {"type": "text", "content": "Please review this FlowForge item for {{resource.display_name}}."},
+            {"type": "text", "content": "Please review this Workflow Studio item for {{resource.display_name}}."},
             {"type": "field_list", "fields": ["resource.display_name", "task.due_at", "run.id"]},
             {"type": "action_buttons", "actions": actions},
         ]
     return [
         {"type": "heading", "content": "{{workflow.name}}"},
-        {"type": "text", "content": "A FlowForge update is available for run {{run.id}}."},
+        {"type": "text", "content": "A Workflow Studio update is available for run {{run.id}}."},
         {"type": "field_list", "fields": ["workflow.name", "run.status"]},
     ]
