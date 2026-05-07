@@ -65,6 +65,17 @@ def _clean_string(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _clean_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    values: list[str] = []
+    for entry in value:
+        text = _clean_string(entry)
+        if text and text not in values:
+            values.append(text)
+    return values
+
+
 def _safe_node_type(value: Any) -> str:
     candidate = _clean_string(value)
     return candidate if candidate in SUPPORTED_NODE_TYPES else "intake"
@@ -148,6 +159,9 @@ def normalize_generated_workflow_graph(graph: dict[str, Any], *, fallback_graph:
         for key in ("label", "branch", "condition"):
             if _clean_string(raw_edge.get(key)):
                 edge[key] = _clean_string(raw_edge.get(key))
+        branches = _clean_string_list(raw_edge.get("branches"))
+        if branches:
+            edge["branches"] = branches
         edges.append(edge)
     normalized_graph: dict[str, Any] = {"nodes": nodes, "edges": edges}
     viewport = _normalize_viewport(graph.get("viewport")) or _normalize_viewport(fallback.get("viewport"))

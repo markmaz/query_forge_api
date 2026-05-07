@@ -136,12 +136,11 @@ class FlowForgeNodeExecutor:
     def _target_for_decision(self, *, outgoing_edges: list[dict[str, Any]], outcome: str | None) -> str | None:
         aliases = self._decision_aliases(outcome) if outcome else set()
         for edge in sorted(outgoing_edges, key=lambda row: str(row.get("id") or "")):
-            branch = self._edge_branch(edge)
-            if branch and branch in aliases:
+            if self._edge_branches(edge) & aliases:
                 target = str(edge.get("target") or "").strip()
                 return target or None
         for edge in sorted(outgoing_edges, key=lambda row: str(row.get("id") or "")):
-            if self._edge_branch(edge):
+            if self._edge_branches(edge):
                 continue
             target = str(edge.get("target") or "").strip()
             return target or None
@@ -174,9 +173,13 @@ class FlowForgeNodeExecutor:
         return normalized
 
     @classmethod
-    def _edge_branch(cls, edge: dict[str, Any]) -> str:
+    def _edge_branches(cls, edge: dict[str, Any]) -> set[str]:
         data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
-        return cls._normalize_branch(edge.get("branch") or edge.get("condition") or data.get("branch") or "")
+        values: list[Any] = [edge.get("branch"), edge.get("condition"), data.get("branch"), data.get("condition")]
+        for raw_list in (edge.get("branches"), data.get("branches")):
+            if isinstance(raw_list, list):
+                values.extend(raw_list)
+        return {normalized for value in values if (normalized := cls._normalize_branch(value))}
 
     @staticmethod
     def _normalize_branch(value: Any) -> str:

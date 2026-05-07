@@ -229,19 +229,20 @@ class FlowForgeWorkflowServiceMixin:
             unconfigured_count = 0
             for edge in outgoing_edges:
                 edge_id = str(edge.get("id") or "<unknown>")
-                branch = self._edge_branch(edge)
-                if not branch:
+                edge_branches = self._edge_branches(edge)
+                if not edge_branches:
                     unconfigured_count += 1
                     continue
-                if branch in branches:
-                    errors.append(
-                        f"Decision node '{node_id}' has duplicate branch '{branch}' on edges {branches[branch]} and {edge_id}."
-                    )
-                branches[branch] = edge_id
-                if outcomes and branch not in outcomes:
-                    warnings.append(
-                        f"Decision edge {edge_id} uses branch '{branch}' that is not listed in decision node '{node_id}' outcomes."
-                    )
+                for branch in sorted(edge_branches):
+                    if branch in branches:
+                        errors.append(
+                            f"Decision node '{node_id}' has duplicate branch '{branch}' on edges {branches[branch]} and {edge_id}."
+                        )
+                    branches[branch] = edge_id
+                    if outcomes and branch not in outcomes:
+                        warnings.append(
+                            f"Decision edge {edge_id} uses branch '{branch}' that is not listed in decision node '{node_id}' outcomes."
+                        )
 
             if len(outgoing_edges) > 1 and unconfigured_count:
                 warnings.append(f"Decision node '{node_id}' has {unconfigured_count} outgoing edge(s) without an outcome route.")
@@ -259,15 +260,17 @@ class FlowForgeWorkflowServiceMixin:
         }
 
     @staticmethod
-    def _edge_branch(edge: dict[str, Any]) -> str:
+    def _edge_branches(edge: dict[str, Any]) -> set[str]:
         data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
-        return (
-            str(edge.get("branch") or edge.get("condition") or data.get("branch") or "")
-            .strip()
-            .lower()
-            .replace(" ", "_")
-            .replace("-", "_")
-        )
+        values: list[Any] = [edge.get("branch"), edge.get("condition"), data.get("branch"), data.get("condition")]
+        for raw_list in (edge.get("branches"), data.get("branches")):
+            if isinstance(raw_list, list):
+                values.extend(raw_list)
+        return {
+            normalized
+            for value in values
+            if (normalized := str(value or "").strip().lower().replace(" ", "_").replace("-", "_"))
+        }
 
     def create_workflow_ai_draft(
         self,

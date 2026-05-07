@@ -191,13 +191,12 @@ class FlowForgeHumanResponseRuntime:
         action_key = self._normalize_action(action)
         aliases = self._action_aliases(action_key)
         for edge in sorted(edges, key=lambda row: str(row.get("id") or "")):
-            branch = self._edge_branch(edge)
-            if branch in aliases:
+            if self._edge_branches(edge) & aliases:
                 target = str(edge.get("target") or "").strip()
                 return target or None
         if action_key in {"accept", "approve"}:
             for edge in sorted(edges, key=lambda row: str(row.get("id") or "")):
-                if self._edge_branch(edge):
+                if self._edge_branches(edge):
                     continue
                 target = str(edge.get("target") or "").strip()
                 return target or None
@@ -261,9 +260,13 @@ class FlowForgeHumanResponseRuntime:
         ]
 
     @staticmethod
-    def _edge_branch(edge: dict[str, Any]) -> str:
+    def _edge_branches(edge: dict[str, Any]) -> set[str]:
         data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
-        return str(edge.get("branch") or edge.get("condition") or data.get("branch") or "").strip().lower()
+        values: list[Any] = [edge.get("branch"), edge.get("condition"), data.get("branch"), data.get("condition")]
+        for raw_list in (edge.get("branches"), data.get("branches")):
+            if isinstance(raw_list, list):
+                values.extend(raw_list)
+        return {str(value or "").strip().lower() for value in values if str(value or "").strip()}
 
     @staticmethod
     def _normalize_action(action: str) -> str:

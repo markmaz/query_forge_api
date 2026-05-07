@@ -165,7 +165,7 @@ def test_dispatcher_routes_decision_node_by_last_decision_outcome():
                 ],
                 "edges": [
                     {"id": "accepted", "source": "triage", "target": "assign", "branch": "accepted"},
-                    {"id": "declined", "source": "triage", "target": "decline", "branch": "declined"},
+                    {"id": "declined", "source": "triage", "target": "decline", "branches": ["declined", "timed_out"]},
                 ],
             }
         ),

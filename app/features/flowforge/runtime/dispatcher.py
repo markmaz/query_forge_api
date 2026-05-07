@@ -489,16 +489,23 @@ class FlowForgeRuntimeDispatcher:
         branch: str,
     ) -> dict[str, Any] | None:
         for edge in sorted(outgoing_edges, key=lambda row: str(row.get("id") or "")):
-            edge_branch = str(edge.get("branch") or edge.get("condition") or "").strip()
-            if edge_branch == branch:
+            if branch in FlowForgeRuntimeDispatcher._edge_branches(edge):
                 target = str(edge.get("target") or "").strip()
                 return nodes.get(target) if target else None
         for edge in sorted(outgoing_edges, key=lambda row: str(row.get("id") or "")):
-            edge_branch = str(edge.get("branch") or edge.get("condition") or "").strip()
-            if not edge_branch:
+            if not FlowForgeRuntimeDispatcher._edge_branches(edge):
                 target = str(edge.get("target") or "").strip()
                 return nodes.get(target) if target else None
         return None
+
+    @staticmethod
+    def _edge_branches(edge: dict[str, Any]) -> set[str]:
+        data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
+        values: list[Any] = [edge.get("branch"), edge.get("condition"), data.get("branch"), data.get("condition")]
+        for raw_list in (edge.get("branches"), data.get("branches")):
+            if isinstance(raw_list, list):
+                values.extend(raw_list)
+        return {str(value or "").strip() for value in values if str(value or "").strip()}
 
     @staticmethod
     def _first_node_id(graph: dict[str, Any]) -> str | None:

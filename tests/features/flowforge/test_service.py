@@ -1221,6 +1221,32 @@ def test_flowforge_validation_warns_for_unmapped_decision_outcomes_and_rejects_d
     assert "outcome 'timed_out' has no outgoing route" in " ".join(result["warnings"])
 
 
+def test_flowforge_validation_accepts_multiple_decision_outcomes_on_one_edge():
+    result = FlowForgeService().validate_graph(
+        graph={
+            "nodes": [
+                {
+                    "id": "decision",
+                    "type": "decision",
+                    "label": "Accepted?",
+                    "position": {"x": 0, "y": 0},
+                    "data": {"outcomes": ["accepted", "declined", "timed_out"]},
+                },
+                {"id": "assign", "type": "end", "label": "Assign", "position": {"x": 200, "y": 0}, "data": {}},
+                {"id": "capture", "type": "event_capture", "label": "Capture", "position": {"x": 200, "y": 120}, "data": {}},
+            ],
+            "edges": [
+                {"id": "accepted", "source": "decision", "target": "assign", "branch": "accepted"},
+                {"id": "not-accepted", "source": "decision", "target": "capture", "branches": ["declined", "timed_out"]},
+            ],
+        }
+    )
+
+    assert result["valid"] is True
+    assert result["errors"] == []
+    assert not any("has no outgoing route" in warning for warning in result["warnings"])
+
+
 def test_flowforge_validation_accepts_governed_data_movement_nodes():
     result = FlowForgeService().validate_graph(
         graph={

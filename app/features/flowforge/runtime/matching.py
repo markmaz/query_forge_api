@@ -171,16 +171,23 @@ class FlowForgeRuntimeMatchingExecutor:
     @staticmethod
     def _target_for_branch(*, outgoing_edges: list[dict[str, Any]], branch: str) -> str | None:
         for edge in sorted(outgoing_edges, key=lambda row: str(row.get("id") or "")):
-            edge_branch = str(edge.get("branch") or edge.get("condition") or "").strip()
-            if edge_branch == branch:
+            if branch in FlowForgeRuntimeMatchingExecutor._edge_branches(edge):
                 target = str(edge.get("target") or "").strip()
                 return target or None
         for edge in sorted(outgoing_edges, key=lambda row: str(row.get("id") or "")):
-            edge_branch = str(edge.get("branch") or edge.get("condition") or "").strip()
-            if not edge_branch:
+            if not FlowForgeRuntimeMatchingExecutor._edge_branches(edge):
                 target = str(edge.get("target") or "").strip()
                 return target or None
         return None
+
+    @staticmethod
+    def _edge_branches(edge: dict[str, Any]) -> set[str]:
+        data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
+        values: list[Any] = [edge.get("branch"), edge.get("condition"), data.get("branch"), data.get("condition")]
+        for raw_list in (edge.get("branches"), data.get("branches")):
+            if isinstance(raw_list, list):
+                values.extend(raw_list)
+        return {str(value or "").strip() for value in values if str(value or "").strip()}
 
     @staticmethod
     def _summary(*, result: dict[str, Any], run_mode: str) -> dict[str, Any]:
