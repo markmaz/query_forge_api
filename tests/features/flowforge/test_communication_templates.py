@@ -52,6 +52,23 @@ def test_communication_template_renderer_validates_and_renders_preview():
     assert "Anxiety" in preview["html"]
 
 
+def test_communication_template_renderer_validates_and_renders_image_blocks():
+    renderer = CommunicationTemplateRenderer()
+    template = _template(
+        body_blocks=[
+            {"type": "image", "src": "https://cdn.example.com/logo.png", "alt": "Clinic logo", "width": 180},
+            {"type": "text", "content": "Hello {{resource.display_name}}."},
+        ]
+    )
+
+    validation = renderer.validate(template=template, resource_fields={"resource.display_name"})
+    preview = renderer.render_preview(template=template, context={"resource": {"display_name": "Dr. Lane"}})
+
+    assert validation.valid is True
+    assert '<img src="https://cdn.example.com/logo.png" alt="Clinic logo" width="180"' in preview["html"]
+    assert "Hello Dr. Lane." in preview["html"]
+
+
 def test_communication_template_renderer_renders_runtime_action_links():
     renderer = CommunicationTemplateRenderer()
 

@@ -8,7 +8,7 @@ from typing import Any
 
 ALLOWED_CHANNELS = {"email"}
 ALLOWED_PURPOSES = {"human_task", "notification", "approval", "alert", "report"}
-ALLOWED_BLOCK_TYPES = {"heading", "text", "field_value", "field_list", "divider", "action_buttons"}
+ALLOWED_BLOCK_TYPES = {"heading", "text", "field_value", "field_list", "image", "divider", "action_buttons"}
 ALLOWED_ACTIONS = {"accept", "decline", "open_task"}
 ACTION_LABELS = {
     "accept": "Accept",
@@ -108,6 +108,19 @@ class CommunicationTemplateRenderer:
                     errors.append(f"body_blocks[{index}].fields must contain at least one field.")
                 else:
                     referenced_fields.update(str(field or "").strip() for field in fields if str(field or "").strip())
+            elif block_type == "image":
+                src = str(block.get("src") or "").strip()
+                alt = str(block.get("alt") or "").strip()
+                href = str(block.get("href") or "").strip()
+                if not src:
+                    errors.append(f"body_blocks[{index}].src is required.")
+                elif not self._safe_image_url(src):
+                    errors.append(f"body_blocks[{index}].src must be an http or https image URL.")
+                if href and not self._safe_link_url(href):
+                    errors.append(f"body_blocks[{index}].href must be an http or https URL.")
+                referenced_fields.update(self._fields_in_text(src))
+                referenced_fields.update(self._fields_in_text(alt))
+                referenced_fields.update(self._fields_in_text(href))
             elif block_type == "action_buttons":
                 actions = block.get("actions")
                 if not isinstance(actions, list) or not actions:
@@ -203,6 +216,20 @@ class CommunicationTemplateRenderer:
                         f"<li><strong>{html.escape(field_key)}:</strong> {html.escape(self._string_value(value))}</li>"
                     )
                 html_parts.append("<ul>" + "".join(items) + "</ul>")
+            elif block_type == "image":
+                src = self._render_text(str(block.get("src") or ""), context=context).strip()
+                if not src or not self._safe_image_url(src):
+                    continue
+                alt = self._render_text(str(block.get("alt") or ""), context=context).strip()
+                href = self._render_text(str(block.get("href") or ""), context=context).strip()
+                width = self._normalize_image_width(block.get("width"))
+                image = (
+                    f'<img src="{html.escape(src, quote=True)}" alt="{html.escape(alt, quote=True)}" '
+                    f'width="{width}" style="display:block;max-width:100%;height:auto;border:0;" />'
+                )
+                if href and self._safe_link_url(href):
+                    image = f'<a href="{html.escape(href, quote=True)}">{image}</a>'
+                html_parts.append(f'<p style="margin:0 0 16px 0;">{image}</p>')
             elif block_type == "divider":
                 html_parts.append("<hr>")
             elif block_type == "action_buttons":
@@ -256,6 +283,22 @@ class CommunicationTemplateRenderer:
             if action_key in ALLOWED_ACTIONS and url_value:
                 normalized[action_key] = url_value
         return normalized
+
+    @staticmethod
+    def _safe_image_url(value: str) -> bool:
+        return value.startswith(("https://", "http://")) or value.startswith("{{")
+
+    @staticmethod
+    def _safe_link_url(value: str) -> bool:
+        return value.startswith(("https://", "http://")) or value.startswith("{{")
+
+    @staticmethod
+    def _normalize_image_width(value: Any) -> int:
+        try:
+            width = int(value or 160)
+        except (TypeError, ValueError):
+            width = 160
+        return max(48, min(width, 640))
 
     @staticmethod
     def _fields_in_text(value: str) -> set[str]:

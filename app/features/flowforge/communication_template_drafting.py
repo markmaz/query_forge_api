@@ -77,7 +77,8 @@ class CommunicationTemplateDraftGenerator:
                 "You generate Workflow Studio communication template JSON. Return JSON only with keys subject, "
                 "body_blocks, and plain_language_summary. Do not return HTML, markdown, scripts, URLs, or "
                 "custom actions. body_blocks may only use these types: heading, text, field_value, "
-                "field_list, divider, action_buttons. action_buttons may only include the required system "
+                "field_list, image, divider, action_buttons. Image blocks must use keys src, alt, width, and optional href. "
+                "action_buttons may only include the required system "
                 f"actions: {required_actions}. Merge fields must be written as {{field.path}} inside text."
             ),
             user_prompt=(
@@ -134,6 +135,20 @@ def _normalize_block(block: dict[str, Any], *, required_actions: list[str]) -> d
         clean_fields = [_clean_string(field) for field in fields] if isinstance(fields, list) else []
         clean_fields = [field for field in clean_fields if field]
         return {"type": "field_list", "fields": clean_fields} if clean_fields else None
+    if block_type == "image":
+        src = _clean_string(block.get("src"))
+        if not src:
+            return None
+        alt = _clean_string(block.get("alt"))
+        href = _clean_string(block.get("href"))
+        width = _clean_string(block.get("width"))
+        return {
+            "type": "image",
+            "src": src,
+            **({"alt": alt} if alt else {}),
+            **({"href": href} if href else {}),
+            **({"width": width} if width else {}),
+        }
     if block_type == "divider":
         return {"type": "divider"}
     if block_type == "action_buttons":
