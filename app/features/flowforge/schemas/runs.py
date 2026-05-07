@@ -97,6 +97,17 @@ def register_run_models(namespace):
             "tasks": fields.List(fields.Nested(human_task), required=True),
         },
     )
+    human_task_queue = namespace.model(
+        "FlowForgeHumanTaskQueue",
+        {
+            "workspace_id": fields.String(required=True),
+            "task_type": fields.String(required=False),
+            "status": fields.String(required=False),
+            "limit": fields.Integer(required=True),
+            "offset": fields.Integer(required=True),
+            "tasks": fields.List(fields.Nested(human_task), required=True),
+        },
+    )
     signed_action_create_request = namespace.model(
         "FlowForgeSignedActionCreateRequest",
         {
@@ -224,6 +235,7 @@ def register_run_models(namespace):
         "run_note_request": run_note_request,
         "human_task": human_task,
         "human_task_list": human_task_list,
+        "human_task_queue": human_task_queue,
         "signed_action_create_request": signed_action_create_request,
         "signed_action_create_response": signed_action_create_response,
         "approval_decision_request": approval_decision_request,

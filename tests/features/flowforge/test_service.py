@@ -569,7 +569,24 @@ class _RuntimeRepo:
                 "due_at": "2026-05-05 12:00:00",
                 "completed_at": None,
                 "response_json": {"allowed_actions": ["accept", "decline"]},
-            }
+            },
+            {
+                "id": 302,
+                "workspace_id": "ws-1",
+                "run_id": 90,
+                "task_type": "approval",
+                "resource_set_id": None,
+                "source_record_key": None,
+                "status": "waiting",
+                "assigned_to_principal_type": "group",
+                "assigned_to_principal_id": "flowforge:operator",
+                "due_at": None,
+                "completed_at": None,
+                "response_json": {
+                    "allowed_actions": ["approve", "decline"],
+                    "approval": {"approval_reason": "Review export.", "destination_key": "ops-export"},
+                },
+            },
         ]
         self.notifications = [
             {
@@ -613,6 +630,15 @@ class _RuntimeRepo:
     def list_run_human_tasks(self, *, workspace_id: str, run_id: int, limit: int):
         del workspace_id
         return [row for row in self.human_tasks if row["run_id"] == run_id][:limit]
+
+    def list_human_tasks(self, *, workspace_id: str, task_type: str | None, statuses: list[str] | None, limit: int, offset: int):
+        del workspace_id
+        rows = self.human_tasks
+        if task_type:
+            rows = [row for row in rows if row["task_type"] == task_type]
+        if statuses:
+            rows = [row for row in rows if row["status"] in statuses]
+        return rows[offset : offset + limit]
 
     def get_human_task(self, *, workspace_id: str, human_task_id: int):
         del workspace_id
@@ -1903,6 +1929,26 @@ def test_flowforge_service_lists_run_human_tasks():
     assert result["tasks"][0]["id"] == 301
     assert result["tasks"][0]["task_type"] == "offer"
     assert result["tasks"][0]["response"] == {"allowed_actions": ["accept", "decline"]}
+
+
+def test_flowforge_service_lists_operator_approval_tasks():
+    service = FlowForgeService(runtime_repository=_RuntimeRepo())
+
+    result = service.list_human_tasks(
+        workspace_id="ws-1",
+        task_type="approval",
+        status="pending,waiting",
+        limit=5000,
+        offset=-1,
+    )
+
+    assert result["workspace_id"] == "ws-1"
+    assert result["task_type"] == "approval"
+    assert result["status"] == "pending,waiting"
+    assert result["limit"] == 500
+    assert result["offset"] == 0
+    assert result["tasks"][0]["id"] == 302
+    assert result["tasks"][0]["response"]["approval"]["destination_key"] == "ops-export"
 
 
 def test_flowforge_service_rejects_human_task_list_for_missing_run():

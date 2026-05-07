@@ -8,7 +8,7 @@ from flask_restx import Resource
 from app.decorators.rbac import require_access
 from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
-from app.features.flowforge.routes.common import _actor_user_id, _service, _workspace_id, flowforge_ns, models
+from app.features.flowforge.routes.common import _actor_user_id, _int_query_arg, _service, _workspace_id, flowforge_ns, models
 from app.services.auth.rate_limit_service import RateLimitService
 
 
@@ -22,6 +22,46 @@ def _enforce_signed_action_rate_limit(*, token: str, action: str) -> None:
         window_s=60,
         message="Too many signed action attempts. Please try again later.",
     )
+
+
+@flowforge_ns.route("/human-tasks")
+class FlowForgeHumanTaskQueue(Resource):
+    @flowforge_ns.doc(
+        summary="List FlowForge human tasks for operator queues",
+        description=(
+            "Returns workspace-scoped human tasks independent of run status. This is the operator queue "
+            "surface for pending approval gates and other human review work. Use task_type=approval and "
+            "status=pending,waiting to find approval gates that need a decision."
+        ),
+        params={
+            "task_type": "Optional exact task type filter, such as approval or offer.",
+            "status": "Optional comma-separated task statuses, such as pending,waiting.",
+            "limit": "Maximum tasks to return. Defaults to 100 and is capped at 500.",
+            "offset": "Zero-based task offset. Defaults to 0.",
+        },
+        responses={
+            200: "Human tasks returned.",
+            401: "Authentication required.",
+            403: "FlowForge operator access required.",
+        },
+    )
+    @flowforge_ns.marshal_with(models["human_task_queue"])
+    @token_required
+    @require_access("flowforge", role="operator")
+    def get(self):
+        try:
+            return (
+                _service().list_human_tasks(
+                    workspace_id=_workspace_id(),
+                    task_type=request.args.get("task_type"),
+                    status=request.args.get("status"),
+                    limit=_int_query_arg("limit", 100),
+                    offset=_int_query_arg("offset", 0),
+                ),
+                200,
+            )
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
 
 
 @flowforge_ns.route("/human-tasks/<int:human_task_id>/signed-actions")

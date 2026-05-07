@@ -108,6 +108,49 @@ class FlowForgeRuntimeHumanTaskRepositoryMixin:
         )
         return [self._decode_human_task(row) for row in rows]
 
+    def list_human_tasks(
+        self,
+        *,
+        workspace_id: str,
+        task_type: str | None,
+        statuses: list[str] | None,
+        limit: int,
+        offset: int,
+    ) -> list[dict[str, Any]]:
+        where_parts = ["workspace_id = :workspace_id"]
+        params: dict[str, Any] = {
+            "workspace_id": str(workspace_id or "").strip(),
+            "limit": int(limit),
+            "offset": int(offset),
+        }
+        if task_type:
+            where_parts.append("task_type = :task_type")
+            params["task_type"] = str(task_type or "").strip()
+        safe_statuses = [str(status or "").strip() for status in (statuses or []) if str(status or "").strip()]
+        if safe_statuses:
+            placeholders = []
+            for index, status in enumerate(safe_statuses):
+                key = f"status_{index}"
+                placeholders.append(f":{key}")
+                params[key] = status
+            where_parts.append(f"status IN ({', '.join(placeholders)})")
+        rows = self._sql.execute_query_mappings(
+            f"""
+            SELECT *
+            FROM flowforge_human_tasks
+            WHERE {' AND '.join(where_parts)}
+            ORDER BY
+              CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,
+              due_at ASC,
+              created_at ASC,
+              id ASC
+            LIMIT :limit
+            OFFSET :offset
+            """,
+            params,
+        )
+        return [self._decode_human_task(row) for row in rows]
+
     def list_due_human_tasks(self, *, limit: int) -> list[dict[str, Any]]:
         rows = self._sql.execute_query_mappings(
             """

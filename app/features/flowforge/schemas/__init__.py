@@ -36,6 +36,7 @@ def register_models(namespace):
         "workflow_run_event_list": models["run_event_list"],
         "workflow_run_note_request": models["run_note_request"],
         "human_task_list": models["human_task_list"],
+        "human_task_queue": models["human_task_queue"],
         "signed_action_create_request": models["signed_action_create_request"],
         "signed_action_create_response": models["signed_action_create_response"],
         "approval_decision_request": models["approval_decision_request"],

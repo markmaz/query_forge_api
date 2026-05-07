@@ -454,6 +454,34 @@ class _RunService:
             ],
         }
 
+    def list_human_tasks(self, *, workspace_id: str, task_type: str | None, status: str | None, limit: int, offset: int):
+        return {
+            "workspace_id": workspace_id,
+            "task_type": task_type,
+            "status": status,
+            "limit": limit,
+            "offset": offset,
+            "tasks": [
+                {
+                    "id": 401,
+                    "workspace_id": workspace_id,
+                    "run_id": 90,
+                    "task_type": "approval",
+                    "resource_set_id": None,
+                    "source_record_key": None,
+                    "status": "waiting",
+                    "assigned_to_principal_type": "group",
+                    "assigned_to_principal_id": "flowforge:operator",
+                    "due_at": None,
+                    "completed_at": None,
+                    "response": {
+                        "allowed_actions": ["approve", "decline"],
+                        "approval": {"approval_reason": "Review export.", "destination_key": "ops-export"},
+                    },
+                }
+            ],
+        }
+
     def create_signed_action_token(self, *, workspace_id: str, human_task_id: int, payload, actor_user_id: str):
         self.signed_action_payload = {
             "workspace_id": workspace_id,
@@ -972,6 +1000,21 @@ def test_flowforge_run_human_tasks_route_lists_tasks(client, monkeypatch):
     assert resp.json["run_id"] == 90
     assert resp.json["tasks"][0]["task_type"] == "offer"
     assert resp.json["tasks"][0]["response"] == {"allowed_actions": ["accept", "decline"]}
+
+
+def test_flowforge_human_task_queue_route_lists_pending_approvals(client, monkeypatch):
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: _RunService())
+
+    resp = client.get(
+        "/api/v1/flowforge/human-tasks?task_type=approval&status=pending,waiting&limit=10&offset=0",
+        headers=_headers(monkeypatch, roles={"flowforge:operator"}),
+    )
+
+    assert resp.status_code == 200
+    assert resp.json["task_type"] == "approval"
+    assert resp.json["status"] == "pending,waiting"
+    assert resp.json["tasks"][0]["task_type"] == "approval"
+    assert resp.json["tasks"][0]["response"]["approval"]["destination_key"] == "ops-export"
 
 
 def test_flowforge_human_task_signed_action_route_creates_token(client, monkeypatch):

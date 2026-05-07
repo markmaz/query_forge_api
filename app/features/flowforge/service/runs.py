@@ -71,6 +71,38 @@ class FlowForgeRunServiceMixin:
             "tasks": [self._serialize_human_task(row) for row in rows],
         }
 
+    def list_human_tasks(
+        self,
+        *,
+        workspace_id: str,
+        task_type: str | None,
+        status: str | None,
+        limit: int,
+        offset: int,
+    ) -> dict[str, Any]:
+        safe_limit = min(max(int(limit or 100), 1), 500)
+        safe_offset = max(int(offset or 0), 0)
+        statuses = [
+            entry.strip()
+            for entry in str(status or "").split(",")
+            if entry.strip()
+        ]
+        rows = self._runtime_repository.list_human_tasks(
+            workspace_id=workspace_id,
+            task_type=self._optional_string(task_type),
+            statuses=statuses or None,
+            limit=safe_limit,
+            offset=safe_offset,
+        )
+        return {
+            "workspace_id": workspace_id,
+            "task_type": self._optional_string(task_type),
+            "status": ",".join(statuses) if statuses else None,
+            "limit": safe_limit,
+            "offset": safe_offset,
+            "tasks": [self._serialize_human_task(row) for row in rows],
+        }
+
     def add_run_note(
         self,
         *,
