@@ -1517,6 +1517,32 @@ class _IntegrationService:
             "settings": {},
         }
 
+    def create_file_watch_integration(self, *, workspace_id: str, payload, actor_user_id: str):
+        self.created_payload = {
+            "workspace_id": workspace_id,
+            "payload": payload,
+            "actor_user_id": actor_user_id,
+        }
+        return {
+            "id": 13,
+            "workspace_id": workspace_id,
+            "provider": "file_watch",
+            "integration_key": payload["integration_key"],
+            "display_name": payload["display_name"],
+            "external_form_id": None,
+            "enabled": True,
+            "mode": payload.get("mode", "production"),
+            "webhook_public_id": "fffile_public",
+            "webhook_path": None,
+            "webhook_url": None,
+            "webhook_secret": None,
+            "field_mapping": payload.get("field_mapping", {}),
+            "source_events": payload.get("source_events", []),
+            "source_fields": payload.get("source_fields", []),
+            "test_recipient_overrides": [],
+            "settings": {},
+        }
+
     def list_integration_triggers(self, *, workspace_id: str, integration_config_id: int):
         return [
             {
@@ -1700,6 +1726,34 @@ def test_flowforge_webhook_integration_route_creates_config(client, monkeypatch)
     assert resp.json["provider"] == "webhook"
     assert resp.json["webhook_path"] == "/api/v1/flowforge/webhooks/generic/ffw_public"
     assert resp.json["webhook_secret"] == "ffweb_secret"
+    assert service.created_payload == {
+        "workspace_id": "ws-1",
+        "payload": payload,
+        "actor_user_id": "user-1",
+    }
+
+
+def test_flowforge_file_watch_integration_route_creates_config(client, monkeypatch):
+    service = _IntegrationService()
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: service)
+
+    payload = {
+        "integration_key": "sftp-dropbox",
+        "display_name": "SFTP Dropbox",
+        "mode": "test",
+        "source_events": [{"event_key": "file_created", "display_name": "File Created"}],
+        "source_fields": [{"path": "file.name", "label": "File Name", "type": "text"}],
+    }
+    resp = client.post(
+        "/api/v1/flowforge/integrations/file-watch",
+        headers=_headers(monkeypatch, roles={"flowforge:admin"}),
+        json=payload,
+    )
+
+    assert resp.status_code == 201
+    assert resp.json["provider"] == "file_watch"
+    assert resp.json["webhook_path"] is None
+    assert resp.json["webhook_secret"] is None
     assert service.created_payload == {
         "workspace_id": "ws-1",
         "payload": payload,

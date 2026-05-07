@@ -112,6 +112,40 @@ class FlowForgeGenericWebhookIntegrationCreate(Resource):
             return exc.to_dict(), exc.status_code
 
 
+@flowforge_ns.route("/integrations/file-watch")
+class FlowForgeFileWatchIntegrationCreate(Resource):
+    @flowforge_ns.doc(
+        summary="Create a file watch integration",
+        description=(
+            "Creates a workspace-scoped file watch integration catalog entry. File watch integrations define "
+            "the allowed file source key, actions/events, and source fields available to workflow file watch "
+            "trigger nodes. They do not create a public webhook endpoint."
+        ),
+        responses={
+            201: "File watch integration created.",
+            400: "Invalid integration payload.",
+            401: "Authentication required.",
+            403: "FlowForge designer access required.",
+        },
+    )
+    @flowforge_ns.marshal_with(models["integration_config_create_response"])
+    @token_required
+    @require_access("flowforge", role="designer")
+    def post(self):
+        try:
+            payload = request.get_json(silent=True) or {}
+            return (
+                _service().create_file_watch_integration(
+                    workspace_id=_workspace_id(),
+                    payload=payload if isinstance(payload, dict) else {},
+                    actor_user_id=_actor_user_id(),
+                ),
+                201,
+            )
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+
+
 @flowforge_ns.route("/integrations/<int:integration_config_id>/triggers")
 @flowforge_ns.param("integration_config_id", "Integration config id whose workflow triggers should be managed.")
 class FlowForgeIntegrationTriggerList(Resource):

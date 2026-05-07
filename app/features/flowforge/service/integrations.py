@@ -50,6 +50,45 @@ class FlowForgeIntegrationServiceMixin:
             public_id_prefix="ffw_",
         )
 
+    def create_file_watch_integration(
+        self,
+        *,
+        workspace_id: str,
+        payload: dict[str, Any],
+        actor_user_id: str,
+    ) -> dict[str, Any]:
+        integration_key = str(payload.get("integration_key") or "").strip()
+        display_name = str(payload.get("display_name") or "").strip()
+        if not integration_key:
+            raise ForgeError("integration_key is required.", status_code=400)
+        if not display_name:
+            raise ForgeError("display_name is required.", status_code=400)
+        mode = str(payload.get("mode") or "production").strip()
+        if mode not in {"production", "test"}:
+            raise ForgeError("mode must be production or test.", status_code=400)
+        settings = dict(payload.get("settings") if isinstance(payload.get("settings"), dict) else {})
+        settings["source_events"] = self._normalize_source_events(payload.get("source_events"))
+        settings["source_fields"] = self._normalize_source_fields(payload.get("source_fields"))
+        settings["watch_config"] = dict(payload.get("watch_config") if isinstance(payload.get("watch_config"), dict) else {})
+        public_id = "fffile_" + secrets.token_urlsafe(18)
+        row = self._integration_repository.create_integration_config(
+            workspace_id=workspace_id,
+            provider="file_watch",
+            integration_key=integration_key,
+            display_name=display_name,
+            external_form_id=None,
+            mode=mode,
+            webhook_public_id=public_id,
+            secret_hash=self._hash_webhook_secret(public_id),
+            field_mapping=payload.get("field_mapping") if isinstance(payload.get("field_mapping"), dict) else {},
+            test_recipient_overrides=(
+                payload.get("test_recipient_overrides") if isinstance(payload.get("test_recipient_overrides"), list) else []
+            ),
+            settings=settings,
+            created_by=str(actor_user_id or "").strip() or None,
+        )
+        return self._serialize_integration_config(row, include_secret=True)
+
     def _create_webhook_backed_integration(
         self,
         *,
@@ -225,6 +264,8 @@ class FlowForgeIntegrationServiceMixin:
 
     def _integration_webhook_path(self, *, provider: str, webhook_public_id: str) -> str | None:
         if not webhook_public_id:
+            return None
+        if provider == "file_watch":
             return None
         provider_path = {
             "jotform": "jotform",

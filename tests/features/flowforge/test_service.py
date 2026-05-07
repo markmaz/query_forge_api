@@ -1476,6 +1476,46 @@ def test_flowforge_service_creates_webhook_integration_with_one_time_secret():
     assert len(repo.created_config["secret_hash"]) == 64
 
 
+def test_flowforge_service_creates_file_watch_integration_without_webhook_endpoint():
+    repo = _IntegrationRepo()
+    service = FlowForgeService(
+        resource_repository=_ResourceRepo(),
+        matching_repository=_MatchingRepo(),
+        integration_repository=repo,
+    )
+
+    result = service.create_file_watch_integration(
+        workspace_id="ws-1",
+        payload={
+            "integration_key": "sftp-dropbox",
+            "display_name": "SFTP Dropbox",
+            "mode": "test",
+            "source_events": [
+                {"event_key": "file_created", "display_name": "File Created"},
+                {"event_key": "file_updated", "display_name": "File Updated"},
+            ],
+            "source_fields": [
+                {"path": "file.name", "label": "File Name", "type": "text", "required": True},
+                {"path": "file.size_bytes", "label": "Size", "type": "number"},
+            ],
+        },
+        actor_user_id="user-1",
+    )
+
+    assert result["id"] == 11
+    assert result["provider"] == "file_watch"
+    assert result["webhook_path"] is None
+    assert result["webhook_url"] is None
+    assert result["webhook_secret"] is None
+    assert repo.created_config["provider"] == "file_watch"
+    assert repo.created_config["webhook_public_id"].startswith("fffile_")
+    assert repo.created_config["created_by"] == "user-1"
+    assert result["source_events"] == [
+        {"event_key": "file_created", "display_name": "File Created", "description": None},
+        {"event_key": "file_updated", "display_name": "File Updated", "description": None},
+    ]
+
+
 def test_flowforge_service_rejects_jotform_integration_without_key():
     service = FlowForgeService(
         resource_repository=_ResourceRepo(),
