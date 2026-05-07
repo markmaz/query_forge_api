@@ -150,6 +150,61 @@ def test_dispatcher_advances_simple_run_to_completion_with_idempotent_events():
     assert len(runtime_repo.events_by_key) == 10
 
 
+def test_dispatcher_creates_pending_notifications_for_notification_nodes():
+    runtime_repo = _RuntimeRepo()
+    runtime_repo.run["run_context_json"] = {
+        "communication_context": {
+            "intake": {
+                "requested_service": "Anxiety therapy",
+                "preferred_days": "Monday",
+            }
+        }
+    }
+    dispatcher = FlowForgeRuntimeDispatcher(
+        runtime_repository=runtime_repo,
+        workflow_repository=_WorkflowRepo(
+            graph={
+                "nodes": [
+                    {"id": "intake", "type": "intake"},
+                    {
+                        "id": "notify",
+                        "type": "notification",
+                        "data": {
+                            "recipients": ["ops@example.com", "lead@example.com", "ops@example.com"],
+                            "communication_template_key": "flowforge.custom_notification",
+                            "reason": "Route needs operator review.",
+                        },
+                    },
+                    {"id": "done", "type": "end"},
+                ],
+                "edges": [
+                    {"id": "e1", "source": "intake", "target": "notify"},
+                    {"id": "e2", "source": "notify", "target": "done"},
+                ],
+            }
+        ),
+    )
+
+    result = dispatcher.dispatch_run(workspace_id="ws-1", run_id=101)
+
+    assert result["status"] == "completed"
+    assert [notification["recipient"] for notification in runtime_repo.notifications] == [
+        "ops@example.com",
+        "lead@example.com",
+    ]
+    assert runtime_repo.notifications[0]["template_key"] == "flowforge.custom_notification"
+    assert runtime_repo.notifications[0]["human_task_id"] is None
+    assert runtime_repo.notifications[0]["idempotency_key"] == "run:101:notification:notify:ops@example.com"
+    assert runtime_repo.notifications[0]["payload_summary"]["reason"] == "Route needs operator review."
+    assert runtime_repo.notifications[0]["payload_summary"]["intake"] == {
+        "requested_service": "Anxiety therapy",
+        "preferred_days": "Monday",
+    }
+    completed_event = runtime_repo.events_by_key["flowforge:run:101:node:notify:completed"]
+    assert completed_event["event_payload"]["notification_ids"] == [1100, 1101]
+    assert completed_event["event_payload"]["recipient_count"] == 2
+
+
 def test_dispatcher_pauses_wait_node_without_completing_run():
     runtime_repo = _RuntimeRepo()
     dispatcher = FlowForgeRuntimeDispatcher(

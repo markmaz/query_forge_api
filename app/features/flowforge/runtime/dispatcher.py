@@ -19,6 +19,7 @@ from app.features.flowforge.runtime.data_import import FlowForgeImportExecutor
 from app.features.flowforge.runtime.export import FlowForgeExportExecutor
 from app.features.flowforge.runtime.map_transform import FlowForgeMapTransformExecutor
 from app.features.flowforge.runtime.matching import FlowForgeRuntimeMatchingExecutor
+from app.features.flowforge.runtime.notification_node import FlowForgeNotificationNodeExecutor
 from app.features.flowforge.runtime.node_executor import (
     FlowForgeNodeExecutionError,
     FlowForgeNodeExecutor,
@@ -44,6 +45,7 @@ class FlowForgeRuntimeDispatcher:
         export_executor: FlowForgeExportExecutor | None = None,
         import_executor: FlowForgeImportExecutor | None = None,
         approval_executor: FlowForgeApprovalGateExecutor | None = None,
+        notification_node_executor: FlowForgeNotificationNodeExecutor | None = None,
         max_steps: int = 50,
     ) -> None:
         self._runtime_repository = runtime_repository or FlowForgeRuntimeRepository()
@@ -77,6 +79,9 @@ class FlowForgeRuntimeDispatcher:
         self._approval_executor = approval_executor or FlowForgeApprovalGateExecutor(
             runtime_repository=self._runtime_repository,
             data_movement_repository=self._data_movement_repository,
+        )
+        self._notification_node_executor = notification_node_executor or FlowForgeNotificationNodeExecutor(
+            runtime_repository=self._runtime_repository,
         )
         self._max_steps = max(1, int(max_steps or 50))
 
@@ -227,6 +232,16 @@ class FlowForgeRuntimeDispatcher:
                         workspace_id=workspace_id,
                         run_id=run_id,
                         node=node,
+                        run_context=run_context
+                        if isinstance(run_context, dict)
+                        else {},
+                    )
+                elif str(node.get("type") or "").strip() == "notification":
+                    result = self._notification_node_executor.execute(
+                        workspace_id=workspace_id,
+                        run_id=run_id,
+                        node=node,
+                        outgoing_edges=outgoing_edges,
                         run_context=run_context
                         if isinstance(run_context, dict)
                         else {},
