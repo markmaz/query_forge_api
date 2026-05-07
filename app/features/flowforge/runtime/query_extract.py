@@ -226,6 +226,15 @@ class FlowForgeQueryExtractExecutor:
 
     def _preview_limit(self, value: Any) -> int:
         raw_limit = self._default_preview_limit if value in (None, "") else value
+        if isinstance(raw_limit, str) and raw_limit.strip().lower() in {
+            "max",
+            "maximum",
+        }:
+            if self._max_preview_limit <= 0:
+                raise FlowForgeNodeExecutionError(
+                    "query_extract preview_limit=max requires FLOWFORGE_QUERY_EXTRACT_MAX_LIMIT to be configured."
+                )
+            return self._max_preview_limit
         try:
             limit = int(raw_limit)
         except (TypeError, ValueError):

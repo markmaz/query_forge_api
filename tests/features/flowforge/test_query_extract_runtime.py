@@ -138,6 +138,43 @@ def test_query_extract_executor_uses_configurable_default_and_max_limits():
 
     assert resolver.calls[1]["preview_limit"] == 250
 
+    executor.execute(
+        workspace_id="ws-1",
+        run_id=92,
+        node={
+            "id": "extract",
+            "type": "query_extract",
+            "data": {"saved_query_id": "saved-1", "preview_limit": "max"},
+        },
+        outgoing_edges=[],
+        run_context={},
+    )
+
+    assert resolver.calls[2]["preview_limit"] == 250
+
+
+def test_query_extract_executor_rejects_max_without_configured_limit():
+    executor = FlowForgeQueryExtractExecutor(
+        data_movement_repository=_DataMovementRepo(),
+        resolver=_Resolver(),
+        max_preview_limit=0,
+    )
+
+    with pytest.raises(FlowForgeNodeExecutionError) as exc:
+        executor.execute(
+            workspace_id="ws-1",
+            run_id=90,
+            node={
+                "id": "extract",
+                "type": "query_extract",
+                "data": {"saved_query_id": "saved-1", "preview_limit": "max"},
+            },
+            outgoing_edges=[],
+            run_context={},
+        )
+
+    assert "FLOWFORGE_QUERY_EXTRACT_MAX_LIMIT" in str(exc.value)
+
 
 def test_query_extract_executor_rejects_raw_sql_fields_before_resolution():
     data_repo = _DataMovementRepo()
