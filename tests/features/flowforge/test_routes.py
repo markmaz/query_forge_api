@@ -1214,6 +1214,7 @@ def test_flowforge_workflow_authoring_routes_create_definition_and_version(clien
             }
         ],
         "edges": [],
+        "viewport": {"x": -220, "y": -110, "zoom": 0.62},
     }
 
     created = client.post(
@@ -1233,8 +1234,10 @@ def test_flowforge_workflow_authoring_routes_create_definition_and_version(clien
     assert created.json["graph"]["nodes"][0]["id"] == "intake"
     assert created.json["graph"]["nodes"][0]["label"] == "Patient Intake"
     assert created.json["graph"]["edges"] == []
+    assert created.json["graph"]["viewport"] == {"x": -220, "y": -110, "zoom": 0.62}
     assert version.status_code == 201
     assert version.json["version_number"] == 2
+    assert version.json["graph"]["viewport"] == {"x": -220, "y": -110, "zoom": 0.62}
 
 
 def test_flowforge_workflow_ai_draft_route_uses_workspace_llm_path(client, monkeypatch):

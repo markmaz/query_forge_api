@@ -34,6 +34,7 @@ def register_workflow_models(namespace):
         {
             "nodes": fields.List(fields.Nested(workflow_node), required=True),
             "edges": fields.List(fields.Nested(workflow_edge), required=True),
+            "viewport": fields.Raw(required=False, description="Optional React Flow viewport with x, y, and zoom."),
         },
     )
     workflow_definition = namespace.model(

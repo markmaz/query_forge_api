@@ -1065,6 +1065,7 @@ def test_flowforge_service_creates_new_workflow_draft_version():
                     {"id": "intake", "type": "intake", "data": {"source": "intake-form", "event": "intake_submitted"}}
                 ],
                 "edges": [],
+                "viewport": {"x": -220, "y": -110, "zoom": 0.62},
             }
         },
         actor_user_id="user-1",
@@ -1072,6 +1073,7 @@ def test_flowforge_service_creates_new_workflow_draft_version():
 
     assert result["id"] == 45
     assert result["version_number"] == 2
+    assert result["graph"]["viewport"] == {"x": -220, "y": -110, "zoom": 0.62}
     assert repo.current_draft["version_id"] == 45
 
 
@@ -1115,6 +1117,7 @@ def test_flowforge_service_creates_workflow_ai_draft_through_workspace_llm():
                     {"id": "intake", "type": "intake", "data": {"source": "intake-form", "event": "intake_submitted"}}
                 ],
                 "edges": [],
+                "viewport": {"x": -180, "y": -90, "zoom": 0.7},
             },
         },
         actor_user_id="user-1",
@@ -1126,6 +1129,7 @@ def test_flowforge_service_creates_workflow_ai_draft_through_workspace_llm():
     assert result["model_name"] == "workflow-drafter"
     assert result["plain_language_summary"] == "Added an approval gate after intake."
     assert result["graph"]["nodes"][1]["type"] == "approval"
+    assert result["graph"]["viewport"] == {"x": -180, "y": -90, "zoom": 0.7}
     assert result["validation_status"] == "invalid"
     assert "requires a configured source integration" in result["validation_result"]["errors"][0]
 

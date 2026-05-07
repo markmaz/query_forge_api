@@ -86,6 +86,18 @@ def _position_for(index: int) -> dict[str, int]:
     return {"x": 120 + (index % 4) * 240, "y": 140 + (index // 4) * 170}
 
 
+def _normalize_viewport(value: Any) -> dict[str, float] | None:
+    if not isinstance(value, dict):
+        return None
+    try:
+        x = round(float(value.get("x") or 0))
+        y = round(float(value.get("y") or 0))
+        zoom = round(float(value.get("zoom") or 1), 3)
+    except (TypeError, ValueError):
+        return None
+    return {"x": x, "y": y, "zoom": max(0.35, min(1.65, zoom))}
+
+
 def normalize_generated_workflow_graph(graph: dict[str, Any], *, fallback_graph: dict[str, Any] | None = None) -> dict[str, Any]:
     fallback = fallback_graph if isinstance(fallback_graph, dict) else {"nodes": [], "edges": []}
     source_nodes = graph.get("nodes") if isinstance(graph.get("nodes"), list) else fallback.get("nodes", [])
@@ -138,7 +150,11 @@ def normalize_generated_workflow_graph(graph: dict[str, Any], *, fallback_graph:
             if _clean_string(raw_edge.get(key)):
                 edge[key] = _clean_string(raw_edge.get(key))
         edges.append(edge)
-    return {"nodes": nodes, "edges": edges}
+    normalized_graph: dict[str, Any] = {"nodes": nodes, "edges": edges}
+    viewport = _normalize_viewport(graph.get("viewport")) or _normalize_viewport(fallback.get("viewport"))
+    if viewport:
+        normalized_graph["viewport"] = viewport
+    return normalized_graph
 
 
 class WorkflowGraphDraftGenerator:

@@ -32,6 +32,12 @@ class WorkflowPosition(TypedDict):
     y: int
 
 
+class WorkflowViewport(TypedDict):
+    x: int
+    y: int
+    zoom: float
+
+
 class WorkflowNode(TypedDict):
     id: str
     type: WorkflowNodeType
@@ -47,9 +53,13 @@ class WorkflowEdge(TypedDict, total=False):
     label: str
 
 
-class WorkflowGraph(TypedDict):
+class WorkflowGraphRequired(TypedDict):
     nodes: list[WorkflowNode]
     edges: list[WorkflowEdge]
+
+
+class WorkflowGraph(WorkflowGraphRequired, total=False):
+    viewport: WorkflowViewport
 
 
 class WorkflowDefinition(TypedDict):
