@@ -898,22 +898,25 @@ class _FakeFlowForgeRuleDraftingLLM:
         }
 
 
-def test_flowforge_service_lists_builtin_therapist_routing_starter_workflow():
-    workflows = FlowForgeService().list_definitions(workspace_id="ws-1")
-
-    assert workflows[0]["id"] == "therapist-routing"
-    assert workflows[0]["name"] == "Therapist Intake Routing"
-    assert any(node["id"] == "match" for node in workflows[0]["graph"]["nodes"])
+class _EmptyWorkflowRepo:
+    def list_workflow_definitions(self, *, workspace_id: str):
+        del workspace_id
+        return []
 
 
-def test_flowforge_service_lists_persisted_workflows_before_builtin_starters():
+def test_flowforge_service_lists_only_persisted_workflows():
+    workflows = FlowForgeService(workflow_repository=_EmptyWorkflowRepo()).list_definitions(workspace_id="ws-1")
+
+    assert workflows == []
+
+
+def test_flowforge_service_lists_persisted_workflows_without_builtin_starters():
     service = FlowForgeService(workflow_repository=_WorkflowRepo())
 
     workflows = service.list_definitions(workspace_id="ws-1")
 
-    assert workflows[0]["id"] == "12"
+    assert [workflow["id"] for workflow in workflows] == ["12"]
     assert workflows[0]["name"] == "Intake Routing"
-    assert workflows[-1]["id"] == "therapist-routing"
 
 
 def test_flowforge_service_returns_design_preview_for_persisted_workflow():
@@ -929,10 +932,18 @@ def test_flowforge_service_returns_design_preview_for_persisted_workflow():
 
 
 def test_flowforge_validation_allows_loops_as_warnings():
-    workflow = FlowForgeService().get_definition(workspace_id="ws-1", workflow_id="therapist-routing")
-    assert workflow is not None
+    graph = {
+        "nodes": [
+            {"id": "start", "type": "intake", "label": "Start", "position": {"x": 0, "y": 0}, "data": {}},
+            {"id": "wait", "type": "wait", "label": "Wait", "position": {"x": 200, "y": 0}, "data": {}},
+        ],
+        "edges": [
+            {"id": "start-wait", "source": "start", "target": "wait"},
+            {"id": "wait-start", "source": "wait", "target": "start"},
+        ],
+    }
 
-    result = FlowForgeService().validate_graph(graph=workflow["graph"])
+    result = FlowForgeService().validate_graph(graph=graph)
 
     assert result["valid"] is True
     assert result["errors"] == []

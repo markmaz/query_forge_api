@@ -14,8 +14,8 @@ class FlowForgeWorkflowList(Resource):
     @flowforge_ns.doc(
         summary="List FlowForge workflow definitions",
         description=(
-            "Returns persisted workflow definitions available to the current workspace, followed by built-in "
-            "starter workflows that can be copied into a persisted draft."
+            "Returns persisted workflow definitions available to the current workspace. Starter templates are "
+            "chosen explicitly in the Designer when creating a new workflow."
         ),
         responses={
             200: "Workflow definitions returned.",
@@ -93,7 +93,7 @@ class FlowForgeWorkflowDetail(Resource):
         description=(
             "Soft-deletes a workspace-scoped workflow definition by setting its archive metadata. Archived "
             "workflows are removed from normal workflow lists but retained for auditability and future recovery "
-            "workflows. Built-in starter workflows cannot be deleted."
+            "workflows."
         ),
         responses={
             200: "Workflow definition archived.",

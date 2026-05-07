@@ -52,11 +52,13 @@ class _IntegrationCatalogRepo:
         ]
 
 
-def test_flowforge_workflow_list_returns_builtin_starter_workflow(client, monkeypatch):
+def test_flowforge_workflow_list_returns_persisted_workflows(client, monkeypatch):
+    service = _RunService()
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: service)
     resp = client.get("/api/v1/flowforge/workflows", headers=_headers(monkeypatch))
 
     assert resp.status_code == 200
-    assert resp.json[0]["id"] == "therapist-routing"
+    assert resp.json[0]["id"] == "42"
     assert resp.json[0]["graph"]["nodes"][0]["id"] == "intake"
 
 
@@ -225,13 +227,15 @@ def test_flowforge_communication_template_ai_draft_route_creates_draft(client, m
 
 
 def test_flowforge_run_inspector_returns_design_preview(client, monkeypatch):
+    service = _RunService()
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: service)
     resp = client.get(
-        "/api/v1/flowforge/workflows/therapist-routing/run-inspector",
+        "/api/v1/flowforge/workflows/42/run-inspector",
         headers=_headers(monkeypatch),
     )
 
     assert resp.status_code == 200
-    assert resp.json["workflow_id"] == "therapist-routing"
+    assert resp.json["workflow_id"] == "42"
     assert resp.json["mode"] == "design_preview"
     assert resp.json["events"][0]["event_type"].startswith("workflow.preview.")
 
@@ -335,13 +339,31 @@ class _RunService:
     def list_definitions(self, *, workspace_id: str):
         return [
             {
-                "id": "therapist-routing",
-                "name": "Therapist Intake Routing",
+                "id": "42",
+                "name": "Persisted Intake Routing",
                 "description": "Routes intake submissions.",
-                "status": "starter",
+                "status": "draft",
                 "graph": {"nodes": [{"id": "intake"}], "edges": []},
             }
         ]
+
+    def get_run_inspector(self, *, workspace_id: str, workflow_id: str):
+        return {
+            "workflow_id": workflow_id,
+            "mode": "design_preview",
+            "status": "ready",
+            "events": [
+                {
+                    "id": "preview-1",
+                    "event_type": "workflow.preview.intake",
+                    "node_id": "intake",
+                    "message": "Intake is part of the design preview.",
+                    "timestamp": "2026-05-04T10:00:00Z",
+                    "data": {"status": "preview"},
+                }
+            ],
+            "notes": ["This preview summarizes the workflow graph before runtime execution."],
+        }
 
     def list_runs(self, *, workspace_id: str, status: str | None, mode: str | None, limit: int, offset: int):
         return {

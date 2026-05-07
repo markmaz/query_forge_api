@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import logging
-from copy import deepcopy
 from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.exceptions.forge_error import ForgeError
 from app.features.flowforge.models import WorkflowDefinition, WorkflowValidationResult
-from app.features.flowforge.seed import THERAPIST_ROUTING_WORKFLOW
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +46,9 @@ class FlowForgeWorkflowServiceMixin:
         except SQLAlchemyError:
             logger.exception("flowforge_workflow_definition_list_failed workspace_id=%s", workspace_id)
             persisted = []
-        return persisted + [deepcopy(THERAPIST_ROUTING_WORKFLOW)]
+        return persisted
 
     def get_definition(self, *, workspace_id: str, workflow_id: str) -> WorkflowDefinition | None:
-        if workflow_id == THERAPIST_ROUTING_WORKFLOW["id"]:
-            return deepcopy(THERAPIST_ROUTING_WORKFLOW)
         try:
             workflow_definition_id = int(workflow_id)
         except (TypeError, ValueError):
