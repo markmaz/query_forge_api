@@ -75,9 +75,6 @@ class FlowForgeWorkflowServiceMixin:
         if not name:
             raise ForgeError("name is required.", status_code=400)
         graph = payload.get("graph") if isinstance(payload.get("graph"), dict) else {"nodes": [], "edges": []}
-        validation = self.validate_graph(graph=graph, workspace_id=workspace_id)
-        if not validation["valid"]:
-            raise ForgeError("Workflow graph is invalid.", status_code=400, details=validation)
         workflow_definition_id = self._workflow_repository.create_workflow_definition(
             workspace_id=workspace_id,
             workflow_key=workflow_key,
@@ -98,7 +95,6 @@ class FlowForgeWorkflowServiceMixin:
             "status": "draft",
             "graph": version["graph"],
         }
-        return None
 
     def validate_graph(self, *, graph: dict[str, Any], workspace_id: str | None = None) -> WorkflowValidationResult:
         nodes = graph.get("nodes") if isinstance(graph, dict) else None
@@ -476,8 +472,7 @@ class FlowForgeWorkflowServiceMixin:
         if not isinstance(graph, dict):
             raise ForgeError("graph must be an object.", status_code=400)
         validation = self.validate_graph(graph=graph, workspace_id=workspace_id)
-        if not validation["valid"]:
-            raise ForgeError("Workflow graph is invalid.", status_code=400, details=validation)
+        validation_status = "valid" if validation["valid"] else "invalid"
         existing_versions = self._workflow_repository.list_workflow_versions(
             workspace_id=workspace_id,
             workflow_definition_id=workflow_definition_id,
@@ -490,7 +485,7 @@ class FlowForgeWorkflowServiceMixin:
             graph=graph,
             created_by=self._optional_string(actor_user_id),
             version_status="draft",
-            validation_status="valid",
+            validation_status=validation_status,
             validation_result=validation,
             matching_policy_refs=payload.get("matching_policy_refs") if isinstance(payload.get("matching_policy_refs"), list) else [],
             settings=payload.get("settings") if isinstance(payload.get("settings"), dict) else {},
@@ -508,7 +503,7 @@ class FlowForgeWorkflowServiceMixin:
             "version_number": next_version_number,
             "version_status": "draft",
             "graph": graph,
-            "validation_status": "valid",
+            "validation_status": validation_status,
             "validation_result": validation,
             "matching_policy_refs": payload.get("matching_policy_refs") if isinstance(payload.get("matching_policy_refs"), list) else [],
             "settings": payload.get("settings") if isinstance(payload.get("settings"), dict) else {},

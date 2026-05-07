@@ -985,6 +985,30 @@ def test_flowforge_service_creates_persisted_workflow_draft():
     assert repo.current_draft["version_id"] == 45
 
 
+def test_flowforge_service_creates_incomplete_workflow_draft_with_invalid_validation():
+    repo = _WorkflowRepo()
+    service = FlowForgeService(workflow_repository=repo, integration_repository=_IntegrationRepo())
+
+    result = service.create_workflow_definition(
+        workspace_id="ws-1",
+        payload={
+            "workflow_key": "template-routing",
+            "name": "Template Routing",
+            "graph": {
+                "nodes": [{"id": "intake", "type": "intake", "data": {"source": "", "event": ""}}],
+                "edges": [],
+            },
+        },
+        actor_user_id="user-1",
+    )
+
+    assert result["id"] == "12"
+    assert repo.created_definition["workflow_key"] == "template-routing"
+    assert repo.created_version["validation_status"] == "invalid"
+    assert "requires a configured source integration" in repo.created_version["validation_result"]["errors"][0]
+    assert repo.current_draft["version_id"] == 45
+
+
 def test_flowforge_service_creates_new_workflow_draft_version():
     repo = _WorkflowRepo()
     service = FlowForgeService(workflow_repository=repo, integration_repository=_IntegrationRepo())
@@ -1005,6 +1029,29 @@ def test_flowforge_service_creates_new_workflow_draft_version():
 
     assert result["id"] == 45
     assert result["version_number"] == 2
+    assert repo.current_draft["version_id"] == 45
+
+
+def test_flowforge_service_saves_invalid_workflow_draft_version():
+    repo = _WorkflowRepo()
+    service = FlowForgeService(workflow_repository=repo, integration_repository=_IntegrationRepo())
+
+    result = service.create_workflow_version(
+        workspace_id="ws-1",
+        workflow_definition_id=12,
+        payload={
+            "graph": {
+                "nodes": [{"id": "intake", "type": "intake", "data": {"source": "", "event": ""}}],
+                "edges": [],
+            }
+        },
+        actor_user_id="user-1",
+    )
+
+    assert result["id"] == 45
+    assert result["validation_status"] == "invalid"
+    assert repo.created_version["validation_status"] == "invalid"
+    assert "requires a configured source integration" in result["validation_result"]["errors"][0]
     assert repo.current_draft["version_id"] == 45
 
 

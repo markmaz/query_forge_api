@@ -37,7 +37,8 @@ class FlowForgeWorkflowList(Resource):
         summary="Create a persisted FlowForge workflow draft",
         description=(
             "Creates a workspace-scoped workflow definition and its first immutable draft version. The submitted "
-            "graph is validated before persistence; invalid graphs are rejected and are not saved."
+            "graph is validated before persistence; incomplete drafts are saved with invalid validation status and "
+            "cannot be published until corrected."
         ),
         responses={
             201: "Workflow draft created.",
@@ -178,7 +179,8 @@ class FlowForgeWorkflowVersionList(Resource):
         summary="Create a persisted FlowForge workflow draft version",
         description=(
             "Validates and saves a new immutable draft version for an existing workflow definition. This endpoint "
-            "does not publish the version; publish remains an explicit admin action."
+            "does not publish the version; invalid drafts are saved with validation results, and publish remains "
+            "an explicit admin action for valid versions."
         ),
         responses={
             201: "Workflow draft version created.",
