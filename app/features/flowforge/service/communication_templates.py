@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import date, datetime
 from typing import Any
 
 from app.config.llm_resolver import ResolvedLLMRuntime
@@ -397,9 +398,9 @@ class FlowForgeCommunicationTemplateServiceMixin:
             "validation_status": str(row.get("validation_status") or "pending"),
             "validation_result": row.get("validation_result") or row.get("validation_result_json") or {},
             "metadata": row.get("metadata") or row.get("metadata_json") or {},
-            "created_at": row.get("created_at"),
-            "updated_at": row.get("updated_at"),
-            "activated_at": row.get("activated_at"),
+            "created_at": FlowForgeCommunicationTemplateServiceMixin._json_scalar(row.get("created_at")),
+            "updated_at": FlowForgeCommunicationTemplateServiceMixin._json_scalar(row.get("updated_at")),
+            "activated_at": FlowForgeCommunicationTemplateServiceMixin._json_scalar(row.get("activated_at")),
         }
 
     @staticmethod
@@ -421,5 +422,11 @@ class FlowForgeCommunicationTemplateServiceMixin:
             "model_provider": row.get("model_provider"),
             "model_name": row.get("model_name"),
             "status": str(row.get("status") or "drafted"),
-            "created_at": row.get("created_at"),
+            "created_at": FlowForgeCommunicationTemplateServiceMixin._json_scalar(row.get("created_at")),
         }
+
+    @staticmethod
+    def _json_scalar(value: Any) -> Any:
+        if isinstance(value, datetime | date):
+            return value.isoformat()
+        return value

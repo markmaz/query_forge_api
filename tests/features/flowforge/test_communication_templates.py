@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from app.exceptions.forge_error import ForgeError
@@ -347,6 +349,7 @@ class _TemplateRepo:
     def activate_template(self, **kwargs):
         self.templates[501]["status"] = "active"
         self.templates[501]["validation_status"] = "valid"
+        self.templates[501]["activated_at"] = datetime(2026, 5, 7, 20, 19, 21)
         return True
 
 
@@ -375,6 +378,7 @@ def test_flowforge_service_creates_and_activates_communication_template():
     assert created["id"] == 502
     assert repo.created["validation_status"] == "valid"
     assert activated["status"] == "active"
+    assert activated["activated_at"] == "2026-05-07T20:19:21"
 
 
 def test_flowforge_service_rejects_invalid_communication_template_activation():
