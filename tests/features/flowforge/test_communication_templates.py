@@ -212,7 +212,14 @@ def test_communication_template_draft_generator_builds_intake_review_content_fro
     assert draft["subject"] == "New patient intake review requested"
     assert "intake.requested_service" in field_lists[0]
     assert "intake.clinical_summary" in field_lists[0]
+    assert "intake.requested_date" in field_lists[0]
+    assert "intake.client_initials" in field_lists[0]
+    assert "intake.preferred_location" in field_lists[0]
+    assert "intake.preferred_days" in field_lists[0]
+    assert "intake.insurance" in field_lists[0]
+    assert "intake.age_range" in field_lists[0]
     assert draft["body_blocks"][-1] == {"type": "action_buttons", "actions": ["accept", "decline"]}
+    assert "open_task" not in draft["body_blocks"][-1]["actions"]
     assert "Thank you,\nThe Novus team" in text_blocks
 
 
@@ -222,7 +229,7 @@ class _BadTemplateDraftClient:
     def chat_json(self, **kwargs):
         self.kwargs = kwargs
         return {
-            "subject": "New patient for {intake.patient.full_name}",
+            "subject": "New patient for {{intake.requested_service}} and {{intake.clinical_summary}}",
             "plain_language_summary": "Generated from bad LLM output.",
             "body_blocks": [
                 {
@@ -235,10 +242,9 @@ class _BadTemplateDraftClient:
                         "intake.patient.full_name",
                         "intake.requested_service",
                         "intake.clinical_summary",
-                        "resource.display_name",
                     ],
                 },
-                {"type": "action_buttons", "actions": ["accept", "decline", "custom"]},
+                {"type": "action_buttons", "actions": ["accept", "decline", "open_task"]},
             ],
         }
 
@@ -248,12 +254,15 @@ def test_communication_template_draft_generator_filters_bad_llm_fields_and_seria
     generator = CommunicationTemplateDraftGenerator(llm_client=llm_client)
 
     draft = generator.generate(
-        prompt="Draft the therapist intake review email. End with a thank you from the Novus team.",
+        prompt=(
+            "Draft the therapist intake review email with all intake information from the incoming form. "
+            "The recipient can accept or decline the patient. End with a thank you from the Novus team."
+        ),
         purpose="human_task",
         channel="email",
         resource_set_id=30,
         resource_fields=["resource.display_name"],
-        required_actions=["accept", "decline"],
+        required_actions=["accept", "decline", "open_task"],
         use_llm=True,
     )
 
@@ -264,7 +273,14 @@ def test_communication_template_draft_generator_filters_bad_llm_fields_and_seria
     assert "{{{'label'" not in rendered_text
     assert draft["subject"] == "New patient intake review requested"
     assert "intake.patient.full_name" not in fields
-    assert fields == ["intake.requested_service", "intake.clinical_summary", "resource.display_name"]
+    assert "intake.requested_date" in fields
+    assert "intake.client_initials" in fields
+    assert "intake.requested_service" in fields
+    assert "intake.preferred_location" in fields
+    assert "intake.preferred_days" in fields
+    assert "intake.insurance" in fields
+    assert "intake.age_range" in fields
+    assert "intake.clinical_summary" in fields
     assert "Please review the intake details below" in rendered_text
     assert "Thank you,\nThe Novus team" in rendered_text
     assert blocks[-1] == {"type": "action_buttons", "actions": ["accept", "decline"]}

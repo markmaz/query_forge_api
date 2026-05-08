@@ -77,6 +77,7 @@ class CommunicationTemplateDraftGenerator:
         allowed_for_purpose = ALLOWED_ACTIONS_BY_PURPOSE.get(clean_purpose, set())
         actions = [_normalize_action(action) for action in required_actions]
         actions = [action for action in actions if action and action in allowed_for_purpose]
+        actions = _actions_for_prompt(prompt=clean_prompt, purpose=clean_purpose, actions=actions)
         if use_llm and self._llm_client is not None:
             return self._generate_with_llm(
                 prompt=clean_prompt,
@@ -133,12 +134,13 @@ class CommunicationTemplateDraftGenerator:
         )
         default_subject = _default_subject(purpose=purpose)
         heuristic_subject = _heuristic_subject(prompt=prompt, purpose=purpose)
-        if normalized["subject"] == default_subject and heuristic_subject != default_subject:
+        if (normalized["subject"] == default_subject or _subject_uses_detail_fields(normalized["subject"])) and heuristic_subject != default_subject:
             normalized["subject"] = heuristic_subject
         normalized["body_blocks"] = _polish_prompt_blocks(
             blocks=normalized["body_blocks"],
             prompt=prompt,
             purpose=purpose,
+            available_fields=available_fields,
         )
         return {
             **normalized,
@@ -240,7 +242,7 @@ def _heuristic_blocks(*, purpose: str, required_actions: list[str], available_fi
     intake_fields = [field for field in communication_template_draft_fields(allowed_fields) if field.startswith("intake.")]
     runtime_fields = [field for field in ["resource.display_name", "selected_resource.display_name", "task.due_at", "run.id"] if field in allowed_fields]
     if purpose in {"human_task", "approval"}:
-        actions = required_actions or (["open_task"] if purpose == "approval" else ["accept", "decline", "open_task"])
+        actions = required_actions or (["open_task"] if purpose == "approval" else ["accept", "decline"])
         field_list = intake_fields or runtime_fields or ["workflow.name", "run.id"]
         return [
             {"type": "heading", "content": "{{workflow.name}}"},
@@ -300,8 +302,29 @@ def _requested_closing(prompt: str) -> str | None:
     return f"Thank you,\nThe {team_name}"
 
 
-def _polish_prompt_blocks(*, blocks: list[dict[str, Any]], prompt: str, purpose: str) -> list[dict[str, Any]]:
+def _polish_prompt_blocks(
+    *,
+    blocks: list[dict[str, Any]],
+    prompt: str,
+    purpose: str,
+    available_fields: list[str],
+) -> list[dict[str, Any]]:
     polished = list(blocks)
+    if _prompt_requests_all_intake(prompt):
+        intake_fields = [field for field in available_fields if field.startswith("intake.")]
+        if intake_fields:
+            existing_index = next((index for index, block in enumerate(polished) if block.get("type") == "field_list"), None)
+            if existing_index is None:
+                insert_at = 2 if len(polished) >= 2 else len(polished)
+                polished.insert(insert_at, {"type": "field_list", "fields": intake_fields})
+            else:
+                existing_fields = polished[existing_index].get("fields")
+                current_fields = existing_fields if isinstance(existing_fields, list) else []
+                polished[existing_index] = {
+                    **polished[existing_index],
+                    "fields": _dedupe([*_clean_fields(current_fields), *intake_fields]),
+                }
+
     has_text = any(block.get("type") == "text" and _clean_string(block.get("content")) for block in polished)
     if not has_text:
         insert_at = 1 if polished and polished[0].get("type") == "heading" else 0
@@ -319,6 +342,27 @@ def _polish_prompt_blocks(*, blocks: list[dict[str, Any]], prompt: str, purpose:
     return polished
 
 
+def _actions_for_prompt(*, prompt: str, purpose: str, actions: list[str]) -> list[str]:
+    if purpose != "human_task":
+        return actions
+    lowered = prompt.lower()
+    asks_accept_decline = "accept" in lowered and "decline" in lowered
+    asks_open_task = "open task" in lowered or "open the task" in lowered
+    if asks_accept_decline and not asks_open_task:
+        filtered = [action for action in actions if action in {"accept", "decline"}]
+        return filtered or ["accept", "decline"]
+    return actions
+
+
+def _prompt_requests_all_intake(prompt: str) -> bool:
+    lowered = prompt.lower()
+    return ("all" in lowered and "intake" in lowered) or "incoming form" in lowered or "intake information" in lowered
+
+
+def _subject_uses_detail_fields(subject: str) -> bool:
+    return any(field.startswith(("intake.", "context.")) for field in MERGE_FIELD_PATTERN.findall(subject))
+
+
 def _dedupe(values: list[str]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
@@ -327,3 +371,7 @@ def _dedupe(values: list[str]) -> list[str]:
             result.append(value)
             seen.add(value)
     return result
+
+
+def _clean_fields(values: list[Any]) -> list[str]:
+    return [str(value or "").strip() for value in values if str(value or "").strip()]
