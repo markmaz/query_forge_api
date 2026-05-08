@@ -1,5 +1,44 @@
 # QueryForge API
 
+## Start Here: Local Runtime Servers
+
+Run these from `/Users/mmaslak/Local Documents/projects/query_forge/query-forge-api` with the virtual environment activated:
+
+```bash
+source .venv/bin/activate
+```
+
+Start the Flask API:
+
+```bash
+python app/main.py
+```
+
+Start the Celery worker in a separate terminal:
+
+```bash
+celery -A app.celery_app worker --loglevel=INFO
+```
+
+Start Celery Beat in a separate terminal:
+
+```bash
+celery -A app.celery_app beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
+```
+
+Start the standalone MCP server in a separate terminal:
+
+```bash
+python -m mcp_server
+```
+
+Local default URLs:
+
+- Flask API: `http://127.0.0.1:5000`
+- MCP server: `http://127.0.0.1:8001/mcp`
+
+Keep both the Celery worker and Celery Beat running for Skills scheduling and Workflow Studio runtime work such as due timeouts, notification dispatch, schedule dispatch, dataset artifact expiration, and raw webhook payload cleanup.
+
 QueryForge API is the Python backend for QueryForge. It serves three related runtime surfaces:
 
 - the primary Flask REST API behind Gunicorn
