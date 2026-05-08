@@ -48,6 +48,58 @@ def _list_value(value: Any) -> list[Any]:
     return [value]
 
 
+def _field_key(field: Any) -> str:
+    if isinstance(field, dict):
+        return _clean_string(field.get("key") or field.get("path") or field.get("name"))
+    return _clean_string(field)
+
+
+def _field_label(field: Any) -> str:
+    if isinstance(field, dict):
+        return _clean_string(field.get("label") or field.get("display_name") or field.get("key") or field.get("path"))
+    return _clean_string(field)
+
+
+def _context_fields_from_intake_fields(intake_fields: list[Any]) -> list[dict[str, Any]]:
+    context_fields: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for field in intake_fields:
+        key = _field_key(field)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        context_fields.append(
+            {
+                "key": key,
+                "label": _field_label(field) or key,
+                "type": field.get("type", "unknown") if isinstance(field, dict) else "unknown",
+            }
+        )
+    return context_fields
+
+
+def _merge_context_fields(context_fields: list[Any], intake_fields: list[Any]) -> list[Any]:
+    merged: list[Any] = []
+    seen: set[str] = set()
+    for field in [*context_fields, *_context_fields_from_intake_fields(intake_fields)]:
+        key = _field_key(field)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        merged.append(field)
+    return merged
+
+
+def _matching_field_key(fields: list[Any], needles: tuple[str, ...], *, fallback: str) -> str:
+    for field in fields:
+        key = _field_key(field)
+        label = _field_label(field)
+        haystack = f"{key} {label}".lower()
+        if key and any(needle in haystack for needle in needles):
+            return key
+    return fallback
+
+
 def _normalize_rule(rule: dict[str, Any], *, section: str, index: int) -> dict[str, Any]:
     condition = rule.get("when") if isinstance(rule.get("when"), dict) else rule
     value_from = condition.get("value_from") or rule.get("value_from")
@@ -118,17 +170,29 @@ class MatchingPolicyDraftGenerator:
         resource_set_id: int,
         resource_fields: list[Any] | None = None,
         context_fields: list[Any] | None = None,
+        intake_source: dict[str, Any] | None = None,
+        intake_fields: list[Any] | None = None,
         use_llm: bool = False,
     ) -> dict[str, Any]:
         clean_prompt = str(prompt or "").strip()
+        merged_context_fields = _merge_context_fields(context_fields or [], intake_fields or [])
         if use_llm and self._llm_client is not None:
             return self._generate_with_llm(
                 prompt=clean_prompt,
                 resource_set_id=resource_set_id,
                 resource_fields=resource_fields or [],
-                context_fields=context_fields or [],
+                context_fields=merged_context_fields,
+                intake_source=intake_source,
+                intake_fields=intake_fields or [],
             )
-        return self._generate_heuristic(prompt=clean_prompt, resource_set_id=resource_set_id)
+        return self._generate_heuristic(
+            prompt=clean_prompt,
+            resource_set_id=resource_set_id,
+            resource_fields=resource_fields or [],
+            context_fields=merged_context_fields,
+            intake_source=intake_source,
+            intake_fields=intake_fields or [],
+        )
 
     def _generate_with_llm(
         self,
@@ -137,20 +201,25 @@ class MatchingPolicyDraftGenerator:
         resource_set_id: int,
         resource_fields: list[Any],
         context_fields: list[Any],
+        intake_source: dict[str, Any] | None,
+        intake_fields: list[Any],
     ) -> dict[str, Any]:
         payload = self._llm_client.chat_json(
             system_prompt=(
-                "You generate FlowForge matching policy JSON. Return JSON only with keys "
+                "You generate Workflow Studio matching policy JSON. Return JSON only with keys "
                 "policy and plain_language_summary. The policy must use version 1. Return policy.eligibility "
                 "and policy.scoring as arrays. Use deterministic rules, no code, no scripts, and only "
                 "supported operators: equals, not_equals, in, not_in, contains, not_contains, exists, "
                 "not_exists, gt, gte, lt, lte, between, overlaps, matches_context, contains_context. "
-                "For runtime inputs, use context_field instead of value_from."
+                "For runtime inputs, use context_field instead of value_from. Only use context_field values "
+                "listed in the allowed intake/runtime context fields."
             ),
             user_prompt=(
                 f"Resource set id: {resource_set_id}\n"
                 f"Allowed resource fields: {resource_fields}\n"
-                f"Allowed context fields: {context_fields}\n"
+                f"Optional intake source: {intake_source or {}}\n"
+                f"Allowed intake fields: {intake_fields}\n"
+                f"Allowed intake/runtime context fields: {context_fields}\n"
                 f"Routing instructions: {prompt}"
             ),
             response_format=True,
@@ -160,6 +229,11 @@ class MatchingPolicyDraftGenerator:
         policy = payload.get("policy") if isinstance(payload.get("policy"), dict) else payload
         if isinstance(policy, dict):
             policy = normalize_generated_matching_policy(policy, resource_set_id=resource_set_id)
+            policy["inputs"] = {
+                "intake_source": intake_source or {},
+                "intake_fields": intake_fields,
+                "context_fields": context_fields,
+            }
         return {
             "generated_policy": policy if isinstance(policy, dict) else {},
             "plain_language_summary": str(payload.get("plain_language_summary") or "").strip(),
@@ -168,7 +242,16 @@ class MatchingPolicyDraftGenerator:
             "draft_source": "llm",
         }
 
-    def _generate_heuristic(self, *, prompt: str, resource_set_id: int) -> dict[str, Any]:
+    def _generate_heuristic(
+        self,
+        *,
+        prompt: str,
+        resource_set_id: int,
+        resource_fields: list[Any],
+        context_fields: list[Any],
+        intake_source: dict[str, Any] | None,
+        intake_fields: list[Any],
+    ) -> dict[str, Any]:
         lower_prompt = prompt.lower()
         eligibility: list[dict[str, Any]] = [
             {
@@ -204,9 +287,9 @@ class MatchingPolicyDraftGenerator:
             scoring.append(
                 {
                     "id": "score-language-match",
-                    "field": "languages",
+                    "field": _matching_field_key(resource_fields, ("language",), fallback="languages"),
                     "operator": "contains_context",
-                    "context_field": "preferred_language",
+                    "context_field": _matching_field_key(context_fields, ("language",), fallback="preferred_language"),
                     "weight": 3,
                     "reason": "Prefer resources matching the requested language.",
                 }
@@ -228,6 +311,11 @@ class MatchingPolicyDraftGenerator:
             "offer": {},
             "no_match": {"reason": "no_eligible_candidates"},
             "explanations": {"include_rule_reasons": True},
+            "inputs": {
+                "intake_source": intake_source or {},
+                "intake_fields": intake_fields,
+                "context_fields": context_fields,
+            },
         }
         return {
             "generated_policy": policy,

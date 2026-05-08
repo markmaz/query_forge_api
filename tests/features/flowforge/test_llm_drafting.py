@@ -58,13 +58,19 @@ def test_matching_policy_draft_generator_builds_local_heuristic_policy():
     result = MatchingPolicyDraftGenerator().generate(
         prompt="Prefer available resources with matching language.",
         resource_set_id=20,
+        resource_fields=[{"key": "spoken_languages", "label": "Spoken Languages", "type": "array"}],
+        intake_source={"integration_key": "jotform-intake", "event_key": "intake_submitted"},
+        intake_fields=[{"path": "primaryLanguage", "label": "Primary Language", "type": "text"}],
     )
 
     policy = result["generated_policy"]
     assert policy["version"] == 1
     assert policy["resource_set_id"] == 20
     assert any(rule["id"] == "eligible-active" for rule in policy["eligibility"])
-    assert any(rule["id"] == "score-language-match" for rule in policy["scoring"])
+    language_rule = next(rule for rule in policy["scoring"] if rule["id"] == "score-language-match")
+    assert language_rule["field"] == "spoken_languages"
+    assert language_rule["context_field"] == "primaryLanguage"
+    assert policy["inputs"]["intake_source"]["integration_key"] == "jotform-intake"
     assert policy["selection"]["strategy"] == "balanced_top_ranked"
     assert policy["selection"]["fairness"]["within_score_delta"] == 0
     assert result["draft_source"] == "heuristic"
@@ -78,13 +84,18 @@ def test_matching_policy_draft_generator_uses_llm_when_requested():
         resource_set_id=20,
         resource_fields=["effective_status"],
         context_fields=[],
+        intake_source={"integration_key": "jotform-intake", "event_key": "intake_submitted"},
+        intake_fields=[{"path": "primaryLanguage", "label": "Primary Language", "type": "text"}],
         use_llm=True,
     )
 
     assert result["draft_source"] == "llm"
     assert result["model_name"] == "fake-flowforge-model"
     assert result["generated_policy"]["resource_set_id"] == 20
+    assert result["generated_policy"]["inputs"]["intake_source"]["integration_key"] == "jotform-intake"
     assert "Only active resources." in llm.calls[0]["user_prompt"]
+    assert "Allowed intake fields" in llm.calls[0]["user_prompt"]
+    assert "primaryLanguage" in llm.calls[0]["user_prompt"]
 
 
 def test_matching_policy_draft_generator_normalizes_llm_policy_shape():

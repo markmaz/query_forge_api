@@ -256,6 +256,8 @@ class FlowForgeMatchingPolicyServiceMixin:
             resource_set_id=int(policy["resource_set_id"]),
             resource_fields=payload.get("resource_fields") if isinstance(payload.get("resource_fields"), list) else [],
             context_fields=payload.get("context_fields") if isinstance(payload.get("context_fields"), list) else [],
+            intake_source=payload.get("intake_source") if isinstance(payload.get("intake_source"), dict) else None,
+            intake_fields=payload.get("intake_fields") if isinstance(payload.get("intake_fields"), list) else [],
             use_llm=use_llm,
         )
         generated_policy = generated.get("generated_policy") if isinstance(generated.get("generated_policy"), dict) else {}
