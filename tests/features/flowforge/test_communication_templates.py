@@ -453,6 +453,29 @@ def test_flowforge_service_sends_communication_template_test_email():
     assert "example.invalid/workflow-studio/test-action/accept" in sent[0]["html"]
 
 
+def test_flowforge_service_returns_controlled_error_when_test_email_send_fails():
+    def fail_send(_recipient: str, _subject: str, _html: str) -> None:
+        raise RuntimeError("SMTP connection unexpectedly closed")
+
+    service = FlowForgeService(
+        communication_template_repository=_TemplateRepo(),
+        resource_repository=_ResourceRepo(),
+        communication_template_email_sender=fail_send,
+    )
+
+    with pytest.raises(ForgeError) as exc:
+        service.send_communication_template_test(
+            workspace_id="ws-1",
+            template_id=501,
+            payload={"recipient": "therapist@example.com"},
+            actor_user_id="user-1",
+        )
+
+    assert exc.value.status_code == 502
+    assert "Unable to send test email" in str(exc.value)
+    assert exc.value.details == {"reason": "SMTP connection unexpectedly closed"}
+
+
 def test_flowforge_service_rejects_ai_draft_actions_that_do_not_match_purpose():
     service = FlowForgeService(communication_template_repository=_TemplateRepo(), resource_repository=_ResourceRepo())
 

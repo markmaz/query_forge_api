@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
@@ -18,6 +19,7 @@ from app.features.flowforge.runtime.communication_templates import ALLOWED_ACTIO
 TEMPLATE_STATUSES = {"draft", "active", "archived"}
 SLUG_PATTERN = re.compile(r"[^a-z0-9]+")
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+logger = logging.getLogger(__name__)
 COMMON_RESOURCE_FIELDS = {
     "resource.source_record_key",
     "resource.display_name",
@@ -182,7 +184,19 @@ class FlowForgeCommunicationTemplateServiceMixin:
                 "open_task": "https://example.invalid/workflow-studio/test-action/open",
             },
         )
-        self._communication_template_email_sender(recipient, rendered["subject"], rendered["html"])
+        try:
+            self._communication_template_email_sender(recipient, rendered["subject"], rendered["html"])
+        except Exception as exc:
+            logger.warning(
+                "FlowForge communication template test send failed",
+                exc_info=True,
+                extra={"workspace_id": workspace_id, "template_id": template_id, "recipient": recipient},
+            )
+            raise ForgeError(
+                "Unable to send test email. Verify the workspace mail configuration and try again.",
+                status_code=502,
+                details={"reason": str(exc)},
+            ) from exc
         return {
             "status": "sent",
             "recipient": recipient,
