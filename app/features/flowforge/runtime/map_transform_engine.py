@@ -108,44 +108,71 @@ class MapTransformEngine:
         if not field_mapping:
             return dict(row)
         output: dict[str, Any] = dict(row) if include_unmapped else {}
-        for target, source, default in self._mapping_entries(field_mapping):
-            value = self._path_value(row, source)
-            output[target] = default if value is None and default is not None else value
+        for entry in self._mapping_entries(field_mapping):
+            value = self._mapped_value(container=row, entry=entry)
+            output[entry["target"]] = entry["default"] if value is None and entry["default"] is not None else value
         return output
 
-    def _mapping_entries(self, field_mapping: Any) -> list[tuple[str, str, Any]]:
-        entries: list[tuple[str, str, Any]] = []
+    def _mapping_entries(self, field_mapping: Any) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
         if isinstance(field_mapping, dict):
             for target, rule in field_mapping.items():
                 if isinstance(rule, dict):
-                    entries.append(
-                        (
-                            str(target),
-                            str(rule.get("source") or rule.get("from") or target),
-                            rule.get("default"),
-                        )
-                    )
+                    entries.append(self._mapping_entry(target=target, rule=rule))
                 else:
-                    entries.append((str(target), str(rule), None))
+                    entries.append(self._mapping_entry(target=target, rule={"source": rule}))
         elif isinstance(field_mapping, list):
             for rule in field_mapping:
                 if not isinstance(rule, dict):
                     continue
                 target = str(rule.get("target") or rule.get("to") or "").strip()
-                source = str(rule.get("source") or rule.get("from") or target).strip()
                 if target:
-                    entries.append((target, source, rule.get("default")))
+                    entries.append(self._mapping_entry(target=target, rule=rule))
         return entries
+
+    def _mapping_entry(self, *, target: Any, rule: dict[str, Any]) -> dict[str, Any]:
+        sources = rule.get("sources")
+        if not isinstance(sources, list):
+            sources = [rule.get("source") or rule.get("from") or target]
+        source_paths = [str(source or "").strip() for source in sources if str(source or "").strip()]
+        transform = str(rule.get("transform") or ("concat" if len(source_paths) > 1 else "copy")).strip().lower()
+        if transform not in {"copy", "concat", "template"}:
+            transform = "copy"
+        return {
+            "target": str(target or "").strip(),
+            "source": source_paths[0] if source_paths else str(target or "").strip(),
+            "sources": source_paths,
+            "default": rule.get("default"),
+            "transform": transform,
+            "separator": str(rule.get("separator") if rule.get("separator") is not None else " "),
+            "template": str(rule.get("template") or ""),
+        }
 
     def _map_context(self, *, context: dict[str, Any], field_mapping: Any) -> dict[str, Any]:
         mapped: dict[str, Any] = {}
-        for target, source, default in self._mapping_entries(field_mapping):
-            target_key = str(target or "").strip()
+        for entry in self._mapping_entries(field_mapping):
+            target_key = str(entry["target"] or "").strip()
             if not target_key:
                 continue
-            value = self._path_value(context, source)
-            mapped[target_key] = default if value is None and default is not None else value
+            value = self._mapped_value(container=context, entry=entry)
+            mapped[target_key] = entry["default"] if value is None and entry["default"] is not None else value
         return mapped
+
+    def _mapped_value(self, *, container: dict[str, Any], entry: dict[str, Any]) -> Any:
+        transform = str(entry.get("transform") or "copy").lower()
+        if transform == "concat":
+            values = [self._path_value(container, source) for source in entry.get("sources", [])]
+            present = [str(value).strip() for value in values if not self._is_blank(value)]
+            return str(entry.get("separator") or " ").join(present)
+        if transform == "template":
+            template = str(entry.get("template") or "")
+            if template:
+                return re.sub(
+                    r"{{\s*([A-Za-z0-9_.-]+)\s*}}",
+                    lambda match: "" if self._path_value(container, match.group(1)) is None else str(self._path_value(container, match.group(1))),
+                    template,
+                ).strip()
+        return self._path_value(container, str(entry.get("source") or ""))
 
     def _communication_fields(self, *, config: dict[str, Any], mapped: dict[str, Any]) -> list[str]:
         configured = config.get("communication_fields") or config.get("template_fields") or []

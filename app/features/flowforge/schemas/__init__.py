@@ -63,6 +63,7 @@ def register_models(namespace):
         "integration_config": models["integration_config"],
         "integration_config_create_response": models["integration_config_create_response"],
         "integration_trigger": models["integration_trigger"],
+        "workflow_value_schema": models["workflow_value_schema"],
         "resource_set": models["resource_set"],
         "resource_record": models["resource_record"],
         "resource_record_update": models["resource_record_update"],

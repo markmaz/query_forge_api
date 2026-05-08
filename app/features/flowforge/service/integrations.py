@@ -6,6 +6,7 @@ from typing import Any
 from flask import current_app, has_app_context
 
 from app.exceptions.forge_error import ForgeError
+from app.features.flowforge.workflow_value_schema import draft_workflow_value_schema, normalize_workflow_value_schema
 
 
 class FlowForgeIntegrationServiceMixin:
@@ -225,6 +226,47 @@ class FlowForgeIntegrationServiceMixin:
             )
         )
 
+    def draft_integration_workflow_value_schema(
+        self,
+        *,
+        workspace_id: str,
+        integration_config_id: int,
+    ) -> dict[str, Any]:
+        integration = self._integration_repository.get_integration_config(
+            workspace_id=workspace_id,
+            integration_config_id=integration_config_id,
+        )
+        if integration is None:
+            raise ForgeError(f"Integration '{integration_config_id}' was not found.", status_code=404)
+        settings = integration.get("settings") or integration.get("settings_json") or {}
+        source_fields = self._source_fields_from_settings(settings)
+        return draft_workflow_value_schema(source_fields)
+
+    def update_integration_workflow_value_schema(
+        self,
+        *,
+        workspace_id: str,
+        integration_config_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        integration = self._integration_repository.get_integration_config(
+            workspace_id=workspace_id,
+            integration_config_id=integration_config_id,
+        )
+        if integration is None:
+            raise ForgeError(f"Integration '{integration_config_id}' was not found.", status_code=404)
+        settings = dict(integration.get("settings") or integration.get("settings_json") or {})
+        schema = normalize_workflow_value_schema(payload.get("workflow_value_schema") or payload)
+        settings["workflow_value_schema"] = schema
+        updated = self._integration_repository.update_integration_settings(
+            workspace_id=workspace_id,
+            integration_config_id=integration_config_id,
+            settings=settings,
+        )
+        if updated is None:
+            raise ForgeError(f"Integration '{integration_config_id}' was not found.", status_code=404)
+        return self._serialize_integration_config(updated, include_secret=False)
+
     def _serialize_integration_config(self, row: dict[str, Any], *, include_secret: bool) -> dict[str, Any]:
         webhook_public_id = str(row.get("webhook_public_id") or "").strip()
         webhook_path = self._integration_webhook_path(
@@ -238,6 +280,7 @@ class FlowForgeIntegrationServiceMixin:
         settings = row.get("settings") or row.get("settings_json") or {}
         source_events = self._source_events_from_settings(settings)
         source_fields = self._source_fields_from_settings(settings)
+        workflow_value_schema = self._workflow_value_schema_from_settings(settings)
         out = {
             "id": row.get("id"),
             "workspace_id": row.get("workspace_id"),
@@ -253,6 +296,7 @@ class FlowForgeIntegrationServiceMixin:
             "field_mapping": row.get("field_mapping") or row.get("field_mapping_json") or {},
             "source_events": source_events,
             "source_fields": source_fields,
+            "workflow_value_schema": workflow_value_schema,
             "test_recipient_overrides": row.get("test_recipient_overrides")
             or row.get("test_recipient_overrides_json")
             or [],
@@ -303,6 +347,11 @@ class FlowForgeIntegrationServiceMixin:
         if not isinstance(settings, dict):
             return []
         return self._normalize_source_fields(settings.get("source_fields"))
+
+    def _workflow_value_schema_from_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(settings, dict):
+            return {"fields": []}
+        return normalize_workflow_value_schema(settings.get("workflow_value_schema"))
 
     def _normalize_source_fields(self, value: Any) -> list[dict[str, Any]]:
         if not isinstance(value, list):

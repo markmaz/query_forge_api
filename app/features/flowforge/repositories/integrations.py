@@ -73,6 +73,32 @@ class FlowForgeIntegrationRepository:
             return None
         return self._decode_integration_config(rows[0])
 
+    def update_integration_settings(
+        self,
+        *,
+        workspace_id: str,
+        integration_config_id: int,
+        settings: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        self._sql.execute_write(
+            """
+            UPDATE flowforge_integration_configs
+            SET settings_json = :settings_json,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE workspace_id = :workspace_id
+              AND id = :integration_config_id
+            """,
+            {
+                "workspace_id": str(workspace_id or "").strip(),
+                "integration_config_id": int(integration_config_id),
+                "settings_json": _json_or_none(settings),
+            },
+        )
+        return self.get_integration_config(
+            workspace_id=workspace_id,
+            integration_config_id=integration_config_id,
+        )
+
     def create_integration_config(
         self,
         *,

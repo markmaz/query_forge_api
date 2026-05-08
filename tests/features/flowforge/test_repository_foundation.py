@@ -641,6 +641,41 @@ def test_flowforge_integration_repository_lists_and_creates_configs_without_secr
     assert listed[0]["test_recipient_overrides_json"] == ["ops@example.com"]
 
 
+def test_flowforge_integration_repository_updates_integration_settings():
+    sql = _SQL(
+        rows=[
+            {
+                "id": 10,
+                "workspace_id": "ws-1",
+                "provider": "jotform",
+                "integration_key": "intake-form",
+                "display_name": "Intake Form",
+                "enabled": 1,
+                "mode": "test",
+                "webhook_public_id": "ffj_public",
+                "field_mapping_json": "{}",
+                "test_recipient_overrides_json": "[]",
+                "settings_json": '{"workflow_value_schema":{"fields":[]}}',
+            }
+        ]
+    )
+    repo = FlowForgeIntegrationRepository(sql=sql)
+
+    updated = repo.update_integration_settings(
+        workspace_id="ws-1",
+        integration_config_id=10,
+        settings={"workflow_value_schema": {"fields": [{"key": "values.patient.email"}]}},
+    )
+
+    query, params = sql.writes[0]
+    assert updated is not None
+    assert "UPDATE flowforge_integration_configs" in query
+    assert params["integration_config_id"] == 10
+    assert json.loads(params["settings_json"]) == {
+        "workflow_value_schema": {"fields": [{"key": "values.patient.email"}]}
+    }
+
+
 def test_flowforge_integration_repository_gets_public_config_and_idempotent_event():
     sql = _SQL(
         rows=[

@@ -49,6 +49,27 @@ def register_integration_models(namespace, *, run_event):
             "description": fields.String(required=False, description="Optional event description."),
         },
     )
+    workflow_value_schema_field = namespace.model(
+        "FlowForgeWorkflowValueSchemaField",
+        {
+            "key": fields.String(required=True, description="Workflow value key, such as values.patient.email."),
+            "label": fields.String(required=True, description="Human-readable field label."),
+            "type": fields.String(required=True, description="Field type: text, number, boolean, date, datetime, email, phone, json, or unknown."),
+            "required": fields.Boolean(required=True, description="Whether this workflow value should be populated."),
+            "sensitive": fields.Boolean(required=True, description="Whether this workflow value may contain sensitive data."),
+            "source_paths": fields.List(fields.String, required=True, description="Suggested source field paths for this value."),
+            "transform": fields.String(required=True, description="Mapping transform: copy, concat, or template."),
+            "separator": fields.String(required=True, description="Separator used by concat transforms."),
+            "template": fields.String(required=True, description="Safe template expression used by template transforms."),
+            "expose_to_templates": fields.Boolean(required=True, description="Whether this field can be exposed to communications."),
+        },
+    )
+    workflow_value_schema = namespace.model(
+        "FlowForgeWorkflowValueSchema",
+        {
+            "fields": fields.List(fields.Nested(workflow_value_schema_field), required=True),
+        },
+    )
     integration_config = namespace.model(
         "FlowForgeIntegrationConfig",
         {
@@ -73,6 +94,11 @@ def register_integration_models(namespace, *, run_event):
                 fields.Nested(integration_source_field),
                 required=True,
                 description="Known provider fields available to intake map/transform nodes.",
+            ),
+            "workflow_value_schema": fields.Nested(
+                workflow_value_schema,
+                required=True,
+                description="Workspace-governed workflow values available as clean Map/Transform targets.",
             ),
             "test_recipient_overrides": fields.Raw(required=True, description="Optional test-mode notification recipient overrides."),
             "settings": fields.Raw(required=True, description="Provider-specific settings."),
@@ -128,4 +154,5 @@ def register_integration_models(namespace, *, run_event):
         "integration_config": integration_config,
         "integration_config_create_response": integration_config_create_response,
         "integration_trigger": integration_trigger,
+        "workflow_value_schema": workflow_value_schema,
     }

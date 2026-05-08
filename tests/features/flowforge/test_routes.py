@@ -1510,6 +1510,22 @@ class _IntegrationService:
                 "source_fields": [
                     {"path": "serviceRequested", "label": "Requested Service", "type": "text", "required": True, "sensitive": False}
                 ],
+                "workflow_value_schema": {
+                    "fields": [
+                        {
+                            "key": "values.intake.service_requested",
+                            "label": "Requested Service",
+                            "type": "text",
+                            "required": True,
+                            "sensitive": False,
+                            "source_paths": ["serviceRequested"],
+                            "transform": "copy",
+                            "separator": " ",
+                            "template": "",
+                            "expose_to_templates": True,
+                        }
+                    ]
+                },
                 "test_recipient_overrides": ["ops@example.com"],
                 "settings": {},
             }
@@ -1537,6 +1553,7 @@ class _IntegrationService:
             "field_mapping": payload.get("field_mapping", {}),
             "source_events": payload.get("source_events", []),
             "source_fields": payload.get("source_fields", []),
+            "workflow_value_schema": {"fields": []},
             "test_recipient_overrides": [],
             "settings": {},
         }
@@ -1563,6 +1580,7 @@ class _IntegrationService:
             "field_mapping": payload.get("field_mapping", {}),
             "source_events": payload.get("source_events", []),
             "source_fields": payload.get("source_fields", []),
+            "workflow_value_schema": {"fields": []},
             "test_recipient_overrides": [],
             "settings": {},
         }
@@ -1589,6 +1607,51 @@ class _IntegrationService:
             "field_mapping": payload.get("field_mapping", {}),
             "source_events": payload.get("source_events", []),
             "source_fields": payload.get("source_fields", []),
+            "workflow_value_schema": {"fields": []},
+            "test_recipient_overrides": [],
+            "settings": {},
+        }
+
+    def draft_integration_workflow_value_schema(self, *, workspace_id: str, integration_config_id: int):
+        return {
+            "fields": [
+                {
+                    "key": "values.intake.service_requested",
+                    "label": "Requested Service",
+                    "type": "text",
+                    "required": True,
+                    "sensitive": False,
+                    "source_paths": ["serviceRequested"],
+                    "transform": "copy",
+                    "separator": " ",
+                    "template": "",
+                    "expose_to_templates": True,
+                }
+            ]
+        }
+
+    def update_integration_workflow_value_schema(self, *, workspace_id: str, integration_config_id: int, payload):
+        self.updated_schema = {
+            "workspace_id": workspace_id,
+            "integration_config_id": integration_config_id,
+            "payload": payload,
+        }
+        return {
+            "id": integration_config_id,
+            "workspace_id": workspace_id,
+            "provider": "jotform",
+            "integration_key": "intake-form",
+            "display_name": "Intake Form",
+            "external_form_id": "form-1",
+            "enabled": True,
+            "mode": "test",
+            "webhook_public_id": "ffj_public",
+            "webhook_path": "/api/v1/flowforge/webhooks/jotform/ffj_public",
+            "webhook_url": "/api/v1/flowforge/webhooks/jotform/ffj_public",
+            "field_mapping": {},
+            "source_events": [],
+            "source_fields": [],
+            "workflow_value_schema": payload.get("workflow_value_schema") or payload,
             "test_recipient_overrides": [],
             "settings": {},
         }
@@ -1808,6 +1871,50 @@ def test_flowforge_file_watch_integration_route_creates_config(client, monkeypat
         "workspace_id": "ws-1",
         "payload": payload,
         "actor_user_id": "user-1",
+    }
+
+
+def test_flowforge_integration_workflow_value_schema_routes_draft_and_update(client, monkeypatch):
+    service = _IntegrationService()
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: service)
+
+    draft_resp = client.post(
+        "/api/v1/flowforge/integrations/10/workflow-value-schema/draft",
+        headers=_headers(monkeypatch, roles={"flowforge:designer"}),
+    )
+    assert draft_resp.status_code == 200
+    assert draft_resp.json["fields"][0]["key"] == "values.intake.service_requested"
+
+    payload = {
+        "workflow_value_schema": {
+            "fields": [
+                {
+                    "key": "values.patient.full_name",
+                    "label": "Patient Full Name",
+                    "type": "text",
+                    "required": True,
+                    "sensitive": True,
+                    "source_paths": ["firstName", "lastName"],
+                    "transform": "concat",
+                    "separator": " ",
+                    "template": "",
+                    "expose_to_templates": True,
+                }
+            ]
+        }
+    }
+    update_resp = client.put(
+        "/api/v1/flowforge/integrations/10/workflow-value-schema",
+        headers=_headers(monkeypatch, roles={"flowforge:designer"}),
+        json=payload,
+    )
+
+    assert update_resp.status_code == 200
+    assert update_resp.json["workflow_value_schema"]["fields"][0]["key"] == "values.patient.full_name"
+    assert service.updated_schema == {
+        "workspace_id": "ws-1",
+        "integration_config_id": 10,
+        "payload": payload,
     }
 
 

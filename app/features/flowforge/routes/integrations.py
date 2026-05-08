@@ -213,3 +213,71 @@ class FlowForgeIntegrationTriggerList(Resource):
             )
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
+
+
+@flowforge_ns.route("/integrations/<int:integration_config_id>/workflow-value-schema/draft")
+@flowforge_ns.param("integration_config_id", "Integration config id whose source fields should generate a workflow value schema draft.")
+class FlowForgeIntegrationWorkflowValueSchemaDraft(Resource):
+    @flowforge_ns.doc(
+        summary="Draft a workflow value schema from integration source fields",
+        description=(
+            "Generates editable Workflow Studio value fields from the integration's configured source fields. "
+            "The response is not persisted until PUT /workflow-value-schema is called."
+        ),
+        responses={
+            200: "Workflow value schema draft returned.",
+            401: "Authentication required.",
+            403: "FlowForge designer access required.",
+            404: "Integration not found in this workspace.",
+        },
+    )
+    @flowforge_ns.marshal_with(models["workflow_value_schema"])
+    @token_required
+    @require_access("flowforge", role="designer")
+    def post(self, integration_config_id: int):
+        try:
+            return (
+                _service().draft_integration_workflow_value_schema(
+                    workspace_id=_workspace_id(),
+                    integration_config_id=integration_config_id,
+                ),
+                200,
+            )
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+
+
+@flowforge_ns.route("/integrations/<int:integration_config_id>/workflow-value-schema")
+@flowforge_ns.param("integration_config_id", "Integration config id whose workflow value schema should be updated.")
+class FlowForgeIntegrationWorkflowValueSchema(Resource):
+    @flowforge_ns.doc(
+        summary="Update an integration workflow value schema",
+        description=(
+            "Persists the governed clean workflow values for an integration. Map/Transform actions use these "
+            "values as dropdown targets and may map one source field to multiple values or combine multiple "
+            "source fields through supported transforms."
+        ),
+        responses={
+            200: "Integration returned with updated workflow value schema.",
+            400: "Invalid schema payload.",
+            401: "Authentication required.",
+            403: "FlowForge designer access required.",
+            404: "Integration not found in this workspace.",
+        },
+    )
+    @flowforge_ns.marshal_with(models["integration_config"])
+    @token_required
+    @require_access("flowforge", role="designer")
+    def put(self, integration_config_id: int):
+        try:
+            payload = request.get_json(silent=True) or {}
+            return (
+                _service().update_integration_workflow_value_schema(
+                    workspace_id=_workspace_id(),
+                    integration_config_id=integration_config_id,
+                    payload=payload if isinstance(payload, dict) else {},
+                ),
+                200,
+            )
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code

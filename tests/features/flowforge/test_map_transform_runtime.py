@@ -126,6 +126,43 @@ def test_map_transform_engine_maps_run_context_for_communication_templates():
     assert "raw" not in result.communication_context["intake"]
 
 
+def test_map_transform_engine_supports_concat_and_template_mapping_utilities():
+    result = MapTransformEngine().transform_context(
+        context={
+            "intake": {
+                "fields": {
+                    "firstName": "Jane",
+                    "lastName": "Novus",
+                    "serviceRequested": "Therapy",
+                }
+            }
+        },
+        config={
+            "mode": "run_context",
+            "field_mapping": [
+                {
+                    "target": "values.patient.full_name",
+                    "sources": ["intake.fields.firstName", "intake.fields.lastName"],
+                    "transform": "concat",
+                    "separator": " ",
+                    "expose_to_templates": True,
+                },
+                {
+                    "target": "values.intake.summary",
+                    "transform": "template",
+                    "template": "{{intake.fields.firstName}} requested {{intake.fields.serviceRequested}}",
+                    "expose_to_templates": True,
+                },
+            ],
+            "template_fields": ["values.patient.full_name", "values.intake.summary"],
+        },
+    )
+
+    assert result.context_update["values"]["patient"]["full_name"] == "Jane Novus"
+    assert result.context_update["values"]["intake"]["summary"] == "Jane requested Therapy"
+    assert result.communication_context["values"]["patient"]["full_name"] == "Jane Novus"
+
+
 def test_map_transform_executor_creates_transformed_artifact_and_audit():
     data_repo = _DataMovementRepo()
     executor = FlowForgeMapTransformExecutor(data_movement_repository=data_repo)
