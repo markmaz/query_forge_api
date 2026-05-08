@@ -202,8 +202,9 @@ class CommunicationTemplateRenderer:
             elif block_type == "text":
                 html_parts.append(f"<p>{self._escape_rendered(block.get('content'), context)}</p>")
             elif block_type == "field_value":
-                label = str(block.get("label") or block.get("field") or "Value").strip()
-                value = self._value_at_path(context, str(block.get("field") or ""))
+                field_key = str(block.get("field") or "")
+                label = str(block.get("label") or self._field_label(field_key) or "Value").strip()
+                value = self._value_at_path(context, field_key)
                 html_parts.append(
                     f"<p><strong>{html.escape(label)}:</strong> {html.escape(self._string_value(value))}</p>"
                 )
@@ -213,7 +214,7 @@ class CommunicationTemplateRenderer:
                     field_key = str(field or "").strip()
                     value = self._value_at_path(context, field_key)
                     items.append(
-                        f"<li><strong>{html.escape(field_key)}:</strong> {html.escape(self._string_value(value))}</li>"
+                        f"<li><strong>{html.escape(self._field_label(field_key))}:</strong> {html.escape(self._string_value(value))}</li>"
                     )
                 html_parts.append("<ul>" + "".join(items) + "</ul>")
             elif block_type == "image":
@@ -345,3 +346,8 @@ class CommunicationTemplateRenderer:
         if isinstance(value, dict):
             return ""
         return str(value)
+
+    @staticmethod
+    def _field_label(field: str) -> str:
+        field_name = str(field or "").split(".")[-1]
+        return re.sub(r"\s+", " ", field_name.replace("_", " ").replace("-", " ")).strip().title()

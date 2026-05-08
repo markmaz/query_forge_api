@@ -49,6 +49,7 @@ def test_communication_template_renderer_validates_and_renders_preview():
     assert validation.errors == []
     assert validation.referenced_actions == ["accept", "decline"]
     assert preview["subject"] == "New task for Dr. Lane"
+    assert "Requested Date" in preview["html"]
     assert "Anxiety" in preview["html"]
 
 
@@ -186,6 +187,88 @@ def test_communication_template_draft_generator_filters_actions_by_purpose():
     )
 
     assert draft["body_blocks"][-1] == {"type": "action_buttons", "actions": ["open_task"]}
+
+
+def test_communication_template_draft_generator_builds_intake_review_content_from_allowed_fields():
+    generator = CommunicationTemplateDraftGenerator()
+
+    draft = generator.generate(
+        prompt=(
+            "Please draft a notification email for a therapist that has a proper subject and pulls in all "
+            "the intake information from the incoming form laid out in an easy to read format. The recipient "
+            "will have the option to accept or decline the patient. End with a thank you from the Novus team."
+        ),
+        purpose="human_task",
+        channel="email",
+        resource_set_id=30,
+        resource_fields=["resource.display_name"],
+        required_actions=["accept", "decline"],
+        tone="professional",
+    )
+
+    field_lists = [block["fields"] for block in draft["body_blocks"] if block["type"] == "field_list"]
+    text_blocks = [block["content"] for block in draft["body_blocks"] if block["type"] == "text"]
+
+    assert draft["subject"] == "New patient intake review requested"
+    assert "intake.requested_service" in field_lists[0]
+    assert "intake.clinical_summary" in field_lists[0]
+    assert draft["body_blocks"][-1] == {"type": "action_buttons", "actions": ["accept", "decline"]}
+    assert "Thank you,\nThe Novus team" in text_blocks
+
+
+class _BadTemplateDraftClient:
+    _model = "draft-test"
+
+    def chat_json(self, **kwargs):
+        self.kwargs = kwargs
+        return {
+            "subject": "New patient for {intake.patient.full_name}",
+            "plain_language_summary": "Generated from bad LLM output.",
+            "body_blocks": [
+                {
+                    "type": "text",
+                    "content": "{{{'label': 'Full Name', 'value': '{intake.patient.full_name}'}}}",
+                },
+                {
+                    "type": "field_list",
+                    "fields": [
+                        "intake.patient.full_name",
+                        "intake.requested_service",
+                        "intake.clinical_summary",
+                        "resource.display_name",
+                    ],
+                },
+                {"type": "action_buttons", "actions": ["accept", "decline", "custom"]},
+            ],
+        }
+
+
+def test_communication_template_draft_generator_filters_bad_llm_fields_and_serialized_content():
+    llm_client = _BadTemplateDraftClient()
+    generator = CommunicationTemplateDraftGenerator(llm_client=llm_client)
+
+    draft = generator.generate(
+        prompt="Draft the therapist intake review email. End with a thank you from the Novus team.",
+        purpose="human_task",
+        channel="email",
+        resource_set_id=30,
+        resource_fields=["resource.display_name"],
+        required_actions=["accept", "decline"],
+        use_llm=True,
+    )
+
+    blocks = draft["body_blocks"]
+    fields = next(block["fields"] for block in blocks if block["type"] == "field_list")
+    rendered_text = " ".join(block.get("content", "") for block in blocks)
+
+    assert "{{{'label'" not in rendered_text
+    assert draft["subject"] == "New patient intake review requested"
+    assert "intake.patient.full_name" not in fields
+    assert fields == ["intake.requested_service", "intake.clinical_summary", "resource.display_name"]
+    assert "Please review the intake details below" in rendered_text
+    assert "Thank you,\nThe Novus team" in rendered_text
+    assert blocks[-1] == {"type": "action_buttons", "actions": ["accept", "decline"]}
+    assert "{{field.path}}" in llm_client.kwargs["system_prompt"]
 
 
 class _TemplateRepo:

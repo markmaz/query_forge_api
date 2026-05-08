@@ -6,7 +6,11 @@ from typing import Any
 from app.config.llm_resolver import ResolvedLLMRuntime
 from app.constants.llm_roles import LLMRole
 from app.exceptions.forge_error import ForgeError
-from app.features.flowforge.communication_template_drafting import CommunicationTemplateDraftGenerator, normalize_generated_communication_template
+from app.features.flowforge.communication_template_drafting import (
+    CommunicationTemplateDraftGenerator,
+    communication_template_draft_fields,
+    normalize_generated_communication_template,
+)
 from app.features.flowforge.runtime.communication_templates import ALLOWED_ACTIONS_BY_PURPOSE, ALLOWED_CHANNELS, ALLOWED_PURPOSES
 from app.features.flowforge.runtime.communication_templates import ALLOWED_ACTIONS
 
@@ -171,6 +175,7 @@ class FlowForgeCommunicationTemplateServiceMixin:
         tone = self._optional_string(payload.get("tone"))
         use_llm = bool(payload.get("use_llm"))
         resource_fields = sorted(self._resource_field_keys(workspace_id=workspace_id, resource_set_id=resource_set_id) or [])
+        available_fields = communication_template_draft_fields(resource_fields)
         generator = self._communication_template_draft_generator
         runtime: ResolvedLLMRuntime | None = None
         if use_llm:
@@ -186,7 +191,12 @@ class FlowForgeCommunicationTemplateServiceMixin:
             tone=tone,
             use_llm=use_llm,
         )
-        normalized = normalize_generated_communication_template(generated, purpose=purpose, required_actions=required_actions)
+        normalized = normalize_generated_communication_template(
+            generated,
+            purpose=purpose,
+            required_actions=required_actions,
+            available_fields=available_fields,
+        )
         template = {
             "channel": channel,
             "purpose": purpose,
