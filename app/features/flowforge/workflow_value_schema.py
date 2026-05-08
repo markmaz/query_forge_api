@@ -63,7 +63,7 @@ def _field_from_source(source_field: dict[str, Any]) -> dict[str, Any]:
         "type": field_type if field_type in VALID_FIELD_TYPES else "unknown",
         "required": bool(source_field.get("required")),
         "sensitive": bool(source_field.get("sensitive")),
-        "source_paths": [path],
+        "source_paths": [_runtime_source_path(path)],
         "transform": "copy",
         "separator": " ",
         "template": "",
@@ -96,12 +96,19 @@ def _source_paths(value: Any) -> list[str]:
     paths: list[str] = []
     seen: set[str] = set()
     for item in raw_values:
-        path = str(item or "").strip().strip(".")
+        path = _runtime_source_path(str(item or "").strip().strip("."))
         if not path or path in seen:
             continue
         seen.add(path)
         paths.append(path)
     return paths
+
+
+def _runtime_source_path(path: str) -> str:
+    clean_path = str(path or "").strip().strip(".")
+    if not clean_path:
+        return ""
+    return clean_path if clean_path.startswith("intake.") else f"intake.fields.{clean_path}"
 
 
 def _label_from_key(key: str) -> str:
