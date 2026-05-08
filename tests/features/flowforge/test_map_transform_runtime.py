@@ -93,6 +93,7 @@ def test_map_transform_engine_maps_run_context_for_communication_templates():
                     "serviceRequested": "Anxiety therapy",
                     "preferredDays": "Monday, Wednesday",
                     "insurance": "BCBS",
+                    "email": "patient@example.com",
                 },
                 "raw": {"unsafe": "do-not-email"},
             }
@@ -103,8 +104,9 @@ def test_map_transform_engine_maps_run_context_for_communication_templates():
                 {"target": "intake.requested_service", "source": "intake.fields.serviceRequested"},
                 {"target": "intake.preferred_days", "source": "intake.fields.preferredDays"},
                 {"target": "intake.insurance", "source": "intake.fields.insurance"},
+                {"target": "values.patient.email", "source": "intake.fields.email"},
             ],
-            "template_fields": ["intake.requested_service", "intake.preferred_days"],
+            "template_fields": ["intake.requested_service", "intake.preferred_days", "values.patient.email"],
             "validations": [{"field": "intake.requested_service", "rule": "required"}],
         },
     )
@@ -115,9 +117,12 @@ def test_map_transform_engine_maps_run_context_for_communication_templates():
         "intake": {
             "requested_service": "Anxiety therapy",
             "preferred_days": "Monday, Wednesday",
+        },
+        "values": {
+            "patient": {"email": "patient@example.com"},
         }
     }
-    assert result.communication_fields == ["intake.preferred_days", "intake.requested_service"]
+    assert result.communication_fields == ["intake.preferred_days", "intake.requested_service", "values.patient.email"]
     assert "raw" not in result.communication_context["intake"]
 
 
@@ -183,8 +188,9 @@ def test_map_transform_executor_updates_run_context_in_context_mode():
                 "field_mapping": {
                     "intake.requested_service": "intake.fields.serviceRequested",
                     "intake.clinical_summary": "intake.fields.summary",
+                    "values.patient.email": "intake.fields.email",
                 },
-                "template_fields": ["intake.requested_service", "intake.clinical_summary"],
+                "template_fields": ["intake.requested_service", "intake.clinical_summary", "values.patient.email"],
             },
         },
         outgoing_edges=[{"id": "e1", "source": "normalize-intake", "target": "match"}],
@@ -193,6 +199,7 @@ def test_map_transform_executor_updates_run_context_in_context_mode():
                 "fields": {
                     "serviceRequested": "Trauma therapy",
                     "summary": "Seeking afternoon appointments.",
+                    "email": "patient@example.com",
                 }
             }
         },
@@ -205,11 +212,15 @@ def test_map_transform_executor_updates_run_context_in_context_mode():
         "intake": {
             "requested_service": "Trauma therapy",
             "clinical_summary": "Seeking afternoon appointments.",
+        },
+        "values": {
+            "patient": {"email": "patient@example.com"},
         }
     }
     assert result.event_payload["context_transform"]["communication_fields"] == [
         "intake.clinical_summary",
         "intake.requested_service",
+        "values.patient.email",
     ]
 
 

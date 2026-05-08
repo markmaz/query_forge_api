@@ -67,7 +67,9 @@ class FlowForgeNotificationNodeExecutor:
 
     @classmethod
     def _notification_recipients(cls, *, config: dict[str, Any], run_context: dict[str, Any]) -> list[str]:
+        dynamic_recipient = cls._dynamic_recipient(config=config, run_context=run_context)
         raw_values = [
+            dynamic_recipient,
             config.get("recipients"),
             config.get("recipient"),
             config.get("recipient_email"),
@@ -80,6 +82,21 @@ class FlowForgeNotificationNodeExecutor:
                 if recipient not in recipients:
                     recipients.append(recipient)
         return recipients
+
+    @classmethod
+    def _dynamic_recipient(cls, *, config: dict[str, Any], run_context: dict[str, Any]) -> Any:
+        source = str(config.get("recipient_source") or config.get("recipient_mode") or "").strip()
+        if source not in {"workflow_value", "mapped_value", "context_field"}:
+            return None
+        field = str(
+            config.get("recipient_field")
+            or config.get("recipient_value")
+            or config.get("recipient_path")
+            or ""
+        ).strip()
+        if not field:
+            return None
+        return cls._path_value(run_context, field)
 
     @staticmethod
     def _notification_payload_summary(*, config: dict[str, Any], run_context: dict[str, Any]) -> dict[str, Any]:
@@ -108,6 +125,17 @@ class FlowForgeNotificationNodeExecutor:
         else:
             raw_items = []
         return [str(item or "").strip() for item in raw_items if str(item or "").strip()]
+
+    @staticmethod
+    def _path_value(context: dict[str, Any], path: str) -> Any:
+        current: Any = context
+        for piece in str(path or "").split("."):
+            if not piece:
+                continue
+            if not isinstance(current, dict) or piece not in current:
+                return None
+            current = current[piece]
+        return current
 
     @staticmethod
     def _first_target(outgoing_edges: list[dict[str, Any]]) -> str | None:

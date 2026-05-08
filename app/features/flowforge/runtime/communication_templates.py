@@ -23,7 +23,7 @@ ALLOWED_ACTIONS_BY_PURPOSE = {
     "report": set(),
 }
 MERGE_FIELD_PATTERN = re.compile(r"{{\s*([A-Za-z0-9_.-]+)\s*}}")
-RUNTIME_FIELD_PREFIXES = {"intake", "context"}
+RUNTIME_FIELD_PREFIXES = {"intake", "context", "values"}
 RUNTIME_FIELDS = {
     "task.due_at",
     "task.id",

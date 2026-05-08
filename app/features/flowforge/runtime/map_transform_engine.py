@@ -155,7 +155,11 @@ class MapTransformEngine:
             fields = []
         if bool(config.get("expose_all_mapped_to_templates")):
             fields.extend(mapped.keys())
-        allowed = [field for field in fields if field.startswith("intake.") and field in mapped]
+        allowed = [
+            field
+            for field in fields
+            if field in mapped and (field.startswith("intake.") or field.startswith("values."))
+        ]
         return sorted(set(allowed))
 
     def _communication_context(self, *, mapped: dict[str, Any], communication_fields: list[str]) -> dict[str, Any]:

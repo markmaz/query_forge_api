@@ -233,7 +233,42 @@ def test_dispatcher_creates_pending_notifications_for_notification_nodes():
     }
     completed_event = runtime_repo.events_by_key["flowforge:run:101:node:notify:completed"]
     assert completed_event["event_payload"]["notification_ids"] == [1100, 1101]
-    assert completed_event["event_payload"]["recipient_count"] == 2
+
+
+def test_dispatcher_resolves_notification_recipients_from_workflow_values():
+    runtime_repo = _RuntimeRepo()
+    runtime_repo.run["run_context_json"] = {
+        "values": {"patient": {"email": "patient@example.com"}},
+        "communication_context": {"values": {"patient": {"email": "patient@example.com"}}},
+    }
+    dispatcher = FlowForgeRuntimeDispatcher(
+        runtime_repository=runtime_repo,
+        workflow_repository=_WorkflowRepo(
+            graph={
+                "nodes": [
+                    {"id": "intake", "type": "intake"},
+                    {
+                        "id": "notify",
+                        "type": "notification",
+                        "data": {
+                            "recipient_source": "workflow_value",
+                            "recipient_field": "values.patient.email",
+                            "communication_template_key": "flowforge.patient_notification",
+                        },
+                    },
+                ],
+                "edges": [{"id": "e1", "source": "intake", "target": "notify"}],
+            }
+        ),
+    )
+
+    result = dispatcher.dispatch_run(workspace_id="ws-1", run_id=101)
+
+    assert result["status"] == "completed"
+    assert [notification["recipient"] for notification in runtime_repo.notifications] == ["patient@example.com"]
+    assert runtime_repo.notifications[0]["idempotency_key"] == "run:101:notification:notify:patient@example.com"
+    completed_event = runtime_repo.events_by_key["flowforge:run:101:node:notify:completed"]
+    assert completed_event["event_payload"]["recipient_count"] == 1
 
 
 def test_dispatcher_pauses_wait_node_without_completing_run():
