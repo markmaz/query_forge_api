@@ -17,6 +17,7 @@ from app.features.flowforge.runtime.communication_templates import ALLOWED_ACTIO
 
 TEMPLATE_STATUSES = {"draft", "active", "archived"}
 SLUG_PATTERN = re.compile(r"[^a-z0-9]+")
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 COMMON_RESOURCE_FIELDS = {
     "resource.source_record_key",
     "resource.display_name",
@@ -151,6 +152,42 @@ class FlowForgeCommunicationTemplateServiceMixin:
             raise ForgeError(f"Communication template '{template_id}' was not found.", status_code=404)
         refreshed = self._communication_template_repository.get_template(workspace_id=workspace_id, template_id=template_id)
         return self._serialize_communication_template(refreshed or {**template, "status": "active", "validation_status": "valid"})
+
+    def send_communication_template_test(
+        self,
+        *,
+        workspace_id: str,
+        template_id: int,
+        payload: dict[str, Any],
+        actor_user_id: str,
+    ) -> dict[str, Any]:
+        del actor_user_id
+        recipient = str(payload.get("recipient") or payload.get("email") or "").strip()
+        if not recipient or not EMAIL_PATTERN.match(recipient):
+            raise ForgeError("recipient must be a valid email address.", status_code=400)
+        row = self._communication_template_repository.get_template(workspace_id=workspace_id, template_id=template_id)
+        if row is None:
+            raise ForgeError(f"Communication template '{template_id}' was not found.", status_code=404)
+        template = self._serialize_communication_template(row)
+        validation = self._validate_template_payload(workspace_id=workspace_id, template=template)
+        if not validation["valid"]:
+            raise ForgeError("Communication template is invalid.", status_code=400, details=validation)
+        preview_context = payload.get("preview_context") if isinstance(payload.get("preview_context"), dict) else {}
+        rendered = self._communication_template_renderer.render_email(
+            template=template,
+            context=preview_context,
+            action_urls={
+                "accept": "https://example.invalid/workflow-studio/test-action/accept",
+                "decline": "https://example.invalid/workflow-studio/test-action/decline",
+                "open_task": "https://example.invalid/workflow-studio/test-action/open",
+            },
+        )
+        self._communication_template_email_sender(recipient, rendered["subject"], rendered["html"])
+        return {
+            "status": "sent",
+            "recipient": recipient,
+            "subject": rendered["subject"],
+        }
 
     def create_communication_template_ai_draft(
         self,

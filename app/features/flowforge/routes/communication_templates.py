@@ -215,3 +215,36 @@ class FlowForgeCommunicationTemplateActivation(Resource):
             )
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
+
+
+@flowforge_ns.route("/communication-templates/<int:template_id>/test-send")
+@flowforge_ns.param("template_id", "Communication template id.")
+class FlowForgeCommunicationTemplateTestSend(Resource):
+    @flowforge_ns.doc(
+        summary="Send a test FlowForge communication template email",
+        responses={
+            200: "Test email sent.",
+            400: "Invalid test-send payload or invalid template.",
+            401: "Authentication required.",
+            403: "FlowForge designer access required.",
+            404: "Communication template not found.",
+        },
+    )
+    @flowforge_ns.expect(models["communication_template_test_send"], validate=False)
+    @flowforge_ns.marshal_with(models["communication_template_test_send_result"])
+    @token_required
+    @require_access("flowforge", role="designer")
+    def post(self, template_id: int):
+        try:
+            payload = request.get_json(silent=True) or {}
+            return (
+                _service().send_communication_template_test(
+                    workspace_id=_workspace_id(),
+                    template_id=template_id,
+                    payload=payload if isinstance(payload, dict) else {},
+                    actor_user_id=_actor_user_id(),
+                ),
+                200,
+            )
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code

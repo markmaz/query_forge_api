@@ -413,6 +413,46 @@ def test_flowforge_service_creates_communication_template_ai_draft():
     assert repo.created_ai_draft["model_provider"] == "heuristic"
 
 
+def test_flowforge_service_sends_communication_template_test_email():
+    sent: list[dict[str, str]] = []
+    service = FlowForgeService(
+        communication_template_repository=_TemplateRepo(),
+        resource_repository=_ResourceRepo(),
+        communication_template_email_sender=lambda recipient, subject, html: sent.append(
+            {"recipient": recipient, "subject": subject, "html": html}
+        ),
+    )
+
+    result = service.send_communication_template_test(
+        workspace_id="ws-1",
+        template_id=501,
+        payload={
+            "recipient": "therapist@example.com",
+            "preview_context": {
+                "resource": {"display_name": "Dr. Lane", "attributes": {"specialty": "Anxiety"}},
+                "task": {"due_at": "2026-05-06T18:00:00Z"},
+                "intake": {"requested_date": "Friday"},
+            },
+        },
+        actor_user_id="user-1",
+    )
+
+    assert result == {
+        "status": "sent",
+        "recipient": "therapist@example.com",
+        "subject": "New task for Dr. Lane",
+    }
+    assert sent == [
+        {
+            "recipient": "therapist@example.com",
+            "subject": "New task for Dr. Lane",
+            "html": sent[0]["html"],
+        }
+    ]
+    assert "Anxiety" in sent[0]["html"]
+    assert "example.invalid/workflow-studio/test-action/accept" in sent[0]["html"]
+
+
 def test_flowforge_service_rejects_ai_draft_actions_that_do_not_match_purpose():
     service = FlowForgeService(communication_template_repository=_TemplateRepo(), resource_repository=_ResourceRepo())
 

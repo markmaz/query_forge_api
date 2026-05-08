@@ -52,6 +52,21 @@ def register_communication_template_models(namespace):
             "preview": fields.Raw(required=False),
         },
     )
+    communication_template_test_send = namespace.model(
+        "FlowForgeCommunicationTemplateTestSend",
+        {
+            "recipient": fields.String(required=True),
+            "preview_context": fields.Raw(required=False),
+        },
+    )
+    communication_template_test_send_result = namespace.model(
+        "FlowForgeCommunicationTemplateTestSendResult",
+        {
+            "status": fields.String(required=True),
+            "recipient": fields.String(required=True),
+            "subject": fields.String(required=True),
+        },
+    )
     communication_template_ai_draft = namespace.model(
         "FlowForgeCommunicationTemplateAIDraft",
         {
@@ -79,5 +94,7 @@ def register_communication_template_models(namespace):
         "communication_template": communication_template,
         "communication_template_upsert": communication_template_upsert,
         "communication_template_validation": communication_template_validation,
+        "communication_template_test_send": communication_template_test_send,
+        "communication_template_test_send_result": communication_template_test_send_result,
         "communication_template_ai_draft": communication_template_ai_draft,
     }

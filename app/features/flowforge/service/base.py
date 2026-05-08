@@ -39,6 +39,7 @@ class FlowForgeServiceBase:
         matching_policy_draft_generator: MatchingPolicyDraftGenerator | None = None,
         communication_template_draft_generator: CommunicationTemplateDraftGenerator | None = None,
         workflow_graph_draft_generator: WorkflowGraphDraftGenerator | None = None,
+        communication_template_email_sender: Callable[[str, str, str], None] | None = None,
         llm_runtime_builder: Callable[..., ResolvedLLMRuntime] | None = None,
     ) -> None:
         self._resource_repository = resource_repository or FlowForgeResourceRepository()
@@ -54,6 +55,7 @@ class FlowForgeServiceBase:
         self._matching_policy_draft_generator = matching_policy_draft_generator or MatchingPolicyDraftGenerator()
         self._communication_template_draft_generator = communication_template_draft_generator or CommunicationTemplateDraftGenerator()
         self._workflow_graph_draft_generator = workflow_graph_draft_generator or WorkflowGraphDraftGenerator()
+        self._communication_template_email_sender = communication_template_email_sender or self._send_communication_template_email
         self._llm_runtime_builder = llm_runtime_builder or build_llm_client_for_role
 
     def _optional_string(self, value: Any) -> str | None:
@@ -76,3 +78,9 @@ class FlowForgeServiceBase:
 
     def _hash_webhook_secret(self, value: str) -> str:
         return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _send_communication_template_email(recipient: str, subject: str, html: str) -> None:
+        from app.email.mailer import get_logo, send_email
+
+        send_email(get_logo(), subject, recipient, html)

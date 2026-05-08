@@ -80,6 +80,8 @@ def register_models(namespace):
         "communication_template": models["communication_template"],
         "communication_template_upsert": models["communication_template_upsert"],
         "communication_template_validation": models["communication_template_validation"],
+        "communication_template_test_send": models["communication_template_test_send"],
+        "communication_template_test_send_result": models["communication_template_test_send_result"],
         "communication_template_ai_draft": models["communication_template_ai_draft"],
     }
 
