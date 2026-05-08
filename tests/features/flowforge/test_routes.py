@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Dict
 
 import app.decorators.rbac as rbac_decorators
@@ -649,6 +650,8 @@ class _RunService:
                 "validation_result": {"errors": [], "warnings": []},
                 "matching_policy_refs": [],
                 "settings": {},
+                "created_at": datetime(2026, 5, 7, 20, 27, 25),
+                "published_at": None,
             }
         ]
 
@@ -724,6 +727,8 @@ class _RunService:
             "validation_result": {"errors": [], "warnings": []},
             "matching_policy_refs": [],
             "settings": {"published_by": actor_user_id},
+            "created_at": datetime(2026, 5, 7, 20, 27, 25),
+            "published_at": datetime(2026, 5, 7, 20, 28, 0),
         }
 
     def delete_workflow_definition(self, *, workspace_id: str, workflow_definition_id: int, actor_user_id: str):
@@ -1240,8 +1245,10 @@ def test_flowforge_workflow_version_routes_list_and_publish(client, monkeypatch)
 
     assert versions.status_code == 200
     assert versions.json[0]["id"] == 44
+    assert versions.json[0]["created_at"] == "2026-05-07T20:27:25"
     assert published.status_code == 200
     assert published.json["version_status"] == "published"
+    assert published.json["published_at"] == "2026-05-07T20:28:00"
 
 
 def test_flowforge_workflow_authoring_routes_create_definition_and_version(client, monkeypatch):

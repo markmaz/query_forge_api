@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+from datetime import date, datetime
+
 from flask_restx import fields
+
+
+class _JsonDateTime(fields.Raw):
+    def format(self, value):
+        if isinstance(value, datetime | date):
+            return value.isoformat()
+        return value
 
 
 def register_workflow_models(namespace):
@@ -123,8 +132,8 @@ def register_workflow_models(namespace):
             "validation_result": fields.Raw(required=True),
             "matching_policy_refs": fields.Raw(required=True),
             "settings": fields.Raw(required=True),
-            "created_at": fields.Raw(required=False),
-            "published_at": fields.Raw(required=False),
+            "created_at": _JsonDateTime(required=False),
+            "published_at": _JsonDateTime(required=False),
         },
     )
     workflow_version_create = namespace.model(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -710,9 +711,15 @@ class FlowForgeWorkflowServiceMixin:
             "validation_result": row.get("validation_result") or row.get("validation_result_json") or {},
             "matching_policy_refs": row.get("matching_policy_refs") or row.get("matching_policy_refs_json") or [],
             "settings": row.get("settings") or row.get("settings_json") or {},
-            "created_at": row.get("created_at"),
-            "published_at": row.get("published_at"),
+            "created_at": self._json_scalar(row.get("created_at")),
+            "published_at": self._json_scalar(row.get("published_at")),
         }
+
+    @staticmethod
+    def _json_scalar(value: Any) -> Any:
+        if isinstance(value, datetime | date):
+            return value.isoformat()
+        return value
 
     def _serialize_workflow_definition(self, row: dict[str, Any]) -> WorkflowDefinition:
         return {

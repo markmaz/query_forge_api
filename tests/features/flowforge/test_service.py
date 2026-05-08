@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -345,6 +346,8 @@ class _WorkflowRepo:
                 "validation_result_json": {"errors": [], "warnings": []},
                 "matching_policy_refs_json": [],
                 "settings_json": {},
+                "created_at": datetime(2026, 5, 7, 20, 27, 25),
+                "published_at": None,
             }
         ]
 
@@ -2193,6 +2196,7 @@ def test_flowforge_service_lists_and_publishes_workflow_versions():
 
     assert versions[0]["id"] == 44
     assert versions[0]["graph"] == {"nodes": [{"id": "intake"}], "edges": []}
+    assert versions[0]["created_at"] == "2026-05-07T20:27:25"
     assert published["version_status"] == "published"
     assert repo.published["published_by"] == "user-1"
 
