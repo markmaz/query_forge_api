@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+
+from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 from app.exceptions.forge_error import ForgeError
 from app.services.domain.planner_retrieval_policy_service import PlannerRetrievalPolicyService
 from app.services.planner_domain.capability_compactor import _to_int
 from app.services.planner_domain.prompt_intents import _dedupe_text_items
+
+logger = logging.getLogger(__name__)
+
+DOMAIN_VECTOR_SEARCH_ERRORS = (OSError, RuntimeError, ValueError, UnexpectedResponse, ResponseHandlingException)
 
 
 def _dedupe_constraints(values: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
@@ -170,17 +177,28 @@ def get_domain_candidates(
         ],
     )
     rows: List[Dict[str, Any]] = []
+    vector_failures: List[str] = []
     for query_spec in query_specs:
         query_text = str(query_spec.get("query") or "").strip()
         if query_text == "":
             continue
-        result = search_domains_fn(
-            workspace_id=workspace_id,
-            query=query_text,
-            limit=6,
-            score_threshold=0.0,
-            include_payload=False,
-        )
+        try:
+            result = search_domains_fn(
+                workspace_id=workspace_id,
+                query=query_text,
+                limit=6,
+                score_threshold=0.0,
+                include_payload=False,
+            )
+        except DOMAIN_VECTOR_SEARCH_ERRORS as exc:
+            vector_failures.append(type(exc).__name__)
+            logger.warning(
+                "domain candidate vector search failed workspace_id=%s query_source=%s error=%s",
+                workspace_id,
+                str(query_spec.get("source") or "vector"),
+                exc,
+            )
+            continue
         semantic_boost = float(query_spec.get("score_boost") or 0.0)
         semantic_reasons = list(query_spec.get("reasons") or [])
         query_source = str(query_spec.get("source") or "vector")
@@ -232,5 +250,15 @@ def get_domain_candidates(
     out.sort(key=lambda item: (-float(item.get("score") or 0.0), int(item.get("domain_id") or 0)))
     out = out[:6]
     if not out:
+        if vector_failures:
+            raise ForgeError(
+                "Domain vector search is temporarily unavailable",
+                status_code=503,
+                details={
+                    "reason": "domain_vector_search_failed",
+                    "failure_count": len(vector_failures),
+                    "failure_types": sorted(set(vector_failures)),
+                },
+            )
         raise ForgeError("No candidate domain found for prompt", status_code=404)
     return out

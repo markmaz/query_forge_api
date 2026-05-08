@@ -4,6 +4,10 @@ from __future__ import annotations
 from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
+import pytest
+from qdrant_client.http.exceptions import ResponseHandlingException
+
+from app.exceptions.forge_error import ForgeError
 from app.services.domain.planner_domain_selection_policy_service import PlannerDomainSelectionPolicyService
 from app.services.domain.planner_retrieval_policy_service import PlannerRetrievalPolicyService
 from app.services.planner_domain.domain_selection_service import DomainSelectionService
@@ -303,3 +307,31 @@ def test_get_domain_candidates_uses_retrieval_policy_query_specs() -> None:
 
     assert any(query == "student demographics birth date age" for query in vector.queries)
     assert any(row["domain_id"] == 21 for row in out)
+
+
+def test_get_domain_candidates_returns_controlled_error_when_vector_search_fails() -> None:
+    class _FailingDomainVector:
+        def search_domains(self, **kwargs):
+            raise ResponseHandlingException(ConnectionResetError("connection reset by peer"))
+
+    svc = DomainSelectionService(
+        domain_vector=_FailingDomainVector(),
+        capabilities_service=MagicMock(),
+        rerank_policy_engine=MagicMock(extract_prompt_signals=lambda *, prompt: []),
+        embedding_model_factory=MagicMock(),
+        column_vector_factory=MagicMock(),
+        semantic_grounding_factory=MagicMock(),
+        semantic_alias_constraints_fn=MagicMock(return_value=[]),
+        retrieval_policy_service=PlannerRetrievalPolicyService(enable_db_lookup=False),
+    )
+
+    with pytest.raises(ForgeError) as exc_info:
+        svc._get_domain_candidates(
+            workspace_id="ws-1",
+            prompt="show student counts",
+            provided_domain_id=None,
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.details["reason"] == "domain_vector_search_failed"
+    assert exc_info.value.details["failure_types"] == ["ResponseHandlingException"]
