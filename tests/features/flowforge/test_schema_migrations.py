@@ -123,3 +123,19 @@ def test_flowforge_communication_template_ai_draft_migration_defines_audit_contr
     assert "generated_body_blocks_json JSON NOT NULL" in sql
     assert "model_provider VARCHAR(64) NULL" in sql
     assert "KEY idx_ff_comm_template_ai_draft_purpose" in sql
+
+
+def test_flowforge_workflow_jobs_governance_migration_defines_owner_run_as_and_acl_contract():
+    sql = _migration_text("20260509_flowforge_workflow_jobs_governance.sql")
+
+    assert "ALTER TABLE flowforge_workflow_definitions" in sql
+    assert "ADD COLUMN owner_user_id VARCHAR(255) NULL" in sql
+    assert "ADD COLUMN run_as_principal_type VARCHAR(32) NULL" in sql
+    assert "ADD COLUMN run_as_principal_id VARCHAR(255) NULL" in sql
+    assert "ADD COLUMN lifecycle VARCHAR(32) NOT NULL DEFAULT 'development'" in sql
+    assert "CREATE TABLE IF NOT EXISTS flowforge_workflow_acl" in sql
+    assert "UNIQUE KEY uidx_ff_workflow_acl_principal" in sql
+    assert "permission VARCHAR(32) NOT NULL" in sql
+    assert "INSERT INTO flowforge_workflow_acl" in sql
+    assert "ALTER TABLE flowforge_runs" in sql
+    assert "ADD COLUMN triggered_by_user_id VARCHAR(255) NULL" in sql

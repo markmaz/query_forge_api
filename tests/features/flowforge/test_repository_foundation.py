@@ -238,6 +238,31 @@ def test_flowforge_communication_template_repository_creates_ai_draft():
     assert json.loads(params["generated_body_blocks_json"])[0]["type"] == "action_buttons"
 
 
+def test_flowforge_workflow_repository_creates_definition_with_owner_and_run_as_defaults():
+    sql = _SQL(lastrowid=12)
+    repo = FlowForgeWorkflowRepository(sql=sql)
+
+    created_id = repo.create_workflow_definition(
+        workspace_id="ws-1",
+        workflow_key="intake-routing",
+        name="Intake Routing",
+        description="Routes intake submissions.",
+        created_by="user-1",
+    )
+
+    query, params = sql.inserts[0]
+    assert created_id == 12
+    assert "INSERT INTO flowforge_workflow_definitions" in query
+    assert "owner_user_id" in query
+    assert "run_as_principal_type" in query
+    assert "run_as_principal_id" in query
+    assert "lifecycle" in query
+    assert params["owner_user_id"] == "user-1"
+    assert params["run_as_principal_type"] == "user"
+    assert params["run_as_principal_id"] == "user-1"
+    assert params["lifecycle"] == "development"
+
+
 def test_flowforge_workflow_repository_serializes_graph_when_creating_version():
     sql = _SQL(lastrowid=44)
     repo = FlowForgeWorkflowRepository(sql=sql)
@@ -356,6 +381,67 @@ def test_flowforge_workflow_repository_archives_workflow_definition():
         "workflow_definition_id": 12,
         "archived_by": "user-1",
     }
+
+
+def test_flowforge_workflow_repository_updates_owner_run_as_and_acl():
+    sql = _SQL(
+        rows=[
+            {
+                "id": 71,
+                "workspace_id": "ws-1",
+                "workflow_definition_id": 12,
+                "principal_type": "user",
+                "principal_id": "designer-1",
+                "permission": "edit",
+            }
+        ],
+        lastrowid=71,
+    )
+    repo = FlowForgeWorkflowRepository(sql=sql)
+
+    owner_updated = repo.update_workflow_owner(
+        workspace_id="ws-1",
+        workflow_definition_id=12,
+        owner_user_id="owner-2",
+        updated_by="admin-1",
+    )
+    run_as_updated = repo.update_workflow_run_as(
+        workspace_id="ws-1",
+        workflow_definition_id=12,
+        principal_type="service_principal",
+        principal_id="workflow-runner",
+        updated_by="admin-1",
+    )
+    grant_id = repo.grant_workflow_permission(
+        workspace_id="ws-1",
+        workflow_definition_id=12,
+        principal_type="user",
+        principal_id="designer-1",
+        permission="edit",
+        granted_by="admin-1",
+    )
+    acl = repo.list_workflow_acl(workspace_id="ws-1", workflow_definition_id=12)
+    revoked = repo.revoke_workflow_permission(
+        workspace_id="ws-1",
+        workflow_definition_id=12,
+        principal_type="user",
+        principal_id="designer-1",
+        revoked_by="admin-1",
+    )
+
+    assert owner_updated is True
+    assert run_as_updated is True
+    assert grant_id == 71
+    assert revoked is True
+    assert "owner_user_id = :owner_user_id" in sql.writes[0][0]
+    assert "run_as_principal_type = :principal_type" in sql.writes[1][0]
+    assert "INSERT INTO flowforge_workflow_acl" in sql.inserts[0][0]
+    assert "ON DUPLICATE KEY UPDATE" in sql.inserts[0][0]
+    assert "FROM flowforge_workflow_acl" in sql.queries[0][0]
+    assert "revoked_at IS NULL" in sql.queries[0][0]
+    assert acl[0]["permission"] == "edit"
+    assert "UPDATE flowforge_workflow_acl" in sql.writes[2][0]
+    assert sql.writes[2][1]["revoked_by"] == "admin-1"
 
 
 def test_flowforge_runtime_repository_dashboard_metrics_are_production_scoped_and_redacted():
@@ -1336,6 +1422,9 @@ def test_flowforge_runtime_repository_creates_and_reads_run_by_idempotency():
         workflow_version_id=13,
         intake_event_id=501,
         mode="test",
+        run_as_principal_type="service_principal",
+        run_as_principal_id="workflow-runner",
+        triggered_by_user_id="operator-1",
         status="waiting",
         current_node_id="intake",
         idempotency_key="intake:501:trigger:66",
@@ -1348,6 +1437,9 @@ def test_flowforge_runtime_repository_creates_and_reads_run_by_idempotency():
 
     assert run_id == 90
     assert "INSERT INTO flowforge_runs" in sql.inserts[0][0]
+    assert sql.inserts[0][1]["run_as_principal_type"] == "service_principal"
+    assert sql.inserts[0][1]["run_as_principal_id"] == "workflow-runner"
+    assert sql.inserts[0][1]["triggered_by_user_id"] == "operator-1"
     assert json.loads(sql.inserts[0][1]["run_context_json"]) == {"trigger_key": "intake-routing"}
     assert existing is not None
     assert existing["run_context_json"] == {"trigger_key": "intake-routing"}

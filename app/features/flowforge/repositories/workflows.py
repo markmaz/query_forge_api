@@ -19,7 +19,14 @@ class FlowForgeWorkflowRepository:
         name: str,
         description: str | None,
         created_by: str | None,
+        owner_user_id: str | None = None,
+        run_as_principal_type: str | None = None,
+        run_as_principal_id: str | None = None,
+        lifecycle: str = "development",
     ) -> int:
+        owner = str(owner_user_id or created_by or "").strip() or None
+        run_as_id = str(run_as_principal_id or owner or "").strip() or None
+        run_as_type = str(run_as_principal_type or ("user" if run_as_id else "")).strip() or None
         result = self._sql.execute_insert(
             """
             INSERT INTO flowforge_workflow_definitions (
@@ -27,12 +34,20 @@ class FlowForgeWorkflowRepository:
               workflow_key,
               name,
               description,
+              owner_user_id,
+              run_as_principal_type,
+              run_as_principal_id,
+              lifecycle,
               created_by
             ) VALUES (
               :workspace_id,
               :workflow_key,
               :name,
               :description,
+              :owner_user_id,
+              :run_as_principal_type,
+              :run_as_principal_id,
+              :lifecycle,
               :created_by
             )
             """,
@@ -41,10 +56,162 @@ class FlowForgeWorkflowRepository:
                 "workflow_key": str(workflow_key or "").strip(),
                 "name": str(name or "").strip(),
                 "description": description,
+                "owner_user_id": owner,
+                "run_as_principal_type": run_as_type,
+                "run_as_principal_id": run_as_id,
+                "lifecycle": str(lifecycle or "development").strip() or "development",
                 "created_by": created_by,
             },
         )
         return _lastrowid(result)
+
+    def update_workflow_owner(
+        self,
+        *,
+        workspace_id: str,
+        workflow_definition_id: int,
+        owner_user_id: str,
+        updated_by: str | None,
+    ) -> bool:
+        count = self._sql.execute_write(
+            """
+            UPDATE flowforge_workflow_definitions
+            SET owner_user_id = :owner_user_id,
+                updated_by = :updated_by,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE workspace_id = :workspace_id
+              AND id = :workflow_definition_id
+              AND archived_at IS NULL
+            """,
+            {
+                "workspace_id": str(workspace_id or "").strip(),
+                "workflow_definition_id": int(workflow_definition_id),
+                "owner_user_id": str(owner_user_id or "").strip(),
+                "updated_by": updated_by,
+            },
+        )
+        return bool(count)
+
+    def update_workflow_run_as(
+        self,
+        *,
+        workspace_id: str,
+        workflow_definition_id: int,
+        principal_type: str,
+        principal_id: str,
+        updated_by: str | None,
+    ) -> bool:
+        count = self._sql.execute_write(
+            """
+            UPDATE flowforge_workflow_definitions
+            SET run_as_principal_type = :principal_type,
+                run_as_principal_id = :principal_id,
+                updated_by = :updated_by,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE workspace_id = :workspace_id
+              AND id = :workflow_definition_id
+              AND archived_at IS NULL
+            """,
+            {
+                "workspace_id": str(workspace_id or "").strip(),
+                "workflow_definition_id": int(workflow_definition_id),
+                "principal_type": str(principal_type or "").strip(),
+                "principal_id": str(principal_id or "").strip(),
+                "updated_by": updated_by,
+            },
+        )
+        return bool(count)
+
+    def list_workflow_acl(self, *, workspace_id: str, workflow_definition_id: int) -> list[dict[str, Any]]:
+        return self._sql.execute_query_mappings(
+            """
+            SELECT *
+            FROM flowforge_workflow_acl
+            WHERE workspace_id = :workspace_id
+              AND workflow_definition_id = :workflow_definition_id
+              AND revoked_at IS NULL
+            ORDER BY permission DESC, principal_type ASC, principal_id ASC
+            """,
+            {
+                "workspace_id": str(workspace_id or "").strip(),
+                "workflow_definition_id": int(workflow_definition_id),
+            },
+        )
+
+    def grant_workflow_permission(
+        self,
+        *,
+        workspace_id: str,
+        workflow_definition_id: int,
+        principal_type: str,
+        principal_id: str,
+        permission: str,
+        granted_by: str | None,
+    ) -> int:
+        result = self._sql.execute_insert(
+            """
+            INSERT INTO flowforge_workflow_acl (
+              workspace_id,
+              workflow_definition_id,
+              principal_type,
+              principal_id,
+              permission,
+              granted_by
+            ) VALUES (
+              :workspace_id,
+              :workflow_definition_id,
+              :principal_type,
+              :principal_id,
+              :permission,
+              :granted_by
+            )
+            ON DUPLICATE KEY UPDATE
+              permission = VALUES(permission),
+              granted_by = VALUES(granted_by),
+              granted_at = CURRENT_TIMESTAMP,
+              revoked_by = NULL,
+              revoked_at = NULL
+            """,
+            {
+                "workspace_id": str(workspace_id or "").strip(),
+                "workflow_definition_id": int(workflow_definition_id),
+                "principal_type": str(principal_type or "").strip(),
+                "principal_id": str(principal_id or "").strip(),
+                "permission": str(permission or "").strip(),
+                "granted_by": granted_by,
+            },
+        )
+        return _lastrowid(result)
+
+    def revoke_workflow_permission(
+        self,
+        *,
+        workspace_id: str,
+        workflow_definition_id: int,
+        principal_type: str,
+        principal_id: str,
+        revoked_by: str | None,
+    ) -> bool:
+        count = self._sql.execute_write(
+            """
+            UPDATE flowforge_workflow_acl
+            SET revoked_by = :revoked_by,
+                revoked_at = CURRENT_TIMESTAMP
+            WHERE workspace_id = :workspace_id
+              AND workflow_definition_id = :workflow_definition_id
+              AND principal_type = :principal_type
+              AND principal_id = :principal_id
+              AND revoked_at IS NULL
+            """,
+            {
+                "workspace_id": str(workspace_id or "").strip(),
+                "workflow_definition_id": int(workflow_definition_id),
+                "principal_type": str(principal_type or "").strip(),
+                "principal_id": str(principal_id or "").strip(),
+                "revoked_by": revoked_by,
+            },
+        )
+        return bool(count)
 
     def list_workflow_definitions(self, *, workspace_id: str) -> list[dict[str, Any]]:
         rows = self._sql.execute_query_mappings(
