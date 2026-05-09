@@ -330,6 +330,8 @@ class _WorkflowRepo:
                 "workflow_key": "intake-routing",
                 "name": "Intake Routing",
                 "description": "Routes intake submissions.",
+                "owner_user_id": "user-1",
+                "created_by": "user-1",
                 "status": "draft",
                 "graph_json": {"nodes": [{"id": "intake"}], "edges": []},
             }
@@ -363,6 +365,10 @@ class _WorkflowRepo:
         self.created_definition = payload
         return 12
 
+    def grant_workflow_permission(self, **payload):
+        self.granted_workflow_permission = payload
+        return 70
+
     def create_workflow_version(self, **payload):
         self.created_version = payload
         return 45
@@ -386,6 +392,24 @@ class _WorkflowRepo:
     def archive_workflow_definition(self, **payload):
         self.archived_definition = payload
         return True
+
+
+class _WorkflowPermissionService:
+    def __init__(self, *, viewable_ids=None, denied_permissions=None) -> None:
+        self.viewable_ids = {int(value) for value in (viewable_ids or [])}
+        self.denied_permissions = set(denied_permissions or [])
+        self.ensure_calls = []
+        self.view_calls = []
+
+    def can_view_workflow(self, *, workflow_definition, **payload):
+        self.view_calls.append({"workflow_definition": workflow_definition, **payload})
+        return int(workflow_definition["id"]) in self.viewable_ids
+
+    def ensure(self, *, required_permission: str, **payload):
+        self.ensure_calls.append({"required_permission": required_permission, **payload})
+        if required_permission in self.denied_permissions:
+            raise ForgeError(f"Workflow permission '{required_permission}' is required.", status_code=403)
+        return required_permission
 
 
 class _IntegrationRepo:
@@ -1053,8 +1077,46 @@ def test_flowforge_service_creates_persisted_workflow_draft():
 
     assert result["id"] == "12"
     assert repo.created_definition["workflow_key"] == "new-routing"
+    assert repo.granted_workflow_permission == {
+        "workspace_id": "ws-1",
+        "workflow_definition_id": 12,
+        "principal_type": "user",
+        "principal_id": "user-1",
+        "permission": "owner",
+        "granted_by": "user-1",
+    }
     assert repo.created_version["validation_status"] == "valid"
     assert repo.current_draft["version_id"] == 45
+
+
+def test_flowforge_service_filters_workflow_definitions_by_object_permission():
+    repo = _WorkflowRepo()
+    repo.definitions.append(
+        {
+            "id": 13,
+            "workflow_key": "hidden-routing",
+            "name": "Hidden Routing",
+            "description": "Hidden workflow.",
+            "owner_user_id": "other-user",
+            "created_by": "other-user",
+            "status": "draft",
+            "graph_json": {"nodes": [{"id": "hidden"}], "edges": []},
+        }
+    )
+    permission_service = _WorkflowPermissionService(viewable_ids={12})
+    service = FlowForgeService(
+        workflow_repository=repo,
+        workflow_permission_service=permission_service,
+    )
+
+    workflows = service.list_definitions(
+        workspace_id="ws-1",
+        actor_user_id="user-1",
+        effective_roles={"flowforge:viewer"},
+    )
+
+    assert [workflow["id"] for workflow in workflows] == ["12"]
+    assert len(permission_service.view_calls) == 2
 
 
 def test_flowforge_service_creates_incomplete_workflow_draft_with_invalid_validation():
@@ -1104,6 +1166,27 @@ def test_flowforge_service_creates_new_workflow_draft_version():
     assert result["version_number"] == 2
     assert result["graph"]["viewport"] == {"x": -220, "y": -110, "zoom": 0.62}
     assert repo.current_draft["version_id"] == 45
+
+
+def test_flowforge_service_rejects_workflow_version_without_edit_permission():
+    repo = _WorkflowRepo()
+    service = FlowForgeService(
+        workflow_repository=repo,
+        integration_repository=_IntegrationRepo(),
+        workflow_permission_service=_WorkflowPermissionService(denied_permissions={"edit"}),
+    )
+
+    with pytest.raises(ForgeError) as exc:
+        service.create_workflow_version(
+            workspace_id="ws-1",
+            workflow_definition_id=12,
+            payload={"graph": {"nodes": [], "edges": []}},
+            actor_user_id="user-1",
+            effective_roles={"flowforge:viewer"},
+        )
+
+    assert exc.value.status_code == 403
+    assert repo.created_version is None
 
 
 def test_flowforge_service_saves_invalid_workflow_draft_version():

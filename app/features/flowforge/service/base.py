@@ -8,6 +8,7 @@ from app.exceptions.forge_error import ForgeError
 from app.features.flowforge.communication_template_drafting import CommunicationTemplateDraftGenerator
 from app.features.flowforge.llm_drafting import MatchingPolicyDraftGenerator
 from app.features.flowforge.matching import MatchingPolicyEngine
+from app.features.flowforge.permissions import WorkflowPermissionService
 from app.features.flowforge.workflow_drafting import WorkflowGraphDraftGenerator
 from app.features.flowforge.repositories import (
     FlowForgeCommunicationTemplateRepository,
@@ -39,6 +40,7 @@ class FlowForgeServiceBase:
         matching_policy_draft_generator: MatchingPolicyDraftGenerator | None = None,
         communication_template_draft_generator: CommunicationTemplateDraftGenerator | None = None,
         workflow_graph_draft_generator: WorkflowGraphDraftGenerator | None = None,
+        workflow_permission_service: WorkflowPermissionService | None = None,
         communication_template_email_sender: Callable[[str, str, str], None] | None = None,
         llm_runtime_builder: Callable[..., ResolvedLLMRuntime] | None = None,
     ) -> None:
@@ -55,6 +57,9 @@ class FlowForgeServiceBase:
         self._matching_policy_draft_generator = matching_policy_draft_generator or MatchingPolicyDraftGenerator()
         self._communication_template_draft_generator = communication_template_draft_generator or CommunicationTemplateDraftGenerator()
         self._workflow_graph_draft_generator = workflow_graph_draft_generator or WorkflowGraphDraftGenerator()
+        self._workflow_permission_service = workflow_permission_service or WorkflowPermissionService(
+            workflow_repository=self._workflow_repository
+        )
         self._communication_template_email_sender = communication_template_email_sender or self._send_communication_template_email
         self._llm_runtime_builder = llm_runtime_builder or build_llm_client_for_role
 

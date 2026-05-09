@@ -337,7 +337,12 @@ class _RunService:
         self.no_match_payload = None
         self.settings_payload = None
 
-    def list_definitions(self, *, workspace_id: str):
+    def list_definitions(self, *, workspace_id: str, actor_user_id: str | None = None, effective_roles=None):
+        self.workflow_list_context = {
+            "workspace_id": workspace_id,
+            "actor_user_id": actor_user_id,
+            "effective_roles": set(effective_roles or set()),
+        }
         return [
             {
                 "id": "42",
@@ -347,6 +352,21 @@ class _RunService:
                 "graph": {"nodes": [{"id": "intake"}], "edges": []},
             }
         ]
+
+    def get_definition(self, *, workspace_id: str, workflow_id: str, actor_user_id: str | None = None, effective_roles=None):
+        self.workflow_get_context = {
+            "workspace_id": workspace_id,
+            "workflow_id": workflow_id,
+            "actor_user_id": actor_user_id,
+            "effective_roles": set(effective_roles or set()),
+        }
+        return {
+            "id": workflow_id,
+            "name": "Persisted Intake Routing",
+            "description": "Routes intake submissions.",
+            "status": "draft",
+            "graph": {"nodes": [{"id": "intake"}], "edges": []},
+        }
 
     def get_run_inspector(self, *, workspace_id: str, workflow_id: str):
         return {
@@ -637,7 +657,20 @@ class _RunService:
             "domains": self.list_reporting_domains(workspace_id=workspace_id),
         }
 
-    def list_workflow_versions(self, *, workspace_id: str, workflow_definition_id: int):
+    def list_workflow_versions(
+        self,
+        *,
+        workspace_id: str,
+        workflow_definition_id: int,
+        actor_user_id: str | None = None,
+        effective_roles=None,
+    ):
+        self.workflow_version_list_context = {
+            "workspace_id": workspace_id,
+            "workflow_definition_id": workflow_definition_id,
+            "actor_user_id": actor_user_id,
+            "effective_roles": set(effective_roles or set()),
+        }
         return [
             {
                 "id": 44,
@@ -664,7 +697,21 @@ class _RunService:
             "graph": payload["graph"],
         }
 
-    def create_workflow_version(self, *, workspace_id: str, workflow_definition_id: int, payload, actor_user_id: str):
+    def create_workflow_version(
+        self,
+        *,
+        workspace_id: str,
+        workflow_definition_id: int,
+        payload,
+        actor_user_id: str,
+        effective_roles=None,
+    ):
+        self.workflow_version_create_context = {
+            "workspace_id": workspace_id,
+            "workflow_definition_id": workflow_definition_id,
+            "actor_user_id": actor_user_id,
+            "effective_roles": set(effective_roles or set()),
+        }
         return {
             "id": 45,
             "workspace_id": workspace_id,
@@ -715,7 +762,15 @@ class _RunService:
         workflow_definition_id: int,
         version_id: int,
         actor_user_id: str,
+        effective_roles=None,
     ):
+        self.workflow_publish_context = {
+            "workspace_id": workspace_id,
+            "workflow_definition_id": workflow_definition_id,
+            "version_id": version_id,
+            "actor_user_id": actor_user_id,
+            "effective_roles": set(effective_roles or set()),
+        }
         return {
             "id": version_id,
             "workspace_id": workspace_id,
@@ -731,7 +786,20 @@ class _RunService:
             "published_at": datetime(2026, 5, 7, 20, 28, 0),
         }
 
-    def delete_workflow_definition(self, *, workspace_id: str, workflow_definition_id: int, actor_user_id: str):
+    def delete_workflow_definition(
+        self,
+        *,
+        workspace_id: str,
+        workflow_definition_id: int,
+        actor_user_id: str,
+        effective_roles=None,
+    ):
+        self.workflow_delete_context = {
+            "workspace_id": workspace_id,
+            "workflow_definition_id": workflow_definition_id,
+            "actor_user_id": actor_user_id,
+            "effective_roles": set(effective_roles or set()),
+        }
         del workspace_id, actor_user_id
         return {
             "deleted": True,

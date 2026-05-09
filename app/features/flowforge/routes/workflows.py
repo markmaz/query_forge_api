@@ -3,10 +3,10 @@ from __future__ import annotations
 from flask import request
 from flask_restx import Resource
 
-from app.decorators.rbac import require_access
+from app.decorators.rbac import require_access, require_feature
 from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
-from app.features.flowforge.routes.common import _actor_user_id, _service, _workspace_id, flowforge_ns, models
+from app.features.flowforge.routes.common import _actor_user_id, _effective_roles, _service, _workspace_id, flowforge_ns, models
 
 
 @flowforge_ns.route("/workflows")
@@ -26,10 +26,14 @@ class FlowForgeWorkflowList(Resource):
     )
     @flowforge_ns.marshal_list_with(models["workflow_definition"])
     @token_required
-    @require_access("flowforge", role="viewer")
+    @require_feature("flowforge")
     def get(self):
         try:
-            return _service().list_definitions(workspace_id=_workspace_id())
+            return _service().list_definitions(
+                workspace_id=_workspace_id(),
+                actor_user_id=_actor_user_id(),
+                effective_roles=_effective_roles(),
+            )
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
 
@@ -78,10 +82,15 @@ class FlowForgeWorkflowDetail(Resource):
     )
     @flowforge_ns.marshal_with(models["workflow_definition"])
     @token_required
-    @require_access("flowforge", role="viewer")
+    @require_feature("flowforge")
     def get(self, workflow_id: str):
         try:
-            workflow = _service().get_definition(workspace_id=_workspace_id(), workflow_id=workflow_id)
+            workflow = _service().get_definition(
+                workspace_id=_workspace_id(),
+                workflow_id=workflow_id,
+                actor_user_id=_actor_user_id(),
+                effective_roles=_effective_roles(),
+            )
             if workflow is None:
                 raise ForgeError(f"Workflow '{workflow_id}' was not found.", status_code=404)
             return workflow
@@ -104,7 +113,7 @@ class FlowForgeWorkflowDetail(Resource):
         },
     )
     @token_required
-    @require_access("flowforge", role="admin")
+    @require_feature("flowforge")
     def delete(self, workflow_id: str):
         try:
             try:
@@ -116,6 +125,7 @@ class FlowForgeWorkflowDetail(Resource):
                     workspace_id=_workspace_id(),
                     workflow_definition_id=workflow_definition_id,
                     actor_user_id=_actor_user_id(),
+                    effective_roles=_effective_roles(),
                 ),
                 200,
             )
@@ -195,13 +205,15 @@ class FlowForgeWorkflowVersionList(Resource):
     )
     @flowforge_ns.marshal_list_with(models["workflow_version"])
     @token_required
-    @require_access("flowforge", role="viewer")
+    @require_feature("flowforge")
     def get(self, workflow_definition_id: int):
         try:
             return (
                 _service().list_workflow_versions(
                     workspace_id=_workspace_id(),
                     workflow_definition_id=workflow_definition_id,
+                    actor_user_id=_actor_user_id(),
+                    effective_roles=_effective_roles(),
                 ),
                 200,
             )
@@ -226,7 +238,7 @@ class FlowForgeWorkflowVersionList(Resource):
     @flowforge_ns.expect(models["workflow_version_create"], validate=False)
     @flowforge_ns.marshal_with(models["workflow_version"])
     @token_required
-    @require_access("flowforge", role="designer")
+    @require_feature("flowforge")
     def post(self, workflow_definition_id: int):
         try:
             payload = request.get_json(silent=True) or {}
@@ -236,6 +248,7 @@ class FlowForgeWorkflowVersionList(Resource):
                     workflow_definition_id=workflow_definition_id,
                     payload=payload if isinstance(payload, dict) else {},
                     actor_user_id=_actor_user_id(),
+                    effective_roles=_effective_roles(),
                 ),
                 201,
             )
@@ -264,7 +277,7 @@ class FlowForgeWorkflowVersionPublish(Resource):
     )
     @flowforge_ns.marshal_with(models["workflow_version"])
     @token_required
-    @require_access("flowforge", role="admin")
+    @require_feature("flowforge")
     def post(self, workflow_definition_id: int, version_id: int):
         try:
             return (
@@ -273,6 +286,7 @@ class FlowForgeWorkflowVersionPublish(Resource):
                     workflow_definition_id=workflow_definition_id,
                     version_id=version_id,
                     actor_user_id=_actor_user_id(),
+                    effective_roles=_effective_roles(),
                 ),
                 200,
             )
@@ -296,9 +310,17 @@ class FlowForgeRunInspector(Resource):
     )
     @flowforge_ns.marshal_with(models["run_inspector"])
     @token_required
-    @require_access("flowforge", role="viewer")
+    @require_feature("flowforge")
     def get(self, workflow_id: str):
         try:
+            workflow = _service().get_definition(
+                workspace_id=_workspace_id(),
+                workflow_id=workflow_id,
+                actor_user_id=_actor_user_id(),
+                effective_roles=_effective_roles(),
+            )
+            if workflow is None:
+                raise ForgeError(f"Workflow '{workflow_id}' was not found.", status_code=404)
             inspector = _service().get_run_inspector(workspace_id=_workspace_id(), workflow_id=workflow_id)
             if inspector is None:
                 raise ForgeError(f"Workflow '{workflow_id}' was not found.", status_code=404)

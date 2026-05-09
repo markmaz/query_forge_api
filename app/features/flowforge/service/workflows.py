@@ -40,18 +40,40 @@ IMPORT_SOURCE_KEYS = {"source_key", "source_id", "resource_set_id"}
 
 
 class FlowForgeWorkflowServiceMixin:
-    def list_definitions(self, *, workspace_id: str) -> list[WorkflowDefinition]:
+    def list_definitions(
+        self,
+        *,
+        workspace_id: str,
+        actor_user_id: str | None = None,
+        effective_roles: set[str] | None = None,
+    ) -> list[WorkflowDefinition]:
         try:
-            persisted = [
-                self._serialize_workflow_definition(row)
-                for row in self._workflow_repository.list_workflow_definitions(workspace_id=workspace_id)
-            ]
+            rows = self._workflow_repository.list_workflow_definitions(workspace_id=workspace_id)
+            if self._enforce_workflow_permissions(actor_user_id=actor_user_id, effective_roles=effective_roles):
+                rows = [
+                    row
+                    for row in rows
+                    if self._workflow_permission_service.can_view_workflow(
+                        workspace_id=workspace_id,
+                        user_id=str(actor_user_id or ""),
+                        workflow_definition=row,
+                        effective_roles=effective_roles,
+                    )
+                ]
+            persisted = [self._serialize_workflow_definition(row) for row in rows]
         except SQLAlchemyError:
             logger.exception("flowforge_workflow_definition_list_failed workspace_id=%s", workspace_id)
             persisted = []
         return persisted
 
-    def get_definition(self, *, workspace_id: str, workflow_id: str) -> WorkflowDefinition | None:
+    def get_definition(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        actor_user_id: str | None = None,
+        effective_roles: set[str] | None = None,
+    ) -> WorkflowDefinition | None:
         try:
             workflow_definition_id = int(workflow_id)
         except (TypeError, ValueError):
@@ -62,6 +84,13 @@ class FlowForgeWorkflowServiceMixin:
         )
         if row is None:
             return None
+        self._ensure_workflow_permission(
+            workspace_id=workspace_id,
+            actor_user_id=actor_user_id,
+            effective_roles=effective_roles,
+            workflow_definition=row,
+            required_permission="view",
+        )
         return self._serialize_workflow_definition(row)
 
     def create_workflow_definition(
@@ -85,11 +114,22 @@ class FlowForgeWorkflowServiceMixin:
             description=self._optional_string(payload.get("description")),
             created_by=self._optional_string(actor_user_id),
         )
+        grant_permission = getattr(self._workflow_repository, "grant_workflow_permission", None)
+        if callable(grant_permission):
+            grant_permission(
+                workspace_id=workspace_id,
+                workflow_definition_id=workflow_definition_id,
+                principal_type="user",
+                principal_id=actor_user_id,
+                permission="owner",
+                granted_by=self._optional_string(actor_user_id),
+            )
         version = self.create_workflow_version(
             workspace_id=workspace_id,
             workflow_definition_id=workflow_definition_id,
             payload={"graph": graph, "settings": payload.get("settings") if isinstance(payload.get("settings"), dict) else {}},
             actor_user_id=actor_user_id,
+            enforce_permissions=False,
         )
         return {
             "id": str(workflow_definition_id),
@@ -572,7 +612,21 @@ class FlowForgeWorkflowServiceMixin:
             )
         return preview_events
 
-    def list_workflow_versions(self, *, workspace_id: str, workflow_definition_id: int) -> list[dict[str, Any]]:
+    def list_workflow_versions(
+        self,
+        *,
+        workspace_id: str,
+        workflow_definition_id: int,
+        actor_user_id: str | None = None,
+        effective_roles: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        self._ensure_workflow_definition_permission(
+            workspace_id=workspace_id,
+            workflow_definition_id=workflow_definition_id,
+            actor_user_id=actor_user_id,
+            effective_roles=effective_roles,
+            required_permission="view",
+        )
         rows = self._workflow_repository.list_workflow_versions(
             workspace_id=workspace_id,
             workflow_definition_id=workflow_definition_id,
@@ -586,6 +640,8 @@ class FlowForgeWorkflowServiceMixin:
         workflow_definition_id: int,
         payload: dict[str, Any],
         actor_user_id: str,
+        effective_roles: set[str] | None = None,
+        enforce_permissions: bool = True,
     ) -> dict[str, Any]:
         definition = self._workflow_repository.get_workflow_definition(
             workspace_id=workspace_id,
@@ -593,6 +649,14 @@ class FlowForgeWorkflowServiceMixin:
         )
         if definition is None:
             raise ForgeError(f"Workflow definition '{workflow_definition_id}' was not found.", status_code=404)
+        if enforce_permissions:
+            self._ensure_workflow_permission(
+                workspace_id=workspace_id,
+                actor_user_id=actor_user_id,
+                effective_roles=effective_roles,
+                workflow_definition=definition,
+                required_permission="edit",
+            )
         graph = payload.get("graph") if isinstance(payload, dict) else None
         if not isinstance(graph, dict):
             raise ForgeError("graph must be an object.", status_code=400)
@@ -641,6 +705,7 @@ class FlowForgeWorkflowServiceMixin:
         workflow_definition_id: int,
         version_id: int,
         actor_user_id: str,
+        effective_roles: set[str] | None = None,
     ) -> dict[str, Any]:
         row = self._workflow_repository.get_workflow_version(
             workspace_id=workspace_id,
@@ -649,6 +714,13 @@ class FlowForgeWorkflowServiceMixin:
         )
         if row is None:
             raise ForgeError(f"Workflow version '{version_id}' was not found.", status_code=404)
+        self._ensure_workflow_definition_permission(
+            workspace_id=workspace_id,
+            workflow_definition_id=workflow_definition_id,
+            actor_user_id=actor_user_id,
+            effective_roles=effective_roles,
+            required_permission="manage",
+        )
         if str(row.get("validation_status") or "") != "valid":
             raise ForgeError("Only valid workflow versions can be published.", status_code=400)
         self._workflow_repository.publish_workflow_version(
@@ -667,6 +739,7 @@ class FlowForgeWorkflowServiceMixin:
         workspace_id: str,
         workflow_definition_id: int,
         actor_user_id: str,
+        effective_roles: set[str] | None = None,
     ) -> dict[str, Any]:
         definition = self._workflow_repository.get_workflow_definition(
             workspace_id=workspace_id,
@@ -674,6 +747,13 @@ class FlowForgeWorkflowServiceMixin:
         )
         if definition is None:
             raise ForgeError(f"Workflow definition '{workflow_definition_id}' was not found.", status_code=404)
+        self._ensure_workflow_permission(
+            workspace_id=workspace_id,
+            actor_user_id=actor_user_id,
+            effective_roles=effective_roles,
+            workflow_definition=definition,
+            required_permission="manage",
+        )
         archived = self._workflow_repository.archive_workflow_definition(
             workspace_id=workspace_id,
             workflow_definition_id=workflow_definition_id,
@@ -682,6 +762,54 @@ class FlowForgeWorkflowServiceMixin:
         if not archived:
             raise ForgeError(f"Workflow definition '{workflow_definition_id}' was not found.", status_code=404)
         return {"deleted": True, "workflow_definition_id": workflow_definition_id}
+
+    @staticmethod
+    def _enforce_workflow_permissions(*, actor_user_id: str | None, effective_roles: set[str] | None) -> bool:
+        return bool(str(actor_user_id or "").strip()) and effective_roles is not None
+
+    def _ensure_workflow_permission(
+        self,
+        *,
+        workspace_id: str,
+        actor_user_id: str | None,
+        effective_roles: set[str] | None,
+        workflow_definition: dict[str, Any],
+        required_permission: str,
+    ) -> None:
+        if not self._enforce_workflow_permissions(actor_user_id=actor_user_id, effective_roles=effective_roles):
+            return
+        self._workflow_permission_service.ensure(
+            workspace_id=workspace_id,
+            user_id=str(actor_user_id or ""),
+            workflow_definition=workflow_definition,
+            required_permission=required_permission,
+            effective_roles=effective_roles,
+        )
+
+    def _ensure_workflow_definition_permission(
+        self,
+        *,
+        workspace_id: str,
+        workflow_definition_id: int,
+        actor_user_id: str | None,
+        effective_roles: set[str] | None,
+        required_permission: str,
+    ) -> None:
+        if not self._enforce_workflow_permissions(actor_user_id=actor_user_id, effective_roles=effective_roles):
+            return
+        definition = self._workflow_repository.get_workflow_definition(
+            workspace_id=workspace_id,
+            workflow_definition_id=workflow_definition_id,
+        )
+        if definition is None:
+            raise ForgeError(f"Workflow definition '{workflow_definition_id}' was not found.", status_code=404)
+        self._ensure_workflow_permission(
+            workspace_id=workspace_id,
+            actor_user_id=actor_user_id,
+            effective_roles=effective_roles,
+            workflow_definition=definition,
+            required_permission=required_permission,
+        )
 
     def _path_exists(self, *, edges: list[Any], start: str, end: str) -> bool:
         adjacency: dict[str, list[str]] = {}

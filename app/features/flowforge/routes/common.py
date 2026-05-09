@@ -40,6 +40,10 @@ def _actor_user_id() -> str:
     return str(getattr(g, "user_id", "") or getattr(g, "current_user_id", "") or "").strip()
 
 
+def _effective_roles() -> set[str]:
+    return set(getattr(g, "effective_roles", set()) or set())
+
+
 def _int_query_arg(name: str, default: int) -> int:
     try:
         return int(request.args.get(name, default))
