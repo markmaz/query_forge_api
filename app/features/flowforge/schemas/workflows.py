@@ -74,6 +74,7 @@ def register_workflow_models(namespace):
         {
             "prompt": fields.String(required=True, description="Plain-language workflow designer instruction."),
             "graph": fields.Nested(workflow_graph, required=True, description="Current workflow graph to modify."),
+            "context": fields.Raw(required=False, description="Optional governed designer context for AI graph drafting."),
             "use_llm": fields.Boolean(required=False, description="Use the workspace FlowForge LLM role when true."),
         },
     )

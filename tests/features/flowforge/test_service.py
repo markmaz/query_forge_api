@@ -1148,11 +1148,24 @@ def test_flowforge_service_creates_workflow_ai_draft_through_workspace_llm():
                 "edges": [],
                 "viewport": {"x": -180, "y": -90, "zoom": 0.7},
             },
+            "context": {
+                "integrations": [
+                    {
+                        "integration_key": "intake-form",
+                        "provider": "jotform",
+                        "source_events": [{"event_key": "intake_submitted"}],
+                    }
+                ],
+                "matching_policies": [{"id": 5, "display_name": "Therapist Routing"}],
+            },
         },
         actor_user_id="user-1",
     )
 
     assert llm_client.calls
+    assert "Governed designer context" in llm_client.calls[0]["user_prompt"]
+    assert "intake-form" in llm_client.calls[0]["user_prompt"]
+    assert "Therapist Routing" in llm_client.calls[0]["user_prompt"]
     assert result["draft_source"] == "llm"
     assert result["model_provider"] == "openai"
     assert result["model_name"] == "workflow-drafter"

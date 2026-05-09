@@ -291,7 +291,13 @@ class FlowForgeWorkflowServiceMixin:
         if use_llm:
             runtime = self._llm_runtime_builder(workspace_id=workspace_id, role=LLMRole.FLOWFORGE_RULE_DRAFTING)
             generator = type(generator)(llm_client=runtime.client)
-        generated = generator.generate(prompt=prompt, current_graph=current_graph, use_llm=use_llm)
+        draft_context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+        generated = generator.generate(
+            prompt=prompt,
+            current_graph=current_graph,
+            draft_context=draft_context,
+            use_llm=use_llm,
+        )
         graph = normalize_generated_workflow_graph(
             generated.get("graph") if isinstance(generated.get("graph"), dict) else {},
             fallback_graph=current_graph,

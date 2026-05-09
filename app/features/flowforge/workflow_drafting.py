@@ -174,22 +174,42 @@ class WorkflowGraphDraftGenerator:
     def __init__(self, *, llm_client: Any | None = None) -> None:
         self._llm_client = llm_client
 
-    def generate(self, *, prompt: str, current_graph: dict[str, Any], use_llm: bool = False) -> dict[str, Any]:
+    def generate(
+        self,
+        *,
+        prompt: str,
+        current_graph: dict[str, Any],
+        draft_context: dict[str, Any] | None = None,
+        use_llm: bool = False,
+    ) -> dict[str, Any]:
         clean_prompt = _clean_string(prompt)
         graph = normalize_generated_workflow_graph(current_graph)
         if use_llm and self._llm_client is not None:
-            return self._generate_with_llm(prompt=clean_prompt, current_graph=graph)
+            return self._generate_with_llm(prompt=clean_prompt, current_graph=graph, draft_context=draft_context or {})
         return self._generate_heuristic(prompt=clean_prompt, current_graph=graph)
 
-    def _generate_with_llm(self, *, prompt: str, current_graph: dict[str, Any]) -> dict[str, Any]:
+    def _generate_with_llm(
+        self,
+        *,
+        prompt: str,
+        current_graph: dict[str, Any],
+        draft_context: dict[str, Any],
+    ) -> dict[str, Any]:
         payload = self._llm_client.chat_json(
             system_prompt=(
-                "You generate FlowForge workflow graph JSON. Return JSON only with keys graph and plain_language_summary. "
+                "You generate Workflow Studio workflow graph JSON. Return JSON only with keys graph and plain_language_summary. "
                 "The graph must contain nodes and edges arrays. Every node must include id, type, label, position, and data. "
                 f"Supported node types: {sorted(SUPPORTED_NODE_TYPES)}. Keep existing node ids stable unless the user asks to replace them. "
-                "Do not include code, scripts, SQL, secrets, credentials, or markdown."
+                "Configure nodes only with identifiers present in the governed designer context when available: integration keys, "
+                "source event keys, matching policy ids, resource set ids, communication template keys, and saved query ids. "
+                "Leave required config values blank when the needed catalog value is unavailable. Do not include code, scripts, SQL, "
+                "secrets, credentials, or markdown."
             ),
-            user_prompt=f"Current graph: {current_graph}\nDesigner request: {prompt}",
+            user_prompt=(
+                f"Current graph: {current_graph}\n"
+                f"Governed designer context: {draft_context}\n"
+                f"Designer request: {prompt}"
+            ),
             response_format=True,
             retry_invalid_schema=True,
             max_tokens=2200,
