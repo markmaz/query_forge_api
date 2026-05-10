@@ -30,6 +30,18 @@ class FlowForgeSettingsServiceMixin:
                     current.get("block_sensitive_reporting_mcp", False),
                 )
             ),
+            "allow_user_run_as_for_production": bool(
+                payload.get(
+                    "allow_user_run_as_for_production",
+                    current.get("allow_user_run_as_for_production", False),
+                )
+            ),
+            "require_service_principal_for_automated_triggers": bool(
+                payload.get(
+                    "require_service_principal_for_automated_triggers",
+                    current.get("require_service_principal_for_automated_triggers", True),
+                )
+            ),
             "raw_payload_retention_days": self._bounded_int(
                 payload.get("raw_payload_retention_days", current.get("raw_payload_retention_days", 30)),
                 field_name="raw_payload_retention_days",
@@ -59,6 +71,10 @@ class FlowForgeSettingsServiceMixin:
         update["settings"] = {
             **update["settings"],
             "block_sensitive_reporting_mcp": update["block_sensitive_reporting_mcp"],
+            "allow_user_run_as_for_production": update["allow_user_run_as_for_production"],
+            "require_service_principal_for_automated_triggers": update[
+                "require_service_principal_for_automated_triggers"
+            ],
         }
 
         saved = self._settings_repository.upsert_settings(workspace_id=workspace_id, payload=update)
@@ -96,6 +112,15 @@ class FlowForgeSettingsServiceMixin:
             "block_sensitive_reporting_mcp": bool(
                 row.get("block_sensitive_reporting_mcp")
                 or (row.get("settings") or {}).get("block_sensitive_reporting_mcp", False)
+            ),
+            "allow_user_run_as_for_production": bool(
+                row.get("allow_user_run_as_for_production")
+                or (row.get("settings") or {}).get("allow_user_run_as_for_production", False)
+            ),
+            "require_service_principal_for_automated_triggers": bool(
+                row.get("require_service_principal_for_automated_triggers")
+                if row.get("require_service_principal_for_automated_triggers") is not None
+                else (row.get("settings") or {}).get("require_service_principal_for_automated_triggers", True)
             ),
             "raw_payload_retention_days": int(row.get("raw_payload_retention_days") or 30),
             "raw_payload_retention_max_days": int(row.get("raw_payload_retention_max_days") or 90),

@@ -308,6 +308,7 @@ class AdminHealthService:
                     "failed_import_count": None,
                     "failed_export_count": None,
                     "stuck_approval_count": None,
+                    "invalid_production_run_as_count": None,
                     "expired_artifact_count": None,
                     "artifact_retention_pending_count": None,
                 },
@@ -330,6 +331,10 @@ class AdminHealthService:
             issues.append(f"{metrics['failed_export_count']} data export(s) failed in the last 24 hours.")
         if int(metrics.get("stuck_approval_count") or 0) > 0:
             issues.append(f"{metrics['stuck_approval_count']} approval task(s) are overdue or stalled.")
+        if int(metrics.get("invalid_production_run_as_count") or 0) > 0:
+            issues.append(
+                f"{metrics['invalid_production_run_as_count']} production workflow(s) have invalid run-as governance."
+            )
         if int(metrics.get("artifact_retention_pending_count") or 0) > 0:
             issues.append(f"{metrics['artifact_retention_pending_count']} dataset artifact(s) are past retention.")
         unavailable_metrics = [
@@ -339,6 +344,7 @@ class AdminHealthService:
                 "failed_import_count",
                 "failed_export_count",
                 "stuck_approval_count",
+                "invalid_production_run_as_count",
                 "expired_artifact_count",
                 "artifact_retention_pending_count",
             )
@@ -447,6 +453,71 @@ class AdminHealthService:
                 """,
                 params,
                 metric_name="stuck_approval_count",
+            ),
+            "invalid_production_run_as_count": self._query_optional_flowforge_count(
+                """
+                SELECT COUNT(*) AS metric_count
+                FROM flowforge_workflow_definitions d
+                LEFT JOIN flowforge_workspace_settings s
+                  ON s.workspace_id = d.workspace_id
+                LEFT JOIN flowforge_workflow_versions pv
+                  ON pv.workspace_id = d.workspace_id
+                 AND pv.workflow_definition_id = d.id
+                 AND pv.id = d.latest_published_version_id
+                 AND pv.version_status = 'published'
+                 AND pv.archived_at IS NULL
+                WHERE d.archived_at IS NULL
+                  AND d.lifecycle = 'production'
+                  AND (
+                    d.run_as_principal_type IS NULL
+                    OR d.run_as_principal_id IS NULL
+                    OR d.run_as_principal_id = ''
+                    OR d.run_as_principal_type NOT IN ('user', 'service_principal', 'workspace_principal')
+                    OR (
+                      d.run_as_principal_type = 'user'
+                      AND COALESCE(
+                        JSON_UNQUOTE(JSON_EXTRACT(s.settings_json, '$.allow_user_run_as_for_production')),
+                        'false'
+                      ) NOT IN ('true', '1', 'yes', 'on')
+                    )
+                    OR (
+                      d.run_as_principal_type = 'user'
+                      AND COALESCE(
+                        JSON_UNQUOTE(JSON_EXTRACT(s.settings_json, '$.require_service_principal_for_automated_triggers')),
+                        'true'
+                      ) IN ('true', '1', 'yes', 'on')
+                      AND (
+                        pv.graph_json LIKE '%schedule_trigger%'
+                        OR pv.graph_json LIKE '%webhook_trigger%'
+                        OR pv.graph_json LIKE '%file_watch_trigger%'
+                      )
+                    )
+                    OR (
+                      d.run_as_principal_type = 'workspace_principal'
+                      AND d.run_as_principal_id <> d.workspace_id
+                    )
+                    OR (
+                      d.run_as_principal_type = 'service_principal'
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM mcp_app_clients c
+                        JOIN mcp_principal_grants g
+                          ON g.principal_type = 'app'
+                         AND g.principal_id = c.client_id
+                         AND g.workspace_id = d.workspace_id
+                        WHERE c.client_id = d.run_as_principal_id
+                          AND c.owning_workspace_id = d.workspace_id
+                          AND c.revoked_at IS NULL
+                          AND (c.expires_at IS NULL OR c.expires_at > CURRENT_TIMESTAMP)
+                          AND g.enabled = 1
+                          AND g.revoked_at IS NULL
+                          AND (g.expires_at IS NULL OR g.expires_at > CURRENT_TIMESTAMP)
+                      )
+                    )
+                  )
+                """,
+                {},
+                metric_name="invalid_production_run_as_count",
             ),
             "expired_artifact_count": self._query_optional_flowforge_count(
                 """

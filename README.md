@@ -179,6 +179,7 @@ Runtime visibility:
 - no-match escalation queues pending email notification audit rows through `POST /api/v1/flowforge/runs/<run_id>/no-match-escalations`; `qf.flowforge.dispatch_notifications` now sends those pending email rows with minimal content and delivery status tracking
 - report summaries are available through `GET /api/v1/flowforge/reports/summary` and reporting-domain metadata through `GET /api/v1/flowforge/reports/domains`
 - workflow versions can be listed and published through the workflow version routes; publishing requires `flowforge:admin` by default
+- production workflow publishing requires a non-user run-as principal by default. Workspace admins may temporarily enable `allow_user_run_as_for_production`, but scheduled, webhook, and file-watch production workflows still require a workspace or service principal when `require_service_principal_for_automated_triggers` is enabled.
 - run and event reads require `flowforge:user` and return redacted runtime context/event payloads only; sensitive payload JSON is not exposed
 - operator notes are appended through `POST /api/v1/flowforge/runs/<run_id>/notes` as `workflow.operator.note` events; until FlowForge-specific operator roles are added, note creation requires `flowforge:admin`
 - these endpoints support operator/run-inspector UI work before retries, assignment automation, richer workflow authoring, and production operator/admin UI are implemented
@@ -187,7 +188,8 @@ FlowForge operational health:
 
 - System Health includes a `FlowForge Runtime` check.
 - The check reads worker heartbeat key `flowforge:worker:last_dispatch` from Valkey.
-- The check reports pending notification backlog, failed notification side effects, stuck queued/waiting/running runs older than 30 minutes, and failed runs in the last 24 hours.
+- The check reports pending notification backlog, failed notification side effects, stuck queued/waiting/running runs older than 30 minutes, failed runs in the last 24 hours, failed imports/exports, stuck approvals, artifact retention backlog, and invalid production run-as identities.
+- `Invalid Run-As` should stay at `0`; recover by changing the production workflow run-as to the workspace principal or an active service principal, then re-publish the latest valid version.
 - Docker and traditional deployments must run both Celery worker and Celery Beat for the FlowForge health check to stay green.
 - Full operations guidance lives in `/Users/mmaslak/Local Documents/projects/query_forge/docs/flowforge-production-runbook.md`.
 

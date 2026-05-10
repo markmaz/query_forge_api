@@ -25,6 +25,7 @@ class _FakeSQL:
             "failed_import_count": 0,
             "failed_export_count": 0,
             "stuck_approval_count": 0,
+            "invalid_production_run_as_count": 0,
             "expired_artifact_count": 0,
             "artifact_retention_pending_count": 0,
         }
@@ -63,6 +64,8 @@ def _metric_name_for_query(query: str) -> str:
         return "failed_export_count"
     if "flowforge_human_tasks" in query:
         return "stuck_approval_count"
+    if "flowforge_workflow_definitions" in query:
+        return "invalid_production_run_as_count"
     if "flowforge_dataset_artifacts" in query and "status = 'expired'" in query:
         return "expired_artifact_count"
     if "flowforge_dataset_artifacts" in query and "expires_at IS NOT NULL" in query:
@@ -303,6 +306,7 @@ def test_check_flowforge_reports_stale_worker_and_operational_backlog():
                 "failed_import_count": 5,
                 "failed_export_count": 6,
                 "stuck_approval_count": 7,
+                "invalid_production_run_as_count": 2,
                 "expired_artifact_count": 8,
                 "artifact_retention_pending_count": 9,
             }
@@ -322,6 +326,7 @@ def test_check_flowforge_reports_stale_worker_and_operational_backlog():
     assert result["metrics"]["failed_import_count"] == 5
     assert result["metrics"]["failed_export_count"] == 6
     assert result["metrics"]["stuck_approval_count"] == 7
+    assert result["metrics"]["invalid_production_run_as_count"] == 2
     assert result["metrics"]["expired_artifact_count"] == 8
     assert result["metrics"]["artifact_retention_pending_count"] == 9
     assert any("heartbeat" in issue for issue in result["issues"])
@@ -330,6 +335,7 @@ def test_check_flowforge_reports_stale_worker_and_operational_backlog():
     assert any("import" in issue for issue in result["issues"])
     assert any("export" in issue for issue in result["issues"])
     assert any("approval" in issue for issue in result["issues"])
+    assert any("run-as governance" in issue for issue in result["issues"])
     assert any("retention" in issue for issue in result["issues"])
 
 
@@ -340,6 +346,7 @@ def test_check_flowforge_degrades_when_optional_operations_tables_are_missing():
                 "schedule_backlog_count",
                 "failed_import_count",
                 "failed_export_count",
+                "invalid_production_run_as_count",
                 "expired_artifact_count",
                 "artifact_retention_pending_count",
             }
@@ -353,6 +360,7 @@ def test_check_flowforge_degrades_when_optional_operations_tables_are_missing():
     assert result["metrics"]["schedule_backlog_count"] is None
     assert result["metrics"]["failed_import_count"] is None
     assert result["metrics"]["failed_export_count"] is None
+    assert result["metrics"]["invalid_production_run_as_count"] is None
     assert result["metrics"]["expired_artifact_count"] is None
     assert result["metrics"]["artifact_retention_pending_count"] is None
     assert any("migrations" in issue for issue in result["issues"])

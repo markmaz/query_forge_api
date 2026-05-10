@@ -29,6 +29,8 @@ class FlowForgeSettingsRepository:
                 "enabled": False,
                 "allow_designer_publish": False,
                 "block_sensitive_reporting_mcp": False,
+                "allow_user_run_as_for_production": False,
+                "require_service_principal_for_automated_triggers": True,
                 "raw_payload_retention_days": 30,
                 "raw_payload_retention_max_days": 90,
                 "default_offer_timeout_minutes": 1440,
@@ -46,6 +48,11 @@ class FlowForgeSettingsRepository:
         row["default_test_recipients"] = _json_value(row.get("default_test_recipients_json")) or []
         row["settings"] = _json_value(row.get("settings_json")) or {}
         row["block_sensitive_reporting_mcp"] = _bool(row["settings"].get("block_sensitive_reporting_mcp"))
+        row["allow_user_run_as_for_production"] = _bool(row["settings"].get("allow_user_run_as_for_production"))
+        require_automation_principal = row["settings"].get("require_service_principal_for_automated_triggers")
+        row["require_service_principal_for_automated_triggers"] = (
+            True if require_automation_principal is None else _bool(require_automation_principal)
+        )
         return row
 
     def upsert_settings(self, *, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:

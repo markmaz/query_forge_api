@@ -724,6 +724,8 @@ class _RunService:
             "enabled": True,
             "allow_designer_publish": False,
             "block_sensitive_reporting_mcp": False,
+            "allow_user_run_as_for_production": False,
+            "require_service_principal_for_automated_triggers": True,
             "raw_payload_retention_days": 30,
             "raw_payload_retention_max_days": 90,
             "default_offer_timeout_minutes": 1440,

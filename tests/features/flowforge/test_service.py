@@ -804,13 +804,13 @@ class _RuntimeRepo:
 class _SettingsRepo:
     def __init__(self) -> None:
         self.updated_payload = None
-
-    def get_settings(self, *, workspace_id: str):
-        return {
-            "workspace_id": workspace_id,
+        self.current = {
+            "workspace_id": "ws-1",
             "enabled": False,
             "allow_designer_publish": False,
             "block_sensitive_reporting_mcp": False,
+            "allow_user_run_as_for_production": False,
+            "require_service_principal_for_automated_triggers": True,
             "raw_payload_retention_days": 30,
             "raw_payload_retention_max_days": 90,
             "default_offer_timeout_minutes": 1440,
@@ -818,6 +818,9 @@ class _SettingsRepo:
             "default_test_recipients": [],
             "settings": {},
         }
+
+    def get_settings(self, *, workspace_id: str):
+        return {**self.current, "workspace_id": workspace_id}
 
     def upsert_settings(self, *, workspace_id: str, payload):
         self.updated_payload = {"workspace_id": workspace_id, "payload": payload}
@@ -2050,6 +2053,25 @@ def test_flowforge_service_updates_sensitive_reporting_mcp_block_flag():
     assert settings_repo.updated_payload["payload"]["settings"]["block_sensitive_reporting_mcp"] is True
 
 
+def test_flowforge_service_updates_production_run_as_settings():
+    settings_repo = _SettingsRepo()
+    service = FlowForgeService(settings_repository=settings_repo)
+
+    result = service.update_workspace_settings(
+        workspace_id="ws-1",
+        payload={
+            "allow_user_run_as_for_production": True,
+            "require_service_principal_for_automated_triggers": False,
+        },
+        actor_user_id="user-1",
+    )
+
+    assert result["allow_user_run_as_for_production"] is True
+    assert result["require_service_principal_for_automated_triggers"] is False
+    assert settings_repo.updated_payload["payload"]["settings"]["allow_user_run_as_for_production"] is True
+    assert settings_repo.updated_payload["payload"]["settings"]["require_service_principal_for_automated_triggers"] is False
+
+
 def test_flowforge_service_rejects_settings_retention_above_max():
     service = FlowForgeService(settings_repository=_SettingsRepo())
 
@@ -2327,7 +2349,7 @@ def test_flowforge_service_returns_reporting_dashboard_metrics():
 
 def test_flowforge_service_lists_and_publishes_workflow_versions():
     repo = _WorkflowRepo()
-    service = FlowForgeService(workflow_repository=repo)
+    service = FlowForgeService(workflow_repository=repo, settings_repository=_SettingsRepo())
 
     versions = service.list_workflow_versions(workspace_id="ws-1", workflow_definition_id=12)
     published = service.publish_workflow_version(
@@ -2349,7 +2371,7 @@ def test_flowforge_service_rejects_production_publish_without_service_run_as():
     repo.definitions[0]["lifecycle"] = "production"
     repo.definitions[0]["run_as_principal_type"] = "user"
     repo.definitions[0]["run_as_principal_id"] = "user-1"
-    service = FlowForgeService(workflow_repository=repo)
+    service = FlowForgeService(workflow_repository=repo, settings_repository=_SettingsRepo())
 
     with pytest.raises(ForgeError) as exc:
         service.publish_workflow_version(
@@ -2369,7 +2391,7 @@ def test_flowforge_service_allows_production_publish_with_service_run_as():
     repo.definitions[0]["lifecycle"] = "production"
     repo.definitions[0]["run_as_principal_type"] = "service_principal"
     repo.definitions[0]["run_as_principal_id"] = "workflow-runner"
-    service = FlowForgeService(workflow_repository=repo)
+    service = FlowForgeService(workflow_repository=repo, settings_repository=_SettingsRepo())
 
     published = service.publish_workflow_version(
         workspace_id="ws-1",
@@ -2380,6 +2402,59 @@ def test_flowforge_service_allows_production_publish_with_service_run_as():
 
     assert published["version_status"] == "published"
     assert repo.published["published_by"] == "user-1"
+
+
+def test_flowforge_service_allows_user_run_as_when_workspace_override_enabled_for_manual_production():
+    repo = _WorkflowRepo()
+    repo.definitions[0]["lifecycle"] = "production"
+    repo.definitions[0]["run_as_principal_type"] = "user"
+    repo.definitions[0]["run_as_principal_id"] = "user-1"
+    settings_repo = _SettingsRepo()
+    settings_repo.current["allow_user_run_as_for_production"] = True
+    settings_repo.current["settings"] = {"allow_user_run_as_for_production": True}
+    service = FlowForgeService(workflow_repository=repo, settings_repository=settings_repo)
+
+    published = service.publish_workflow_version(
+        workspace_id="ws-1",
+        workflow_definition_id=12,
+        version_id=44,
+        actor_user_id="user-1",
+    )
+
+    assert published["version_status"] == "published"
+    assert repo.published["published_by"] == "user-1"
+
+
+def test_flowforge_service_rejects_user_run_as_for_production_trigger_even_with_user_override():
+    repo = _WorkflowRepo()
+    repo.definitions[0]["lifecycle"] = "production"
+    repo.definitions[0]["run_as_principal_type"] = "user"
+    repo.definitions[0]["run_as_principal_id"] = "user-1"
+    repo.versions[0]["graph_json"] = {
+        "nodes": [{"id": "schedule", "type": "schedule_trigger"}],
+        "edges": [],
+    }
+    settings_repo = _SettingsRepo()
+    settings_repo.current["allow_user_run_as_for_production"] = True
+    settings_repo.current["require_service_principal_for_automated_triggers"] = True
+    settings_repo.current["settings"] = {
+        "allow_user_run_as_for_production": True,
+        "require_service_principal_for_automated_triggers": True,
+    }
+    service = FlowForgeService(workflow_repository=repo, settings_repository=settings_repo)
+
+    with pytest.raises(ForgeError) as exc:
+        service.publish_workflow_version(
+            workspace_id="ws-1",
+            workflow_definition_id=12,
+            version_id=44,
+            actor_user_id="user-1",
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.details["allow_user_run_as_for_production"] is True
+    assert exc.value.details["require_service_principal_for_automated_triggers"] is True
+    assert repo.published is None
 
 
 def test_flowforge_service_returns_workflow_governance_metadata():

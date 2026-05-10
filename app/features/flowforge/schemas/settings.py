@@ -20,6 +20,20 @@ def register_settings_models(namespace):
                     "Defaults false so UI-visible data remains MCP-visible until a workspace admin opts in."
                 ),
             ),
+            "allow_user_run_as_for_production": fields.Boolean(
+                required=True,
+                description=(
+                    "Emergency override that allows production workflows to run as a user principal. "
+                    "Defaults false; service or workspace run-as principals remain the production default."
+                ),
+            ),
+            "require_service_principal_for_automated_triggers": fields.Boolean(
+                required=True,
+                description=(
+                    "When true, production workflows started by schedule, webhook, or file-watch triggers must use "
+                    "a non-user automation run-as principal."
+                ),
+            ),
             "raw_payload_retention_days": fields.Integer(required=True, description="Configured raw webhook payload retention days."),
             "raw_payload_retention_max_days": fields.Integer(required=True, description="Product maximum retention days."),
             "default_offer_timeout_minutes": fields.Integer(required=True, description="Default timeout for offer human tasks."),
@@ -42,6 +56,8 @@ def register_settings_models(namespace):
             "enabled": fields.Boolean(required=False),
             "allow_designer_publish": fields.Boolean(required=False),
             "block_sensitive_reporting_mcp": fields.Boolean(required=False),
+            "allow_user_run_as_for_production": fields.Boolean(required=False),
+            "require_service_principal_for_automated_triggers": fields.Boolean(required=False),
             "raw_payload_retention_days": fields.Integer(required=False),
             "default_offer_timeout_minutes": fields.Integer(required=False),
             "default_no_match_recipients": fields.List(fields.String, required=False),

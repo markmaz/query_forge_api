@@ -48,6 +48,8 @@ def test_flowforge_settings_repository_returns_defaults_when_missing():
         "enabled": False,
         "allow_designer_publish": False,
         "block_sensitive_reporting_mcp": False,
+        "allow_user_run_as_for_production": False,
+        "require_service_principal_for_automated_triggers": True,
         "raw_payload_retention_days": 30,
         "raw_payload_retention_max_days": 90,
         "default_offer_timeout_minutes": 1440,
@@ -94,6 +96,8 @@ def test_flowforge_settings_repository_upserts_workspace_settings():
     assert "ON DUPLICATE KEY UPDATE" in query
     assert params["default_no_match_recipients_json"] == '["ops@example.com"]'
     assert settings["default_test_recipients"] == ["test@example.com"]
+    assert settings["allow_user_run_as_for_production"] is False
+    assert settings["require_service_principal_for_automated_triggers"] is True
 
 
 def test_flowforge_integration_repository_purges_expired_raw_payloads():

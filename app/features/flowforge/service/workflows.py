@@ -755,7 +755,11 @@ class FlowForgeWorkflowServiceMixin:
         )
         if str(row.get("validation_status") or "") != "valid":
             raise ForgeError("Only valid workflow versions can be published.", status_code=400)
-        self._validate_publish_run_as(workflow_definition=definition)
+        self._validate_publish_run_as(
+            workspace_id=workspace_id,
+            workflow_definition=definition,
+            graph=row.get("graph_json") or {},
+        )
         self._workflow_repository.publish_workflow_version(
             workspace_id=workspace_id,
             workflow_definition_id=workflow_definition_id,
@@ -796,12 +800,26 @@ class FlowForgeWorkflowServiceMixin:
             raise ForgeError(f"Workflow definition '{workflow_definition_id}' was not found.", status_code=404)
         return {"deleted": True, "workflow_definition_id": workflow_definition_id}
 
-    def _validate_publish_run_as(self, *, workflow_definition: dict[str, Any]) -> None:
+    def _validate_publish_run_as(
+        self,
+        *,
+        workspace_id: str,
+        workflow_definition: dict[str, Any],
+        graph: dict[str, Any] | None = None,
+    ) -> None:
         lifecycle = str(workflow_definition.get("lifecycle") or "development").strip().lower()
         if lifecycle != "production":
             return
         principal_type = str(workflow_definition.get("run_as_principal_type") or "").strip().lower()
         principal_id = str(workflow_definition.get("run_as_principal_id") or "").strip()
+        settings = self._settings_repository.get_settings(workspace_id=workspace_id)
+        allow_user_run_as = bool(settings.get("allow_user_run_as_for_production"))
+        require_automation_principal = bool(settings.get("require_service_principal_for_automated_triggers", True))
+        has_automated_trigger = self._graph_has_automated_trigger(graph or {})
+        if principal_type == "user" and principal_id and allow_user_run_as and not (
+            has_automated_trigger and require_automation_principal
+        ):
+            return
         if principal_type in PRODUCTION_RUN_AS_PRINCIPAL_TYPES and principal_id:
             return
         raise ForgeError(
@@ -811,7 +829,18 @@ class FlowForgeWorkflowServiceMixin:
                 "reason": "production_run_as_required",
                 "workflow_definition_id": workflow_definition.get("id"),
                 "run_as_principal_type": principal_type or None,
+                "allow_user_run_as_for_production": allow_user_run_as,
+                "require_service_principal_for_automated_triggers": require_automation_principal,
             },
+        )
+
+    @staticmethod
+    def _graph_has_automated_trigger(graph: dict[str, Any]) -> bool:
+        nodes = graph.get("nodes") if isinstance(graph, dict) else []
+        return any(
+            isinstance(node, dict) and str(node.get("type") or "").strip() in FLOWFORGE_TRIGGER_NODE_TYPES
+            for node in nodes
+            if isinstance(node, dict)
         )
 
     @staticmethod
