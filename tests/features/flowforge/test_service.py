@@ -332,6 +332,9 @@ class _WorkflowRepo:
                 "description": "Routes intake submissions.",
                 "owner_user_id": "user-1",
                 "created_by": "user-1",
+                "run_as_principal_type": "user",
+                "run_as_principal_id": "user-1",
+                "lifecycle": "development",
                 "status": "draft",
                 "graph_json": {"nodes": [{"id": "intake"}], "edges": []},
             }
@@ -1824,6 +1827,7 @@ def test_flowforge_service_persists_public_jotform_webhook_intake(monkeypatch):
         integration_repository=integration_repo,
         settings_repository=_SettingsRepo(),
         runtime_repository=runtime_repo,
+        workflow_repository=_WorkflowRepo(),
     )
 
     result = service.accept_jotform_integration_webhook(
@@ -1857,7 +1861,11 @@ def test_flowforge_service_persists_public_jotform_webhook_intake(monkeypatch):
     assert runtime_repo.created_runs[0]["workflow_definition_id"] == 12
     assert runtime_repo.created_runs[0]["workflow_version_id"] == 13
     assert runtime_repo.created_runs[0]["intake_event_id"] == 501
+    assert runtime_repo.created_runs[0]["run_as_principal_type"] == "user"
+    assert runtime_repo.created_runs[0]["run_as_principal_id"] == "user-1"
     assert runtime_repo.created_events[0]["event_type"] == "workflow.run.created"
+    assert runtime_repo.created_events[0]["event_payload"]["run_as_principal_type"] == "user"
+    assert runtime_repo.created_events[0]["event_payload"]["run_as_principal_id"] == "user-1"
     assert integration_repo.updated_trigger_evaluation["trigger_evaluation"]["created_run_count"] == 1
     assert queued_dispatches == [("ws-1", 901)]
 
@@ -1905,6 +1913,7 @@ def test_flowforge_service_persists_public_generic_webhook_intake(monkeypatch):
         integration_repository=integration_repo,
         settings_repository=_SettingsRepo(),
         runtime_repository=runtime_repo,
+        workflow_repository=_WorkflowRepo(),
     )
 
     result = service.accept_generic_integration_webhook(
@@ -2293,6 +2302,44 @@ def test_flowforge_service_lists_and_publishes_workflow_versions():
     assert versions[0]["id"] == 44
     assert versions[0]["graph"] == {"nodes": [{"id": "intake"}], "edges": []}
     assert versions[0]["created_at"] == "2026-05-07T20:27:25"
+    assert published["version_status"] == "published"
+    assert repo.published["published_by"] == "user-1"
+
+
+def test_flowforge_service_rejects_production_publish_without_service_run_as():
+    repo = _WorkflowRepo()
+    repo.definitions[0]["lifecycle"] = "production"
+    repo.definitions[0]["run_as_principal_type"] = "user"
+    repo.definitions[0]["run_as_principal_id"] = "user-1"
+    service = FlowForgeService(workflow_repository=repo)
+
+    with pytest.raises(ForgeError) as exc:
+        service.publish_workflow_version(
+            workspace_id="ws-1",
+            workflow_definition_id=12,
+            version_id=44,
+            actor_user_id="user-1",
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.details["reason"] == "production_run_as_required"
+    assert repo.published is None
+
+
+def test_flowforge_service_allows_production_publish_with_service_run_as():
+    repo = _WorkflowRepo()
+    repo.definitions[0]["lifecycle"] = "production"
+    repo.definitions[0]["run_as_principal_type"] = "service_principal"
+    repo.definitions[0]["run_as_principal_id"] = "workflow-runner"
+    service = FlowForgeService(workflow_repository=repo)
+
+    published = service.publish_workflow_version(
+        workspace_id="ws-1",
+        workflow_definition_id=12,
+        version_id=44,
+        actor_user_id="user-1",
+    )
+
     assert published["version_status"] == "published"
     assert repo.published["published_by"] == "user-1"
 

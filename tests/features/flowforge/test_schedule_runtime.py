@@ -68,6 +68,8 @@ def _workflow_row(*, nodes: list[dict[str, object]], workflow_key: str = "daily-
         "workflow_definition_id": 12,
         "workflow_version_id": 44,
         "workflow_key": workflow_key,
+        "run_as_principal_type": "service_principal",
+        "run_as_principal_id": "workflow-runner",
         "graph_json": {"nodes": nodes, "edges": []},
         "settings_json": {},
         "published_at": datetime(2026, 5, 5, 8, 0, tzinfo=timezone.utc),
@@ -108,8 +110,12 @@ def test_schedule_runtime_creates_one_run_for_due_window_and_enqueues_dispatch()
     assert data_repo.created_schedule_runs[0]["window_start"].isoformat() == "2026-05-06T12:00:00"
     assert runtime_repo.created_runs[0]["current_node_id"] == "schedule"
     assert runtime_repo.created_runs[0]["mode"] == "production"
+    assert runtime_repo.created_runs[0]["run_as_principal_type"] == "service_principal"
+    assert runtime_repo.created_runs[0]["run_as_principal_id"] == "workflow-runner"
     assert runtime_repo.events[0]["event_type"] == "workflow.run.created"
     assert runtime_repo.events[0]["event_payload"]["trigger_type"] == "schedule_trigger"
+    assert runtime_repo.events[0]["event_payload"]["run_as_principal_type"] == "service_principal"
+    assert runtime_repo.events[0]["event_payload"]["run_as_principal_id"] == "workflow-runner"
     assert enqueued == [{"workspace_id": "ws-1", "run_id": 900}]
 
 

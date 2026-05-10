@@ -141,6 +141,9 @@ class FlowForgeScheduleRuntime:
             current_node_id=node_id,
             idempotency_key=window.idempotency_key,
             run_context={**window.run_context, "schedule_run_id": int(schedule_run_id)},
+            run_as_principal_type=str(workflow.get("run_as_principal_type") or "").strip() or None,
+            run_as_principal_id=str(workflow.get("run_as_principal_id") or "").strip() or None,
+            triggered_by_user_id=None,
         )
         self._runtime_repository.append_run_event(
             workspace_id=workspace_id,
@@ -163,6 +166,8 @@ class FlowForgeScheduleRuntime:
                 "workflow_definition_id": int(workflow["workflow_definition_id"]),
                 "workflow_version_id": int(workflow["workflow_version_id"]),
                 "mode": window.mode,
+                "run_as_principal_type": str(workflow.get("run_as_principal_type") or "").strip() or None,
+                "run_as_principal_id": str(workflow.get("run_as_principal_id") or "").strip() or None,
             },
             actor_type="system",
             actor_id="flowforge",

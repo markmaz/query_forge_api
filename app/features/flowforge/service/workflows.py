@@ -37,6 +37,7 @@ QUERY_EXTRACT_SOURCE_KEYS = {"saved_query_id", "semantic_plan_id", "query_builde
 QUERY_EXTRACT_FORBIDDEN_KEYS = {"sql", "raw_sql", "query", "query_text", "statement"}
 EXPORT_DESTINATION_KEYS = {"destination_key", "destination_id"}
 IMPORT_SOURCE_KEYS = {"source_key", "source_id", "resource_set_id"}
+PRODUCTION_RUN_AS_PRINCIPAL_TYPES = {"service_principal", "workspace_principal"}
 
 
 class FlowForgeWorkflowServiceMixin:
@@ -714,6 +715,12 @@ class FlowForgeWorkflowServiceMixin:
         )
         if row is None:
             raise ForgeError(f"Workflow version '{version_id}' was not found.", status_code=404)
+        definition = self._workflow_repository.get_workflow_definition(
+            workspace_id=workspace_id,
+            workflow_definition_id=workflow_definition_id,
+        )
+        if definition is None:
+            raise ForgeError(f"Workflow definition '{workflow_definition_id}' was not found.", status_code=404)
         self._ensure_workflow_definition_permission(
             workspace_id=workspace_id,
             workflow_definition_id=workflow_definition_id,
@@ -723,6 +730,7 @@ class FlowForgeWorkflowServiceMixin:
         )
         if str(row.get("validation_status") or "") != "valid":
             raise ForgeError("Only valid workflow versions can be published.", status_code=400)
+        self._validate_publish_run_as(workflow_definition=definition)
         self._workflow_repository.publish_workflow_version(
             workspace_id=workspace_id,
             workflow_definition_id=workflow_definition_id,
@@ -762,6 +770,24 @@ class FlowForgeWorkflowServiceMixin:
         if not archived:
             raise ForgeError(f"Workflow definition '{workflow_definition_id}' was not found.", status_code=404)
         return {"deleted": True, "workflow_definition_id": workflow_definition_id}
+
+    def _validate_publish_run_as(self, *, workflow_definition: dict[str, Any]) -> None:
+        lifecycle = str(workflow_definition.get("lifecycle") or "development").strip().lower()
+        if lifecycle != "production":
+            return
+        principal_type = str(workflow_definition.get("run_as_principal_type") or "").strip().lower()
+        principal_id = str(workflow_definition.get("run_as_principal_id") or "").strip()
+        if principal_type in PRODUCTION_RUN_AS_PRINCIPAL_TYPES and principal_id:
+            return
+        raise ForgeError(
+            "Production workflows must run as a service or workspace principal before publishing.",
+            status_code=400,
+            details={
+                "reason": "production_run_as_required",
+                "workflow_definition_id": workflow_definition.get("id"),
+                "run_as_principal_type": principal_type or None,
+            },
+        )
 
     @staticmethod
     def _enforce_workflow_permissions(*, actor_user_id: str | None, effective_roles: set[str] | None) -> bool:

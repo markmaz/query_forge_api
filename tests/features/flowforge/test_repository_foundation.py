@@ -345,6 +345,19 @@ def test_flowforge_workflow_repository_lists_and_publishes_versions():
     assert "UPDATE flowforge_workflow_definitions" in sql.writes[1][0]
 
 
+def test_flowforge_workflow_repository_lists_schedule_versions_with_run_as_metadata():
+    sql = _SQL(rows=[])
+    repo = FlowForgeWorkflowRepository(sql=sql)
+
+    repo.list_published_schedule_workflow_versions(limit=10)
+
+    query, params = sql.queries[0]
+    assert "d.run_as_principal_type" in query
+    assert "d.run_as_principal_id" in query
+    assert "d.lifecycle" in query
+    assert params == {"limit": 10}
+
+
 def test_flowforge_workflow_repository_sets_current_draft_version():
     sql = _SQL()
     repo = FlowForgeWorkflowRepository(sql=sql)

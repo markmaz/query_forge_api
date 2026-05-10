@@ -114,6 +114,10 @@ class FlowForgeTriggerEvaluationServiceMixin:
                 "no_match_config": trigger.get("no_match_config") or {},
                 "intake": normalized_payload,
             }
+            run_identity = self._workflow_run_identity(
+                workspace_id=workspace_id,
+                workflow_definition_id=int(trigger["workflow_definition_id"]),
+            )
             run_id = self._runtime_repository.create_run(
                 workspace_id=workspace_id,
                 workflow_definition_id=int(trigger["workflow_definition_id"]),
@@ -124,6 +128,9 @@ class FlowForgeTriggerEvaluationServiceMixin:
                 current_node_id="intake",
                 idempotency_key=idempotency_key,
                 run_context=run_context,
+                run_as_principal_type=run_identity["run_as_principal_type"],
+                run_as_principal_id=run_identity["run_as_principal_id"],
+                triggered_by_user_id=None,
             )
             self._runtime_repository.append_run_event(
                 workspace_id=workspace_id,
@@ -138,6 +145,8 @@ class FlowForgeTriggerEvaluationServiceMixin:
                     "workflow_definition_id": trigger.get("workflow_definition_id"),
                     "workflow_version_id": workflow_version_id,
                     "mode": integration.get("mode"),
+                    "run_as_principal_type": run_identity["run_as_principal_type"],
+                    "run_as_principal_id": run_identity["run_as_principal_id"],
                 },
                 actor_type="system",
                 actor_id="flowforge",
@@ -161,6 +170,18 @@ class FlowForgeTriggerEvaluationServiceMixin:
                 }
             )
         return created_runs
+
+    def _workflow_run_identity(self, *, workspace_id: str, workflow_definition_id: int) -> dict[str, Any]:
+        workflow = self._workflow_repository.get_workflow_definition(
+            workspace_id=workspace_id,
+            workflow_definition_id=workflow_definition_id,
+        )
+        if not workflow:
+            return {"run_as_principal_type": None, "run_as_principal_id": None}
+        return {
+            "run_as_principal_type": str(workflow.get("run_as_principal_type") or "").strip() or None,
+            "run_as_principal_id": str(workflow.get("run_as_principal_id") or "").strip() or None,
+        }
 
     def _enqueue_created_run_dispatch(self, *, workspace_id: str, run_id: int, idempotency_key: str) -> None:
         try:
