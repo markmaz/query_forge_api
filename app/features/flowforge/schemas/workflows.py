@@ -56,7 +56,88 @@ def register_workflow_models(namespace):
             "name": fields.String(required=True, description="Workflow display name."),
             "description": fields.String(required=True, description="Workflow purpose summary."),
             "status": fields.String(required=True, description="Definition lifecycle status."),
+            "owner_user_id": fields.String(required=False, description="Workflow owner user id."),
+            "lifecycle": fields.String(required=False, description="Workflow lifecycle, for example development or production."),
+            "run_as_principal": fields.Raw(required=False, description="Principal used when workflow runs are created."),
+            "effective_permissions": fields.Raw(required=False, description="Resolved permissions for the current actor."),
             "graph": fields.Nested(workflow_graph, required=True),
+        },
+    )
+    workflow_permission_entry = namespace.model(
+        "FlowForgeWorkflowPermissionEntry",
+        {
+            "id": fields.Integer(required=False),
+            "principal_type": fields.String(required=True, description="Principal type: user, workspace_role, or workspace."),
+            "principal_id": fields.String(required=True, description="Principal id."),
+            "permission": fields.String(required=True, description="Granted workflow object permission."),
+            "granted_by": fields.String(required=False),
+            "granted_at": _JsonDateTime(required=False),
+        },
+    )
+    workflow_permissions = namespace.model(
+        "FlowForgeWorkflowPermissions",
+        {
+            "workflow_definition_id": fields.Integer(required=True),
+            "items": fields.List(fields.Nested(workflow_permission_entry), required=True),
+        },
+    )
+    workflow_permissions_update = namespace.model(
+        "FlowForgeWorkflowPermissionsUpdateRequest",
+        {
+            "permissions": fields.List(fields.Raw, required=False, description="ACL entries to grant or update."),
+            "grants": fields.List(fields.Raw, required=False, description="ACL entries to grant or update."),
+            "revocations": fields.List(fields.Raw, required=False, description="ACL principal entries to revoke."),
+        },
+    )
+    workflow_owner_update = namespace.model(
+        "FlowForgeWorkflowOwnerUpdateRequest",
+        {"owner_user_id": fields.String(required=True, description="New workflow owner user id.")},
+    )
+    workflow_run_as_update = namespace.model(
+        "FlowForgeWorkflowRunAsUpdateRequest",
+        {
+            "principal_type": fields.String(required=True, description="Run-as principal type."),
+            "principal_id": fields.String(required=True, description="Run-as principal id."),
+        },
+    )
+    workflow_run_as_principal = namespace.model(
+        "FlowForgeWorkflowRunAsPrincipal",
+        {
+            "principal_type": fields.String(required=True),
+            "principal_id": fields.String(required=True),
+            "display_name": fields.String(required=True),
+            "description": fields.String(required=False),
+            "status": fields.String(required=True),
+            "production_eligible": fields.Boolean(required=True),
+        },
+    )
+    workflow_run_as_principals = namespace.model(
+        "FlowForgeWorkflowRunAsPrincipals",
+        {
+            "workspace_id": fields.String(required=True),
+            "items": fields.List(fields.Nested(workflow_run_as_principal), required=True),
+        },
+    )
+    workflow_manual_run_request = namespace.model(
+        "FlowForgeWorkflowManualRunRequest",
+        {
+            "mode": fields.String(required=False, description="Run mode. Defaults to test."),
+            "start_node_id": fields.String(required=False, description="Optional explicit start node id."),
+            "input": fields.Raw(required=False, description="Optional manual run input payload."),
+            "idempotency_key": fields.String(required=False, description="Optional client idempotency key."),
+        },
+    )
+    workflow_manual_run = namespace.model(
+        "FlowForgeWorkflowManualRun",
+        {
+            "run_id": fields.Integer(required=True),
+            "workflow_definition_id": fields.Integer(required=True),
+            "workflow_version_id": fields.Integer(required=True),
+            "status": fields.String(required=True),
+            "mode": fields.String(required=True),
+            "current_node_id": fields.String(required=False),
+            "idempotency_key": fields.String(required=True),
+            "created": fields.Boolean(required=True),
         },
     )
     workflow_definition_create = namespace.model(
@@ -148,6 +229,13 @@ def register_workflow_models(namespace):
     return {
         "workflow_definition": workflow_definition,
         "workflow_definition_create": workflow_definition_create,
+        "workflow_permissions": workflow_permissions,
+        "workflow_permissions_update": workflow_permissions_update,
+        "workflow_owner_update": workflow_owner_update,
+        "workflow_run_as_update": workflow_run_as_update,
+        "workflow_run_as_principals": workflow_run_as_principals,
+        "workflow_manual_run_request": workflow_manual_run_request,
+        "workflow_manual_run": workflow_manual_run,
         "workflow_ai_draft_request": workflow_ai_draft_request,
         "workflow_ai_draft": workflow_ai_draft,
         "validation_result": validation_result,

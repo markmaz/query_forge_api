@@ -73,6 +73,10 @@ class _RuntimeRepo:
         self.run["current_node_id"] = payload["current_node_id"]
         return True
 
+    def update_run_context(self, **payload):
+        self.run["run_context_json"] = payload["run_context"]
+        return True
+
     def fail_run(self, **payload):
         self.failed = payload
         self.run["status"] = "failed"

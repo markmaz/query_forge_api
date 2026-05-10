@@ -61,7 +61,14 @@ class WorkflowGraph(WorkflowGraphRequired, total=False):
     viewport: WorkflowViewport
 
 
-class WorkflowDefinition(TypedDict):
+class WorkflowDefinitionGovernance(TypedDict, total=False):
+    owner_user_id: str | None
+    lifecycle: str
+    run_as_principal: dict[str, Any]
+    effective_permissions: dict[str, Any]
+
+
+class WorkflowDefinition(WorkflowDefinitionGovernance):
     id: str
     name: str
     description: str

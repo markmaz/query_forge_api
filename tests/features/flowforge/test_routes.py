@@ -349,6 +349,10 @@ class _RunService:
                 "name": "Persisted Intake Routing",
                 "description": "Routes intake submissions.",
                 "status": "draft",
+                "owner_user_id": "user-1",
+                "lifecycle": "development",
+                "run_as_principal": {"principal_type": "user", "principal_id": "user-1"},
+                "effective_permissions": {"permission": "owner", "can_manage": True},
                 "graph": {"nodes": [{"id": "intake"}], "edges": []},
             }
         ]
@@ -365,7 +369,134 @@ class _RunService:
             "name": "Persisted Intake Routing",
             "description": "Routes intake submissions.",
             "status": "draft",
+            "owner_user_id": "user-1",
+            "lifecycle": "development",
+            "run_as_principal": {"principal_type": "user", "principal_id": "user-1"},
+            "effective_permissions": {"permission": "owner", "can_manage": True},
             "graph": {"nodes": [{"id": "intake"}], "edges": []},
+        }
+
+    def list_workflow_run_as_principals(self, *, workspace_id: str, actor_user_id: str):
+        return {
+            "workspace_id": workspace_id,
+            "items": [
+                {
+                    "principal_type": "workspace_principal",
+                    "principal_id": workspace_id,
+                    "display_name": "Workspace principal",
+                    "description": "Workspace automation identity.",
+                    "status": "available",
+                    "production_eligible": True,
+                },
+                {
+                    "principal_type": "user",
+                    "principal_id": actor_user_id,
+                    "display_name": "Current user",
+                    "description": "Development run identity.",
+                    "status": "available",
+                    "production_eligible": False,
+                },
+            ],
+        }
+
+    def get_workflow_permissions(self, *, workspace_id: str, workflow_definition_id: int, actor_user_id: str, effective_roles=None):
+        self.workflow_permissions_context = {
+            "workspace_id": workspace_id,
+            "workflow_definition_id": workflow_definition_id,
+            "actor_user_id": actor_user_id,
+            "effective_roles": set(effective_roles or set()),
+        }
+        return {
+            "workflow_definition_id": workflow_definition_id,
+            "items": [
+                {
+                    "id": 70,
+                    "principal_type": "user",
+                    "principal_id": actor_user_id,
+                    "permission": "owner",
+                    "granted_by": actor_user_id,
+                    "granted_at": "2026-05-09T12:00:00",
+                }
+            ],
+        }
+
+    def update_workflow_permissions(
+        self, *, workspace_id: str, workflow_definition_id: int, payload, actor_user_id: str, effective_roles=None
+    ):
+        self.workflow_permissions_payload = {
+            "workspace_id": workspace_id,
+            "workflow_definition_id": workflow_definition_id,
+            "payload": payload,
+            "actor_user_id": actor_user_id,
+            "effective_roles": set(effective_roles or set()),
+        }
+        return self.get_workflow_permissions(
+            workspace_id=workspace_id,
+            workflow_definition_id=workflow_definition_id,
+            actor_user_id=actor_user_id,
+            effective_roles=effective_roles,
+        )
+
+    def update_workflow_owner(
+        self, *, workspace_id: str, workflow_definition_id: int, payload, actor_user_id: str, effective_roles=None
+    ):
+        self.workflow_owner_payload = {
+            "workspace_id": workspace_id,
+            "workflow_definition_id": workflow_definition_id,
+            "payload": payload,
+            "actor_user_id": actor_user_id,
+            "effective_roles": set(effective_roles or set()),
+        }
+        workflow = self.get_definition(
+            workspace_id=workspace_id,
+            workflow_id=str(workflow_definition_id),
+            actor_user_id=actor_user_id,
+            effective_roles=effective_roles,
+        )
+        workflow["owner_user_id"] = payload["owner_user_id"]
+        return workflow
+
+    def update_workflow_run_as(
+        self, *, workspace_id: str, workflow_definition_id: int, payload, actor_user_id: str, effective_roles=None
+    ):
+        self.workflow_run_as_payload = {
+            "workspace_id": workspace_id,
+            "workflow_definition_id": workflow_definition_id,
+            "payload": payload,
+            "actor_user_id": actor_user_id,
+            "effective_roles": set(effective_roles or set()),
+        }
+        workflow = self.get_definition(
+            workspace_id=workspace_id,
+            workflow_id=str(workflow_definition_id),
+            actor_user_id=actor_user_id,
+            effective_roles=effective_roles,
+        )
+        workflow["run_as_principal"] = {
+            "principal_type": payload["principal_type"],
+            "principal_id": payload["principal_id"],
+        }
+        return workflow
+
+    def start_workflow_run(
+        self, *, workspace_id: str, workflow_definition_id: int, payload, actor_user_id: str, effective_roles=None
+    ):
+        self.workflow_run_payload = {
+            "workspace_id": workspace_id,
+            "workflow_definition_id": workflow_definition_id,
+            "payload": payload,
+            "actor_user_id": actor_user_id,
+            "effective_roles": set(effective_roles or set()),
+        }
+        return {
+            "run_id": 901,
+            "workflow_definition_id": workflow_definition_id,
+            "workflow_version_id": 44,
+            "status": "waiting",
+            "mode": payload.get("mode") or "test",
+            "current_node_id": "intake",
+            "idempotency_key": payload.get("idempotency_key") or "manual-1",
+            "created": True,
         }
 
     def get_run_inspector(self, *, workspace_id: str, workflow_id: str):
@@ -1317,6 +1448,44 @@ def test_flowforge_workflow_version_routes_list_and_publish(client, monkeypatch)
     assert published.status_code == 200
     assert published.json["version_status"] == "published"
     assert published.json["published_at"] == "2026-05-07T20:28:00"
+
+
+def test_flowforge_workflow_governance_routes(client, monkeypatch):
+    service = _RunService()
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: service)
+    headers = _headers(monkeypatch, roles={"flowforge:admin"})
+
+    principals = client.get("/api/v1/flowforge/workflows/run-as-principals", headers=headers)
+    permissions = client.get("/api/v1/flowforge/workflows/12/permissions", headers=headers)
+    updated_permissions = client.put(
+        "/api/v1/flowforge/workflows/12/permissions",
+        headers=headers,
+        json={"grants": [{"principal_type": "workspace_role", "principal_id": "flowforge:operator", "permission": "run"}]},
+    )
+    owner = client.put("/api/v1/flowforge/workflows/12/owner", headers=headers, json={"owner_user_id": "user-2"})
+    run_as = client.put(
+        "/api/v1/flowforge/workflows/12/run-as",
+        headers=headers,
+        json={"principal_type": "workspace_principal", "principal_id": "ws-1"},
+    )
+    run = client.post(
+        "/api/v1/flowforge/workflows/12/run",
+        headers=headers,
+        json={"mode": "test", "idempotency_key": "manual-1"},
+    )
+
+    assert principals.status_code == 200
+    assert principals.json["items"][0]["principal_type"] == "workspace_principal"
+    assert permissions.status_code == 200
+    assert permissions.json["items"][0]["permission"] == "owner"
+    assert updated_permissions.status_code == 200
+    assert service.workflow_permissions_payload["payload"]["grants"][0]["permission"] == "run"
+    assert owner.status_code == 200
+    assert owner.json["owner_user_id"] == "user-2"
+    assert run_as.status_code == 200
+    assert run_as.json["run_as_principal"]["principal_type"] == "workspace_principal"
+    assert run.status_code == 201
+    assert run.json["run_id"] == 901
 
 
 def test_flowforge_workflow_authoring_routes_create_definition_and_version(client, monkeypatch):

@@ -69,6 +69,29 @@ class FlowForgeWorkflowList(Resource):
             return exc.to_dict(), exc.status_code
 
 
+@flowforge_ns.route("/workflows/run-as-principals")
+class FlowForgeWorkflowRunAsPrincipals(Resource):
+    @flowforge_ns.doc(
+        summary="List available Workflow Studio run-as principals",
+        description="Returns user, workspace, and service principals that can be assigned to workflow runs.",
+        responses={200: "Run-as principals returned.", 401: "Authentication required.", 403: "FlowForge access required."},
+    )
+    @flowforge_ns.marshal_with(models["workflow_run_as_principals"])
+    @token_required
+    @require_feature("flowforge")
+    def get(self):
+        try:
+            return (
+                _service().list_workflow_run_as_principals(
+                    workspace_id=_workspace_id(),
+                    actor_user_id=_actor_user_id(),
+                ),
+                200,
+            )
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+
+
 @flowforge_ns.route("/workflows/<string:workflow_id>")
 @flowforge_ns.param("workflow_id", "Workflow definition id.")
 class FlowForgeWorkflowDetail(Resource):
@@ -129,6 +152,142 @@ class FlowForgeWorkflowDetail(Resource):
                 ),
                 200,
             )
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+
+
+@flowforge_ns.route("/workflows/<int:workflow_definition_id>/permissions")
+@flowforge_ns.param("workflow_definition_id", "Persisted workflow definition id.")
+class FlowForgeWorkflowPermissions(Resource):
+    @flowforge_ns.doc(
+        summary="Get Workflow Studio object permissions",
+        description="Returns active ACL grants for a workflow definition. Requires manage permission on the workflow.",
+        responses={200: "Workflow permissions returned.", 403: "Manage permission required.", 404: "Workflow not found."},
+    )
+    @flowforge_ns.marshal_with(models["workflow_permissions"])
+    @token_required
+    @require_feature("flowforge")
+    def get(self, workflow_definition_id: int):
+        try:
+            return (
+                _service().get_workflow_permissions(
+                    workspace_id=_workspace_id(),
+                    workflow_definition_id=workflow_definition_id,
+                    actor_user_id=_actor_user_id(),
+                    effective_roles=_effective_roles(),
+                ),
+                200,
+            )
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+
+    @flowforge_ns.doc(
+        summary="Update Workflow Studio object permissions",
+        description="Grants, updates, or revokes workflow ACL entries. Requires manage permission on the workflow.",
+        responses={200: "Workflow permissions updated.", 400: "Invalid permission payload.", 403: "Manage permission required."},
+    )
+    @flowforge_ns.expect(models["workflow_permissions_update"], validate=False)
+    @flowforge_ns.marshal_with(models["workflow_permissions"])
+    @token_required
+    @require_feature("flowforge")
+    def put(self, workflow_definition_id: int):
+        try:
+            payload = request.get_json(silent=True) or {}
+            return (
+                _service().update_workflow_permissions(
+                    workspace_id=_workspace_id(),
+                    workflow_definition_id=workflow_definition_id,
+                    payload=payload if isinstance(payload, dict) else {},
+                    actor_user_id=_actor_user_id(),
+                    effective_roles=_effective_roles(),
+                ),
+                200,
+            )
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+
+
+@flowforge_ns.route("/workflows/<int:workflow_definition_id>/owner")
+@flowforge_ns.param("workflow_definition_id", "Persisted workflow definition id.")
+class FlowForgeWorkflowOwner(Resource):
+    @flowforge_ns.doc(
+        summary="Update Workflow Studio workflow owner",
+        description="Reassigns workflow ownership and grants the new owner owner-level object permission.",
+        responses={200: "Workflow owner updated.", 400: "Invalid owner payload.", 403: "Manage permission required."},
+    )
+    @flowforge_ns.expect(models["workflow_owner_update"], validate=False)
+    @flowforge_ns.marshal_with(models["workflow_definition"])
+    @token_required
+    @require_feature("flowforge")
+    def put(self, workflow_definition_id: int):
+        try:
+            payload = request.get_json(silent=True) or {}
+            return (
+                _service().update_workflow_owner(
+                    workspace_id=_workspace_id(),
+                    workflow_definition_id=workflow_definition_id,
+                    payload=payload if isinstance(payload, dict) else {},
+                    actor_user_id=_actor_user_id(),
+                    effective_roles=_effective_roles(),
+                ),
+                200,
+            )
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+
+
+@flowforge_ns.route("/workflows/<int:workflow_definition_id>/run-as")
+@flowforge_ns.param("workflow_definition_id", "Persisted workflow definition id.")
+class FlowForgeWorkflowRunAs(Resource):
+    @flowforge_ns.doc(
+        summary="Update Workflow Studio run-as principal",
+        description="Sets the principal captured by future workflow runs. Production publish requires a service or workspace principal.",
+        responses={200: "Workflow run-as principal updated.", 400: "Invalid principal payload.", 403: "Manage permission required."},
+    )
+    @flowforge_ns.expect(models["workflow_run_as_update"], validate=False)
+    @flowforge_ns.marshal_with(models["workflow_definition"])
+    @token_required
+    @require_feature("flowforge")
+    def put(self, workflow_definition_id: int):
+        try:
+            payload = request.get_json(silent=True) or {}
+            return (
+                _service().update_workflow_run_as(
+                    workspace_id=_workspace_id(),
+                    workflow_definition_id=workflow_definition_id,
+                    payload=payload if isinstance(payload, dict) else {},
+                    actor_user_id=_actor_user_id(),
+                    effective_roles=_effective_roles(),
+                ),
+                200,
+            )
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+
+
+@flowforge_ns.route("/workflows/<int:workflow_definition_id>/run")
+@flowforge_ns.param("workflow_definition_id", "Persisted workflow definition id.")
+class FlowForgeWorkflowManualRun(Resource):
+    @flowforge_ns.doc(
+        summary="Start a Workflow Studio workflow run manually",
+        description="Creates a run from the latest published workflow version and queues runtime dispatch.",
+        responses={201: "Workflow run created.", 400: "Workflow is not runnable.", 403: "Run permission required."},
+    )
+    @flowforge_ns.expect(models["workflow_manual_run_request"], validate=False)
+    @flowforge_ns.marshal_with(models["workflow_manual_run"])
+    @token_required
+    @require_feature("flowforge")
+    def post(self, workflow_definition_id: int):
+        try:
+            payload = request.get_json(silent=True) or {}
+            result = _service().start_workflow_run(
+                workspace_id=_workspace_id(),
+                workflow_definition_id=workflow_definition_id,
+                payload=payload if isinstance(payload, dict) else {},
+                actor_user_id=_actor_user_id(),
+                effective_roles=_effective_roles(),
+            )
+            return result, 201 if result.get("created") else 200
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
 

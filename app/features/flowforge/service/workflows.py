@@ -61,7 +61,15 @@ class FlowForgeWorkflowServiceMixin:
                         effective_roles=effective_roles,
                     )
                 ]
-            persisted = [self._serialize_workflow_definition(row) for row in rows]
+            persisted = [
+                self._serialize_workflow_definition(
+                    row,
+                    workspace_id=workspace_id,
+                    actor_user_id=actor_user_id,
+                    effective_roles=effective_roles,
+                )
+                for row in rows
+            ]
         except SQLAlchemyError:
             logger.exception("flowforge_workflow_definition_list_failed workspace_id=%s", workspace_id)
             persisted = []
@@ -92,7 +100,12 @@ class FlowForgeWorkflowServiceMixin:
             workflow_definition=row,
             required_permission="view",
         )
-        return self._serialize_workflow_definition(row)
+        return self._serialize_workflow_definition(
+            row,
+            workspace_id=workspace_id,
+            actor_user_id=actor_user_id,
+            effective_roles=effective_roles,
+        )
 
     def create_workflow_definition(
         self,
@@ -137,6 +150,18 @@ class FlowForgeWorkflowServiceMixin:
             "name": name,
             "description": self._optional_string(payload.get("description")) or "",
             "status": "draft",
+            "owner_user_id": self._optional_string(actor_user_id),
+            "lifecycle": "development",
+            "run_as_principal": {"principal_type": "user", "principal_id": actor_user_id},
+            "effective_permissions": {
+                "permission": "owner",
+                "can_view": True,
+                "can_run": True,
+                "can_manage_runs": True,
+                "can_edit": True,
+                "can_manage": True,
+                "can_own": True,
+            },
             "graph": version["graph"],
         }
 
@@ -881,11 +906,32 @@ class FlowForgeWorkflowServiceMixin:
             return value.isoformat()
         return value
 
-    def _serialize_workflow_definition(self, row: dict[str, Any]) -> WorkflowDefinition:
+    def _serialize_workflow_definition(
+        self,
+        row: dict[str, Any],
+        *,
+        workspace_id: str | None = None,
+        actor_user_id: str | None = None,
+        effective_roles: set[str] | None = None,
+    ) -> WorkflowDefinition:
+        principal_type = str(row.get("run_as_principal_type") or "").strip() or None
+        principal_id = str(row.get("run_as_principal_id") or "").strip() or None
         return {
             "id": str(row.get("id")),
             "name": row.get("name") or "",
             "description": row.get("description") or "",
             "status": row.get("status") or "draft",
+            "owner_user_id": row.get("owner_user_id"),
+            "lifecycle": row.get("lifecycle") or "development",
+            "run_as_principal": {
+                "principal_type": principal_type,
+                "principal_id": principal_id,
+            },
+            "effective_permissions": self._effective_workflow_permissions(
+                workspace_id=str(workspace_id or row.get("workspace_id") or ""),
+                workflow_definition=row,
+                actor_user_id=actor_user_id,
+                effective_roles=effective_roles,
+            ),
             "graph": row.get("graph") or row.get("graph_json") or {"nodes": [], "edges": []},
         }

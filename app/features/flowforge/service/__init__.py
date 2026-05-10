@@ -14,11 +14,15 @@ from app.features.flowforge.service.settings import FlowForgeSettingsServiceMixi
 from app.features.flowforge.service.signed_actions import FlowForgeSignedActionServiceMixin
 from app.features.flowforge.service.trigger_evaluation import FlowForgeTriggerEvaluationServiceMixin
 from app.features.flowforge.service.webhooks import FlowForgeWebhookServiceMixin
+from app.features.flowforge.service.workflow_governance import FlowForgeWorkflowGovernanceServiceMixin
+from app.features.flowforge.service.workflow_manual_runs import FlowForgeWorkflowManualRunServiceMixin
 from app.features.flowforge.service.workflows import FlowForgeWorkflowServiceMixin
 
 
 class FlowForgeService(
     FlowForgeWorkflowServiceMixin,
+    FlowForgeWorkflowGovernanceServiceMixin,
+    FlowForgeWorkflowManualRunServiceMixin,
     FlowForgeApprovalTaskServiceMixin,
     FlowForgeCommunicationTemplateServiceMixin,
     FlowForgeDataMovementServiceMixin,

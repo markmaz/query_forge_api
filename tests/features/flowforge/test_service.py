@@ -324,6 +324,20 @@ class _WorkflowRepo:
         self.created_definition = None
         self.created_version = None
         self.current_draft = None
+        self.grants = []
+        self.revocations = []
+        self.owner_update = None
+        self.run_as_update = None
+        self.acl = [
+            {
+                "id": 70,
+                "principal_type": "user",
+                "principal_id": "user-1",
+                "permission": "owner",
+                "granted_by": "user-1",
+                "granted_at": datetime(2026, 5, 9, 12, 0, 0),
+            }
+        ]
         self.definitions = [
             {
                 "id": 12,
@@ -370,7 +384,27 @@ class _WorkflowRepo:
 
     def grant_workflow_permission(self, **payload):
         self.granted_workflow_permission = payload
+        self.grants.append(payload)
         return 70
+
+    def revoke_workflow_permission(self, **payload):
+        self.revocations.append(payload)
+        return True
+
+    def list_workflow_acl(self, *, workspace_id: str, workflow_definition_id: int):
+        del workspace_id, workflow_definition_id
+        return list(self.acl)
+
+    def update_workflow_owner(self, **payload):
+        self.owner_update = payload
+        self.definitions[0]["owner_user_id"] = payload["owner_user_id"]
+        return True
+
+    def update_workflow_run_as(self, **payload):
+        self.run_as_update = payload
+        self.definitions[0]["run_as_principal_type"] = payload["principal_type"]
+        self.definitions[0]["run_as_principal_id"] = payload["principal_id"]
+        return True
 
     def create_workflow_version(self, **payload):
         self.created_version = payload
@@ -407,6 +441,10 @@ class _WorkflowPermissionService:
     def can_view_workflow(self, *, workflow_definition, **payload):
         self.view_calls.append({"workflow_definition": workflow_definition, **payload})
         return int(workflow_definition["id"]) in self.viewable_ids
+
+    def effective_permission(self, **payload):
+        del payload
+        return "owner"
 
     def ensure(self, *, required_permission: str, **payload):
         self.ensure_calls.append({"required_permission": required_permission, **payload})
@@ -2342,6 +2380,95 @@ def test_flowforge_service_allows_production_publish_with_service_run_as():
 
     assert published["version_status"] == "published"
     assert repo.published["published_by"] == "user-1"
+
+
+def test_flowforge_service_returns_workflow_governance_metadata():
+    service = FlowForgeService(workflow_repository=_WorkflowRepo())
+
+    result = service.get_definition(
+        workspace_id="ws-1",
+        workflow_id="12",
+        actor_user_id="user-1",
+        effective_roles={"flowforge:designer"},
+    )
+
+    assert result["owner_user_id"] == "user-1"
+    assert result["run_as_principal"] == {"principal_type": "user", "principal_id": "user-1"}
+    assert result["lifecycle"] == "development"
+    assert result["effective_permissions"]["permission"] == "owner"
+    assert result["effective_permissions"]["can_manage"] is True
+
+
+def test_flowforge_service_updates_workflow_permissions():
+    repo = _WorkflowRepo()
+    service = FlowForgeService(workflow_repository=repo)
+
+    result = service.update_workflow_permissions(
+        workspace_id="ws-1",
+        workflow_definition_id=12,
+        payload={
+            "grants": [{"principal_type": "workspace_role", "principal_id": "flowforge:operator", "permission": "run"}],
+            "revocations": [{"principal_type": "user", "principal_id": "user-2"}],
+        },
+        actor_user_id="user-1",
+        effective_roles={"flowforge:admin"},
+    )
+
+    assert result["workflow_definition_id"] == 12
+    assert repo.grants[-1]["principal_id"] == "flowforge:operator"
+    assert repo.revocations[-1]["principal_id"] == "user-2"
+
+
+def test_flowforge_service_updates_owner_and_run_as():
+    repo = _WorkflowRepo()
+    service = FlowForgeService(workflow_repository=repo)
+
+    owner = service.update_workflow_owner(
+        workspace_id="ws-1",
+        workflow_definition_id=12,
+        payload={"owner_user_id": "user-2"},
+        actor_user_id="user-1",
+        effective_roles={"flowforge:admin"},
+    )
+    run_as = service.update_workflow_run_as(
+        workspace_id="ws-1",
+        workflow_definition_id=12,
+        payload={"principal_type": "workspace_principal", "principal_id": "ws-1"},
+        actor_user_id="user-1",
+        effective_roles={"flowforge:admin"},
+    )
+
+    assert owner["owner_user_id"] == "user-2"
+    assert repo.grants[-1]["permission"] == "owner"
+    assert run_as["run_as_principal"] == {"principal_type": "workspace_principal", "principal_id": "ws-1"}
+
+
+def test_flowforge_service_starts_manual_run_from_latest_published_version(monkeypatch):
+    repo = _WorkflowRepo()
+    repo.definitions[0]["latest_published_version_id"] = 44
+    repo.versions[0]["version_status"] = "published"
+    runtime_repo = _RuntimeRepo()
+    queued_dispatches = []
+    monkeypatch.setattr(
+        "app.tasks.flowforge_tasks.enqueue_flowforge_run_dispatch",
+        lambda *, workspace_id, run_id: queued_dispatches.append((workspace_id, run_id)),
+    )
+    service = FlowForgeService(workflow_repository=repo, runtime_repository=runtime_repo)
+
+    result = service.start_workflow_run(
+        workspace_id="ws-1",
+        workflow_definition_id=12,
+        payload={"mode": "test", "idempotency_key": "manual-1", "input": {"reason": "smoke-test"}},
+        actor_user_id="user-1",
+        effective_roles={"flowforge:admin"},
+    )
+
+    assert result["run_id"] == 901
+    assert result["workflow_version_id"] == 44
+    assert runtime_repo.created_runs[0]["triggered_by_user_id"] == "user-1"
+    assert runtime_repo.created_runs[0]["run_context"]["input"] == {"reason": "smoke-test"}
+    assert runtime_repo.created_events[0]["event_type"] == "workflow.run.created"
+    assert queued_dispatches == [("ws-1", 901)]
 
 
 def test_flowforge_service_archives_persisted_workflow_definition():
