@@ -36,6 +36,7 @@ class FlowForgeHumanResponseRuntime:
         human_task_id: int | None = None,
         resource_set_id: int | None = None,
         source_record_key: str | None = None,
+        response: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         run = self._runtime_repository.get_run(workspace_id=workspace_id, run_id=run_id)
         if run is None:
@@ -98,7 +99,9 @@ class FlowForgeHumanResponseRuntime:
             action=normalized_action,
             human_task_id=human_task_id,
             source_record_key=source_record_key,
+            response=response,
         )
+        response_summary = self._response_summary(response)
         self._runtime_repository.update_run_status(
             workspace_id=workspace_id,
             run_id=int(run_id),
@@ -118,6 +121,7 @@ class FlowForgeHumanResponseRuntime:
                 "from_node_id": current_node_id,
                 "to_node_id": target_node_id,
                 "assignment_id": assignment_id,
+                **response_summary,
             },
             actor_type="system",
             actor_id="flowforge",
@@ -171,6 +175,7 @@ class FlowForgeHumanResponseRuntime:
                 human_task_id=human_task_id,
                 resource_set_id=task.get("resource_set_id"),
                 source_record_key=task.get("source_record_key"),
+                response=response,
             )
             if result.get("status") == "advanced":
                 advanced += 1
@@ -223,15 +228,19 @@ class FlowForgeHumanResponseRuntime:
         action: str,
         human_task_id: int | None,
         source_record_key: str | None,
+        response: dict[str, Any] | None = None,
     ) -> None:
         context = dict(run.get("run_context") or run.get("run_context_json") or {})
         outcome = self._decision_outcome_for_action(action)
+        response_summary = self._response_summary(response)
         context["workflow_decision"] = {
             "action": action,
             "outcome": outcome,
             "human_task_id": int(human_task_id) if human_task_id is not None else None,
             "source_record_key": source_record_key,
+            **response_summary,
         }
+        context["human_response"] = dict(context["workflow_decision"])
         context["last_decision_outcome"] = outcome
         self._runtime_repository.update_run_context(
             workspace_id=workspace_id,
@@ -249,6 +258,36 @@ class FlowForgeHumanResponseRuntime:
         if action_key == "timeout":
             return "timed_out"
         return action_key
+
+    @classmethod
+    def _response_summary(cls, response: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(response, dict):
+            return {}
+        summary: dict[str, Any] = {}
+        for key in ("decline_reason", "response_note", "decision_note"):
+            value = cls._optional_string(response.get(key))
+            if value:
+                summary[key] = value
+        reason = (
+            cls._optional_string(response.get("reason"))
+            or cls._optional_string(response.get("decline_reason"))
+            or cls._optional_string(response.get("decision_note"))
+            or cls._optional_string(response.get("response_note"))
+        )
+        if reason:
+            summary["reason"] = reason
+        if response.get("timeout") is True:
+            summary["timeout"] = True
+        for key in ("response_time_seconds", "response_time_ms"):
+            value = response.get(key)
+            if isinstance(value, (int, float)) and value >= 0:
+                summary[key] = value
+        return summary
+
+    @staticmethod
+    def _optional_string(value: Any) -> str | None:
+        text = str(value or "").strip()
+        return text or None
 
     @staticmethod
     def _outgoing_edges(*, graph: dict[str, Any], node_id: str) -> list[dict[str, Any]]:

@@ -70,6 +70,7 @@ class FlowForgeApprovalTaskServiceMixin:
             task=task,
             action=normalized_action,
             actor_user_id=actor_user_id,
+            response=response,
         )
         return {
             "human_task_id": int(human_task_id),
@@ -86,6 +87,7 @@ class FlowForgeApprovalTaskServiceMixin:
         task: dict[str, Any],
         action: str,
         actor_user_id: str,
+        response: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         from app.features.flowforge.runtime.human_responses import FlowForgeHumanResponseRuntime
 
@@ -99,6 +101,7 @@ class FlowForgeApprovalTaskServiceMixin:
             human_task_id=int(task["id"]),
             resource_set_id=task.get("resource_set_id"),
             source_record_key=task.get("source_record_key"),
+            response=response,
         )
         if action == "decline" and runtime_result.get("status") == "no_target":
             self._runtime_repository.fail_run(

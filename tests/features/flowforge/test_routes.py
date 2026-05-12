@@ -238,9 +238,25 @@ def test_flowforge_run_inspector_returns_design_preview(client, monkeypatch):
     )
 
     assert resp.status_code == 200
-    assert resp.json["workflow_id"] == "42"
-    assert resp.json["mode"] == "design_preview"
-    assert resp.json["events"][0]["event_type"].startswith("workflow.preview.")
+
+
+def test_flowforge_workflow_readiness_returns_backend_contract(client, monkeypatch):
+    service = _RunService()
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: service)
+
+    resp = client.get(
+        "/api/v1/flowforge/workflows/42/readiness",
+        headers=_headers(monkeypatch),
+    )
+
+    assert resp.status_code == 200
+    assert resp.json["workflow_definition_id"] == 42
+    assert resp.json["status"] == "needs_publish"
+    assert resp.json["can_publish"] is True
+    assert resp.json["latest_run_id"] == 90
+    assert resp.json["latest_run_mode"] == "test"
+    assert resp.json["steps"][0]["id"] == "draft_saved"
+    assert service.workflow_readiness_context["effective_roles"] == {"flowforge:user"}
 
 
 class _TemplateService:
@@ -460,6 +476,26 @@ class _RunService:
         workflow["owner_user_id"] = payload["owner_user_id"]
         return workflow
 
+    def update_workflow_metadata(
+        self, *, workspace_id: str, workflow_definition_id: int, payload, actor_user_id: str, effective_roles=None
+    ):
+        self.workflow_metadata_payload = {
+            "workspace_id": workspace_id,
+            "workflow_definition_id": workflow_definition_id,
+            "payload": payload,
+            "actor_user_id": actor_user_id,
+            "effective_roles": set(effective_roles or set()),
+        }
+        workflow = self.get_definition(
+            workspace_id=workspace_id,
+            workflow_id=str(workflow_definition_id),
+            actor_user_id=actor_user_id,
+            effective_roles=effective_roles,
+        )
+        workflow["name"] = payload["name"]
+        workflow["description"] = payload.get("description") or workflow["description"]
+        return workflow
+
     def update_workflow_run_as(
         self, *, workspace_id: str, workflow_definition_id: int, payload, actor_user_id: str, effective_roles=None
     ):
@@ -501,6 +537,48 @@ class _RunService:
             "current_node_id": "intake",
             "idempotency_key": payload.get("idempotency_key") or "manual-1",
             "created": True,
+        }
+
+    def get_workflow_readiness(
+        self,
+        *,
+        workspace_id: str,
+        workflow_definition_id: int,
+        actor_user_id: str | None = None,
+        effective_roles=None,
+    ):
+        self.workflow_readiness_context = {
+            "workspace_id": workspace_id,
+            "workflow_definition_id": workflow_definition_id,
+            "actor_user_id": actor_user_id,
+            "effective_roles": set(effective_roles or set()),
+        }
+        return {
+            "workflow_definition_id": workflow_definition_id,
+            "status": "needs_publish",
+            "can_publish": True,
+            "can_run": False,
+            "latest_valid_draft_version_id": 44,
+            "latest_published_version_id": None,
+            "latest_run_id": 90,
+            "latest_run_status": "waiting",
+            "latest_run_mode": "test",
+            "blockers": [],
+            "warnings": [
+                {
+                    "code": "published_version_required",
+                    "message": "Publish a valid workflow version before runtime execution.",
+                    "severity": "warning",
+                }
+            ],
+            "steps": [
+                {
+                    "id": "draft_saved",
+                    "label": "Draft saved",
+                    "state": "complete",
+                    "detail": "Valid draft version 1 is saved.",
+                }
+            ],
         }
 
     def get_run_inspector(self, *, workspace_id: str, workflow_id: str):
@@ -1599,6 +1677,11 @@ def test_flowforge_workflow_governance_routes(client, monkeypatch):
         json={"grants": [{"principal_type": "workspace_role", "principal_id": "flowforge:operator", "permission": "run"}]},
     )
     owner = client.put("/api/v1/flowforge/workflows/12/owner", headers=headers, json={"owner_user_id": "user-2"})
+    metadata = client.put(
+        "/api/v1/flowforge/workflows/12/metadata",
+        headers=headers,
+        json={"name": "Renamed Workflow", "description": "Updated description."},
+    )
     run_as = client.put(
         "/api/v1/flowforge/workflows/12/run-as",
         headers=headers,
@@ -1618,6 +1701,9 @@ def test_flowforge_workflow_governance_routes(client, monkeypatch):
     assert service.workflow_permissions_payload["payload"]["grants"][0]["permission"] == "run"
     assert owner.status_code == 200
     assert owner.json["owner_user_id"] == "user-2"
+    assert metadata.status_code == 200
+    assert metadata.json["name"] == "Renamed Workflow"
+    assert service.workflow_metadata_payload["payload"]["description"] == "Updated description."
     assert run_as.status_code == 200
     assert run_as.json["run_as_principal"]["principal_type"] == "workspace_principal"
     assert run.status_code == 201

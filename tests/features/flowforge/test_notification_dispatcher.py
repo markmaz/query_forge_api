@@ -21,6 +21,7 @@ class _RuntimeRepo:
         self.sent = []
         self.failed = []
         self.events = []
+        self.needs_attention = []
 
     def list_pending_notifications(self, *, limit: int):
         assert limit == 25
@@ -32,6 +33,10 @@ class _RuntimeRepo:
 
     def mark_notification_failed(self, **payload):
         self.failed.append(payload)
+        return True
+
+    def mark_run_needs_attention(self, **payload):
+        self.needs_attention.append(payload)
         return True
 
     def append_run_event(self, **payload):
@@ -84,10 +89,12 @@ def test_notification_dispatcher_marks_failed_when_sender_raises():
 
     result = dispatcher.dispatch_pending(limit=25)
 
-    assert result == {"status": "completed", "processed": 1, "sent": 0, "failed": 1}
+    assert result == {"status": "completed_with_failures", "processed": 1, "sent": 0, "failed": 1}
     assert repo.failed[0]["notification_id"] == 701
     assert "smtp unavailable" in repo.failed[0]["error_message"]
+    assert repo.needs_attention == [{"workspace_id": "ws-1", "run_id": 90}]
     assert repo.events[0]["event_type"] == "workflow.notification.failed"
+    assert repo.events[0]["event_payload"]["run_status"] == "needs_attention"
 
 
 def test_notification_dispatcher_renders_human_task_action_link_without_intake_details():
@@ -118,7 +125,9 @@ def test_notification_dispatcher_renders_human_task_action_link_without_intake_d
 
     assert result["sent"] == 1
     assert sent_messages[0][0] == "therapist@example.com"
-    assert "FlowForge workflow task" in sent_messages[0][1]
+    assert sent_messages[0][1] == "Workflow task"
+    assert "FlowForge" not in sent_messages[0][1]
+    assert "FlowForge" not in sent_messages[0][2]
     assert "http://localhost:3000/flowforge/actions/ffact_123" in sent_messages[0][2]
     assert "Jane Patient" not in sent_messages[0][2]
 
@@ -153,10 +162,10 @@ def test_notification_dispatcher_renders_active_custom_template():
             "template_key": "therapist-task",
             "channel": "email",
             "purpose": "human_task",
-            "subject": "Task for {{selected_resource.display_name}}",
+            "subject": "FlowForge task for {{selected_resource.display_name}}",
             "body_blocks_json": [
-                {"type": "heading", "content": "Hello {{selected_resource.display_name}}"},
-                {"type": "text", "content": "Please respond by {{task.due_at}}."},
+                {"type": "heading", "content": "FlowForge task for {{selected_resource.display_name}}"},
+                {"type": "text", "content": "Please respond by {{task.due_at}} in FlowForge."},
                 {"type": "field_list", "fields": ["intake.requested_service", "intake.preferred_days"]},
                 {"type": "action_buttons", "actions": ["accept", "decline"]},
             ],
@@ -179,8 +188,11 @@ def test_notification_dispatcher_renders_active_custom_template():
         "template_key": "therapist-task",
         "channel": "email",
     }
-    assert sent_messages[0][1] == "Task for Dr. Lane"
-    assert "Hello Dr. Lane" in sent_messages[0][2]
+    assert sent_messages[0][1] == "Workflow task for Dr. Lane"
+    assert "Workflow task for Dr. Lane" in sent_messages[0][2]
+    assert "in Workflow" in sent_messages[0][2]
+    assert "FlowForge" not in sent_messages[0][1]
+    assert "FlowForge" not in sent_messages[0][2]
     assert "Anxiety therapy" in sent_messages[0][2]
     assert "Monday, Wednesday" in sent_messages[0][2]
     assert "2026-05-06T18:00:00Z" in sent_messages[0][2]

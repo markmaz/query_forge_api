@@ -14,9 +14,12 @@ from app.features.flowforge.workflow_drafting import normalize_generated_workflo
 
 logger = logging.getLogger(__name__)
 
+FLOWFORGE_MANUAL_START_NODE_TYPE = "manual_start"
 FLOWFORGE_TRIGGER_NODE_TYPES = {"schedule_trigger", "webhook_trigger", "file_watch_trigger"}
+FLOWFORGE_START_NODE_TYPES = {*FLOWFORGE_TRIGGER_NODE_TYPES, FLOWFORGE_MANUAL_START_NODE_TYPE}
 FLOWFORGE_DATA_MOVEMENT_NODE_TYPES = {"query_extract", "export", "import", "map_transform"}
 FLOWFORGE_SUPPORTED_NODE_TYPES = {
+    FLOWFORGE_MANUAL_START_NODE_TYPE,
     *FLOWFORGE_TRIGGER_NODE_TYPES,
     "intake",
     "scoring",
@@ -256,10 +259,12 @@ class FlowForgeWorkflowServiceMixin:
                 continue
             node_id = str(node.get("id") or "").strip()
             node_type = str(node.get("type") or "").strip()
-            if node_type in FLOWFORGE_TRIGGER_NODE_TYPES and incoming_counts.get(node_id, 0) > 0:
-                errors.append(f"Trigger node '{node_id}' cannot have incoming edges.")
-            if node_type in FLOWFORGE_TRIGGER_NODE_TYPES and outgoing_counts.get(node_id, 0) == 0:
-                warnings.append(f"Trigger node '{node_id}' has no outgoing edge.")
+            if node_type in FLOWFORGE_START_NODE_TYPES and incoming_counts.get(node_id, 0) > 0:
+                label = "Manual start" if node_type == FLOWFORGE_MANUAL_START_NODE_TYPE else "Trigger"
+                errors.append(f"{label} node '{node_id}' cannot have incoming edges.")
+            if node_type in FLOWFORGE_START_NODE_TYPES and outgoing_counts.get(node_id, 0) == 0:
+                label = "Manual start" if node_type == FLOWFORGE_MANUAL_START_NODE_TYPE else "Trigger"
+                warnings.append(f"{label} node '{node_id}' has no outgoing edge.")
 
         self._validate_decision_edges(
             nodes_by_id=nodes_by_id,
@@ -778,6 +783,127 @@ class FlowForgeWorkflowServiceMixin:
         published["version_status"] = "published"
         return self._serialize_workflow_version(published)
 
+    def get_workflow_readiness(
+        self,
+        *,
+        workspace_id: str,
+        workflow_definition_id: int,
+        actor_user_id: str | None = None,
+        effective_roles: set[str] | None = None,
+    ) -> dict[str, Any]:
+        definition = self._workflow_repository.get_workflow_definition(
+            workspace_id=workspace_id,
+            workflow_definition_id=workflow_definition_id,
+        )
+        if definition is None:
+            raise ForgeError(f"Workflow definition '{workflow_definition_id}' was not found.", status_code=404)
+        self._ensure_workflow_permission(
+            workspace_id=workspace_id,
+            actor_user_id=actor_user_id,
+            effective_roles=effective_roles,
+            workflow_definition=definition,
+            required_permission="view",
+        )
+        permissions = self._effective_workflow_permissions(
+            workspace_id=workspace_id,
+            workflow_definition=definition,
+            actor_user_id=actor_user_id,
+            effective_roles=effective_roles,
+        )
+        versions = [
+            self._serialize_workflow_version(row)
+            for row in self._workflow_repository.list_workflow_versions(
+                workspace_id=workspace_id,
+                workflow_definition_id=workflow_definition_id,
+            )
+        ]
+        latest_published = self._latest_version(
+            [version for version in versions if str(version.get("version_status") or "") == "published"]
+        )
+        latest_valid_draft = self._latest_version(
+            [
+                version
+                for version in versions
+                if str(version.get("version_status") or "") != "published"
+                and str(version.get("validation_status") or "") == "valid"
+            ]
+        )
+        current_graph = (
+            latest_valid_draft.get("graph")
+            if isinstance(latest_valid_draft, dict)
+            else definition.get("graph") or definition.get("graph_json") or {"nodes": [], "edges": []}
+        )
+        validation = self.validate_graph(graph=current_graph if isinstance(current_graph, dict) else {}, workspace_id=workspace_id)
+        blockers: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+
+        for index, error in enumerate(validation.get("errors") or []):
+            blockers.append({"code": f"validation_error_{index + 1}", "message": str(error), "severity": "error"})
+        for index, warning in enumerate(validation.get("warnings") or []):
+            warnings.append({"code": f"validation_warning_{index + 1}", "message": str(warning), "severity": "warning"})
+
+        self._append_graph_readiness_findings(graph=current_graph if isinstance(current_graph, dict) else {}, blockers=blockers, warnings=warnings)
+        self._append_run_as_readiness_findings(
+            workspace_id=workspace_id,
+            workflow_definition=definition,
+            graph=current_graph if isinstance(current_graph, dict) else {},
+            blockers=blockers,
+        )
+        if not latest_valid_draft and not latest_published:
+            blockers.append(
+                {
+                    "code": "valid_draft_required",
+                    "message": "Save a valid draft version before publishing.",
+                    "severity": "error",
+                }
+            )
+        if not latest_published:
+            warnings.append(
+                {
+                    "code": "published_version_required",
+                    "message": "Publish a valid workflow version before runtime execution.",
+                    "severity": "warning",
+                }
+            )
+        if not permissions.get("can_run"):
+            blockers.append(
+                {
+                    "code": "run_permission_required",
+                    "message": "The current user does not have permission to run this workflow.",
+                    "severity": "error",
+                }
+            )
+
+        latest_run = self._runtime_repository.get_latest_run_for_workflow(
+            workspace_id=workspace_id,
+            workflow_definition_id=workflow_definition_id,
+        )
+        can_publish = bool(permissions.get("can_manage")) and bool(latest_valid_draft) and not blockers
+        can_run = bool(permissions.get("can_run")) and bool(latest_published) and not [
+            blocker for blocker in blockers if blocker.get("code") != "valid_draft_required"
+        ]
+        status = "ready" if can_run else "blocked" if blockers else "needs_publish"
+        return {
+            "workflow_definition_id": workflow_definition_id,
+            "status": status,
+            "can_publish": can_publish,
+            "can_run": can_run,
+            "latest_valid_draft_version_id": latest_valid_draft.get("id") if isinstance(latest_valid_draft, dict) else None,
+            "latest_published_version_id": latest_published.get("id") if isinstance(latest_published, dict) else None,
+            "latest_run_id": int(latest_run["id"]) if latest_run and latest_run.get("id") is not None else None,
+            "latest_run_status": latest_run.get("status") if latest_run else None,
+            "latest_run_mode": latest_run.get("mode") if latest_run else None,
+            "blockers": blockers,
+            "warnings": warnings,
+            "steps": self._readiness_steps(
+                latest_valid_draft=latest_valid_draft,
+                latest_published=latest_published,
+                validation=validation,
+                blockers=blockers,
+                latest_run=latest_run,
+            ),
+        }
+
     def delete_workflow_definition(
         self,
         *,
@@ -841,6 +967,174 @@ class FlowForgeWorkflowServiceMixin:
                 "require_service_principal_for_automated_triggers": require_automation_principal,
             },
         )
+
+    def _append_run_as_readiness_findings(
+        self,
+        *,
+        workspace_id: str,
+        workflow_definition: dict[str, Any],
+        graph: dict[str, Any],
+        blockers: list[dict[str, Any]],
+    ) -> None:
+        try:
+            self._validate_publish_run_as(
+                workspace_id=workspace_id,
+                workflow_definition=workflow_definition,
+                graph=graph,
+            )
+        except ForgeError as exc:
+            blockers.append(
+                {
+                    "code": str(exc.details.get("reason") or "run_as_not_ready") if isinstance(exc.details, dict) else "run_as_not_ready",
+                    "message": str(exc.message),
+                    "severity": "error",
+                }
+            )
+
+    def _append_graph_readiness_findings(
+        self,
+        *,
+        graph: dict[str, Any],
+        blockers: list[dict[str, Any]],
+        warnings: list[dict[str, Any]],
+    ) -> None:
+        nodes = graph.get("nodes") if isinstance(graph, dict) else []
+        if not isinstance(nodes, list):
+            return
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            node_id = str(node.get("id") or "").strip() or "<unknown>"
+            node_type = str(node.get("type") or "").strip()
+            config = self._node_config(node)
+            if node_type == "matching" and not any(config.get(key) for key in ("matching_policy_id", "policy_key")):
+                blockers.append(
+                    {
+                        "code": "matching_policy_required",
+                        "message": f"Matching node '{node_id}' requires a matching policy.",
+                        "severity": "error",
+                        "node_id": node_id,
+                    }
+                )
+            if node_type == "matching" and not any(config.get(key) for key in ("resource_set_id", "resource_set_key")):
+                blockers.append(
+                    {
+                        "code": "resource_set_required",
+                        "message": f"Matching node '{node_id}' requires a resource set.",
+                        "severity": "error",
+                        "node_id": node_id,
+                    }
+                )
+            if node_type == "map_transform" and not any(
+                isinstance(config.get(key), (dict, list)) and config.get(key)
+                for key in ("field_mapping", "mappings", "validations")
+            ):
+                blockers.append(
+                    {
+                        "code": "mapping_schema_required",
+                        "message": f"Map transform node '{node_id}' requires field mappings or validation rules before publish.",
+                        "severity": "error",
+                        "node_id": node_id,
+                    }
+                )
+            if node_type in {"human_task", "notification"} and not any(
+                config.get(key) for key in ("template_key", "communication_template_key")
+            ):
+                blockers.append(
+                    {
+                        "code": "communication_template_required",
+                        "message": f"{node_type.replace('_', ' ').title()} node '{node_id}' requires a communication template.",
+                        "severity": "error",
+                        "node_id": node_id,
+                    }
+                )
+            if node_type == "event_capture" and not any(config.get(key) for key in ("event_key", "event_name")):
+                warnings.append(
+                    {
+                        "code": "event_capture_key_recommended",
+                        "message": f"Event capture node '{node_id}' should define an event key or event name for reporting.",
+                        "severity": "warning",
+                        "node_id": node_id,
+                    }
+                )
+
+    @staticmethod
+    def _latest_version(versions: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not versions:
+            return None
+        return max(versions, key=lambda row: int(row.get("version_number") or 0))
+
+    @staticmethod
+    def _readiness_steps(
+        *,
+        latest_valid_draft: dict[str, Any] | None,
+        latest_published: dict[str, Any] | None,
+        validation: dict[str, Any],
+        blockers: list[dict[str, Any]],
+        latest_run: dict[str, Any] | None,
+    ) -> list[dict[str, str]]:
+        validation_valid = bool(validation.get("valid"))
+        latest_run_id = latest_run.get("id") if latest_run else None
+        return [
+            {
+                "id": "draft_saved",
+                "label": "Draft saved",
+                "state": "complete" if latest_valid_draft or latest_published else "blocked",
+                "detail": (
+                    f"Valid draft version {latest_valid_draft.get('version_number')} is saved."
+                    if latest_valid_draft
+                    else "A published version is persisted."
+                    if latest_published
+                    else "Save a valid draft version before publishing."
+                ),
+            },
+            {
+                "id": "graph_validated",
+                "label": "Graph validated",
+                "state": "complete" if validation_valid else "blocked",
+                "detail": (
+                    "Validation passed for the persisted graph."
+                    if validation_valid
+                    else "Fix validation errors before publishing."
+                ),
+            },
+            {
+                "id": "version_published",
+                "label": "Version published",
+                "state": (
+                    "complete"
+                    if latest_published
+                    else "current"
+                    if latest_valid_draft and not blockers
+                    else "blocked"
+                ),
+                "detail": (
+                    f"Published version {latest_published.get('version_number')} is available for runtime."
+                    if latest_published
+                    else "Publish a valid version to make runtime deterministic."
+                ),
+            },
+            {
+                "id": "run_started",
+                "label": "Run started",
+                "state": "current" if latest_published and not blockers else "blocked",
+                "detail": (
+                    "Start a run from the latest published version."
+                    if latest_published
+                    else "A published version is required before runtime."
+                ),
+            },
+            {
+                "id": "inspect_report",
+                "label": "Inspect and report",
+                "state": "current" if latest_run_id else "blocked",
+                "detail": (
+                    f"Run {latest_run_id} is available for inspection and reporting."
+                    if latest_run_id
+                    else "Run inspection and reporting are available after a run starts."
+                ),
+            },
+        ]
 
     @staticmethod
     def _graph_has_automated_trigger(graph: dict[str, Any]) -> bool:

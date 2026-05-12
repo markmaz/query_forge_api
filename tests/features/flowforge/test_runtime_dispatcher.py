@@ -130,6 +130,10 @@ class _WorkflowRepo:
         }
 
 
+def _latest_context(runtime_repo: _RuntimeRepo) -> dict[str, object]:
+    return runtime_repo.run["run_context_json"]
+
+
 def test_dispatcher_advances_simple_run_to_completion_with_idempotent_events():
     runtime_repo = _RuntimeRepo()
     dispatcher = FlowForgeRuntimeDispatcher(
@@ -148,6 +152,10 @@ def test_dispatcher_advances_simple_run_to_completion_with_idempotent_events():
     assert duplicate["status"] == "skipped"
     assert duplicate["reason"] == "terminal_status"
     assert len(runtime_repo.events_by_key) == 10
+    context = _latest_context(runtime_repo)
+    assert context["last_node_output"]["node_id"] == "done"
+    assert context["node_outputs"]["intake"]["node_type"] == "intake"
+    assert context["node_outputs"]["notify"]["data"]["node_type"] == "notification"
 
 
 def test_dispatcher_routes_decision_node_by_last_decision_outcome():
@@ -179,6 +187,37 @@ def test_dispatcher_routes_decision_node_by_last_decision_outcome():
     completed_event = runtime_repo.events_by_key["flowforge:run:101:node:triage:completed"]
     assert completed_event["event_payload"]["outcome"] == "declined"
     assert completed_event["event_payload"]["next_node_id"] == "decline"
+
+
+def test_dispatcher_routes_decision_node_by_previous_node_output():
+    runtime_repo = _RuntimeRepo()
+    runtime_repo.run["current_node_id"] = "previous"
+    runtime_repo.run["run_context_json"] = {}
+    dispatcher = FlowForgeRuntimeDispatcher(
+        runtime_repository=runtime_repo,
+        workflow_repository=_WorkflowRepo(
+            graph={
+                "nodes": [
+                    {"id": "previous", "type": "decision", "data": {"default_outcome": "declined"}},
+                    {"id": "triage", "type": "decision", "data": {"outcomes": ["accepted", "declined"]}},
+                    {"id": "accept", "type": "end"},
+                    {"id": "decline", "type": "end"},
+                ],
+                "edges": [
+                    {"id": "e1", "source": "previous", "target": "triage"},
+                    {"id": "accepted", "source": "triage", "target": "accept", "branch": "accepted"},
+                    {"id": "declined", "source": "triage", "target": "decline", "branch": "declined"},
+                ],
+            }
+        ),
+    )
+
+    result = dispatcher.dispatch_run(workspace_id="ws-1", run_id=101)
+
+    assert result["status"] == "completed"
+    assert result["visited_node_ids"] == ["previous", "triage", "decline"]
+    completed_event = runtime_repo.events_by_key["flowforge:run:101:node:triage:completed"]
+    assert completed_event["event_payload"]["outcome"] == "declined"
 
 
 def test_dispatcher_creates_pending_notifications_for_notification_nodes():
@@ -233,6 +272,8 @@ def test_dispatcher_creates_pending_notifications_for_notification_nodes():
     }
     completed_event = runtime_repo.events_by_key["flowforge:run:101:node:notify:completed"]
     assert completed_event["event_payload"]["notification_ids"] == [1100, 1101]
+    assert runtime_repo.run["run_context_json"]["last_notification"]["status"] == "pending"
+    assert runtime_repo.run["run_context_json"]["last_notification"]["reason"] == "Route needs operator review."
 
 
 def test_dispatcher_resolves_notification_recipients_from_workflow_values():
@@ -323,6 +364,73 @@ def test_dispatcher_supports_end_iterator_and_event_capture_nodes():
     assert result["status"] == "completed"
     assert result["visited_node_ids"] == ["capture", "next", "done"]
     assert runtime_repo.completed["current_node_id"] == "done"
+
+
+def test_dispatcher_materializes_configured_event_capture_fields():
+    runtime_repo = _RuntimeRepo()
+    runtime_repo.run["current_node_id"] = "capture"
+    runtime_repo.run["run_context_json"] = {
+        "workflow_decision": {
+            "outcome": "declined",
+            "decline_reason": "Provider is at capacity.",
+            "response_time_seconds": 73,
+            "source_record_key": "provider-42",
+        },
+        "flowforge_matching": {
+            "selected_source_record_key": "provider-42",
+        },
+        "last_notification": {
+            "status": "failed",
+            "reason": "Mail provider rejected the address.",
+        },
+        "last_operator_note": {
+            "note": "Escalated to staffing lead.",
+        },
+    }
+    dispatcher = FlowForgeRuntimeDispatcher(
+        runtime_repository=runtime_repo,
+        workflow_repository=_WorkflowRepo(
+            graph={
+                "nodes": [
+                    {
+                        "id": "capture",
+                        "type": "event_capture",
+                        "data": {
+                            "event_key": "candidate_declined",
+                            "captures": [
+                                "reason",
+                                "decline_reason",
+                                "response_time",
+                                "selected_resource",
+                                "notification_status",
+                                "operator_note",
+                            ],
+                        },
+                    },
+                    {"id": "done", "type": "end"},
+                ],
+                "edges": [{"id": "e1", "source": "capture", "target": "done"}],
+            }
+        ),
+    )
+
+    result = dispatcher.dispatch_run(workspace_id="ws-1", run_id=101)
+
+    assert result["status"] == "completed"
+    completed_event = runtime_repo.events_by_key["flowforge:run:101:node:capture:completed"]
+    assert completed_event["event_payload"]["event_key"] == "candidate_declined"
+    assert completed_event["event_payload"]["captured"] == {
+        "reason": "Provider is at capacity.",
+        "decline_reason": "Provider is at capacity.",
+        "response_time": 73,
+        "selected_resource": "provider-42",
+        "notification_status": "failed",
+        "operator_note": "Escalated to staffing lead.",
+    }
+    assert completed_event["event_payload"]["capture_sources"]["reason"] == "workflow_decision.decline_reason"
+    context = _latest_context(runtime_repo)
+    assert context["node_outputs"]["capture"]["data"]["captured"]["reason"] == "Provider is at capacity."
+    assert context["last_node_output"]["node_id"] == "done"
 
 
 def test_dispatcher_advances_data_movement_nodes_and_waits_for_approval():
@@ -497,24 +605,13 @@ def test_dispatcher_advances_data_movement_nodes_and_waits_for_approval():
         ]
         == "ops-sftp"
     )
-    assert (
-        runtime_repo.context_updates[0]["run_context"]["artifacts"]["extract"][
-            "artifact_id"
-        ]
-        == 501
-    )
-    assert (
-        runtime_repo.context_updates[1]["run_context"]["artifacts"]["transform"][
-            "artifact_id"
-        ]
-        == 601
-    )
-    assert (
-        runtime_repo.context_updates[2]["run_context"]["artifacts"]["export"][
-            "artifact_id"
-        ]
-        == 701
-    )
+    context = _latest_context(runtime_repo)
+    assert context["artifacts"]["extract"]["artifact_id"] == 501
+    assert context["artifacts"]["transform"]["artifact_id"] == 601
+    assert context["artifacts"]["export"]["artifact_id"] == 701
+    assert context["node_outputs"]["extract"]["data"]["data_movement"]["artifact"]["artifact_id"] == 501
+    assert context["node_outputs"]["transform"]["data"]["data_movement"]["artifact"]["artifact_id"] == 601
+    assert context["node_outputs"]["export"]["data"]["data_movement"]["artifact"]["artifact_id"] == 701
 
 
 def test_dispatcher_routes_import_nodes_through_import_executor():
@@ -566,12 +663,9 @@ def test_dispatcher_routes_import_nodes_through_import_executor():
 
     assert result["status"] == "completed"
     assert result["visited_node_ids"] == ["import", "done"]
-    assert (
-        runtime_repo.context_updates[0]["run_context"]["artifacts"]["import"][
-            "artifact_id"
-        ]
-        == 701
-    )
+    context = _latest_context(runtime_repo)
+    assert context["artifacts"]["import"]["artifact_id"] == 701
+    assert context["node_outputs"]["import"]["data"]["data_movement"]["artifact"]["artifact_id"] == 701
 
 
 def test_dispatcher_executes_matching_node_and_persists_candidate_results():
@@ -715,21 +809,18 @@ def test_dispatcher_executes_matching_node_and_persists_candidate_results():
     assert runtime_repo.matching_evaluations[0]["snapshot_batch_id"] == 30
     assert len(runtime_repo.matching_candidates) == 2
     assert runtime_repo.matching_candidates[0]["selected"] is True
-    assert runtime_repo.context_updates[0]["run_context"]["flowforge_matching"][
-        "candidate_keys"
-    ] == ["resource-1"]
+    context = _latest_context(runtime_repo)
+    assert context["flowforge_matching"]["candidate_keys"] == ["resource-1"]
     assert (
-        runtime_repo.context_updates[0]["run_context"]["flowforge_matching"][
-            "communication_template_key"
-        ]
+        context["flowforge_matching"]["communication_template_key"]
         == "flowforge.custom_task"
     )
     assert (
-        runtime_repo.context_updates[0]["run_context"]["flowforge_matching"][
-            "offer_timeout_minutes"
-        ]
+        context["flowforge_matching"]["offer_timeout_minutes"]
         == 60
     )
+    assert context["node_outputs"]["match"]["data"]["branch"] == "matched"
+    assert context["last_node_output"]["node_id"] == "offer"
     assert runtime_repo.human_tasks[0]["source_record_key"] == "resource-1"
     assert (
         runtime_repo.human_tasks[0]["idempotency_key"]

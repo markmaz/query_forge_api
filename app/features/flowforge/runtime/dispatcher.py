@@ -264,16 +264,22 @@ class FlowForgeRuntimeDispatcher:
                     visited_node_ids=visited_node_ids,
                 )
 
+            context_update = self._node_output_context_update(
+                node_id=current_node_id,
+                node=node,
+                result=result,
+            )
             if result.run_context_update:
-                run_context = self._merge_run_context(
-                    run_context if isinstance(run_context, dict) else {},
-                    result.run_context_update,
-                )
-                self._runtime_repository.update_run_context(
-                    workspace_id=workspace_id,
-                    run_id=run_id,
-                    run_context=run_context,
-                )
+                context_update = self._merge_run_context(context_update, result.run_context_update)
+            run_context = self._merge_run_context(
+                run_context if isinstance(run_context, dict) else {},
+                context_update,
+            )
+            self._runtime_repository.update_run_context(
+                workspace_id=workspace_id,
+                run_id=run_id,
+                run_context=run_context,
+            )
 
             if result.status == "waiting":
                 self._append_once(
@@ -443,6 +449,25 @@ class FlowForgeRuntimeDispatcher:
             else:
                 merged[key] = value
         return merged
+
+    @staticmethod
+    def _node_output_context_update(
+        *,
+        node_id: str,
+        node: dict[str, Any],
+        result: Any,
+    ) -> dict[str, Any]:
+        output = {
+            "node_id": node_id,
+            "node_type": str(node.get("type") or "").strip(),
+            "status": result.status,
+            "next_node_id": result.next_node_id,
+            "data": result.event_payload or {},
+        }
+        return {
+            "node_outputs": {node_id: output},
+            "last_node_output": output,
+        }
 
     @staticmethod
     def _nodes_by_id(graph: dict[str, Any]) -> dict[str, dict[str, Any]]:

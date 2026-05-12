@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any
 
 from app.exceptions.forge_error import ForgeError
@@ -164,11 +165,11 @@ class FlowForgeRunServiceMixin:
             "current_node_id": row.get("current_node_id"),
             "idempotency_key": row.get("idempotency_key"),
             "run_context": row.get("run_context") or row.get("run_context_json") or {},
-            "started_at": row.get("started_at"),
-            "completed_at": row.get("completed_at"),
-            "failed_at": row.get("failed_at"),
-            "created_at": row.get("created_at"),
-            "updated_at": row.get("updated_at"),
+            "started_at": self._json_scalar(row.get("started_at")),
+            "completed_at": self._json_scalar(row.get("completed_at")),
+            "failed_at": self._json_scalar(row.get("failed_at")),
+            "created_at": self._json_scalar(row.get("created_at")),
+            "updated_at": self._json_scalar(row.get("updated_at")),
         }
 
     def _serialize_run_event(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -182,7 +183,7 @@ class FlowForgeRunServiceMixin:
             "event_payload": row.get("event_payload") or row.get("event_payload_json") or {},
             "actor_type": row.get("actor_type"),
             "actor_id": row.get("actor_id"),
-            "created_at": row.get("created_at"),
+            "created_at": self._json_scalar(row.get("created_at")),
         }
 
     def _serialize_human_task(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -196,9 +197,15 @@ class FlowForgeRunServiceMixin:
             "status": row.get("status"),
             "assigned_to_principal_type": row.get("assigned_to_principal_type"),
             "assigned_to_principal_id": row.get("assigned_to_principal_id"),
-            "due_at": row.get("due_at"),
-            "completed_at": row.get("completed_at"),
+            "due_at": self._json_scalar(row.get("due_at")),
+            "completed_at": self._json_scalar(row.get("completed_at")),
             "response": row.get("response") or row.get("response_json") or {},
-            "created_at": row.get("created_at"),
-            "updated_at": row.get("updated_at"),
+            "created_at": self._json_scalar(row.get("created_at")),
+            "updated_at": self._json_scalar(row.get("updated_at")),
         }
+
+    @staticmethod
+    def _json_scalar(value: Any) -> Any:
+        if isinstance(value, datetime | date):
+            return value.isoformat()
+        return value

@@ -181,6 +181,50 @@ class FlowForgeWorkflowGovernanceServiceMixin:
             effective_roles=effective_roles,
         )
 
+    def update_workflow_metadata(
+        self,
+        *,
+        workspace_id: str,
+        workflow_definition_id: int,
+        payload: dict[str, Any],
+        actor_user_id: str,
+        effective_roles: set[str] | None = None,
+    ) -> WorkflowDefinition:
+        definition = self._workflow_definition_or_404(
+            workspace_id=workspace_id,
+            workflow_definition_id=workflow_definition_id,
+        )
+        self._ensure_workflow_permission(
+            workspace_id=workspace_id,
+            actor_user_id=actor_user_id,
+            effective_roles=effective_roles,
+            workflow_definition=definition,
+            required_permission="manage",
+        )
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            raise ForgeError("name is required.", status_code=400)
+        description = str(payload.get("description") or "").strip() or None
+        updated = self._workflow_repository.update_workflow_metadata(
+            workspace_id=workspace_id,
+            workflow_definition_id=workflow_definition_id,
+            name=name,
+            description=description,
+            updated_by=self._optional_string(actor_user_id),
+        )
+        if not updated:
+            raise ForgeError(f"Workflow definition '{workflow_definition_id}' was not found.", status_code=404)
+        refreshed = self._workflow_definition_or_404(
+            workspace_id=workspace_id,
+            workflow_definition_id=workflow_definition_id,
+        )
+        return self._serialize_workflow_definition(
+            refreshed,
+            workspace_id=workspace_id,
+            actor_user_id=actor_user_id,
+            effective_roles=effective_roles,
+        )
+
     def update_workflow_run_as(
         self,
         *,

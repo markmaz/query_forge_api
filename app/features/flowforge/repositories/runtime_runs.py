@@ -87,9 +87,11 @@ class FlowForgeRuntimeRunRepositoryMixin:
             FROM flowforge_runs r
             LEFT JOIN users run_as_user
               ON r.run_as_principal_type = 'user'
-             AND run_as_user.user_id = r.run_as_principal_id
+             AND run_as_user.user_id COLLATE utf8mb4_unicode_ci =
+                 r.run_as_principal_id COLLATE utf8mb4_unicode_ci
             LEFT JOIN users triggered_user
-              ON triggered_user.user_id = r.triggered_by_user_id
+              ON triggered_user.user_id COLLATE utf8mb4_unicode_ci =
+                 r.triggered_by_user_id COLLATE utf8mb4_unicode_ci
             WHERE r.workspace_id = :workspace_id
               AND r.idempotency_key = :idempotency_key
             LIMIT 1
@@ -135,9 +137,11 @@ class FlowForgeRuntimeRunRepositoryMixin:
             FROM flowforge_runs r
             LEFT JOIN users run_as_user
               ON r.run_as_principal_type = 'user'
-             AND run_as_user.user_id = r.run_as_principal_id
+             AND run_as_user.user_id COLLATE utf8mb4_unicode_ci =
+                 r.run_as_principal_id COLLATE utf8mb4_unicode_ci
             LEFT JOIN users triggered_user
-              ON triggered_user.user_id = r.triggered_by_user_id
+              ON triggered_user.user_id COLLATE utf8mb4_unicode_ci =
+                 r.triggered_by_user_id COLLATE utf8mb4_unicode_ci
             WHERE r.workspace_id = :workspace_id
               {where_status}
               {where_mode}
@@ -172,9 +176,11 @@ class FlowForgeRuntimeRunRepositoryMixin:
             FROM flowforge_runs r
             LEFT JOIN users run_as_user
               ON r.run_as_principal_type = 'user'
-             AND run_as_user.user_id = r.run_as_principal_id
+             AND run_as_user.user_id COLLATE utf8mb4_unicode_ci =
+                 r.run_as_principal_id COLLATE utf8mb4_unicode_ci
             LEFT JOIN users triggered_user
-              ON triggered_user.user_id = r.triggered_by_user_id
+              ON triggered_user.user_id COLLATE utf8mb4_unicode_ci =
+                 r.triggered_by_user_id COLLATE utf8mb4_unicode_ci
             WHERE r.workspace_id = :workspace_id
               AND r.id = :run_id
             LIMIT 1
@@ -182,6 +188,43 @@ class FlowForgeRuntimeRunRepositoryMixin:
             {
                 "workspace_id": str(workspace_id or "").strip(),
                 "run_id": int(run_id),
+            },
+        )
+        if not rows:
+            return None
+        return self._decode_run(rows[0])
+
+    def get_latest_run_for_workflow(self, *, workspace_id: str, workflow_definition_id: int) -> dict[str, Any] | None:
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT
+              r.*,
+              COALESCE(
+                NULLIF(TRIM(CONCAT_WS(' ', run_as_user.first_name, run_as_user.last_name)), ''),
+                NULLIF(run_as_user.email, ''),
+                NULLIF(run_as_user.username, '')
+              ) AS run_as_principal_display_name,
+              COALESCE(
+                NULLIF(TRIM(CONCAT_WS(' ', triggered_user.first_name, triggered_user.last_name)), ''),
+                NULLIF(triggered_user.email, ''),
+                NULLIF(triggered_user.username, '')
+              ) AS triggered_by_display_name
+            FROM flowforge_runs r
+            LEFT JOIN users run_as_user
+              ON r.run_as_principal_type = 'user'
+             AND run_as_user.user_id COLLATE utf8mb4_unicode_ci =
+                 r.run_as_principal_id COLLATE utf8mb4_unicode_ci
+            LEFT JOIN users triggered_user
+              ON triggered_user.user_id COLLATE utf8mb4_unicode_ci =
+                 r.triggered_by_user_id COLLATE utf8mb4_unicode_ci
+            WHERE r.workspace_id = :workspace_id
+              AND r.workflow_definition_id = :workflow_definition_id
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT 1
+            """,
+            {
+                "workspace_id": str(workspace_id or "").strip(),
+                "workflow_definition_id": int(workflow_definition_id),
             },
         )
         if not rows:
@@ -209,6 +252,22 @@ class FlowForgeRuntimeRunRepositoryMixin:
                 "run_id": int(run_id),
                 "status": str(status or "").strip(),
                 "current_node_id": current_node_id,
+            },
+        )
+        return bool(count)
+
+    def mark_run_needs_attention(self, *, workspace_id: str, run_id: int) -> bool:
+        count = self._sql.execute_write(
+            """
+            UPDATE flowforge_runs
+            SET status = 'needs_attention'
+            WHERE workspace_id = :workspace_id
+              AND id = :run_id
+              AND status NOT IN ('failed', 'canceled')
+            """,
+            {
+                "workspace_id": str(workspace_id or "").strip(),
+                "run_id": int(run_id),
             },
         )
         return bool(count)

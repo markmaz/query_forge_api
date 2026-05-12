@@ -170,6 +170,7 @@ def test_human_response_runtime_advances_wait_node_and_enqueues_dispatch():
         human_task_id=301,
         resource_set_id=20,
         source_record_key="resource-1",
+        response={"response_note": "Accepted within preferred window.", "response_time_seconds": 42},
     )
 
     assert result["status"] == "advanced"
@@ -178,6 +179,10 @@ def test_human_response_runtime_advances_wait_node_and_enqueues_dispatch():
     assert repo.status_updates[0]["status"] == "waiting"
     assert repo.status_updates[0]["current_node_id"] == "assign"
     assert repo.events[0]["event_type"] == "workflow.human_response.advance"
+    assert repo.events[0]["event_payload"]["reason"] == "Accepted within preferred window."
+    assert repo.events[0]["event_payload"]["response_time_seconds"] == 42
+    assert repo.context_updates[0]["run_context"]["workflow_decision"]["reason"] == "Accepted within preferred window."
+    assert repo.context_updates[0]["run_context"]["human_response"]["response_note"] == "Accepted within preferred window."
     assert repo.assignments[0]["source_record_key"] == "resource-1"
     assert repo.assignments[0]["idempotency_key"] == "run:101:assignment:resource-1"
     assert enqueued == [("ws-1", 101)]

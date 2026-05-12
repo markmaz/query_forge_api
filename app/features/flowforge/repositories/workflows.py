@@ -92,6 +92,36 @@ class FlowForgeWorkflowRepository:
         )
         return bool(count)
 
+    def update_workflow_metadata(
+        self,
+        *,
+        workspace_id: str,
+        workflow_definition_id: int,
+        name: str,
+        description: str | None,
+        updated_by: str | None,
+    ) -> bool:
+        count = self._sql.execute_write(
+            """
+            UPDATE flowforge_workflow_definitions
+            SET name = :name,
+                description = :description,
+                updated_by = :updated_by,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE workspace_id = :workspace_id
+              AND id = :workflow_definition_id
+              AND archived_at IS NULL
+            """,
+            {
+                "workspace_id": str(workspace_id or "").strip(),
+                "workflow_definition_id": int(workflow_definition_id),
+                "name": str(name or "").strip(),
+                "description": description,
+                "updated_by": updated_by,
+            },
+        )
+        return bool(count)
+
     def update_workflow_run_as(
         self,
         *,
@@ -236,10 +266,12 @@ class FlowForgeWorkflowRepository:
               ON v.id = COALESCE(d.current_draft_version_id, d.latest_published_version_id)
              AND v.workspace_id = d.workspace_id
             LEFT JOIN users owner_user
-              ON owner_user.user_id = d.owner_user_id
+              ON owner_user.user_id COLLATE utf8mb4_unicode_ci =
+                 d.owner_user_id COLLATE utf8mb4_unicode_ci
             LEFT JOIN users run_as_user
               ON d.run_as_principal_type = 'user'
-             AND run_as_user.user_id = d.run_as_principal_id
+             AND run_as_user.user_id COLLATE utf8mb4_unicode_ci =
+                 d.run_as_principal_id COLLATE utf8mb4_unicode_ci
             WHERE d.workspace_id = :workspace_id
               AND d.archived_at IS NULL
             ORDER BY d.updated_at DESC, d.id DESC
@@ -271,10 +303,12 @@ class FlowForgeWorkflowRepository:
               ON v.id = COALESCE(d.current_draft_version_id, d.latest_published_version_id)
              AND v.workspace_id = d.workspace_id
             LEFT JOIN users owner_user
-              ON owner_user.user_id = d.owner_user_id
+              ON owner_user.user_id COLLATE utf8mb4_unicode_ci =
+                 d.owner_user_id COLLATE utf8mb4_unicode_ci
             LEFT JOIN users run_as_user
               ON d.run_as_principal_type = 'user'
-             AND run_as_user.user_id = d.run_as_principal_id
+             AND run_as_user.user_id COLLATE utf8mb4_unicode_ci =
+                 d.run_as_principal_id COLLATE utf8mb4_unicode_ci
             WHERE d.workspace_id = :workspace_id
               AND d.id = :workflow_definition_id
               AND d.archived_at IS NULL

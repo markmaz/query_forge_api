@@ -42,6 +42,13 @@ class FlowForgeWorkflowManualRunServiceMixin:
         mode = str(payload.get("mode") or "test").strip().lower()
         if mode not in {"test", "production"}:
             raise ForgeError("mode must be test or production.", status_code=400)
+        self._ensure_published_graph_runnable(workspace_id=workspace_id, graph=graph)
+        if mode == "production":
+            self._validate_publish_run_as(
+                workspace_id=workspace_id,
+                workflow_definition=definition,
+                graph=graph,
+            )
         start_node_id = str(payload.get("start_node_id") or "").strip() or self._first_workflow_node_id(graph=graph)
         if not start_node_id:
             raise ForgeError("Workflow graph must contain a start node.", status_code=400)
@@ -124,6 +131,25 @@ class FlowForgeWorkflowManualRunServiceMixin:
                 if node_id:
                     return node_id
         return None
+
+    def _ensure_published_graph_runnable(self, *, workspace_id: str, graph: dict[str, Any]) -> None:
+        validation = self.validate_graph(graph=graph if isinstance(graph, dict) else {}, workspace_id=workspace_id)
+        blockers: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+        self._append_graph_readiness_findings(
+            graph=graph if isinstance(graph, dict) else {},
+            blockers=blockers,
+            warnings=warnings,
+        )
+        if validation.get("errors") or blockers:
+            raise ForgeError(
+                "Published workflow version is not runnable.",
+                status_code=400,
+                details={
+                    "errors": list(validation.get("errors") or []),
+                    "blockers": blockers,
+                },
+            )
 
     def _enqueue_manual_run_dispatch(self, *, workspace_id: str, run_id: int, idempotency_key: str) -> None:
         try:

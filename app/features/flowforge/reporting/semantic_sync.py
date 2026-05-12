@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from pathlib import Path
 from typing import Any, Protocol
 
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.features.flowforge.reporting.manifest import REPORTING_DOMAINS, validate_reporting_manifest
 from app.features.flowforge.reporting.read_model_audit import audit_reporting_read_model_sql
+from app.features.flowforge.reporting.semantic_metadata import (
+    domain_profile_params,
+    load_workspace_column_ids,
+    semantic_column_metadata,
+    upsert_generated_semantic_metadata,
+)
 from app.ports.sql_executor import ForgeQueryPort
 
 _MIGRATION_PATHS = (
@@ -239,7 +243,7 @@ class QueryForgeFlowForgeSemanticDomainRegistry:
             workspace_table_id = int(table_rows[0]["id"])
 
             for column in columns:
-                semantic = _semantic_column_metadata(domain=domain, column=column)
+                semantic = semantic_column_metadata(domain=domain, column=column)
                 tx.execute_write(
                     """
                     INSERT INTO workspace_column (
@@ -323,6 +327,13 @@ class QueryForgeFlowForgeSemanticDomainRegistry:
             )
 
             _deactivate_missing_columns(tx, workspace_table_id=workspace_table_id, columns=columns)
+            semantic_counts = upsert_generated_semantic_metadata(
+                tx,
+                workspace_id=workspace_id,
+                domain=domain,
+                workspace_table_id=workspace_table_id,
+                columns=columns,
+            )
             tx.execute_write(
                 "UPDATE domain_workspace_table SET is_primary = 0 WHERE domain_id = :domain_id",
                 {"domain_id": domain_id},
@@ -415,7 +426,14 @@ class QueryForgeFlowForgeSemanticDomainRegistry:
                   content_hash = VALUES(content_hash),
                   updated_at = CURRENT_TIMESTAMP
                 """,
-                _domain_profile_params(workspace_id=workspace_id, domain_id=domain_id, domain=domain),
+                domain_profile_params(
+                    workspace_id=workspace_id,
+                    domain_id=domain_id,
+                    domain=domain,
+                    workspace_table_id=workspace_table_id,
+                    columns=columns,
+                    column_id_by_name=load_workspace_column_ids(tx, workspace_table_id=workspace_table_id),
+                ),
             )
             tx.execute_write(
                 """
@@ -455,6 +473,7 @@ class QueryForgeFlowForgeSemanticDomainRegistry:
             "actor_user_id": actor_user_id,
             "domain_source": domain["domain_source"],
             "domain_group": domain["domain_group"],
+            **semantic_counts,
         }
 
     def _read_model_full_name(self, *, read_model: str) -> str:
@@ -635,58 +654,6 @@ def _status_for_issues(issues: list[str], *, dry_run: bool) -> str:
     return "manifest_invalid"
 
 
-def _json_dumps(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"))
-
-
-def _field_keys(items: Any) -> set[str]:
-    out: set[str] = set()
-    for item in list(items or []):
-        if isinstance(item, dict):
-            key = str(item.get("key") or item.get("metric_key") or "").strip()
-        else:
-            key = str(item or "").strip()
-        if key:
-            out.add(key)
-    return out
-
-
-def _field_label(items: Any, key: str) -> str:
-    for item in list(items or []):
-        if isinstance(item, dict) and str(item.get("key") or item.get("metric_key") or "").strip() == key:
-            return str(item.get("label") or key).strip()
-    return key.replace("_", " ").title()
-
-
-def _semantic_column_metadata(*, domain: dict[str, Any], column: dict[str, Any]) -> dict[str, str]:
-    column_name = str(column["column_name"])
-    metric_keys = _field_keys(domain.get("metrics"))
-    dimension_keys = _field_keys(domain.get("dimensions"))
-    identifiers = {str(item) for item in domain.get("identifiers") or []}
-    time_fields = {str(item) for item in domain.get("time_fields") or []}
-    if column_name in time_fields or column_name.endswith("_at") or column_name.endswith("_date"):
-        semantic_type = "time"
-    elif column_name in identifiers or column_name == domain.get("workspace_scope_field") or column_name.endswith("_id"):
-        semantic_type = "identifier"
-    elif column_name in metric_keys or column_name.endswith("_count") or column_name.endswith("_seconds"):
-        semantic_type = "metric"
-    elif column_name.startswith("is_") or column_name.endswith("_flag") or column_name in {"selected", "included", "excluded"}:
-        semantic_type = "flag"
-    else:
-        semantic_type = "attribute" if column_name in dimension_keys else "other"
-
-    label = _field_label(domain.get("metrics"), column_name)
-    if label == column_name.replace("_", " ").title():
-        label = _field_label(domain.get("dimensions"), column_name)
-    return {
-        "semantic_type": semantic_type,
-        "semantic_entity": str(domain["domain_key"])[:100],
-        "semantic_sub_type": str(domain["domain_group"])[:200],
-        "semantic_concept_key": f"{str(domain['domain_key']).upper()}__{column_name.upper()}"[:128],
-        "description": label,
-    }
-
-
 def _deactivate_missing_columns(tx: Any, *, workspace_table_id: int, columns: list[dict[str, Any]]) -> None:
     keep = [str(column["column_name"]) for column in columns]
     if not keep:
@@ -706,71 +673,6 @@ def _deactivate_missing_columns(tx: Any, *, workspace_table_id: int, columns: li
         """,
         params,
     )
-
-
-def _domain_profile_params(*, workspace_id: str, domain_id: int, domain: dict[str, Any]) -> dict[str, Any]:
-    synonyms = [item for item in list(domain.get("synonyms") or []) if isinstance(item, dict)]
-    synonym_terms = _synonym_text_terms(synonyms)
-    keywords = [
-        domain["domain_group"],
-        domain["domain_source"],
-        domain["read_model"],
-        domain["queryforge_visibility"],
-        *synonym_terms,
-    ]
-    entities = [{"key": key, "label": key.replace("_", " ").title()} for key in domain.get("identifiers") or []]
-    metrics = [
-        {
-            "metric_key": item.get("key"),
-            "label": item.get("label"),
-            "kind": "count" if str(item.get("key") or "").endswith("_count") else "measure",
-            "agg": "count" if str(item.get("key") or "").endswith("_count") else "sum",
-        }
-        for item in list(domain.get("metrics") or [])
-        if isinstance(item, dict)
-    ]
-    attributes = list(domain.get("dimensions") or [])
-    notes = (
-        f"System-managed FlowForge Workflow Intelligence domain. "
-        f"domain_key={domain['domain_key']}; read_model={domain['read_model']}; "
-        f"visibility={domain['queryforge_visibility']}. Do not edit generated manifest fields directly."
-    )
-    embedding_text = "\n".join(
-        [
-            f"Domain: {domain['display_name']}",
-            f"Description: {domain['description']}",
-            f"Read model: {domain['read_model']}",
-            f"Metrics: {', '.join(str(item.get('label') or item.get('key')) for item in domain.get('metrics') or [])}",
-            f"Dimensions: {', '.join(str(item.get('label') or item.get('key')) for item in domain.get('dimensions') or [])}",
-            f"Synonyms: {', '.join(synonym_terms)}",
-            f"Prompts: {' | '.join(str(prompt) for prompt in domain.get('query_studio_prompts') or [])}",
-        ]
-    )
-    return {
-        "workspace_id": workspace_id,
-        "domain_id": int(domain_id),
-        "summary": domain["description"],
-        "keywords": _json_dumps(keywords),
-        "entities": _json_dumps(entities),
-        "metrics": _json_dumps(metrics),
-        "attributes": _json_dumps(attributes),
-        "synonyms": _json_dumps(synonyms),
-        "acronyms": _json_dumps([]),
-        "notes": notes,
-        "embedding_text": embedding_text,
-        "content_hash": hashlib.sha256(embedding_text.encode("utf-8")).hexdigest(),
-    }
-
-
-def _synonym_text_terms(synonyms: list[dict[str, Any]]) -> list[str]:
-    terms: list[str] = []
-    for item in synonyms:
-        raw_values = [item.get("term"), *list(item.get("means") or [])]
-        for raw in raw_values:
-            term = " ".join(str(raw or "").strip().split())
-            if term and term not in terms:
-                terms.append(term)
-    return terms
 
 
 def _table_alias(domain: dict[str, Any]) -> str:

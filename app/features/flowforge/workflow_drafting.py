@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 SUPPORTED_NODE_TYPES = {
+    "manual_start",
     "schedule_trigger",
     "webhook_trigger",
     "file_watch_trigger",
@@ -27,6 +28,7 @@ SUPPORTED_NODE_TYPES = {
 }
 
 DEFAULT_NODE_DATA: dict[str, dict[str, Any]] = {
+    "manual_start": {"mode": "manual"},
     "schedule_trigger": {"rrule": "FREQ=DAILY;INTERVAL=1", "mode": "test"},
     "intake": {"source": "", "event": ""},
     "matching": {"matching_policy_id": ""},
@@ -42,6 +44,7 @@ DEFAULT_NODE_DATA: dict[str, dict[str, Any]] = {
 }
 
 NODE_LABELS = {
+    "manual_start": "Manual Start",
     "schedule_trigger": "Schedule Trigger",
     "webhook_trigger": "Webhook Trigger",
     "file_watch_trigger": "File Watch Trigger",
@@ -83,6 +86,8 @@ def _normalize_branch_list(value: Any) -> list[str]:
 
 def _safe_node_type(value: Any) -> str:
     candidate = _clean_string(value)
+    if candidate in {"manual", "start", "manual start", "manual_trigger", "manual_run", "manual-start"}:
+        return "manual_start"
     return candidate if candidate in SUPPORTED_NODE_TYPES else "intake"
 
 
@@ -620,7 +625,15 @@ def normalize_generated_workflow_graph(graph: dict[str, Any], *, fallback_graph:
             }
         )
     if not nodes:
-        nodes.append({"id": "start", "type": "intake", "label": "Start", "position": _position_for(0), "data": {}})
+        nodes.append(
+            {
+                "id": "start",
+                "type": "manual_start",
+                "label": "Manual Start",
+                "position": _position_for(0),
+                "data": dict(DEFAULT_NODE_DATA["manual_start"]),
+            }
+        )
         existing_ids.add("start")
 
     edge_ids: set[str] = set()
@@ -724,6 +737,8 @@ class WorkflowGraphDraftGenerator:
                 "source event keys, matching policy ids, resource set ids, communication template keys, and saved query ids. "
                 "For intake nodes, write the integration key to data.source and the source event key to data.event; do not use "
                 "data.integration_key or data.event_key on intake nodes. Matching nodes branch directly with edge branch values "
+                "Use manual_start for workflows that start from the Studio Run now action or a manual test run; do not use intake "
+                "for manual-only workflows unless the user explicitly asks for an integration/form intake. "
                 "'matched' and 'no_match'; do not add a separate decision only to check whether matching returned candidates. "
                 "Decision node data.outcomes must exactly match outgoing edge branch/branches values. Human response decisions "
                 "should use outcomes such as 'accepted', 'declined', and 'timed_out' when timeout is part of the workflow. "
@@ -767,8 +782,12 @@ class WorkflowGraphDraftGenerator:
 
     def _generate_heuristic(self, *, prompt: str, current_graph: dict[str, Any]) -> dict[str, Any]:
         lower_prompt = prompt.lower()
-        node_type = "intake"
-        if any(term in lower_prompt for term in ("schedule", "daily", "weekly")):
+        node_type = "manual_start"
+        if any(term in lower_prompt for term in ("manual", "test run", "run now", "simple test")):
+            node_type = "manual_start"
+        elif any(term in lower_prompt for term in ("intake", "form", "jotform")):
+            node_type = "intake"
+        elif any(term in lower_prompt for term in ("schedule", "daily", "weekly")):
             node_type = "schedule_trigger"
         elif any(term in lower_prompt for term in ("saved query", "query extract", "report")):
             node_type = "query_extract"

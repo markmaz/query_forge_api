@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal
 from datetime import date, datetime
 from types import SimpleNamespace
@@ -405,6 +406,12 @@ class _WorkflowRepo:
         self.definitions[0]["owner_user_id"] = payload["owner_user_id"]
         return True
 
+    def update_workflow_metadata(self, **payload):
+        self.metadata_update = payload
+        self.definitions[0]["name"] = payload["name"]
+        self.definitions[0]["description"] = payload["description"]
+        return True
+
     def update_workflow_run_as(self, **payload):
         self.run_as_update = payload
         self.definitions[0]["run_as_principal_type"] = payload["principal_type"]
@@ -618,6 +625,11 @@ class _RuntimeRepo:
                 "current_node_id": "intake",
                 "idempotency_key": "intake:501:trigger:66",
                 "run_context_json": {"trigger_key": "intake-routing"},
+                "started_at": datetime(2026, 5, 11, 21, 6, 0),
+                "completed_at": None,
+                "failed_at": None,
+                "created_at": datetime(2026, 5, 11, 21, 6, 0),
+                "updated_at": datetime(2026, 5, 11, 21, 6, 1),
             }
         ]
         self.events = [
@@ -631,6 +643,7 @@ class _RuntimeRepo:
                 "event_payload_json": {"trigger_key": "intake-routing"},
                 "actor_type": "system",
                 "actor_id": "flowforge",
+                "created_at": datetime(2026, 5, 11, 21, 6, 0),
             }
         ]
         self.human_tasks = [
@@ -644,9 +657,11 @@ class _RuntimeRepo:
                 "status": "pending",
                 "assigned_to_principal_type": "resource",
                 "assigned_to_principal_id": "resource-1",
-                "due_at": "2026-05-05 12:00:00",
+                "due_at": datetime(2026, 5, 5, 12, 0, 0),
                 "completed_at": None,
                 "response_json": {"allowed_actions": ["accept", "decline"]},
+                "created_at": datetime(2026, 5, 5, 10, 0, 0),
+                "updated_at": datetime(2026, 5, 5, 10, 0, 1),
             },
             {
                 "id": 302,
@@ -678,6 +693,9 @@ class _RuntimeRepo:
                 "status": "pending",
                 "idempotency_key": "no-match:90:ops@example.com",
                 "payload_summary_json": {"reason": "No eligible resources."},
+                "created_at": datetime(2026, 5, 12, 10, 11, 28),
+                "sent_at": None,
+                "failed_at": datetime(2026, 5, 12, 10, 11, 52),
             }
         ]
 
@@ -696,6 +714,11 @@ class _RuntimeRepo:
     def list_runs(self, *, workspace_id: str, status: str | None, mode: str | None, limit: int, offset: int):
         del workspace_id, status, mode
         return self.runs[offset : offset + limit]
+
+    def get_latest_run_for_workflow(self, *, workspace_id: str, workflow_definition_id: int):
+        del workspace_id
+        runs = [row for row in self.runs if row["workflow_definition_id"] == workflow_definition_id]
+        return runs[-1] if runs else None
 
     def get_run(self, *, workspace_id: str, run_id: int):
         del workspace_id
@@ -1404,6 +1427,27 @@ def test_flowforge_validation_rejects_unknown_edge_endpoint():
     assert result["errors"] == ["Edge a-b has an unknown target."]
 
 
+def test_flowforge_validation_accepts_manual_start_node():
+    result = FlowForgeService().validate_graph(
+        graph={
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "manual_start",
+                    "label": "Manual Start",
+                    "position": {"x": 0, "y": 0},
+                    "data": {"mode": "manual"},
+                },
+                {"id": "end", "type": "end", "label": "End", "position": {"x": 200, "y": 0}, "data": {}},
+            ],
+            "edges": [{"id": "start-end", "source": "start", "target": "end"}],
+        }
+    )
+
+    assert result["valid"] is True
+    assert result["errors"] == []
+
+
 def test_flowforge_validation_warns_for_unmapped_decision_outcomes_and_rejects_duplicates():
     result = FlowForgeService().validate_graph(
         graph={
@@ -2085,8 +2129,12 @@ def test_flowforge_service_lists_persisted_runs_and_events():
     assert runs["runs"][0]["run_as_principal_display_name"] == "Olivia Operator"
     assert runs["runs"][0]["triggered_by_user_id"] == "operator-1"
     assert runs["runs"][0]["triggered_by_display_name"] == "Olivia Operator"
+    assert runs["runs"][0]["started_at"] == "2026-05-11T21:06:00"
+    assert runs["runs"][0]["created_at"] == "2026-05-11T21:06:00"
+    assert runs["runs"][0]["updated_at"] == "2026-05-11T21:06:01"
     assert detail["id"] == 90
     assert events["events"][0]["event_type"] == "workflow.run.created"
+    assert events["events"][0]["created_at"] == "2026-05-11T21:06:00"
 
 
 def test_flowforge_service_updates_workspace_settings():
@@ -2222,6 +2270,9 @@ def test_flowforge_service_lists_run_human_tasks():
     assert result["tasks"][0]["id"] == 301
     assert result["tasks"][0]["task_type"] == "offer"
     assert result["tasks"][0]["response"] == {"allowed_actions": ["accept", "decline"]}
+    assert result["tasks"][0]["due_at"] == "2026-05-05T12:00:00"
+    assert result["tasks"][0]["created_at"] == "2026-05-05T10:00:00"
+    assert result["tasks"][0]["updated_at"] == "2026-05-05T10:00:01"
 
 
 def test_flowforge_service_lists_operator_approval_tasks():
@@ -2337,6 +2388,9 @@ def test_flowforge_service_lists_run_notifications():
     assert result["limit"] == 500
     assert result["notifications"][0]["template_key"] == "flowforge.no_match"
     assert result["notifications"][0]["payload_summary"] == {"reason": "No eligible resources."}
+    assert result["notifications"][0]["created_at"] == "2026-05-12T10:11:28"
+    assert result["notifications"][0]["failed_at"] == "2026-05-12T10:11:52"
+    json.dumps(result)
 
 
 def test_flowforge_service_creates_no_match_escalation_notifications():
@@ -2449,7 +2503,7 @@ def test_flowforge_service_returns_intake_review_timeline_and_raw_form():
 
 def test_flowforge_service_lists_and_publishes_workflow_versions():
     repo = _WorkflowRepo()
-    service = FlowForgeService(workflow_repository=repo, settings_repository=_SettingsRepo())
+    service = FlowForgeService(workflow_repository=repo, runtime_repository=_RuntimeRepo(), settings_repository=_SettingsRepo())
 
     versions = service.list_workflow_versions(workspace_id="ws-1", workflow_definition_id=12)
     published = service.publish_workflow_version(
@@ -2471,7 +2525,7 @@ def test_flowforge_service_rejects_production_publish_without_service_run_as():
     repo.definitions[0]["lifecycle"] = "production"
     repo.definitions[0]["run_as_principal_type"] = "user"
     repo.definitions[0]["run_as_principal_id"] = "user-1"
-    service = FlowForgeService(workflow_repository=repo, settings_repository=_SettingsRepo())
+    service = FlowForgeService(workflow_repository=repo, runtime_repository=_RuntimeRepo(), settings_repository=_SettingsRepo())
 
     with pytest.raises(ForgeError) as exc:
         service.publish_workflow_version(
@@ -2484,6 +2538,65 @@ def test_flowforge_service_rejects_production_publish_without_service_run_as():
     assert exc.value.status_code == 400
     assert exc.value.details["reason"] == "production_run_as_required"
     assert repo.published is None
+
+
+def test_flowforge_service_readiness_reports_publish_and_runtime_blockers():
+    repo = _WorkflowRepo()
+    repo.definitions[0]["lifecycle"] = "production"
+    repo.definitions[0]["run_as_principal_type"] = "user"
+    repo.definitions[0]["run_as_principal_id"] = "user-1"
+    repo.versions[0]["graph_json"] = {
+        "nodes": [
+            {"id": "start", "type": "intake", "data": {"source": "intake-form", "event": "intake_submitted"}},
+            {"id": "match", "type": "matching", "data": {}},
+        ],
+        "edges": [{"id": "start-match", "source": "start", "target": "match"}],
+    }
+    service = FlowForgeService(workflow_repository=repo, runtime_repository=_RuntimeRepo(), settings_repository=_SettingsRepo())
+
+    readiness = service.get_workflow_readiness(
+        workspace_id="ws-1",
+        workflow_definition_id=12,
+        actor_user_id="user-1",
+        effective_roles={"flowforge:admin"},
+    )
+
+    blocker_codes = {item["code"] for item in readiness["blockers"]}
+    warning_codes = {item["code"] for item in readiness["warnings"]}
+    assert readiness["status"] == "blocked"
+    assert readiness["can_publish"] is False
+    assert readiness["can_run"] is False
+    assert "production_run_as_required" in blocker_codes
+    assert "matching_policy_required" in blocker_codes
+    assert "resource_set_required" in blocker_codes
+    assert "published_version_required" in warning_codes
+    assert readiness["steps"][0]["id"] == "draft_saved"
+
+
+def test_flowforge_service_readiness_allows_published_runnable_workflow():
+    repo = _WorkflowRepo()
+    runtime_repo = _RuntimeRepo()
+    repo.definitions[0]["latest_published_version_id"] = 44
+    repo.definitions[0]["graph_json"] = {"nodes": [{"id": "end", "type": "end", "data": {}}], "edges": []}
+    repo.versions[0]["version_status"] = "published"
+    repo.versions[0]["graph_json"] = {"nodes": [{"id": "end", "type": "end", "data": {}}], "edges": []}
+    service = FlowForgeService(workflow_repository=repo, runtime_repository=runtime_repo, settings_repository=_SettingsRepo())
+
+    readiness = service.get_workflow_readiness(
+        workspace_id="ws-1",
+        workflow_definition_id=12,
+        actor_user_id="user-1",
+        effective_roles={"flowforge:admin"},
+    )
+
+    assert readiness["status"] == "ready"
+    assert readiness["can_run"] is True
+    assert readiness["latest_published_version_id"] == 44
+    assert readiness["latest_run_id"] == 90
+    assert readiness["latest_run_status"] == "waiting"
+    assert readiness["latest_run_mode"] == "test"
+    assert readiness["steps"][2]["state"] == "complete"
+    assert readiness["steps"][4]["state"] == "current"
 
 
 def test_flowforge_service_allows_production_publish_with_service_run_as():
@@ -2599,10 +2712,17 @@ def test_flowforge_service_updates_workflow_permissions():
     assert repo.revocations[-1]["principal_id"] == "user-2"
 
 
-def test_flowforge_service_updates_owner_and_run_as():
+def test_flowforge_service_updates_metadata_owner_and_run_as():
     repo = _WorkflowRepo()
     service = FlowForgeService(workflow_repository=repo)
 
+    metadata = service.update_workflow_metadata(
+        workspace_id="ws-1",
+        workflow_definition_id=12,
+        payload={"name": "Renamed Workflow", "description": "Updated description."},
+        actor_user_id="user-1",
+        effective_roles={"flowforge:admin"},
+    )
     owner = service.update_workflow_owner(
         workspace_id="ws-1",
         workflow_definition_id=12,
@@ -2618,6 +2738,8 @@ def test_flowforge_service_updates_owner_and_run_as():
         effective_roles={"flowforge:admin"},
     )
 
+    assert metadata["name"] == "Renamed Workflow"
+    assert repo.metadata_update["description"] == "Updated description."
     assert owner["owner_user_id"] == "user-2"
     assert repo.grants[-1]["permission"] == "owner"
     assert run_as["run_as_principal"] == {
@@ -2631,6 +2753,13 @@ def test_flowforge_service_starts_manual_run_from_latest_published_version(monke
     repo = _WorkflowRepo()
     repo.definitions[0]["latest_published_version_id"] = 44
     repo.versions[0]["version_status"] = "published"
+    repo.versions[0]["graph_json"] = {
+        "nodes": [
+            {"id": "start", "type": "manual_start", "label": "Manual Start", "data": {"mode": "manual"}},
+            {"id": "end", "type": "end", "label": "End", "data": {}},
+        ],
+        "edges": [{"id": "start-end", "source": "start", "target": "end"}],
+    }
     runtime_repo = _RuntimeRepo()
     queued_dispatches = []
     monkeypatch.setattr(
@@ -2653,6 +2782,37 @@ def test_flowforge_service_starts_manual_run_from_latest_published_version(monke
     assert runtime_repo.created_runs[0]["run_context"]["input"] == {"reason": "smoke-test"}
     assert runtime_repo.created_events[0]["event_type"] == "workflow.run.created"
     assert queued_dispatches == [("ws-1", 901)]
+
+
+def test_flowforge_service_rejects_manual_run_for_invalid_published_graph(monkeypatch):
+    repo = _WorkflowRepo()
+    repo.definitions[0]["latest_published_version_id"] = 44
+    repo.versions[0]["version_status"] = "published"
+    repo.versions[0]["graph_json"] = {
+        "nodes": [{"id": "match", "type": "matching", "data": {}}],
+        "edges": [],
+    }
+    runtime_repo = _RuntimeRepo()
+    monkeypatch.setattr(
+        "app.tasks.flowforge_tasks.enqueue_flowforge_run_dispatch",
+        lambda *, workspace_id, run_id: None,
+    )
+    service = FlowForgeService(workflow_repository=repo, runtime_repository=runtime_repo)
+
+    with pytest.raises(ForgeError) as exc:
+        service.start_workflow_run(
+            workspace_id="ws-1",
+            workflow_definition_id=12,
+            payload={"mode": "test", "idempotency_key": "manual-1"},
+            actor_user_id="user-1",
+            effective_roles={"flowforge:admin"},
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.message == "Published workflow version is not runnable."
+    blocker_codes = {item["code"] for item in exc.value.details["blockers"]}
+    assert "matching_policy_required" in blocker_codes
+    assert runtime_repo.created_runs == []
 
 
 def test_flowforge_service_archives_persisted_workflow_definition():

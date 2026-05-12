@@ -28,18 +28,34 @@ def test_dispatch_flowforge_run_task_delegates_to_runtime_dispatcher(monkeypatch
 
 def test_dispatch_flowforge_notifications_task_delegates_to_notification_dispatcher(monkeypatch):
     observed: dict[str, object] = {}
+    context_events: list[str] = []
+
+    class _AppContext:
+        def __enter__(self):
+            context_events.append("enter")
+
+        def __exit__(self, exc_type, exc, traceback):
+            context_events.append("exit")
+
+    class _App:
+        def app_context(self):
+            context_events.append("app_context")
+            return _AppContext()
 
     class _Dispatcher:
         def dispatch_pending(self):
             observed["called"] = True
+            observed["inside_app_context"] = context_events[-1] == "enter"
             return {"status": "completed", "processed": 1, "sent": 1, "failed": 0}
 
+    monkeypatch.setattr("app.tasks.flowforge_tasks._create_task_app", lambda: _App())
     monkeypatch.setattr("app.tasks.flowforge_tasks.FlowForgeNotificationDispatcher", lambda: _Dispatcher())
 
     result = dispatch_flowforge_notifications()
 
     assert result == {"status": "completed", "processed": 1, "sent": 1, "failed": 0}
-    assert observed == {"called": True}
+    assert observed == {"called": True, "inside_app_context": True}
+    assert context_events == ["app_context", "enter", "exit"]
 
 
 def test_dispatch_flowforge_due_timeouts_task_delegates_to_human_response_runtime(monkeypatch):

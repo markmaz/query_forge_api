@@ -34,7 +34,12 @@ class FlowForgeNotificationDispatcher:
             except Exception as exc:  # noqa: BLE001
                 failed += 1
                 self._mark_failed(notification=notification, error_message=str(exc))
-        return {"status": "completed", "processed": len(notifications), "sent": sent, "failed": failed}
+        return {
+            "status": "completed_with_failures" if failed else "completed",
+            "processed": len(notifications),
+            "sent": sent,
+            "failed": failed,
+        }
 
     def _dispatch_notification(self, notification: dict[str, Any]) -> None:
         recipient = str(notification.get("recipient") or "").strip()
@@ -66,6 +71,7 @@ class FlowForgeNotificationDispatcher:
             notification_id=notification_id,
             error_message=error_message[:1000],
         )
+        self._mark_run_needs_attention(notification=notification)
         self._append_notification_event(
             notification=notification,
             event_type="workflow.notification.failed",
@@ -74,7 +80,17 @@ class FlowForgeNotificationDispatcher:
                 "notification_id": notification_id,
                 "template_key": notification.get("template_key"),
                 "error_message": error_message[:500],
+                "run_status": "needs_attention",
             },
+        )
+
+    def _mark_run_needs_attention(self, *, notification: dict[str, Any]) -> None:
+        run_id = notification.get("run_id")
+        if run_id is None:
+            return
+        self._runtime_repository.mark_run_needs_attention(
+            workspace_id=str(notification.get("workspace_id") or "").strip(),
+            run_id=int(run_id),
         )
 
     def _append_notification_event(
@@ -116,23 +132,23 @@ class FlowForgeNotificationDispatcher:
                 action_url=self._safe_summary_value(payload_summary, "action_url"),
                 action_urls=self._action_urls(payload_summary),
             )
-            return rendered["subject"] or "FlowForge workflow notification", rendered["html"]
+            return self._workflow_email_copy(rendered["subject"] or "Workflow notification", rendered["html"])
 
-        reason = self._safe_summary_value(payload_summary, "reason") or "A FlowForge workflow requires attention."
-        subject = "FlowForge workflow notification"
+        reason = self._safe_summary_value(payload_summary, "reason") or "A workflow requires attention."
+        subject = "Workflow notification"
         if template_key == "flowforge.human_task":
             action_url = self._safe_summary_value(payload_summary, "action_url")
-            subject = "FlowForge workflow task"
+            subject = "Workflow task"
             html = (
-                "<p>A FlowForge workflow task is waiting for your response.</p>"
+                "<p>A workflow task is waiting for your response.</p>"
                 + (f'<p><a href="{self._escape(action_url)}">Review this task</a></p>' if action_url else "")
                 + "<p>Open QueryForge to review the full workflow context.</p>"
             )
             return subject, html
         if template_key == "flowforge.no_match":
-            subject = "FlowForge no-match workflow alert"
+            subject = "Workflow no-match alert"
         html = (
-            "<p>A FlowForge workflow notification was generated.</p>"
+            "<p>A workflow notification was generated.</p>"
             f"<p><strong>Reason:</strong> {self._escape(reason)}</p>"
             "<p>Open QueryForge to review the full workflow context.</p>"
         )
@@ -214,6 +230,10 @@ class FlowForgeNotificationDispatcher:
             .replace('"', "&quot;")
             .replace("'", "&#x27;")
         )
+
+    @staticmethod
+    def _workflow_email_copy(subject: str, html: str) -> tuple[str, str]:
+        return str(subject or "").replace("FlowForge", "Workflow"), str(html or "").replace("FlowForge", "Workflow")
 
     @staticmethod
     def _send_email(recipient: str, subject: str, html: str) -> None:

@@ -102,9 +102,9 @@ class FlowForgeNotificationServiceMixin:
             "payload_summary": row.get("payload_summary") or row.get("payload_summary_json") or {},
             "provider_message_id": row.get("provider_message_id"),
             "error_message": row.get("error_message"),
-            "created_at": row.get("created_at"),
-            "sent_at": row.get("sent_at"),
-            "failed_at": row.get("failed_at"),
+            "created_at": self._json_scalar(row.get("created_at")),
+            "sent_at": self._json_scalar(row.get("sent_at")),
+            "failed_at": self._json_scalar(row.get("failed_at")),
         }
 
     def _normalize_recipients(self, raw: Any) -> list[str]:

@@ -111,7 +111,7 @@ class FlowForgeSignedActionServiceMixin:
             actor_id=str(row["human_task_id"]),
             idempotency_key=f"signed-action:{token_hash}:{normalized_action}",
         )
-        runtime_result = self._advance_after_signed_action(row=row, action=normalized_action)
+        runtime_result = self._advance_after_signed_action(row=row, action=normalized_action, response=response)
         return {
             "accepted": True,
             "action": normalized_action,
@@ -122,7 +122,13 @@ class FlowForgeSignedActionServiceMixin:
             },
         }
 
-    def _advance_after_signed_action(self, *, row: dict[str, Any], action: str) -> dict[str, Any]:
+    def _advance_after_signed_action(
+        self,
+        *,
+        row: dict[str, Any],
+        action: str,
+        response: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         from app.features.flowforge.runtime.human_responses import FlowForgeHumanResponseRuntime
 
         return FlowForgeHumanResponseRuntime(runtime_repository=self._runtime_repository).advance_after_human_action(
@@ -132,6 +138,7 @@ class FlowForgeSignedActionServiceMixin:
             human_task_id=int(row["human_task_id"]),
             resource_set_id=row.get("resource_set_id"),
             source_record_key=row.get("source_record_key"),
+            response=response,
         )
 
     def _serialize_public_signed_action_task(self, row: dict[str, Any]) -> dict[str, Any]:

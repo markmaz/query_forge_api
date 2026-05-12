@@ -283,6 +283,27 @@ def test_workflow_graph_normalizer_repairs_llm_intake_aliases_and_branches():
     assert edges_by_id["e_decline_timeout"]["branches"] == ["declined", "timed_out"]
 
 
+def test_workflow_graph_normalizer_preserves_manual_start_alias():
+    normalized = normalize_generated_workflow_graph(
+        {
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "manual",
+                    "label": "Manual test run",
+                    "position": {"x": 120, "y": 140},
+                    "data": {},
+                },
+                {"id": "end", "type": "end", "label": "End", "position": {"x": 360, "y": 140}, "data": {}},
+            ],
+            "edges": [{"id": "start-end", "source": "start", "target": "end"}],
+        }
+    )
+
+    assert normalized["nodes"][0]["type"] == "manual_start"
+    assert normalized["nodes"][0]["data"] == {"mode": "manual"}
+
+
 def test_workflow_graph_generator_repairs_resource_offer_shortcut_when_prompt_requires_acceptance_loop():
     prompt = (
         "I want a workflow that starts with an intake event from a jotform, maps the values in the form to a schema, "

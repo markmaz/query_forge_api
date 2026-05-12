@@ -28,6 +28,7 @@ from app.services.semantic.concept_retrieval_service import ConceptRetrievalServ
 from app.services.semantic.concept_to_column_service import ConceptToColumnService
 from app.services.semantic.constrained_column_vector_service import ConstrainedColumnVectorService
 from app.services.semantic.deterministic_matcher import DeterministicMatcher
+from app.services.semantic.domain_profile_metric_binding import apply_domain_profile_metric_bindings
 from app.services.semantic.domain_selection_service import DomainSelectionService
 from app.services.semantic.value_alias_service import canonicalize_value
 from app.services.semantic.value_alias_resolution_service import ValueAliasResolutionService
@@ -388,6 +389,13 @@ class PlanService:
             slot_intent=slot_intent,
             prompt=prompt,
             mapped_columns=concept_mapping.get("mapped_columns", []),
+        )
+        role_guardrails = apply_domain_profile_metric_bindings(
+            sql=self._sql,
+            workspace_id=workspace_id,
+            domain_id=selected_domain_id,
+            prompt=prompt,
+            role_guardrails=role_guardrails,
         )
         warnings.extend(role_guardrails.get("warnings", []))
         allowed_candidate_columns = role_guardrails.get("allowed_columns") or concept_mapping.get("mapped_columns", [])
@@ -1380,6 +1388,8 @@ class PlanService:
                     and str(candidate_field.get("columnName") or "").strip()
                 ):
                     metric_field = candidate_field
+                if str(metric_row.get("metric_agg") or "").strip().lower():
+                    fn = str(metric_row.get("metric_agg") or "").strip().lower()
                 if "student" in str(metric_row.get("concept_key") or "").lower():
                     fn = "count_distinct"
             aggs["metrics"].append(
@@ -1387,7 +1397,7 @@ class PlanService:
                     "id": "semantic_plan_metric_count",
                     "fn": fn,
                     "field": metric_field,
-                    "label": "count",
+                    "label": str((metric_row or {}).get("metric_label") or "count") if isinstance(metric_row, dict) else "count",
                 }
             )
         return out

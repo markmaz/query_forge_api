@@ -1501,6 +1501,20 @@ def test_flowforge_runtime_repository_updates_run_context():
     assert json.loads(params["run_context_json"]) == {"flowforge_matching": {"candidate_keys": ["resource-1"]}}
 
 
+def test_flowforge_runtime_repository_marks_run_needs_attention_without_moving_node():
+    sql = _SQL(write_count=1)
+    repo = FlowForgeRuntimeRepository(sql=sql)
+
+    updated = repo.mark_run_needs_attention(workspace_id="ws-1", run_id=90)
+
+    query, params = sql.writes[0]
+    assert updated is True
+    assert "SET status = 'needs_attention'" in query
+    assert "current_node_id" not in query
+    assert "status NOT IN ('failed', 'canceled')" in query
+    assert params == {"workspace_id": "ws-1", "run_id": 90}
+
+
 def test_flowforge_runtime_repository_persists_matching_evaluations_and_candidates():
     sql = _SQL(lastrowid=77)
     repo = FlowForgeRuntimeRepository(sql=sql)

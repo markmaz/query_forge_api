@@ -419,8 +419,16 @@ def test_flowforge_service_creates_communication_template_ai_draft():
 
 def test_flowforge_service_sends_communication_template_test_email():
     sent: list[dict[str, str]] = []
+    repo = _TemplateRepo()
+    repo.templates[501]["subject"] = "FlowForge test for {{resource.display_name}}"
+    workflow_body_blocks = [
+        {"type": "heading", "content": "FlowForge task for {{resource.display_name}}"},
+        {"type": "text", "content": "Open FlowForge before {{task.due_at}}."},
+    ]
+    repo.templates[501]["body_blocks"] = workflow_body_blocks
+    repo.templates[501]["body_blocks_json"] = workflow_body_blocks
     service = FlowForgeService(
-        communication_template_repository=_TemplateRepo(),
+        communication_template_repository=repo,
         resource_repository=_ResourceRepo(),
         communication_template_email_sender=lambda recipient, subject, html: sent.append(
             {"recipient": recipient, "subject": subject, "html": html}
@@ -444,17 +452,19 @@ def test_flowforge_service_sends_communication_template_test_email():
     assert result == {
         "status": "sent",
         "recipient": "therapist@example.com",
-        "subject": "New task for Dr. Lane",
+        "subject": "Workflow test for Dr. Lane",
     }
     assert sent == [
         {
             "recipient": "therapist@example.com",
-            "subject": "New task for Dr. Lane",
+            "subject": "Workflow test for Dr. Lane",
             "html": sent[0]["html"],
         }
     ]
-    assert "Anxiety" in sent[0]["html"]
-    assert "example.invalid/workflow-studio/test-action/accept" in sent[0]["html"]
+    assert "Workflow task for Dr. Lane" in sent[0]["html"]
+    assert "Open Workflow before 2026-05-06T18:00:00Z." in sent[0]["html"]
+    assert "FlowForge" not in sent[0]["subject"]
+    assert "FlowForge" not in sent[0]["html"]
 
 
 def test_flowforge_service_returns_controlled_error_when_test_email_send_fails():

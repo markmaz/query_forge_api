@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.services.semantic import plan_service as legacy_plan_service
 from app.services.semantic.plan import sql_json_builder
 import app.services.semantic.plan.value_alias_applier as value_alias_applier
 from app.services.semantic.plan import PlanService
@@ -11,7 +12,7 @@ from app.services.semantic.plan.value_alias_applier import ValueAliasApplier
 from app.services.semantic.plan.plan_validator import PlanValidator
 from app.services.semantic.deterministic_matcher import DeterministicMatcher
 from app.services.domain.planner_semantic_time_policy_service import PlannerSemanticTimePolicyService
-from tests._support.fakes import FakeForgeQueryPort
+from tests._support.fakes import CapturedCall, FakeForgeQueryPort
 
 
 def test_normalize_llm_payload_coerces_common_alternate_shapes() -> None:
@@ -46,6 +47,135 @@ def test_normalize_llm_payload_coerces_common_alternate_shapes() -> None:
     assert out["join_plan"] == {"joins": [{"left_table": "a", "right_table": "b"}]}
     assert out["notes"] == ["single note"]
     assert out["confidence"] == 0.85
+
+
+def test_plan_uses_domain_profile_metric_binding_when_concept_retrieval_misses_metric() -> None:
+    _assert_domain_profile_metric_binding_plan(PlanService)
+
+
+def test_legacy_plan_uses_domain_profile_metric_binding_when_concept_retrieval_misses_metric() -> None:
+    _assert_domain_profile_metric_binding_plan(legacy_plan_service.PlanService)
+
+
+def _assert_domain_profile_metric_binding_plan(plan_service_cls) -> None:
+    class _SemanticExtractor:
+        def extract(self, prompt):
+            return {
+                "normalized_text": prompt,
+                "slots": {"metric": [], "dimensions": [], "subgroups": [], "time_ranges": [], "org_schools": [], "org_districts": []},
+                "by_label": {},
+                "ents": [],
+                "model": {},
+                "warnings": [],
+            }
+
+    class _Deterministic:
+        def match(self, prompt):
+            del prompt
+            return {"matched": [], "unmatched_tokens": []}
+
+    class _ConceptRetrieval:
+        def search(self, **kwargs):
+            return {"query_text": kwargs.get("prompt"), "hits": []}
+
+    class _ConceptToColumn:
+        def map_concepts_to_columns(self, **kwargs):
+            return {"concepts": list(kwargs.get("concept_hits") or []), "mapped_columns": [], "warnings": []}
+
+    class _ColumnVector:
+        def search(self, **kwargs):
+            return {
+                "filtered_to_candidate_count": len(list(kwargs.get("candidate_columns") or [])),
+                "hits": list(kwargs.get("candidate_columns") or []),
+            }
+
+    class _DomainSelector:
+        def choose_domain_id(self, **kwargs):
+            return {"domain_id": kwargs.get("preselected_domain_id"), "source": "provided", "threshold_met": True, "domains": []}
+
+    class _LLM:
+        def chat_json(self, **kwargs):
+            del kwargs
+            return {
+                "sql_json": {},
+                "selected_columns": [],
+                "filters": [],
+                "join_plan": {},
+                "confidence": 0.72,
+                "notes": [],
+            }
+
+    class _ValueAliasResolver:
+        def resolve(self, **kwargs):
+            del kwargs
+            return []
+
+    class _SQL(FakeForgeQueryPort):
+        def execute_query_mappings(self, query, params=None):
+            if "FROM domain_profile" in query:
+                self.query_mappings_calls.append(CapturedCall(query=query, params=params))
+                return [
+                    {
+                        "metrics": """
+                [
+                  {
+                    "metric_key": "run_count",
+                    "label": "Run Count",
+                    "agg": "count",
+                    "sql_metric": {
+                      "fn": "count",
+                      "label": "Run Count",
+                      "field": {"workspaceTableId": 10, "modelColumnId": 100, "columnName": "run_id"}
+                    }
+                  },
+                  {
+                    "metric_key": "completed_run_count",
+                    "label": "Completed Runs",
+                    "agg": "sum",
+                    "sql_metric": {
+                      "fn": "sum",
+                      "label": "Completed Runs",
+                      "field": {"workspaceTableId": 10, "modelColumnId": 101, "columnName": "completed_flag"}
+                    }
+                  }
+                ]
+                """,
+                    }
+                ]
+            return super().execute_query_mappings(query, params)
+
+    sql = _SQL()
+
+    svc = plan_service_cls(
+        sql=sql,
+        deterministic=_Deterministic(),
+        concept_retrieval=_ConceptRetrieval(),
+        concept_to_column=_ConceptToColumn(),
+        column_vector=_ColumnVector(),
+        domain_selector=_DomainSelector(),
+        llm_client=_LLM(),
+        semantic_extractor=_SemanticExtractor(),
+        value_alias_resolver=_ValueAliasResolver(),
+        tier2_runner=lambda prompt: {"plan_ir": {}, "model": {"enabled": False}, "timings_ms": {"tier2": 0}},
+    )
+    out = svc.plan(
+        {
+            "workspace_id": "ws-1",
+            "vertical_norm": "generic",
+            "domain_id": 44,
+            "prompt": "How many Workflow Studio runs completed this week?",
+        },
+        include_llm=True,
+    )
+
+    selected = out["llm_plan"]["selected_columns"]
+    assert selected == [{"concept_key": "COMPLETED_RUN_COUNT", "model_column_id": 101}]
+    sql_json = out["llm_plan"]["sql_json"]
+    assert sql_json["columns"][0]["field"]["columnName"] == "completed_flag"
+    metric = sql_json["aggs"]["metrics"][0]
+    assert metric["fn"] == "sum"
+    assert metric["field"]["columnName"] == "completed_flag"
+    assert metric["label"] == "Completed Runs"
 
 
 def test_normalize_llm_payload_can_map_filter_column_expression() -> None:

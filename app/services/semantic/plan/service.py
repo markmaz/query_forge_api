@@ -25,6 +25,7 @@ from app.services.semantic.concept_retrieval_service import ConceptRetrievalServ
 from app.services.semantic.concept_to_column_service import ConceptToColumnService
 from app.services.semantic.constrained_column_vector_service import ConstrainedColumnVectorService
 from app.services.semantic.deterministic_matcher import DeterministicMatcher
+from app.services.semantic.domain_profile_metric_binding import apply_domain_profile_metric_bindings
 from app.services.semantic.domain_selection_service import DomainSelectionService
 from app.services.semantic.value_alias_resolution_service import ValueAliasResolutionService
 from app.nlp.tier2_spacy.pipeline import run_tier2_with_meta
@@ -72,6 +73,7 @@ class PlanService:
         semantic_extractor: Optional[SemanticExtractService] = None,
     ) -> None:
         _sql = sql or ForgeMetaSQL()
+        self._sql = _sql
         _concept_scoring = concept_scoring_policy_service or PlannerConceptScoringPolicyService(sql=_sql)
         _semantic_join = semantic_join_policy_service or PlannerSemanticJoinPolicyService(sql=_sql)
         _semantic_projection = semantic_projection_policy_service or PlannerSemanticProjectionPolicyService(sql=_sql)
@@ -346,6 +348,13 @@ class PlanService:
             slot_intent=slot_intent,
             prompt=prompt,
             mapped_columns=concept_mapping.get("mapped_columns", []),
+        )
+        role_guardrails = apply_domain_profile_metric_bindings(
+            sql=self._sql,
+            workspace_id=workspace_id,
+            domain_id=selected_domain_id,
+            prompt=prompt,
+            role_guardrails=role_guardrails,
         )
         warnings.extend(role_guardrails.get("warnings", []))
         allowed_candidate_columns = role_guardrails.get("allowed_columns") or concept_mapping.get("mapped_columns", [])

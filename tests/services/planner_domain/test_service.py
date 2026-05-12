@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 import logging
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
@@ -118,6 +119,149 @@ class _FakeLLM:
             "content": "{}",
             "raw_text": "{}",
         }
+
+
+class _FakeFlowForgeCapabilitiesService:
+    def get_domain_capabilities(self, *, workspace_id, user_id, domain_id):
+        del workspace_id, user_id
+        assert domain_id == 6
+        return {
+            "domain_id": 6,
+            "domain_version": 7,
+            "dimensions": [
+                {
+                    "column_key": "wt1149.run_id",
+                    "label": "Run Id",
+                    "data_type": "string",
+                    "filterable": True,
+                    "workspace_table_id": 1149,
+                    "model_column_id": 100,
+                    "column_name": "run_id",
+                },
+                {
+                    "column_key": "wt1149.completed_flag",
+                    "label": "Completed Flag",
+                    "data_type": "int",
+                    "filterable": True,
+                    "workspace_table_id": 1149,
+                    "model_column_id": 101,
+                    "column_name": "completed_flag",
+                },
+            ],
+            "domain_metrics": [
+                {
+                    "metric_key": "run_count",
+                    "label": "Run Count",
+                    "kind": "count",
+                    "agg": "count",
+                    "sql_metric": {
+                        "fn": "count",
+                        "field": {"workspaceTableId": 1149, "modelColumnId": 100, "columnName": "run_id"},
+                        "label": "Run Count",
+                    },
+                },
+                {
+                    "metric_key": "completed_run_count",
+                    "label": "Completed Runs",
+                    "kind": "count",
+                    "agg": "sum",
+                    "sql_metric": {
+                        "fn": "sum",
+                        "field": {"workspaceTableId": 1149, "modelColumnId": 101, "columnName": "completed_flag"},
+                        "label": "Completed Runs",
+                    },
+                },
+            ],
+            "user_metrics": [],
+            "overlay_metrics": [],
+            "time_columns": [],
+        }
+
+
+class _FakeEmptyPlanLLM:
+    def chat_json_with_trace(self, **kwargs):
+        user_prompt = str(kwargs.get("user_prompt") or "")
+        if "Task: Extract lightweight planning slots" in user_prompt:
+            return {
+                "parsed": {
+                    "intent": "aggregate",
+                    "entity": "workflow runs",
+                    "constraints": [],
+                    "time_phrases": ["this week"],
+                },
+                "content": "{}",
+                "raw_text": "{}",
+            }
+        return {
+            "parsed": {
+                "intent": "list",
+                "selects": {"dimensions": [], "metrics": []},
+                "filters": [],
+                "time": {},
+                "grouping": {"group_by": [], "order_by": [], "limit": None},
+            },
+            "content": "{}",
+            "raw_text": "{}",
+        }
+
+
+def test_runtime_llm_resolution_updates_next_actions_client(monkeypatch) -> None:
+    fake_client = _FakeLLM()
+
+    def _fake_resolver(**kwargs):
+        assert kwargs["workspace_id"] == "ws-1"
+        assert kwargs["role"] == "planner"
+        return SimpleNamespace(
+            client=fake_client,
+            source="workspace_role",
+            role="planner",
+            llm_id=42,
+            provider="generic",
+            model="test-model",
+            endpoint="http://resolved.local:11434",
+        )
+
+    monkeypatch.setattr(planner_domain_service_module, "build_llm_client_for_role", _fake_resolver)
+    svc = PlannerDomainService(
+        capabilities_service=_FakeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+    )
+
+    svc._resolve_runtime_llm(workspace_id="ws-1", role="planner")
+
+    assert svc._llm is fake_client
+    assert svc._llm_planning._llm is fake_client
+    assert svc._next_actions._llm_client is fake_client
+    assert svc._enrichment._next_actions is svc._next_actions
+    assert svc._llm_runtime_meta["endpoint"] == "http://resolved.local:11434"
+
+
+def test_plan_domain_binds_empty_count_prompt_to_domain_profile_metric(monkeypatch) -> None:
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_LLM_EXPLANATION_ENABLED", False)
+    monkeypatch.setattr(planner_domain_service_module, "QF_PLAN_DOMAIN_LLM_NEXT_ACTIONS_ENABLED", False)
+    svc = PlannerDomainService(
+        capabilities_service=_FakeFlowForgeCapabilitiesService(),
+        domain_vector_service=_FakeDomainVectorService(),
+        llm_client=_FakeEmptyPlanLLM(),
+    )
+
+    out = svc.plan(
+        {
+            "workspace_id": "ws-1",
+            "vertical_norm": "generic",
+            "base_domain_id": 6,
+            "prompt": "How many Workflow Studio runs completed this week?",
+        },
+        user_id="user-1",
+    )
+
+    assert out["validation"]["is_valid"] is True
+    assert out["plan_json_v2"]["intent"] == "aggregate"
+    assert out["plan_json_v2"]["selects"]["metrics"] == [{"metric_ref": "domain_metric:completed_run_count"}]
+    sql_metrics = ((out["sql_json"].get("aggs") or {}).get("metrics") or [])
+    assert sql_metrics[0]["fn"] == "sum"
+    assert sql_metrics[0]["field"]["columnName"] == "completed_flag"
+    assert sql_metrics[0]["label"] == "Completed Runs"
 
 
 class _FakeLLMWithExplanationSummary:

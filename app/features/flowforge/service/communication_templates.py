@@ -185,8 +185,9 @@ class FlowForgeCommunicationTemplateServiceMixin:
                 "open_task": "https://example.invalid/workflow-studio/test-action/open",
             },
         )
+        subject, html = self._workflow_email_copy(rendered["subject"], rendered["html"])
         try:
-            self._communication_template_email_sender(recipient, rendered["subject"], rendered["html"])
+            self._communication_template_email_sender(recipient, subject, html)
         except Exception as exc:
             logger.warning(
                 "FlowForge communication template test send failed",
@@ -201,7 +202,7 @@ class FlowForgeCommunicationTemplateServiceMixin:
         return {
             "status": "sent",
             "recipient": recipient,
-            "subject": rendered["subject"],
+            "subject": subject,
         }
 
     def create_communication_template_ai_draft(
@@ -430,3 +431,7 @@ class FlowForgeCommunicationTemplateServiceMixin:
         if isinstance(value, datetime | date):
             return value.isoformat()
         return value
+
+    @staticmethod
+    def _workflow_email_copy(subject: str, html: str) -> tuple[str, str]:
+        return str(subject or "").replace("FlowForge", "Workflow"), str(html or "").replace("FlowForge", "Workflow")

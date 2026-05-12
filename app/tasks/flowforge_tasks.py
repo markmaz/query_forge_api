@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from app.celery_app import celery
@@ -28,8 +29,7 @@ def dispatch_flowforge_due_timeouts() -> dict[str, Any]:
 @celery.task(name="qf.flowforge.dispatch_notifications")
 def dispatch_flowforge_notifications() -> dict[str, Any]:
     record_flowforge_worker_heartbeat(task_name="qf.flowforge.dispatch_notifications")
-    dispatcher = FlowForgeNotificationDispatcher()
-    return dispatcher.dispatch_pending()
+    return _run_with_app_context(_dispatch_pending_notifications)
 
 
 @celery.task(name="qf.flowforge.dispatch_due_schedules")
@@ -55,3 +55,20 @@ def expire_flowforge_dataset_artifacts(limit: int = 500) -> dict[str, Any]:
 
 def enqueue_flowforge_run_dispatch(*, workspace_id: str, run_id: int) -> None:
     dispatch_flowforge_run.apply_async(args=[workspace_id, int(run_id)])
+
+
+def _dispatch_pending_notifications() -> dict[str, Any]:
+    dispatcher = FlowForgeNotificationDispatcher()
+    return dispatcher.dispatch_pending()
+
+
+def _run_with_app_context(action: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+    app = _create_task_app()
+    with app.app_context():
+        return action()
+
+
+def _create_task_app() -> Any:
+    from app import create_app
+
+    return create_app()

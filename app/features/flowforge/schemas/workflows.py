@@ -20,7 +20,7 @@ def register_workflow_models(namespace):
             "type": fields.String(
                 required=True,
                 description=(
-                    "Node behavior type, for example intake, matching, decision, schedule_trigger, "
+                    "Node behavior type, for example manual_start, intake, matching, decision, schedule_trigger, "
                     "query_extract, export, import, map_transform, approval, or iterator."
                 ),
             ),
@@ -97,6 +97,13 @@ def register_workflow_models(namespace):
         "FlowForgeWorkflowOwnerUpdateRequest",
         {"owner_user_id": fields.String(required=True, description="New workflow owner user id.")},
     )
+    workflow_metadata_update = namespace.model(
+        "FlowForgeWorkflowMetadataUpdateRequest",
+        {
+            "name": fields.String(required=True, description="Workflow display name."),
+            "description": fields.String(required=False, description="Workflow purpose summary."),
+        },
+    )
     workflow_run_as_update = namespace.model(
         "FlowForgeWorkflowRunAsUpdateRequest",
         {
@@ -142,6 +149,41 @@ def register_workflow_models(namespace):
             "current_node_id": fields.String(required=False),
             "idempotency_key": fields.String(required=True),
             "created": fields.Boolean(required=True),
+        },
+    )
+    workflow_readiness_finding = namespace.model(
+        "FlowForgeWorkflowReadinessFinding",
+        {
+            "code": fields.String(required=True),
+            "message": fields.String(required=True),
+            "severity": fields.String(required=True),
+            "node_id": fields.String(required=False),
+        },
+    )
+    workflow_readiness_step = namespace.model(
+        "FlowForgeWorkflowReadinessStep",
+        {
+            "id": fields.String(required=True),
+            "label": fields.String(required=True),
+            "state": fields.String(required=True, description="complete, current, or blocked."),
+            "detail": fields.String(required=True),
+        },
+    )
+    workflow_readiness = namespace.model(
+        "FlowForgeWorkflowReadiness",
+        {
+            "workflow_definition_id": fields.Integer(required=True),
+            "status": fields.String(required=True, description="ready, needs_publish, or blocked."),
+            "can_publish": fields.Boolean(required=True),
+            "can_run": fields.Boolean(required=True),
+            "latest_valid_draft_version_id": fields.Integer(required=False),
+            "latest_published_version_id": fields.Integer(required=False),
+            "latest_run_id": fields.Integer(required=False),
+            "latest_run_status": fields.String(required=False),
+            "latest_run_mode": fields.String(required=False),
+            "blockers": fields.List(fields.Nested(workflow_readiness_finding), required=True),
+            "warnings": fields.List(fields.Nested(workflow_readiness_finding), required=True),
+            "steps": fields.List(fields.Nested(workflow_readiness_step), required=True),
         },
     )
     workflow_definition_create = namespace.model(
@@ -236,10 +278,12 @@ def register_workflow_models(namespace):
         "workflow_permissions": workflow_permissions,
         "workflow_permissions_update": workflow_permissions_update,
         "workflow_owner_update": workflow_owner_update,
+        "workflow_metadata_update": workflow_metadata_update,
         "workflow_run_as_update": workflow_run_as_update,
         "workflow_run_as_principals": workflow_run_as_principals,
         "workflow_manual_run_request": workflow_manual_run_request,
         "workflow_manual_run": workflow_manual_run,
+        "workflow_readiness": workflow_readiness,
         "workflow_ai_draft_request": workflow_ai_draft_request,
         "workflow_ai_draft": workflow_ai_draft,
         "validation_result": validation_result,

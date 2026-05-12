@@ -52,6 +52,14 @@ class FlowForgeNotificationNodeExecutor:
                     "recipient_count": len(recipients),
                     "reason": "no_outgoing_edge",
                 },
+                run_context_update={
+                    "last_notification": self._last_notification_context(
+                        template_key=template_key,
+                        notification_ids=notification_ids,
+                        recipients=recipients,
+                        reason=payload_summary.get("reason"),
+                    )
+                },
             )
         return NodeExecutionResult(
             status="advance",
@@ -62,6 +70,14 @@ class FlowForgeNotificationNodeExecutor:
                 "notification_ids": notification_ids,
                 "recipient_count": len(recipients),
                 "next_node_id": next_node_id,
+            },
+            run_context_update={
+                "last_notification": self._last_notification_context(
+                    template_key=template_key,
+                    notification_ids=notification_ids,
+                    recipients=recipients,
+                    reason=payload_summary.get("reason"),
+                )
             },
         )
 
@@ -108,6 +124,22 @@ class FlowForgeNotificationNodeExecutor:
             "reason": str(config.get("reason") or configured_context.get("reason") or "Workflow notification.").strip(),
             "intake": dict(intake),
             "context": communication_context,
+        }
+
+    @staticmethod
+    def _last_notification_context(
+        *,
+        template_key: str,
+        notification_ids: list[int],
+        recipients: list[str],
+        reason: Any,
+    ) -> dict[str, Any]:
+        return {
+            "status": "pending" if notification_ids else "skipped",
+            "template_key": template_key,
+            "notification_ids": notification_ids,
+            "recipient_count": len(recipients),
+            "reason": str(reason or "").strip() or None,
         }
 
     @staticmethod

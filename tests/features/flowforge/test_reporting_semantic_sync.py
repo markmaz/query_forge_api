@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 
 from app.features.flowforge.reporting.manifest import REPORTING_DOMAINS
-from app.features.flowforge.reporting.semantic_sync import _domain_profile_params
+from app.features.flowforge.reporting.semantic_metadata import domain_profile_params
+from app.features.flowforge.reporting.semantic_metadata import upsert_generated_semantic_metadata
 from app.features.flowforge.reporting.semantic_sync import FlowForgeSemanticSyncService
 
 
@@ -137,10 +138,92 @@ def test_flowforge_semantic_sync_reports_sensitive_drift():
 def test_flowforge_domain_profile_params_embeds_manifest_synonyms():
     domain = next(item for item in REPORTING_DOMAINS if item["domain_key"] == "flowforge_intake_events")
 
-    params = _domain_profile_params(workspace_id="ws-1", domain_id=29, domain=domain)
+    params = domain_profile_params(workspace_id="ws-1", domain_id=29, domain=domain)
 
     synonyms = json.loads(params["synonyms"])
     keywords = json.loads(params["keywords"])
     assert any("patient" in item["means"] for item in synonyms)
     assert "patient" in keywords
     assert "client intake" in params["embedding_text"]
+
+
+def test_flowforge_domain_profile_params_binds_manifest_metrics_to_read_model_columns():
+    domain = next(item for item in REPORTING_DOMAINS if item["domain_key"] == "flowforge_workflow_runs")
+
+    params = domain_profile_params(
+        workspace_id="ws-1",
+        domain_id=29,
+        domain=domain,
+        workspace_table_id=44,
+        columns=[
+            {"column_name": "run_id"},
+            {"column_name": "completed_flag"},
+            {"column_name": "failed_flag"},
+            {"column_name": "needs_attention_flag"},
+        ],
+        column_id_by_name={
+            "run_id": 101,
+            "completed_flag": 102,
+            "failed_flag": 103,
+            "needs_attention_flag": 104,
+        },
+    )
+
+    metrics = {item["metric_key"]: item for item in json.loads(params["metrics"])}
+
+    assert metrics["run_count"]["sql_metric"]["fn"] == "count"
+    assert metrics["run_count"]["sql_metric"]["field"]["columnName"] == "run_id"
+    assert metrics["completed_run_count"]["sql_metric"]["fn"] == "sum"
+    assert metrics["completed_run_count"]["sql_metric"]["field"]["columnName"] == "completed_flag"
+    assert metrics["needs_attention_count"]["column_key"] == "wt44.needs_attention_flag"
+
+
+class _SemanticTx:
+    def __init__(self) -> None:
+        self.write_calls: list[dict[str, object]] = []
+
+    def execute_query_mappings(self, query, params):
+        if "FROM workspace_column" in query:
+            return [
+                {"id": 101, "column_name": "run_id"},
+                {"id": 102, "column_name": "needs_attention_flag"},
+                {"id": 103, "column_name": "status"},
+            ]
+        if "FROM semantic_concept" in query:
+            return [{"id": 501}]
+        if "FROM semantic_registry" in query:
+            return [{"id": 601}]
+        return []
+
+    def execute_write(self, query, params):
+        self.write_calls.append({"query": query, "params": dict(params or {})})
+        return 1
+
+
+def test_flowforge_semantic_sync_upserts_generated_concepts_registry_and_maps():
+    domain = next(item for item in REPORTING_DOMAINS if item["domain_key"] == "flowforge_workflow_runs")
+    tx = _SemanticTx()
+
+    result = upsert_generated_semantic_metadata(
+        tx,
+        workspace_id="ws-1",
+        domain=domain,
+        workspace_table_id=44,
+        columns=[
+            {"column_name": "run_id", "data_type": "bigint", "nullable": False, "ordinal_position": 1},
+            {"column_name": "needs_attention_flag", "data_type": "int", "nullable": False, "ordinal_position": 2},
+            {"column_name": "status", "data_type": "varchar", "nullable": True, "ordinal_position": 3},
+        ],
+    )
+
+    joined = "\n".join(str(call["query"]) for call in tx.write_calls)
+    assert result["semantic_concept_count"] == 3
+    assert result["semantic_registry_count"] == 3
+    assert result["semantic_concept_map_count"] == 3
+    assert result["semantic_column_map_count"] == 3
+    assert "INSERT INTO semantic_concept" in joined
+    assert "INSERT INTO semantic_registry" in joined
+    assert "INSERT INTO workspace_column_semantic_concept_map" in joined
+    assert "INSERT INTO semantic_column_map" in joined
+    assert "INSERT INTO semantic_concept_alias" in joined
+    assert any(call["params"].get("alias_key") == "needs attention" for call in tx.write_calls)

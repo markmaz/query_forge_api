@@ -138,6 +138,7 @@ class FlowForgeRuntimeMatchingExecutor:
                 "next_node_id": next_node_id,
                 "offer": offer_summary,
             },
+            run_context_update=runtime_context,
         )
 
     def _resolve_policy_version(self, *, workspace_id: str, config: dict[str, Any]) -> dict[str, Any]:

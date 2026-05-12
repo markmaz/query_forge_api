@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal, TypedDict
 
 WorkflowNodeType = Literal[
+    "manual_start",
     "schedule_trigger",
     "webhook_trigger",
     "file_watch_trigger",

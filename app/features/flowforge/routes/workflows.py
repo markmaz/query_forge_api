@@ -236,6 +236,35 @@ class FlowForgeWorkflowOwner(Resource):
             return exc.to_dict(), exc.status_code
 
 
+@flowforge_ns.route("/workflows/<int:workflow_definition_id>/metadata")
+@flowforge_ns.param("workflow_definition_id", "Persisted workflow definition id.")
+class FlowForgeWorkflowMetadata(Resource):
+    @flowforge_ns.doc(
+        summary="Update Workflow Studio workflow metadata",
+        description="Updates the workflow display name and description. Requires manage permission on the workflow.",
+        responses={200: "Workflow metadata updated.", 400: "Invalid metadata payload.", 403: "Manage permission required."},
+    )
+    @flowforge_ns.expect(models["workflow_metadata_update"], validate=False)
+    @flowforge_ns.marshal_with(models["workflow_definition"])
+    @token_required
+    @require_feature("flowforge")
+    def put(self, workflow_definition_id: int):
+        try:
+            payload = request.get_json(silent=True) or {}
+            return (
+                _service().update_workflow_metadata(
+                    workspace_id=_workspace_id(),
+                    workflow_definition_id=workflow_definition_id,
+                    payload=payload if isinstance(payload, dict) else {},
+                    actor_user_id=_actor_user_id(),
+                    effective_roles=_effective_roles(),
+                ),
+                200,
+            )
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+
+
 @flowforge_ns.route("/workflows/<int:workflow_definition_id>/run-as")
 @flowforge_ns.param("workflow_definition_id", "Persisted workflow definition id.")
 class FlowForgeWorkflowRunAs(Resource):
@@ -288,6 +317,35 @@ class FlowForgeWorkflowManualRun(Resource):
                 effective_roles=_effective_roles(),
             )
             return result, 201 if result.get("created") else 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+
+
+@flowforge_ns.route("/workflows/<int:workflow_definition_id>/readiness")
+@flowforge_ns.param("workflow_definition_id", "Persisted workflow definition id.")
+class FlowForgeWorkflowReadiness(Resource):
+    @flowforge_ns.doc(
+        summary="Get Workflow Studio production readiness",
+        description=(
+            "Returns backend-computed readiness for the persisted workflow lifecycle: draft save, graph validation, "
+            "publish, runtime, inspection, and reporting. This is the durable readiness contract used by the Studio UI."
+        ),
+        responses={200: "Workflow readiness returned.", 403: "View permission required.", 404: "Workflow not found."},
+    )
+    @flowforge_ns.marshal_with(models["workflow_readiness"])
+    @token_required
+    @require_feature("flowforge")
+    def get(self, workflow_definition_id: int):
+        try:
+            return (
+                _service().get_workflow_readiness(
+                    workspace_id=_workspace_id(),
+                    workflow_definition_id=workflow_definition_id,
+                    actor_user_id=_actor_user_id(),
+                    effective_roles=_effective_roles(),
+                ),
+                200,
+            )
         except ForgeError as exc:
             return exc.to_dict(), exc.status_code
 
