@@ -60,6 +60,8 @@ def test_flowforge_workflow_list_returns_persisted_workflows(client, monkeypatch
 
     assert resp.status_code == 200
     assert resp.json[0]["id"] == "42"
+    assert resp.json[0]["created_at"] == "2026-05-07T20:27:25"
+    assert resp.json[0]["updated_at"] == "2026-05-08T20:27:25"
     assert resp.json[0]["graph"]["nodes"][0]["id"] == "intake"
 
 
@@ -353,6 +355,8 @@ class _RunService:
                 "lifecycle": "development",
                 "run_as_principal": {"principal_type": "user", "principal_id": "user-1"},
                 "effective_permissions": {"permission": "owner", "can_manage": True},
+                "created_at": "2026-05-07T20:27:25",
+                "updated_at": "2026-05-08T20:27:25",
                 "graph": {"nodes": [{"id": "intake"}], "edges": []},
             }
         ]
@@ -788,6 +792,96 @@ class _RunService:
             "default_filters": [{"field": "mode", "operator": "equals", "value": normalized_mode}],
             "metrics": {"run_count": 10, "offer_count": 6, "assignment_count": 4},
             "domains": self.list_reporting_domains(workspace_id=workspace_id),
+        }
+
+    def get_intake_review_timeline(self, *, workspace_id: str, mode: str | None, days: int | None = 7):
+        normalized_mode = mode or "production"
+        return {
+            "workspace_id": workspace_id,
+            "mode": normalized_mode,
+            "days": days or 7,
+            "buckets": [
+                {
+                    "date": "2026-05-05",
+                    "intake_count": 2,
+                    "accepted_count": 1,
+                    "not_accepted_count": 1,
+                    "pending_count": 0,
+                    "events": [
+                        {
+                            "intake_event_id": 501,
+                            "date": "2026-05-05",
+                            "received_at": "2026-05-05T10:00:00",
+                            "provider": "jotform",
+                            "external_submission_id": "sub-501",
+                            "run_id": 90,
+                            "run_status": "completed",
+                            "workflow_key": "intake-routing",
+                            "outcome": "accepted",
+                            "outcome_label": "Accepted by Dr. Lane",
+                            "accepted_by": "Dr. Lane",
+                            "accepted_resource_set_id": 20,
+                            "accepted_source_record_key": "dr-lane",
+                            "no_match_reason": None,
+                            "raw_payload_available": True,
+                        },
+                        {
+                            "intake_event_id": 502,
+                            "date": "2026-05-05",
+                            "received_at": "2026-05-05T11:00:00",
+                            "provider": "jotform",
+                            "external_submission_id": "sub-502",
+                            "run_id": 91,
+                            "run_status": "needs_attention",
+                            "workflow_key": "intake-routing",
+                            "outcome": "not_accepted",
+                            "outcome_label": "Not accepted: no_eligible_candidates",
+                            "accepted_by": None,
+                            "accepted_resource_set_id": None,
+                            "accepted_source_record_key": None,
+                            "no_match_reason": "no_eligible_candidates",
+                            "raw_payload_available": True,
+                        },
+                    ],
+                }
+            ],
+        }
+
+    def get_intake_raw_form(self, *, workspace_id: str, intake_event_id: int):
+        return {
+            "workspace_id": workspace_id,
+            "intake_event_id": intake_event_id,
+            "provider": "jotform",
+            "external_form_id": "form-1",
+            "external_submission_id": "sub-502",
+            "mode": "production",
+            "received_at": "2026-05-05T11:00:00",
+            "raw_payload_available": True,
+            "raw_payload_redacted_at": None,
+            "raw_payload_redacted_by": None,
+            "raw_payload_expires_at": "2026-06-04T11:00:00",
+            "raw_payload": {"patient": {"first_name": "Jane"}, "requested_service": "therapy"},
+            "normalized_payload": {"requested_service": "therapy"},
+        }
+
+    def dry_run_reporting_domain_sync(self, *, workspace_id: str, actor_user_id: str | None = None):
+        return {
+            "workspace_id": workspace_id,
+            "dry_run": True,
+            "status": "ok",
+            "domain_count": 2,
+            "registered_count": 0,
+            "domains": [{"domain_key": "flowforge_workflow_runs", "registration_status": "validated"}],
+        }
+
+    def sync_reporting_domains(self, *, workspace_id: str, actor_user_id: str | None = None):
+        return {
+            "workspace_id": workspace_id,
+            "dry_run": False,
+            "status": "ok",
+            "domain_count": 2,
+            "registered_count": 2,
+            "domains": [{"domain_key": "flowforge_workflow_runs", "registration_status": "registered"}],
         }
 
     def list_workflow_versions(
@@ -1433,6 +1527,46 @@ def test_flowforge_reporting_routes_return_domains_and_summary(client, monkeypat
     assert dashboard.status_code == 200
     assert dashboard.json["metrics"]["offer_count"] == 6
     assert dashboard.json["default_filters"][0]["value"] == "production"
+
+
+def test_flowforge_intake_review_routes_return_timeline_and_operator_raw_form(client, monkeypatch):
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: _RunService())
+
+    timeline = client.get("/api/v1/flowforge/reports/intake-review?days=7", headers=_headers(monkeypatch))
+    denied_raw = client.get("/api/v1/flowforge/reports/intake-review/502/raw", headers=_headers(monkeypatch))
+    raw = client.get(
+        "/api/v1/flowforge/reports/intake-review/502/raw",
+        headers=_headers(monkeypatch, roles={"flowforge:operator"}),
+    )
+
+    assert timeline.status_code == 200
+    assert timeline.json["buckets"][0]["intake_count"] == 2
+    assert timeline.json["buckets"][0]["events"][0]["accepted_by"] == "Dr. Lane"
+    assert timeline.json["buckets"][0]["events"][1]["outcome"] == "not_accepted"
+    assert denied_raw.status_code == 403
+    assert raw.status_code == 200
+    assert raw.json["raw_payload"]["patient"]["first_name"] == "Jane"
+
+
+def test_flowforge_reporting_domain_sync_routes_are_admin_only(client, monkeypatch):
+    monkeypatch.setattr(flowforge_routes, "_service", lambda: _RunService())
+
+    denied = client.post("/api/v1/flowforge/reports/domains/sync/dry-run", headers=_headers(monkeypatch))
+    dry_run = client.post(
+        "/api/v1/flowforge/reports/domains/sync/dry-run",
+        headers=_headers(monkeypatch, roles={"flowforge:admin"}),
+    )
+    synced = client.post(
+        "/api/v1/flowforge/reports/domains/sync",
+        headers=_headers(monkeypatch, roles={"flowforge:admin"}),
+    )
+
+    assert denied.status_code == 403
+    assert dry_run.status_code == 200
+    assert dry_run.json["dry_run"] is True
+    assert dry_run.json["domains"][0]["registration_status"] == "validated"
+    assert synced.status_code == 200
+    assert synced.json["registered_count"] == 2
 
 
 def test_flowforge_workflow_version_routes_list_and_publish(client, monkeypatch):

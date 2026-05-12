@@ -159,6 +159,27 @@ class _FakeWorkspaceLLMService:
         return {"success": True, "message": f"Connected to {llm_id}"}
 
 
+class _FakeFlowForgeSemanticSyncService:
+    def __init__(self, domains: list[dict[str, Any]] | None = None, fail: bool = False) -> None:
+        self._domains = domains or [
+            {
+                "domain_key": "flowforge_workflow_runs",
+                "read_model": "v_flowforge_report_workflow_runs",
+                "registration_status": "validated",
+                "registration_issues": [],
+            }
+        ]
+        self._fail = fail
+
+    def sync_domains(self, *, workspace_id: str, actor_user_id: str | None, dry_run: bool) -> dict[str, Any]:
+        assert workspace_id in {"ws-1", "*"}
+        assert actor_user_id is None
+        assert dry_run is True
+        if self._fail:
+            raise RuntimeError("semantic registry unavailable")
+        return {"domains": [dict(domain) for domain in self._domains]}
+
+
 def test_check_all_healthy():
     with patch("app.services.admin.health_service.requests.get") as mock_get:
         with patch.object(
@@ -179,6 +200,7 @@ def test_check_all_healthy():
                 qdrant_url="http://fake-qdrant:6333",
                 mcp_resource_url="http://fake-mcp:8001",
                 workspace_llm_service=_FakeWorkspaceLLMService(),
+                flowforge_semantic_sync_service=_FakeFlowForgeSemanticSyncService(),
             )
             result = svc.check_all(workspace_id="ws-1")
 
@@ -197,6 +219,7 @@ def test_check_all_healthy():
     assert result["checks"]["broker"]["status"] == "ok"
     assert result["checks"]["flowforge"]["status"] == "ok"
     assert result["checks"]["flowforge"]["worker"]["task_name"] == "qf.flowforge.dispatch_notifications"
+    assert result["checks"]["flowforge"]["metrics"]["workflow_intelligence_domain_drift_count"] == 0
 
 
 def test_check_all_mysql_down():
@@ -213,6 +236,7 @@ def test_check_all_mysql_down():
                 qdrant_url="http://fake-qdrant:6333",
                 mcp_resource_url="http://fake-mcp:8001",
                 workspace_llm_service=_FakeWorkspaceLLMService(),
+                flowforge_semantic_sync_service=_FakeFlowForgeSemanticSyncService(),
             )
             result = svc.check_all(workspace_id="ws-1")
 
@@ -234,6 +258,7 @@ def test_check_all_workspace_llm_down():
                 qdrant_url="http://fake-qdrant:6333",
                 mcp_resource_url="http://fake-mcp:8001",
                 workspace_llm_service=_FakeWorkspaceLLMService(fail_ids={12}),
+                flowforge_semantic_sync_service=_FakeFlowForgeSemanticSyncService(),
             )
             result = svc.check_all(workspace_id="ws-1")
 
@@ -258,6 +283,7 @@ def test_check_all_everything_down():
                 qdrant_url="http://fake-qdrant:6333",
                 mcp_resource_url="http://fake-mcp:8001",
                 workspace_llm_service=_FakeWorkspaceLLMService(fail_ids={11, 12}),
+                flowforge_semantic_sync_service=_FakeFlowForgeSemanticSyncService(),
             )
             result = svc.check_all(workspace_id="ws-1")
 
@@ -310,7 +336,8 @@ def test_check_flowforge_reports_stale_worker_and_operational_backlog():
                 "expired_artifact_count": 8,
                 "artifact_retention_pending_count": 9,
             }
-        )
+        ),
+        flowforge_semantic_sync_service=_FakeFlowForgeSemanticSyncService(),
     )
 
     with patch("app.services.admin.health_service.get_flowforge_worker_health", return_value=_FLOWFORGE_STALE):
@@ -329,6 +356,7 @@ def test_check_flowforge_reports_stale_worker_and_operational_backlog():
     assert result["metrics"]["invalid_production_run_as_count"] == 2
     assert result["metrics"]["expired_artifact_count"] == 8
     assert result["metrics"]["artifact_retention_pending_count"] == 9
+    assert result["metrics"]["workflow_intelligence_domain_drift_count"] == 0
     assert any("heartbeat" in issue for issue in result["issues"])
     assert any("stuck" in issue for issue in result["issues"])
     assert any("scheduled" in issue for issue in result["issues"])
@@ -350,7 +378,8 @@ def test_check_flowforge_degrades_when_optional_operations_tables_are_missing():
                 "expired_artifact_count",
                 "artifact_retention_pending_count",
             }
-        )
+        ),
+        flowforge_semantic_sync_service=_FakeFlowForgeSemanticSyncService(),
     )
 
     with patch("app.services.admin.health_service.get_flowforge_worker_health", return_value=_FLOWFORGE_HEALTHY):
@@ -364,6 +393,50 @@ def test_check_flowforge_degrades_when_optional_operations_tables_are_missing():
     assert result["metrics"]["expired_artifact_count"] is None
     assert result["metrics"]["artifact_retention_pending_count"] is None
     assert any("migrations" in issue for issue in result["issues"])
+
+
+def test_check_flowforge_degrades_when_workflow_intelligence_domains_drift():
+    svc = AdminHealthService(
+        sql=_FakeSQL(),
+        flowforge_semantic_sync_service=_FakeFlowForgeSemanticSyncService(
+            domains=[
+                {
+                    "domain_key": "flowforge_workflow_runs",
+                    "read_model": "v_flowforge_report_workflow_runs",
+                    "registration_status": "validated",
+                    "registration_issues": [],
+                },
+                {
+                    "domain_key": "flowforge_offer_outcomes",
+                    "read_model": "v_flowforge_report_offer_outcomes",
+                    "registration_status": "read_model_missing",
+                    "registration_issues": ["read model missing from migration SQL"],
+                },
+            ]
+        ),
+    )
+
+    with patch("app.services.admin.health_service.get_flowforge_worker_health", return_value=_FLOWFORGE_HEALTHY):
+        result = svc._check_flowforge(workspace_id="ws-1")
+
+    assert result["status"] == "degraded"
+    assert result["metrics"]["workflow_intelligence_domain_drift_count"] == 1
+    assert result["workflow_intelligence_domains"][1]["domain_key"] == "flowforge_offer_outcomes"
+    assert any("Workflow Intelligence domain" in issue for issue in result["issues"])
+
+
+def test_check_flowforge_degrades_when_workflow_intelligence_health_is_unavailable():
+    svc = AdminHealthService(
+        sql=_FakeSQL(),
+        flowforge_semantic_sync_service=_FakeFlowForgeSemanticSyncService(fail=True),
+    )
+
+    with patch("app.services.admin.health_service.get_flowforge_worker_health", return_value=_FLOWFORGE_HEALTHY):
+        result = svc._check_flowforge(workspace_id="ws-1")
+
+    assert result["status"] == "degraded"
+    assert result["metrics"]["workflow_intelligence_domain_drift_count"] is None
+    assert any("Workflow Intelligence domain registration health is unavailable" in issue for issue in result["issues"])
 
 
 class _FakeValkeyClient:

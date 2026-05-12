@@ -8,6 +8,7 @@ from app.features.flowforge.repositories.runtime_events import FlowForgeRuntimeE
 from app.features.flowforge.repositories.runtime_human_tasks import FlowForgeRuntimeHumanTaskRepositoryMixin
 from app.features.flowforge.repositories.runtime_matching import FlowForgeRuntimeMatchingRepositoryMixin
 from app.features.flowforge.repositories.runtime_notifications import FlowForgeRuntimeNotificationRepositoryMixin
+from app.features.flowforge.repositories.runtime_reporting import FlowForgeRuntimeReportingRepositoryMixin
 from app.features.flowforge.repositories.runtime_runs import FlowForgeRuntimeRunRepositoryMixin
 from app.features.flowforge.repositories.runtime_signed_actions import FlowForgeRuntimeSignedActionRepositoryMixin
 from app.ports.sql_executor import ForgeQueryPort
@@ -21,6 +22,7 @@ class FlowForgeRuntimeRepository(
     FlowForgeRuntimeAssignmentRepositoryMixin,
     FlowForgeRuntimeSignedActionRepositoryMixin,
     FlowForgeRuntimeNotificationRepositoryMixin,
+    FlowForgeRuntimeReportingRepositoryMixin,
 ):
     def __init__(self, *, sql: Optional[ForgeQueryPort] = None) -> None:
         self._sql = sql or ForgeMetaSQL()

@@ -15,6 +15,7 @@ from app.celery_app import celery
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.config import QDRANT_URL, VALKEY_ADDRESS, VALKEY_CONFIG, VALKEY_PORT, VLLM_BASE_URL, VLLM_MODEL
 from app.config.mcp_oauth_config import load_mcp_oauth_config
+from app.features.flowforge.reporting.semantic_sync import FlowForgeSemanticSyncService
 from app.features.flowforge.runtime.health import get_flowforge_worker_health
 from app.ports.sql_executor import ForgeQueryPort
 from app.services.tenancy.workspace_llm_service import WorkspaceLLMService
@@ -32,6 +33,7 @@ class AdminHealthService:
         qdrant_url: Optional[str] = None,
         mcp_resource_url: Optional[str] = None,
         workspace_llm_service: Optional[WorkspaceLLMService] = None,
+        flowforge_semantic_sync_service: Optional[FlowForgeSemanticSyncService] = None,
     ) -> None:
         self._sql = sql or ForgeMetaSQL()
         self._vllm_base_url = vllm_base_url or VLLM_BASE_URL
@@ -39,6 +41,7 @@ class AdminHealthService:
         self._qdrant_url = qdrant_url or QDRANT_URL
         self._mcp_resource_url = (mcp_resource_url or load_mcp_oauth_config().mcp_resource_url).rstrip("/")
         self._workspace_llm_service = workspace_llm_service or WorkspaceLLMService()
+        self._flowforge_semantic_sync_service = flowforge_semantic_sync_service or FlowForgeSemanticSyncService()
 
     def check_all(self, *, workspace_id: Optional[str] = None) -> Dict[str, Any]:
         checks: Dict[str, Any] = {}
@@ -48,7 +51,7 @@ class AdminHealthService:
         checks["qdrant"] = self._check_qdrant()
         checks["mcp"] = self._check_mcp()
         checks["broker"] = self.check_broker()
-        checks["flowforge"] = self._check_flowforge()
+        checks["flowforge"] = self._check_flowforge(workspace_id=workspace_id)
 
         statuses = [c["status"] for c in checks.values()]
         if all(s == "ok" for s in statuses):
@@ -289,7 +292,7 @@ class AdminHealthService:
             out["status"] = "error"
         return out
 
-    def _check_flowforge(self) -> Dict[str, Any]:
+    def _check_flowforge(self, *, workspace_id: Optional[str] = None) -> Dict[str, Any]:
         heartbeat = get_flowforge_worker_health()
         try:
             metrics = self._query_flowforge_operational_metrics()
@@ -311,9 +314,12 @@ class AdminHealthService:
                     "invalid_production_run_as_count": None,
                     "expired_artifact_count": None,
                     "artifact_retention_pending_count": None,
+                    "workflow_intelligence_domain_drift_count": None,
                 },
             }
 
+        workflow_intelligence = self._check_workflow_intelligence_domains(workspace_id=workspace_id)
+        metrics["workflow_intelligence_domain_drift_count"] = workflow_intelligence["drift_count"]
         issues: list[str] = []
         if not heartbeat.get("healthy"):
             issues.append(str(heartbeat.get("reason") or "FlowForge worker heartbeat is unhealthy."))
@@ -337,6 +343,12 @@ class AdminHealthService:
             )
         if int(metrics.get("artifact_retention_pending_count") or 0) > 0:
             issues.append(f"{metrics['artifact_retention_pending_count']} dataset artifact(s) are past retention.")
+        if workflow_intelligence.get("issue"):
+            issues.append(str(workflow_intelligence["issue"]))
+        elif int(workflow_intelligence["drift_count"] or 0) > 0:
+            issues.append(
+                f"{workflow_intelligence['drift_count']} Workflow Intelligence domain(s) have registration drift."
+            )
         unavailable_metrics = [
             key
             for key in (
@@ -347,6 +359,7 @@ class AdminHealthService:
                 "invalid_production_run_as_count",
                 "expired_artifact_count",
                 "artifact_retention_pending_count",
+                "workflow_intelligence_domain_drift_count",
             )
             if metrics.get(key) is None
         ]
@@ -357,8 +370,41 @@ class AdminHealthService:
             "status": "ok" if not issues else "degraded",
             "worker": heartbeat,
             "metrics": metrics,
+            "workflow_intelligence_domains": workflow_intelligence["domains"],
             "issues": issues,
         }
+
+    def _check_workflow_intelligence_domains(self, *, workspace_id: Optional[str]) -> Dict[str, Any]:
+        try:
+            sync = self._flowforge_semantic_sync_service.sync_domains(
+                workspace_id=str(workspace_id or "*"),
+                actor_user_id=None,
+                dry_run=True,
+            )
+        except (OSError, RuntimeError, ValueError):
+            logger.exception("Workflow Intelligence domain health failed")
+            return {
+                "drift_count": None,
+                "domains": [],
+                "issue": "Workflow Intelligence domain registration health is unavailable.",
+            }
+
+        domains: list[dict[str, Any]] = []
+        drift_count = 0
+        for domain in sync.get("domains") or []:
+            status = str(domain.get("registration_status") or "")
+            issues = [str(issue) for issue in domain.get("registration_issues") or []]
+            if status not in {"validated", "registered"} or issues:
+                drift_count += 1
+            domains.append(
+                {
+                    "domain_key": str(domain.get("domain_key") or ""),
+                    "read_model": str(domain.get("read_model") or ""),
+                    "registration_status": status,
+                    "registration_issues": issues,
+                }
+            )
+        return {"drift_count": drift_count, "domains": domains, "issue": None}
 
     def _query_flowforge_operational_metrics(self) -> Dict[str, Any]:
         now = datetime.now(timezone.utc).replace(tzinfo=None)

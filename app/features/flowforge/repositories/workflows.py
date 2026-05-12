@@ -216,11 +216,30 @@ class FlowForgeWorkflowRepository:
     def list_workflow_definitions(self, *, workspace_id: str) -> list[dict[str, Any]]:
         rows = self._sql.execute_query_mappings(
             """
-            SELECT d.*, v.graph_json, v.validation_status, v.validation_result_json
+            SELECT
+              d.*,
+              v.graph_json,
+              v.validation_status,
+              v.validation_result_json,
+              COALESCE(
+                NULLIF(TRIM(CONCAT_WS(' ', owner_user.first_name, owner_user.last_name)), ''),
+                NULLIF(owner_user.email, ''),
+                NULLIF(owner_user.username, '')
+              ) AS owner_display_name,
+              COALESCE(
+                NULLIF(TRIM(CONCAT_WS(' ', run_as_user.first_name, run_as_user.last_name)), ''),
+                NULLIF(run_as_user.email, ''),
+                NULLIF(run_as_user.username, '')
+              ) AS run_as_user_display_name
             FROM flowforge_workflow_definitions d
             LEFT JOIN flowforge_workflow_versions v
               ON v.id = COALESCE(d.current_draft_version_id, d.latest_published_version_id)
              AND v.workspace_id = d.workspace_id
+            LEFT JOIN users owner_user
+              ON owner_user.user_id = d.owner_user_id
+            LEFT JOIN users run_as_user
+              ON d.run_as_principal_type = 'user'
+             AND run_as_user.user_id = d.run_as_principal_id
             WHERE d.workspace_id = :workspace_id
               AND d.archived_at IS NULL
             ORDER BY d.updated_at DESC, d.id DESC
@@ -232,11 +251,30 @@ class FlowForgeWorkflowRepository:
     def get_workflow_definition(self, *, workspace_id: str, workflow_definition_id: int) -> dict[str, Any] | None:
         rows = self._sql.execute_query_mappings(
             """
-            SELECT d.*, v.graph_json, v.validation_status, v.validation_result_json
+            SELECT
+              d.*,
+              v.graph_json,
+              v.validation_status,
+              v.validation_result_json,
+              COALESCE(
+                NULLIF(TRIM(CONCAT_WS(' ', owner_user.first_name, owner_user.last_name)), ''),
+                NULLIF(owner_user.email, ''),
+                NULLIF(owner_user.username, '')
+              ) AS owner_display_name,
+              COALESCE(
+                NULLIF(TRIM(CONCAT_WS(' ', run_as_user.first_name, run_as_user.last_name)), ''),
+                NULLIF(run_as_user.email, ''),
+                NULLIF(run_as_user.username, '')
+              ) AS run_as_user_display_name
             FROM flowforge_workflow_definitions d
             LEFT JOIN flowforge_workflow_versions v
               ON v.id = COALESCE(d.current_draft_version_id, d.latest_published_version_id)
              AND v.workspace_id = d.workspace_id
+            LEFT JOIN users owner_user
+              ON owner_user.user_id = d.owner_user_id
+            LEFT JOIN users run_as_user
+              ON d.run_as_principal_type = 'user'
+             AND run_as_user.user_id = d.run_as_principal_id
             WHERE d.workspace_id = :workspace_id
               AND d.id = :workflow_definition_id
               AND d.archived_at IS NULL
@@ -250,6 +288,27 @@ class FlowForgeWorkflowRepository:
         if not rows:
             return None
         return self._decode_workflow_definition(rows[0])
+
+    def get_user_display_name(self, *, user_id: str) -> str | None:
+        normalized_user_id = str(user_id or "").strip()
+        if not normalized_user_id:
+            return None
+        rows = self._sql.execute_query_mappings(
+            """
+            SELECT COALESCE(
+              NULLIF(TRIM(CONCAT_WS(' ', first_name, last_name)), ''),
+              NULLIF(email, ''),
+              NULLIF(username, '')
+            ) AS display_name
+            FROM users
+            WHERE user_id = :user_id
+            LIMIT 1
+            """,
+            {"user_id": normalized_user_id},
+        )
+        if not rows:
+            return None
+        return str(rows[0].get("display_name") or "").strip() or None
 
     def create_workflow_version(
         self,

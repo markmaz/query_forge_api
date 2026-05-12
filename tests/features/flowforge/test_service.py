@@ -1,11 +1,12 @@
 from decimal import Decimal
-from datetime import datetime
+from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
 
 from app.exceptions.forge_error import ForgeError
 from app.config.llm_resolver import ResolvedLLMRuntime
+from app.features.flowforge.reporting.semantic_sync import FlowForgeSemanticSyncService
 from app.features.flowforge.service import FlowForgeService
 
 
@@ -345,12 +346,16 @@ class _WorkflowRepo:
                 "name": "Intake Routing",
                 "description": "Routes intake submissions.",
                 "owner_user_id": "user-1",
+                "owner_display_name": "Taylor Jordan",
                 "created_by": "user-1",
                 "run_as_principal_type": "user",
                 "run_as_principal_id": "user-1",
+                "run_as_user_display_name": "Taylor Jordan",
                 "lifecycle": "development",
                 "status": "draft",
                 "graph_json": {"nodes": [{"id": "intake"}], "edges": []},
+                "created_at": datetime(2026, 5, 7, 20, 27, 25),
+                "updated_at": datetime(2026, 5, 8, 20, 27, 25),
             }
         ]
         self.versions = [
@@ -604,6 +609,11 @@ class _RuntimeRepo:
                 "workflow_version_id": 13,
                 "intake_event_id": 501,
                 "mode": "test",
+                "run_as_principal_type": "user",
+                "run_as_principal_id": "operator-1",
+                "run_as_principal_display_name": "Olivia Operator",
+                "triggered_by_user_id": "operator-1",
+                "triggered_by_display_name": "Olivia Operator",
                 "status": "waiting",
                 "current_node_id": "intake",
                 "idempotency_key": "intake:501:trigger:66",
@@ -798,6 +808,61 @@ class _RuntimeRepo:
             "data_movement_audit_count": 13,
             "failed_import_count": 1,
             "failed_export_count": 2,
+        }
+
+    def list_intake_review_events(self, *, workspace_id: str, mode: str, days: int):
+        today = date.today()
+        return [
+            {
+                "intake_event_id": 501,
+                "intake_date": today,
+                "received_at": datetime.combine(today, datetime.min.time()),
+                "provider": "jotform",
+                "external_submission_id": "sub-501",
+                "run_id": 90,
+                "run_status": "completed",
+                "workflow_key": "intake-routing",
+                "assignment_id": 701,
+                "assignment_status": "assigned",
+                "accepted_resource_set_id": 20,
+                "accepted_source_record_key": "dr-lane",
+                "accepted_resource_display_name": "Dr. Lane",
+                "no_match_reason": None,
+                "raw_payload_redacted_at": None,
+            },
+            {
+                "intake_event_id": 502,
+                "intake_date": today,
+                "received_at": datetime.combine(today, datetime.min.time()),
+                "provider": "jotform",
+                "external_submission_id": "sub-502",
+                "run_id": 91,
+                "run_status": "needs_attention",
+                "workflow_key": "intake-routing",
+                "assignment_id": None,
+                "assignment_status": None,
+                "accepted_resource_set_id": None,
+                "accepted_source_record_key": None,
+                "accepted_resource_display_name": None,
+                "no_match_reason": "no_eligible_candidates",
+                "raw_payload_redacted_at": None,
+            },
+        ]
+
+    def get_intake_raw_form(self, *, workspace_id: str, intake_event_id: int):
+        return {
+            "intake_event_id": intake_event_id,
+            "provider": "jotform",
+            "external_form_id": "form-1",
+            "external_submission_id": "sub-502",
+            "mode": "production",
+            "received_at": datetime(2026, 5, 5, 11, 0, 0),
+            "raw_payload_available": True,
+            "raw_payload_redacted_at": None,
+            "raw_payload_redacted_by": None,
+            "raw_payload_expires_at": datetime(2026, 6, 4, 11, 0, 0),
+            "raw_payload_json": {"patient": {"first_name": "Jane"}},
+            "normalized_payload_json": {"requested_service": "therapy"},
         }
 
 
@@ -1066,6 +1131,8 @@ def test_flowforge_service_lists_persisted_workflows_without_builtin_starters():
 
     assert [workflow["id"] for workflow in workflows] == ["12"]
     assert workflows[0]["name"] == "Intake Routing"
+    assert workflows[0]["created_at"] == "2026-05-07T20:27:25"
+    assert workflows[0]["updated_at"] == "2026-05-08T20:27:25"
 
 
 def test_flowforge_service_returns_design_preview_for_persisted_workflow():
@@ -2013,6 +2080,11 @@ def test_flowforge_service_lists_persisted_runs_and_events():
     assert runs["offset"] == 0
     assert runs["runs"][0]["id"] == 90
     assert runs["runs"][0]["run_context"] == {"trigger_key": "intake-routing"}
+    assert runs["runs"][0]["run_as_principal_type"] == "user"
+    assert runs["runs"][0]["run_as_principal_id"] == "operator-1"
+    assert runs["runs"][0]["run_as_principal_display_name"] == "Olivia Operator"
+    assert runs["runs"][0]["triggered_by_user_id"] == "operator-1"
+    assert runs["runs"][0]["triggered_by_display_name"] == "Olivia Operator"
     assert detail["id"] == 90
     assert events["events"][0]["event_type"] == "workflow.run.created"
 
@@ -2301,7 +2373,18 @@ def test_flowforge_service_uses_default_no_match_recipients():
     assert repo.created_notifications[0]["recipient"] == "ops-default@example.com"
 
 
-def test_flowforge_service_returns_reporting_domains_and_summary():
+def test_flowforge_service_returns_reporting_domains_and_summary(monkeypatch):
+    monkeypatch.setattr(
+        FlowForgeSemanticSyncService,
+        "domain_status_index",
+        lambda self, *, workspace_id: {
+            "flowforge_workflow_runs": {
+                "registration_status": "registered",
+                "registration_issues": [],
+                "queryforge_launch": {"source": "flowforge"},
+            }
+        },
+    )
     service = FlowForgeService(runtime_repository=_RuntimeRepo())
 
     domains = service.list_reporting_domains(workspace_id="ws-1")
@@ -2345,6 +2428,23 @@ def test_flowforge_service_returns_reporting_dashboard_metrics():
         "flowforge_dataset_artifacts",
         "flowforge_data_movement_audit",
     }
+
+
+def test_flowforge_service_returns_intake_review_timeline_and_raw_form():
+    service = FlowForgeService(runtime_repository=_RuntimeRepo())
+
+    timeline = service.get_intake_review_timeline(workspace_id="ws-1", mode=None, days=7)
+    raw_form = service.get_intake_raw_form(workspace_id="ws-1", intake_event_id=502)
+    today_bucket = next(bucket for bucket in timeline["buckets"] if bucket["date"] == date.today().isoformat())
+
+    assert timeline["mode"] == "production"
+    assert today_bucket["intake_count"] == 2
+    assert today_bucket["accepted_count"] == 1
+    assert today_bucket["not_accepted_count"] == 1
+    assert today_bucket["events"][0]["accepted_by"] == "Dr. Lane"
+    assert today_bucket["events"][1]["outcome"] == "not_accepted"
+    assert raw_form["raw_payload"]["patient"]["first_name"] == "Jane"
+    assert raw_form["normalized_payload"]["requested_service"] == "therapy"
 
 
 def test_flowforge_service_lists_and_publishes_workflow_versions():
@@ -2468,7 +2568,12 @@ def test_flowforge_service_returns_workflow_governance_metadata():
     )
 
     assert result["owner_user_id"] == "user-1"
-    assert result["run_as_principal"] == {"principal_type": "user", "principal_id": "user-1"}
+    assert result["owner_display_name"] == "Taylor Jordan"
+    assert result["run_as_principal"] == {
+        "principal_type": "user",
+        "principal_id": "user-1",
+        "display_name": "Taylor Jordan",
+    }
     assert result["lifecycle"] == "development"
     assert result["effective_permissions"]["permission"] == "owner"
     assert result["effective_permissions"]["can_manage"] is True
@@ -2515,7 +2620,11 @@ def test_flowforge_service_updates_owner_and_run_as():
 
     assert owner["owner_user_id"] == "user-2"
     assert repo.grants[-1]["permission"] == "owner"
-    assert run_as["run_as_principal"] == {"principal_type": "workspace_principal", "principal_id": "ws-1"}
+    assert run_as["run_as_principal"] == {
+        "principal_type": "workspace_principal",
+        "principal_id": "ws-1",
+        "display_name": "Workspace principal",
+    }
 
 
 def test_flowforge_service_starts_manual_run_from_latest_published_version(monkeypatch):

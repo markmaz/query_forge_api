@@ -72,10 +72,26 @@ class FlowForgeRuntimeRunRepositoryMixin:
     def get_run_by_idempotency(self, *, workspace_id: str, idempotency_key: str) -> dict[str, Any] | None:
         rows = self._sql.execute_query_mappings(
             """
-            SELECT *
-            FROM flowforge_runs
-            WHERE workspace_id = :workspace_id
-              AND idempotency_key = :idempotency_key
+            SELECT
+              r.*,
+              COALESCE(
+                NULLIF(TRIM(CONCAT_WS(' ', run_as_user.first_name, run_as_user.last_name)), ''),
+                NULLIF(run_as_user.email, ''),
+                NULLIF(run_as_user.username, '')
+              ) AS run_as_principal_display_name,
+              COALESCE(
+                NULLIF(TRIM(CONCAT_WS(' ', triggered_user.first_name, triggered_user.last_name)), ''),
+                NULLIF(triggered_user.email, ''),
+                NULLIF(triggered_user.username, '')
+              ) AS triggered_by_display_name
+            FROM flowforge_runs r
+            LEFT JOIN users run_as_user
+              ON r.run_as_principal_type = 'user'
+             AND run_as_user.user_id = r.run_as_principal_id
+            LEFT JOIN users triggered_user
+              ON triggered_user.user_id = r.triggered_by_user_id
+            WHERE r.workspace_id = :workspace_id
+              AND r.idempotency_key = :idempotency_key
             LIMIT 1
             """,
             {
@@ -100,16 +116,32 @@ class FlowForgeRuntimeRunRepositoryMixin:
     ) -> list[dict[str, Any]]:
         status_filter = str(status or "").strip()
         mode_filter = str(mode or "").strip()
-        where_status = "AND status = :status" if status_filter else ""
-        where_mode = "AND mode = :mode" if mode_filter else ""
+        where_status = "AND r.status = :status" if status_filter else ""
+        where_mode = "AND r.mode = :mode" if mode_filter else ""
         rows = self._sql.execute_query_mappings(
             f"""
-            SELECT *
-            FROM flowforge_runs
-            WHERE workspace_id = :workspace_id
+            SELECT
+              r.*,
+              COALESCE(
+                NULLIF(TRIM(CONCAT_WS(' ', run_as_user.first_name, run_as_user.last_name)), ''),
+                NULLIF(run_as_user.email, ''),
+                NULLIF(run_as_user.username, '')
+              ) AS run_as_principal_display_name,
+              COALESCE(
+                NULLIF(TRIM(CONCAT_WS(' ', triggered_user.first_name, triggered_user.last_name)), ''),
+                NULLIF(triggered_user.email, ''),
+                NULLIF(triggered_user.username, '')
+              ) AS triggered_by_display_name
+            FROM flowforge_runs r
+            LEFT JOIN users run_as_user
+              ON r.run_as_principal_type = 'user'
+             AND run_as_user.user_id = r.run_as_principal_id
+            LEFT JOIN users triggered_user
+              ON triggered_user.user_id = r.triggered_by_user_id
+            WHERE r.workspace_id = :workspace_id
               {where_status}
               {where_mode}
-            ORDER BY started_at DESC, id DESC
+            ORDER BY r.started_at DESC, r.id DESC
             LIMIT :limit OFFSET :offset
             """,
             {
@@ -125,10 +157,26 @@ class FlowForgeRuntimeRunRepositoryMixin:
     def get_run(self, *, workspace_id: str, run_id: int) -> dict[str, Any] | None:
         rows = self._sql.execute_query_mappings(
             """
-            SELECT *
-            FROM flowforge_runs
-            WHERE workspace_id = :workspace_id
-              AND id = :run_id
+            SELECT
+              r.*,
+              COALESCE(
+                NULLIF(TRIM(CONCAT_WS(' ', run_as_user.first_name, run_as_user.last_name)), ''),
+                NULLIF(run_as_user.email, ''),
+                NULLIF(run_as_user.username, '')
+              ) AS run_as_principal_display_name,
+              COALESCE(
+                NULLIF(TRIM(CONCAT_WS(' ', triggered_user.first_name, triggered_user.last_name)), ''),
+                NULLIF(triggered_user.email, ''),
+                NULLIF(triggered_user.username, '')
+              ) AS triggered_by_display_name
+            FROM flowforge_runs r
+            LEFT JOIN users run_as_user
+              ON r.run_as_principal_type = 'user'
+             AND run_as_user.user_id = r.run_as_principal_id
+            LEFT JOIN users triggered_user
+              ON triggered_user.user_id = r.triggered_by_user_id
+            WHERE r.workspace_id = :workspace_id
+              AND r.id = :run_id
             LIMIT 1
             """,
             {

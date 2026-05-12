@@ -24,7 +24,7 @@ class FlowForgeWorkflowGovernanceServiceMixin:
                 {
                     "principal_type": "user",
                     "principal_id": actor,
-                    "display_name": "Current user",
+                    "display_name": self._user_display_name(actor) or "Current user",
                     "description": "Allowed for draft and development workflow runs.",
                     "status": "available",
                     "production_eligible": False,
@@ -260,6 +260,11 @@ class FlowForgeWorkflowGovernanceServiceMixin:
                 "id": row.get("id"),
                 "principal_type": row.get("principal_type"),
                 "principal_id": row.get("principal_id"),
+                "principal_display_name": self._principal_display_name(
+                    principal_type=str(row.get("principal_type") or ""),
+                    principal_id=str(row.get("principal_id") or ""),
+                    workspace_id=str(row.get("workspace_id") or ""),
+                ),
                 "permission": row.get("permission"),
                 "granted_by": row.get("granted_by"),
                 "granted_at": self._json_scalar(row.get("granted_at")),
@@ -333,6 +338,36 @@ class FlowForgeWorkflowGovernanceServiceMixin:
                 }
             )
         return result
+
+    def _user_display_name(self, user_id: str) -> str | None:
+        lookup = getattr(self._workflow_repository, "get_user_display_name", None)
+        if not callable(lookup):
+            return None
+        try:
+            return lookup(user_id=user_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("flowforge_user_display_name_lookup_failed user_id=%s", user_id)
+            return None
+
+    def _principal_display_name(self, *, principal_type: str, principal_id: str, workspace_id: str) -> str | None:
+        normalized_type = str(principal_type or "").strip().lower()
+        normalized_id = str(principal_id or "").strip()
+        if not normalized_id:
+            return None
+        if normalized_type == "user":
+            return self._user_display_name(normalized_id)
+        if normalized_type in {"workspace", "workspace_principal"}:
+            return "Workspace principal"
+        if normalized_type == "service_principal":
+            return next(
+                (
+                    str(item.get("display_name") or "").strip()
+                    for item in self._service_principal_run_as_options(workspace_id=workspace_id)
+                    if item.get("principal_id") == normalized_id and str(item.get("display_name") or "").strip()
+                ),
+                None,
+            )
+        return None
 
     def _run_as_principal_is_available(
         self,

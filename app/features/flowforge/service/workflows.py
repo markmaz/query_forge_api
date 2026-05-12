@@ -145,14 +145,20 @@ class FlowForgeWorkflowServiceMixin:
             actor_user_id=actor_user_id,
             enforce_permissions=False,
         )
+        actor_display_name = self._user_display_name(actor_user_id) if hasattr(self, "_user_display_name") else None
         return {
             "id": str(workflow_definition_id),
             "name": name,
             "description": self._optional_string(payload.get("description")) or "",
             "status": "draft",
             "owner_user_id": self._optional_string(actor_user_id),
+            "owner_display_name": actor_display_name,
             "lifecycle": "development",
-            "run_as_principal": {"principal_type": "user", "principal_id": actor_user_id},
+            "run_as_principal": {
+                "principal_type": "user",
+                "principal_id": actor_user_id,
+                "display_name": actor_display_name,
+            },
             "effective_permissions": {
                 "permission": "owner",
                 "can_view": True,
@@ -163,6 +169,8 @@ class FlowForgeWorkflowServiceMixin:
                 "can_own": True,
             },
             "graph": version["graph"],
+            "created_at": None,
+            "updated_at": None,
         }
 
     def validate_graph(self, *, graph: dict[str, Any], workspace_id: str | None = None) -> WorkflowValidationResult:
@@ -935,6 +943,11 @@ class FlowForgeWorkflowServiceMixin:
             return value.isoformat()
         return value
 
+    @staticmethod
+    def _optional_display_name(value: Any) -> str | None:
+        normalized = str(value or "").strip()
+        return normalized or None
+
     def _serialize_workflow_definition(
         self,
         row: dict[str, Any],
@@ -945,16 +958,24 @@ class FlowForgeWorkflowServiceMixin:
     ) -> WorkflowDefinition:
         principal_type = str(row.get("run_as_principal_type") or "").strip() or None
         principal_id = str(row.get("run_as_principal_id") or "").strip() or None
+        owner_display_name = self._optional_display_name(row.get("owner_display_name"))
+        run_as_display_name = self._optional_display_name(row.get("run_as_user_display_name"))
+        if principal_type == "workspace_principal" and principal_id:
+            run_as_display_name = "Workspace principal"
         return {
             "id": str(row.get("id")),
             "name": row.get("name") or "",
             "description": row.get("description") or "",
             "status": row.get("status") or "draft",
             "owner_user_id": row.get("owner_user_id"),
+            "owner_display_name": owner_display_name,
             "lifecycle": row.get("lifecycle") or "development",
+            "created_at": self._json_scalar(row.get("created_at")),
+            "updated_at": self._json_scalar(row.get("updated_at")),
             "run_as_principal": {
                 "principal_type": principal_type,
                 "principal_id": principal_id,
+                "display_name": run_as_display_name,
             },
             "effective_permissions": self._effective_workflow_permissions(
                 workspace_id=str(workspace_id or row.get("workspace_id") or ""),

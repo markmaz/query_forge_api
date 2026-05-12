@@ -43,6 +43,7 @@ class QueryStudioDomainExplorerService:
             SELECT
               d.id,
               d.name,
+              d.kind,
               d.description,
               COUNT(DISTINCT wc.id) AS field_count,
               COALESCE(
@@ -81,7 +82,7 @@ class QueryStudioDomainExplorerService:
              AND dp.domain_id = d.id
             WHERE udm.user_id = :user_id
               AND udm.can_read = 1
-            GROUP BY d.id, d.name, d.description
+            GROUP BY d.id, d.name, d.kind, d.description
             ORDER BY d.name
             """,
             {"workspace_id": workspace_id, "user_id": user_id},
@@ -100,6 +101,7 @@ class QueryStudioDomainExplorerService:
                     "id": domain_id,
                     "key": _slugify(name),
                     "label": name,
+                    "kind": str(row.get("kind") or "").strip() or None,
                     "description": str(row.get("description") or "").strip() or None,
                     "fieldCount": _as_int(row.get("field_count")) or 0,
                     "categoryCount": _as_int(row.get("category_count")) or 0,
@@ -133,6 +135,7 @@ class QueryStudioDomainExplorerService:
             "id": _as_int(domain.get("id")),
             "key": _slugify(str(domain.get("name") or "")),
             "label": str(domain.get("name") or "").strip(),
+            "kind": str(domain.get("kind") or "").strip() or None,
             "description": str(domain.get("description") or "").strip() or None,
             "fieldCount": max(_as_int(domain.get("field_count")) or 0, len(fields)),
             "categoryCount": category_count,
@@ -158,6 +161,7 @@ class QueryStudioDomainExplorerService:
             SELECT
               d.id,
               d.name,
+              d.kind,
               d.description,
               COUNT(DISTINCT wc.id) AS field_count,
               COALESCE(
@@ -197,7 +201,7 @@ class QueryStudioDomainExplorerService:
             WHERE d.workspace_id = :workspace_id
               AND d.id = :domain_id
               AND d.is_active = 1
-            GROUP BY d.id, d.name, d.description
+            GROUP BY d.id, d.name, d.kind, d.description
             LIMIT 1
             """,
             {"workspace_id": workspace_id, "user_id": user_id, "domain_id": int(domain_id)},

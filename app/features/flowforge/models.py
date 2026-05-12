@@ -66,6 +66,8 @@ class WorkflowDefinitionGovernance(TypedDict, total=False):
     lifecycle: str
     run_as_principal: dict[str, Any]
     effective_permissions: dict[str, Any]
+    created_at: str | None
+    updated_at: str | None
 
 
 class WorkflowDefinition(WorkflowDefinitionGovernance):

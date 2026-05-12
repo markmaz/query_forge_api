@@ -1,220 +1,37 @@
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta
 from typing import Any
 
-
-_REPORTING_DOMAINS: list[dict[str, Any]] = [
-    {
-        "domain_key": "flowforge_workflow_runs",
-        "display_name": "FlowForge Workflow Runs",
-        "description": "Workspace-scoped workflow run status, mode, timing, and operational outcome metrics.",
-        "read_model": "v_flowforge_report_workflow_runs",
-        "default_filters": [{"field": "mode", "operator": "equals", "value": "production"}],
-        "sensitive_excluded_fields": ["run_context_json", "idempotency_key"],
-        "query_studio_prompts": [
-            "How many FlowForge runs completed this week?",
-            "Which FlowForge runs need attention?",
-            "Show run counts by workflow and status.",
-        ],
-        "metrics": [
-            {"key": "run_count", "label": "Run Count"},
-            {"key": "active_run_count", "label": "Active Runs"},
-            {"key": "completed_run_count", "label": "Completed Runs"},
-            {"key": "failed_run_count", "label": "Failed Runs"},
-            {"key": "needs_attention_count", "label": "Needs Attention Runs"},
-        ],
-        "dimensions": [
-            {"key": "mode", "label": "Mode"},
-            {"key": "status", "label": "Run Status"},
-            {"key": "workflow_definition_id", "label": "Workflow Definition"},
-            {"key": "workflow_version_id", "label": "Workflow Version"},
-        ],
-    },
-    {
-        "domain_key": "flowforge_intake_events",
-        "display_name": "FlowForge Intake Events",
-        "description": "Safe intake event metadata without raw payloads, normalized payloads, headers, or sensitive fields.",
-        "read_model": "v_flowforge_report_intake_events",
-        "default_filters": [{"field": "mode", "operator": "equals", "value": "production"}],
-        "sensitive_excluded_fields": [
-            "headers_json",
-            "raw_payload_json",
-            "normalized_payload_json",
-            "sensitive_fields_json",
-            "source_ip",
-        ],
-        "query_studio_prompts": [
-            "How many intakes were received by provider?",
-            "Show intake events that produced no workflow run.",
-        ],
-        "metrics": [{"key": "intake_event_count", "label": "Intake Event Count"}],
-        "dimensions": [
-            {"key": "provider", "label": "Provider"},
-            {"key": "mode", "label": "Mode"},
-            {"key": "status", "label": "Status"},
-        ],
-    },
-    {
-        "domain_key": "flowforge_matching_evaluations",
-        "display_name": "FlowForge Matching Evaluations",
-        "description": "Matching outcomes, selected resource keys, and no-match reasons without input context payloads.",
-        "read_model": "v_flowforge_report_matching_evaluations",
-        "default_filters": [{"field": "run_mode", "operator": "equals", "value": "production"}],
-        "sensitive_excluded_fields": ["input_context_json", "summary_json"],
-        "query_studio_prompts": [
-            "What are the top no-match reasons?",
-            "How many matching evaluations selected a resource?",
-        ],
-        "metrics": [
-            {"key": "matching_evaluation_count", "label": "Matching Evaluation Count"},
-            {"key": "no_match_outcome_count", "label": "No-Match Outcomes"},
-        ],
-        "dimensions": [
-            {"key": "status", "label": "Evaluation Status"},
-            {"key": "no_match_reason", "label": "No-Match Reason"},
-            {"key": "resource_set_id", "label": "Resource Set"},
-        ],
-    },
-    {
-        "domain_key": "flowforge_resource_snapshots",
-        "display_name": "FlowForge Resource Snapshots",
-        "description": "Compiled resource snapshot availability, capacity, and status fields with contact/sensitive profiles excluded.",
-        "read_model": "v_flowforge_report_resource_snapshots",
-        "default_filters": [{"field": "snapshot_mode", "operator": "equals", "value": "production"}],
-        "sensitive_excluded_fields": [
-            "primary_email",
-            "primary_phone",
-            "normalized_profile_json",
-            "sensitive_profile_json",
-            "validation_errors_json",
-        ],
-        "query_studio_prompts": [
-            "How many active resources are available?",
-            "Show resource capacity by service area.",
-        ],
-        "metrics": [
-            {"key": "resource_snapshot_record_count", "label": "Resource Snapshot Records"},
-            {"key": "available_resource_count", "label": "Available Resources"},
-        ],
-        "dimensions": [
-            {"key": "effective_status", "label": "Effective Status"},
-            {"key": "availability_status", "label": "Availability Status"},
-            {"key": "resource_set_id", "label": "Resource Set"},
-        ],
-    },
-    {
-        "domain_key": "flowforge_offers_responses",
-        "display_name": "FlowForge Offers and Responses",
-        "description": "Human offer task status, due/completion timing, and resource references without signed-token data.",
-        "read_model": "v_flowforge_report_offers_responses",
-        "default_filters": [{"field": "run_mode", "operator": "equals", "value": "production"}],
-        "sensitive_excluded_fields": ["response_json", "idempotency_key", "signed_action_tokens"],
-        "query_studio_prompts": [
-            "What is the offer acceptance rate?",
-            "Which offers are still pending?",
-        ],
-        "metrics": [
-            {"key": "offer_count", "label": "Offer Count"},
-            {"key": "pending_offer_count", "label": "Pending Offers"},
-            {"key": "completed_offer_count", "label": "Completed Offers"},
-        ],
-        "dimensions": [
-            {"key": "status", "label": "Offer Status"},
-            {"key": "resource_set_id", "label": "Resource Set"},
-        ],
-    },
-    {
-        "domain_key": "flowforge_assignments",
-        "display_name": "FlowForge Assignments",
-        "description": "Assignment outcomes and resource references created by FlowForge workflows.",
-        "read_model": "v_flowforge_report_assignments",
-        "default_filters": [{"field": "run_mode", "operator": "equals", "value": "production"}],
-        "sensitive_excluded_fields": ["assignment_json", "idempotency_key"],
-        "query_studio_prompts": [
-            "How many assignments were created this month?",
-            "Show assignments by resource set and status.",
-        ],
-        "metrics": [{"key": "assignment_count", "label": "Assignment Count"}],
-        "dimensions": [
-            {"key": "status", "label": "Assignment Status"},
-            {"key": "resource_set_id", "label": "Resource Set"},
-        ],
-    },
-    {
-        "domain_key": "flowforge_notifications",
-        "display_name": "FlowForge Notifications",
-        "description": "Notification delivery status and template usage with recipient addresses and payload details excluded.",
-        "read_model": "v_flowforge_report_notifications",
-        "default_filters": [{"field": "run_mode", "operator": "equals", "value": "production"}],
-        "sensitive_excluded_fields": ["recipient", "payload_summary_json", "provider_message_id", "error_message"],
-        "query_studio_prompts": [
-            "How many FlowForge notifications failed?",
-            "Show notifications by template and status.",
-        ],
-        "metrics": [
-            {"key": "notification_count", "label": "Notification Count"},
-            {"key": "pending_notification_count", "label": "Pending Notifications"},
-            {"key": "failed_notification_count", "label": "Failed Notifications"},
-        ],
-        "dimensions": [
-            {"key": "channel", "label": "Channel"},
-            {"key": "template_key", "label": "Template"},
-            {"key": "status", "label": "Status"},
-        ],
-    },
-    {
-        "domain_key": "flowforge_dataset_artifacts",
-        "display_name": "FlowForge Dataset Artifacts",
-        "description": "Dataset artifact lifecycle, volume, storage kind, expiry, and run linkage for import/export operations.",
-        "read_model": "v_flowforge_report_dataset_artifacts",
-        "default_filters": [{"field": "run_mode", "operator": "equals", "value": "production"}],
-        "sensitive_excluded_fields": ["storage_ref_json", "schema_json", "checksum"],
-        "query_studio_prompts": [
-            "Which FlowForge dataset artifacts are past retention?",
-            "Show data movement artifact counts by status and storage kind.",
-            "How many rows were exported by FlowForge this week?",
-        ],
-        "metrics": [
-            {"key": "dataset_artifact_count", "label": "Dataset Artifacts"},
-            {"key": "expired_dataset_artifact_count", "label": "Expired Dataset Artifacts"},
-            {"key": "retention_pending_artifact_count", "label": "Past-Retention Artifacts"},
-        ],
-        "dimensions": [
-            {"key": "artifact_type", "label": "Artifact Type"},
-            {"key": "storage_kind", "label": "Storage Kind"},
-            {"key": "status", "label": "Artifact Status"},
-        ],
-    },
-    {
-        "domain_key": "flowforge_data_movement_audit",
-        "display_name": "FlowForge Data Movement Audit",
-        "description": "Operational import/export audit rows with action status, source/destination references, and timing.",
-        "read_model": "v_flowforge_report_data_movement_audit",
-        "default_filters": [{"field": "run_mode", "operator": "equals", "value": "production"}],
-        "sensitive_excluded_fields": ["request_json", "result_json", "idempotency_key"],
-        "query_studio_prompts": [
-            "Which FlowForge imports failed in the last day?",
-            "Which FlowForge exports failed in the last day?",
-            "Show import and export counts by source and destination.",
-        ],
-        "metrics": [
-            {"key": "data_movement_audit_count", "label": "Data Movement Audit Rows"},
-            {"key": "failed_import_count", "label": "Failed Imports"},
-            {"key": "failed_export_count", "label": "Failed Exports"},
-        ],
-        "dimensions": [
-            {"key": "action_type", "label": "Action Type"},
-            {"key": "status", "label": "Action Status"},
-            {"key": "source_key", "label": "Source"},
-            {"key": "destination_key", "label": "Destination"},
-        ],
-    },
-]
+from app.exceptions.forge_error import ForgeError
+from app.features.flowforge.reporting import REPORTING_DOMAINS, FlowForgeSemanticSyncService
 
 
 class FlowForgeReportServiceMixin:
     def list_reporting_domains(self, *, workspace_id: str) -> list[dict[str, Any]]:
-        return [self._reporting_domain(workspace_id=workspace_id, domain=domain) for domain in _REPORTING_DOMAINS]
+        status_index = FlowForgeSemanticSyncService().domain_status_index(workspace_id=workspace_id)
+        return [
+            self._reporting_domain(
+                workspace_id=workspace_id,
+                domain=domain,
+                registration=status_index.get(str(domain["domain_key"])),
+            )
+            for domain in REPORTING_DOMAINS
+        ]
+
+    def dry_run_reporting_domain_sync(self, *, workspace_id: str, actor_user_id: str | None = None) -> dict[str, Any]:
+        return FlowForgeSemanticSyncService().sync_domains(
+            workspace_id=workspace_id,
+            actor_user_id=actor_user_id,
+            dry_run=True,
+        )
+
+    def sync_reporting_domains(self, *, workspace_id: str, actor_user_id: str | None = None) -> dict[str, Any]:
+        return FlowForgeSemanticSyncService().sync_domains(
+            workspace_id=workspace_id,
+            actor_user_id=actor_user_id,
+            dry_run=False,
+        )
 
     def get_report_summary(self, *, workspace_id: str, mode: str | None) -> dict[str, Any]:
         normalized_mode = self._reporting_mode(mode)
@@ -249,6 +66,59 @@ class FlowForgeReportServiceMixin:
             "domains": self.list_reporting_domains(workspace_id=workspace_id),
         }
 
+    def get_intake_review_timeline(self, *, workspace_id: str, mode: str | None, days: int | None = 7) -> dict[str, Any]:
+        normalized_mode = self._reporting_mode(mode)
+        normalized_days = max(1, min(int(days or 7), 31))
+        rows = self._runtime_repository.list_intake_review_events(
+            workspace_id=workspace_id,
+            mode=normalized_mode,
+            days=normalized_days,
+        )
+        bucket_index = self._rolling_day_buckets(days=normalized_days)
+        for row in rows:
+            day = self._date_key(row.get("intake_date") or row.get("received_at"))
+            if day not in bucket_index:
+                continue
+            event = self._intake_review_event(row)
+            bucket = bucket_index[day]
+            bucket["intake_count"] += 1
+            if event["outcome"] == "accepted":
+                bucket["accepted_count"] += 1
+            elif event["outcome"] == "not_accepted":
+                bucket["not_accepted_count"] += 1
+            else:
+                bucket["pending_count"] += 1
+            bucket["events"].append(event)
+        return {
+            "workspace_id": workspace_id,
+            "mode": normalized_mode,
+            "days": normalized_days,
+            "buckets": list(bucket_index.values()),
+        }
+
+    def get_intake_raw_form(self, *, workspace_id: str, intake_event_id: int) -> dict[str, Any]:
+        raw_form = self._runtime_repository.get_intake_raw_form(
+            workspace_id=workspace_id,
+            intake_event_id=self._positive_int(intake_event_id, field_name="intake_event_id"),
+        )
+        if raw_form is None:
+            raise ForgeError("FlowForge intake event not found.", status_code=404)
+        return {
+            "workspace_id": workspace_id,
+            "intake_event_id": int(raw_form["intake_event_id"]),
+            "provider": raw_form.get("provider"),
+            "external_form_id": raw_form.get("external_form_id"),
+            "external_submission_id": raw_form.get("external_submission_id"),
+            "mode": raw_form.get("mode"),
+            "received_at": raw_form.get("received_at"),
+            "raw_payload_available": bool(raw_form.get("raw_payload_available")),
+            "raw_payload_redacted_at": raw_form.get("raw_payload_redacted_at"),
+            "raw_payload_redacted_by": raw_form.get("raw_payload_redacted_by"),
+            "raw_payload_expires_at": raw_form.get("raw_payload_expires_at"),
+            "raw_payload": raw_form.get("raw_payload_json") or {},
+            "normalized_payload": raw_form.get("normalized_payload_json") or {},
+        }
+
     def _reporting_mode(self, mode: str | None) -> str:
         normalized = self._optional_string(mode) or "production"
         if normalized not in {"production", "test"}:
@@ -261,14 +131,90 @@ class FlowForgeReportServiceMixin:
         except (TypeError, ValueError):
             return 0
 
-    def _reporting_domain(self, *, workspace_id: str, domain: dict[str, Any]) -> dict[str, Any]:
+    def _rolling_day_buckets(self, *, days: int) -> dict[str, dict[str, Any]]:
+        today = date.today()
+        start = today - timedelta(days=days - 1)
+        buckets: dict[str, dict[str, Any]] = {}
+        for offset in range(days):
+            day = start + timedelta(days=offset)
+            key = day.isoformat()
+            buckets[key] = {
+                "date": key,
+                "intake_count": 0,
+                "accepted_count": 0,
+                "not_accepted_count": 0,
+                "pending_count": 0,
+                "events": [],
+            }
+        return buckets
+
+    def _intake_review_event(self, row: dict[str, Any]) -> dict[str, Any]:
+        assignment_id = row.get("assignment_id")
+        no_match_reason = self._optional_string(row.get("no_match_reason"))
+        accepted_by = self._optional_string(row.get("accepted_resource_display_name")) or self._optional_string(
+            row.get("accepted_source_record_key")
+        )
+        if assignment_id is not None:
+            outcome = "accepted"
+            outcome_label = f"Accepted by {accepted_by}" if accepted_by else "Accepted"
+        elif no_match_reason:
+            outcome = "not_accepted"
+            outcome_label = f"Not accepted: {no_match_reason}"
+        else:
+            outcome = "pending"
+            outcome_label = "Pending acceptance"
+        return {
+            "intake_event_id": int(row["intake_event_id"]),
+            "date": self._date_key(row.get("intake_date") or row.get("received_at")),
+            "received_at": row.get("received_at"),
+            "provider": row.get("provider"),
+            "external_submission_id": row.get("external_submission_id"),
+            "run_id": int(row["run_id"]) if row.get("run_id") is not None else None,
+            "run_status": row.get("run_status"),
+            "workflow_key": row.get("workflow_key"),
+            "outcome": outcome,
+            "outcome_label": outcome_label,
+            "accepted_by": accepted_by,
+            "accepted_resource_set_id": int(row["accepted_resource_set_id"]) if row.get("accepted_resource_set_id") is not None else None,
+            "accepted_source_record_key": row.get("accepted_source_record_key"),
+            "no_match_reason": no_match_reason,
+            "raw_payload_available": row.get("raw_payload_redacted_at") is None,
+        }
+
+    def _date_key(self, value: Any) -> str:
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        text = str(value or "").strip()
+        return text[:10]
+
+    def _reporting_domain(
+        self,
+        *,
+        workspace_id: str,
+        domain: dict[str, Any],
+        registration: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        registration_status = str((registration or {}).get("registration_status") or "registered")
+        registration_issues = list((registration or {}).get("registration_issues") or [])
         return {
             "workspace_id": workspace_id,
             "domain_key": domain["domain_key"],
             "display_name": domain["display_name"],
             "description": domain["description"],
             "read_model": domain["read_model"],
-            "semantic_registered": True,
+            "semantic_registered": registration_status in {"validated", "registered"} and not registration_issues,
+            "registration_status": registration_status,
+            "registration_issues": registration_issues,
+            "domain_group": domain["domain_group"],
+            "domain_source": domain["domain_source"],
+            "queryforge_visibility": domain["queryforge_visibility"],
+            "workspace_scope_field": domain["workspace_scope_field"],
+            "mode_field": domain["mode_field"],
+            "time_fields": list(domain["time_fields"]),
+            "identifiers": list(domain["identifiers"]),
+            "queryforge_launch": dict((registration or {}).get("queryforge_launch") or {}),
             "default_filters": list(domain["default_filters"]),
             "sensitive_excluded_fields": list(domain["sensitive_excluded_fields"]),
             "query_studio_prompts": list(domain["query_studio_prompts"]),

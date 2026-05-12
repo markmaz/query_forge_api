@@ -309,6 +309,41 @@ def test_get_domain_candidates_uses_retrieval_policy_query_specs() -> None:
     assert any(row["domain_id"] == 21 for row in out)
 
 
+def test_get_domain_candidates_uses_workflow_intelligence_retrieval_policy() -> None:
+    class _RecordingDomainVector:
+        def __init__(self) -> None:
+            self.queries: List[str] = []
+
+        def search_domains(self, *, workspace_id, query, limit, score_threshold, include_payload):
+            assert workspace_id == "ws-1"
+            self.queries.append(query)
+            if "FlowForge" in query or "Workflow Studio" in query:
+                return {"results": [{"domain_id": 25, "name": "FlowForge Workflow Runs", "score": 0.72}]}
+            return {"results": [{"domain_id": 3, "name": "Student Enrollment", "score": 0.7}]}
+
+    vector = _RecordingDomainVector()
+    svc = DomainSelectionService(
+        domain_vector=vector,
+        capabilities_service=MagicMock(),
+        rerank_policy_engine=MagicMock(extract_prompt_signals=lambda *, prompt: ["workflow_intelligence_prompt"]),
+        embedding_model_factory=MagicMock(),
+        column_vector_factory=MagicMock(),
+        semantic_grounding_factory=MagicMock(),
+        semantic_alias_constraints_fn=MagicMock(return_value=[]),
+        retrieval_policy_service=PlannerRetrievalPolicyService(enable_db_lookup=False),
+    )
+
+    out = svc._get_domain_candidates(
+        workspace_id="ws-1",
+        prompt="How many workflow runs failed this week?",
+        provided_domain_id=None,
+    )
+
+    assert any("FlowForge workflow intelligence" in query for query in vector.queries)
+    assert out[0]["domain_id"] == 25
+    assert "workflow_intelligence" in out[0]["reason"]
+
+
 def test_get_domain_candidates_returns_controlled_error_when_vector_search_fails() -> None:
     class _FailingDomainVector:
         def search_domains(self, **kwargs):

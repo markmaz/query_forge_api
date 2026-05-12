@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import app.services.execution_service as execution_service
 
 
@@ -309,6 +311,64 @@ def test_execution_start_sql_json(client, auth_headers, monkeypatch):
     assert job["countSql"] == "SELECT COUNT(*) AS total FROM t"
 
 
+def test_execution_start_routes_flowforge_domains_to_metadata_executor(client, auth_headers, monkeypatch):
+    _install_valkey(monkeypatch)
+    metadata_exec = SimpleNamespace()
+
+    class _Prepared:
+        sql = "SELECT mode, COUNT(*) AS total FROM query_forge_rbac.v_flowforge_report_intake_events GROUP BY mode"
+        params = {}
+        qf_rendered_sql = sql
+        qf_count_sql = None
+
+    class _NoCodeService:
+        def __init__(self, executor, domain_resolver):
+            assert executor is metadata_exec
+            self.domain_resolver = domain_resolver
+
+        def prepare(self, raw_query, mode="preview", limit=200, offset=0):
+            assert raw_query == {"domainId": 29}
+            return _Prepared()
+
+    class _WorkspaceSqlExec:
+        def submit_statement_async(self, sql, parameters, **_kwargs):
+            raise AssertionError("workspace datasource should not execute FlowForge reporting domains")
+
+    class _MetadataSqlExec:
+        def submit_statement_async(self, sql, parameters, **_kwargs):
+            assert sql == _Prepared.sql
+            assert parameters == {}
+            return {"qf_statement_id": "stmt-flowforge"}
+
+    class _Ctx:
+        sql_exec = _WorkspaceSqlExec()
+
+    class _Builder:
+        def build(self, workspace_id: str):
+            return _Ctx()
+
+    monkeypatch.setattr(execution_service, "WorkspaceSqlContextBuilder", _Builder)
+    monkeypatch.setattr(execution_service, "QueryForgeService", _NoCodeService)
+    monkeypatch.setattr(execution_service, "DomainResolver", lambda workspace_id: object())
+    monkeypatch.setattr(
+        execution_service,
+        "_sql_json_uses_flowforge_metadata_domain",
+        lambda *, workspace_id, sql_json: True,
+    )
+    monkeypatch.setattr(execution_service, "_build_metadata_sql_exec", lambda: metadata_exec)
+    metadata_exec.submit_statement_async = _MetadataSqlExec().submit_statement_async
+
+    resp = client.post(
+        "/api/v1/executions/start",
+        headers=auth_headers,
+        json={"sqlJson": {"domainId": 29}, "kind": "query_builder"},
+    )
+
+    assert resp.status_code == 200
+    job = execution_service._get_job(resp.json["jobId"])
+    assert job["execution_backend"] == "queryforge_metadata"
+
+
 def test_execution_start_rejects_raw_sql_fields(client, auth_headers, monkeypatch):
     _install_valkey(monkeypatch)
 
@@ -388,7 +448,12 @@ def test_execution_start_rejects_mutating_raw_sql_preview(client, auth_headers, 
 
 def test_execution_status_and_results_use_inline_snapshot_for_sync_adapter(client, auth_headers, monkeypatch):
     _install_valkey(monkeypatch)
-    _install_nocode_prepare(monkeypatch, sql="SELECT 7 AS a", params={})
+    _install_nocode_prepare(
+        monkeypatch,
+        sql="SELECT 7 AS a",
+        params={},
+        qf_count_sql="SELECT COUNT(*) AS total FROM t",
+    )
 
     class _SqlExec:
         def submit_statement_async(self, sql, parameters, **_kwargs):
@@ -397,6 +462,11 @@ def test_execution_status_and_results_use_inline_snapshot_for_sync_adapter(clien
         def fetch_all_json(self, qf_statement_id):
             assert qf_statement_id == "stmt-inline"
             return [[7]]
+
+        def submit_statement(self, sql, parameters=None, **_kwargs):
+            assert sql == "SELECT COUNT(*) AS total FROM t"
+            assert parameters == {}
+            return {"status": {"state": "SUCCEEDED"}, "rows": [{"total": 99}]}
 
         def get_statement_status(self, qf_statement_id):
             # Simulate fresh process/instance where in-memory statements are gone.
@@ -427,3 +497,4 @@ def test_execution_status_and_results_use_inline_snapshot_for_sync_adapter(clien
     results = client.get(f"/api/v1/executions/{job_id}/results", headers=auth_headers)
     assert results.status_code == 200
     assert results.json["rows"] == [{"a": 7}]
+    assert results.json["total"] == 99

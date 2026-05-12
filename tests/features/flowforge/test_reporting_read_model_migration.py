@@ -5,6 +5,7 @@ from pathlib import Path
 
 MIGRATION_PATH = Path("migrations/20260505_flowforge_reporting_read_models.sql")
 DATA_MOVEMENT_MIGRATION_PATH = Path("migrations/20260506_flowforge_data_movement_reporting_read_models.sql")
+WORKFLOW_INTELLIGENCE_MIGRATION_PATH = Path("migrations/20260510_flowforge_workflow_intelligence_read_models.sql")
 
 
 def test_flowforge_reporting_read_model_views_exclude_sensitive_fields():
@@ -43,3 +44,26 @@ def test_flowforge_data_movement_reporting_read_model_views_exclude_payload_fiel
     assert "request_json" not in sql
     assert "result_json" not in sql
     assert "idempotency_key" not in sql
+
+
+def test_flowforge_workflow_intelligence_reporting_read_model_views_exclude_sensitive_payloads():
+    sql = WORKFLOW_INTELLIGENCE_MIGRATION_PATH.read_text(encoding="utf-8")
+
+    for view_name in [
+        "v_flowforge_report_workflow_checkpoints",
+        "v_flowforge_report_offer_outcomes",
+        "v_flowforge_report_matching_candidates",
+        "v_flowforge_report_assignment_funnel",
+    ]:
+        assert f"CREATE OR REPLACE VIEW {view_name}" in sql
+
+    assert "e.event_payload_json AS" not in sql
+    assert "sensitive_payload_json" not in sql
+    assert "run_context_json" not in sql
+    assert "response_json" not in sql
+    assert "token_hash" not in sql
+    assert "primary_email" not in sql
+    assert "primary_phone" not in sql
+    assert "normalized_profile_json" not in sql
+    assert "score_breakdown_json" not in sql
+    assert "explanation_json" not in sql

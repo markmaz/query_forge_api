@@ -20,9 +20,9 @@ spec.loader.exec_module(seed_module)
 def test_load_seed_document_reads_expected_counts() -> None:
     document = seed_module.load_seed_document(seed_module.DEFAULT_PAYLOAD_PATH)
 
-    assert document["total_payload_count"] == 112
+    assert document["total_payload_count"] == 114
     families = {item["family_key"]: item for item in document["families"]}
-    assert families["planner_signal_policy"]["count"] == 30
+    assert families["planner_signal_policy"]["count"] == 31
     assert families["planner_semantic_time_policy"]["count"] == 2
 
 
