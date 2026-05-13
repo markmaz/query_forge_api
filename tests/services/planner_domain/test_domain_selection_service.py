@@ -344,6 +344,53 @@ def test_get_domain_candidates_uses_workflow_intelligence_retrieval_policy() -> 
     assert "workflow_intelligence" in out[0]["reason"]
 
 
+def test_get_domain_candidates_prefers_workflow_runs_for_workflow_studio_run_count() -> None:
+    class _RecordingDomainVector:
+        def __init__(self) -> None:
+            self.queries: List[str] = []
+
+        def search_domains(self, *, workspace_id, query, limit, score_threshold, include_payload):
+            assert workspace_id == "ws-1"
+            self.queries.append(query)
+            if "Workflow Runs run count" in query:
+                return {
+                    "results": [
+                        {"domain_id": 25, "name": "FlowForge Workflow Runs", "score": 0.72},
+                        {"domain_id": 29, "name": "FlowForge Intake Events", "score": 0.74},
+                    ]
+                }
+            return {"results": [{"domain_id": 29, "name": "FlowForge Intake Events", "score": 0.76}]}
+
+    vector = _RecordingDomainVector()
+    svc = DomainSelectionService(
+        domain_vector=vector,
+        capabilities_service=MagicMock(),
+        rerank_policy_engine=MagicMock(
+            extract_prompt_signals=lambda *, prompt: [
+                "workflow_intelligence_prompt",
+                "workflow_run_count_prompt",
+                "aggregate_intent",
+                "time_constraint_present",
+            ]
+        ),
+        embedding_model_factory=MagicMock(),
+        column_vector_factory=MagicMock(),
+        semantic_grounding_factory=MagicMock(),
+        semantic_alias_constraints_fn=MagicMock(return_value=[]),
+        retrieval_policy_service=PlannerRetrievalPolicyService(enable_db_lookup=False),
+    )
+
+    out = svc._get_domain_candidates(
+        workspace_id="ws-1",
+        prompt="How many times did the workflow studio run today?",
+        provided_domain_id=None,
+    )
+
+    assert any("Workflow Runs run count" in query for query in vector.queries)
+    assert out[0]["domain_id"] == 25
+    assert "workflow_run_count" in out[0]["reason"]
+
+
 def test_get_domain_candidates_returns_controlled_error_when_vector_search_fails() -> None:
     class _FailingDomainVector:
         def search_domains(self, **kwargs):

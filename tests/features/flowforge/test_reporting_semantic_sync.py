@@ -147,6 +147,18 @@ def test_flowforge_domain_profile_params_embeds_manifest_synonyms():
     assert "client intake" in params["embedding_text"]
 
 
+def test_flowforge_workflow_runs_profile_embeds_run_count_language():
+    domain = next(item for item in REPORTING_DOMAINS if item["domain_key"] == "flowforge_workflow_runs")
+
+    params = domain_profile_params(workspace_id="ws-1", domain_id=25, domain=domain)
+
+    synonyms = json.loads(params["synonyms"])
+    keywords = json.loads(params["keywords"])
+    assert any(item["term"] == "workflow studio run" for item in synonyms)
+    assert "how many times" in keywords
+    assert "How many times did Workflow Studio run today?" in params["embedding_text"]
+
+
 def test_flowforge_domain_profile_params_binds_manifest_metrics_to_read_model_columns():
     domain = next(item for item in REPORTING_DOMAINS if item["domain_key"] == "flowforge_workflow_runs")
 
@@ -176,6 +188,34 @@ def test_flowforge_domain_profile_params_binds_manifest_metrics_to_read_model_co
     assert metrics["completed_run_count"]["sql_metric"]["fn"] == "sum"
     assert metrics["completed_run_count"]["sql_metric"]["field"]["columnName"] == "completed_flag"
     assert metrics["needs_attention_count"]["column_key"] == "wt44.needs_attention_flag"
+
+
+def test_flowforge_domain_profile_params_binds_status_metrics_to_metric_flags():
+    domains = {item["domain_key"]: item for item in REPORTING_DOMAINS}
+
+    workflow_params = domain_profile_params(
+        workspace_id="ws-1",
+        domain_id=29,
+        domain=domains["flowforge_workflow_runs"],
+        workspace_table_id=44,
+        columns=[{"column_name": "run_id"}, {"column_name": "active_flag"}],
+        column_id_by_name={"run_id": 101, "active_flag": 105},
+    )
+    workflow_metrics = {item["metric_key"]: item for item in json.loads(workflow_params["metrics"])}
+    assert workflow_metrics["active_run_count"]["sql_metric"]["fn"] == "sum"
+    assert workflow_metrics["active_run_count"]["sql_metric"]["field"]["columnName"] == "active_flag"
+
+    notifications_params = domain_profile_params(
+        workspace_id="ws-1",
+        domain_id=30,
+        domain=domains["flowforge_notifications"],
+        workspace_table_id=45,
+        columns=[{"column_name": "notification_flag"}, {"column_name": "failed_flag"}],
+        column_id_by_name={"notification_flag": 201, "failed_flag": 202},
+    )
+    notification_metrics = {item["metric_key"]: item for item in json.loads(notifications_params["metrics"])}
+    assert notification_metrics["notification_count"]["sql_metric"]["field"]["columnName"] == "notification_flag"
+    assert notification_metrics["failed_notification_count"]["sql_metric"]["field"]["columnName"] == "failed_flag"
 
 
 class _SemanticTx:
@@ -217,13 +257,15 @@ def test_flowforge_semantic_sync_upserts_generated_concepts_registry_and_maps():
     )
 
     joined = "\n".join(str(call["query"]) for call in tx.write_calls)
-    assert result["semantic_concept_count"] == 3
-    assert result["semantic_registry_count"] == 3
-    assert result["semantic_concept_map_count"] == 3
-    assert result["semantic_column_map_count"] == 3
+    assert result["semantic_concept_count"] == 8
+    assert result["semantic_registry_count"] == 8
+    assert result["semantic_concept_map_count"] == 5
+    assert result["semantic_column_map_count"] == 5
     assert "INSERT INTO semantic_concept" in joined
     assert "INSERT INTO semantic_registry" in joined
     assert "INSERT INTO workspace_column_semantic_concept_map" in joined
     assert "INSERT INTO semantic_column_map" in joined
     assert "INSERT INTO semantic_concept_alias" in joined
     assert any(call["params"].get("alias_key") == "needs attention" for call in tx.write_calls)
+    assert any(call["params"].get("concept_key") == "FLOWFORGE_WORKFLOW_RUNS__COMPLETED_RUN_COUNT" for call in tx.write_calls)
+    assert any(call["params"].get("alias_key") == "completed runs" for call in tx.write_calls)

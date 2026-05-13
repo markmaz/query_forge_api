@@ -37,9 +37,23 @@ REPORTING_DOMAINS: list[dict[str, Any]] = [
         "default_filters": _production_filter("mode"),
         "sensitive_excluded_fields": ["run_context_json", "idempotency_key"],
         "query_studio_prompts": [
+            "How many times did Workflow Studio run today?",
             "How many Workflow Studio runs completed this week?",
             "Which production workflows need attention?",
             "Show average run duration by workflow.",
+        ],
+        "synonyms": [
+            {
+                "term": "workflow studio run",
+                "means": [
+                    "workflow run",
+                    "workflow studio runs",
+                    "flowforge run",
+                    "automation run",
+                    "ran today",
+                ],
+            },
+            {"term": "run count", "means": ["how many times", "number of runs", "times workflow studio ran"]},
         ],
         "metrics": [
             _field("run_count", "Run Count"),

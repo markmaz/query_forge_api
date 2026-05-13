@@ -217,7 +217,13 @@ def get_domain_candidates(
         domain_id = _to_int(row.get("domain_id"))
         if domain_id is None:
             continue
-        current_score = float(row.get("score") or 0.0) + float(row.get("_semantic_boost") or 0.0)
+        candidate_name = str(row.get("name") or f"domain_{domain_id}")
+        name_bias = retrieval_policy_service.score_domain_name_bias(
+            workspace_id=workspace_id,
+            prompt_signals=prompt_signals,
+            candidate_name=candidate_name,
+        )
+        current_score = float(row.get("score") or 0.0) + float(row.get("_semantic_boost") or 0.0) + float(name_bias or 0.0)
         query_reasons = _dedupe_text_items(
             [
                 *list(row.get("reason") or []),
@@ -229,7 +235,7 @@ def get_domain_candidates(
         if existing is None:
             by_domain[domain_id] = {
                 "domain_id": domain_id,
-                "name": str(row.get("name") or f"domain_{domain_id}"),
+                "name": candidate_name,
                 "score": current_score,
                 "reason": query_reasons,
                 "source": query_source,
@@ -240,7 +246,7 @@ def get_domain_candidates(
         existing["reason"] = _dedupe_text_items(existing_reasons + new_reasons)
         if current_score > float(existing.get("score") or 0.0):
             existing["score"] = current_score
-            existing["name"] = str(row.get("name") or existing.get("name") or f"domain_{domain_id}")
+            existing["name"] = candidate_name or str(existing.get("name") or f"domain_{domain_id}")
             existing["source"] = query_source
     for domain_id, row in by_domain.items():
         if domain_id in seen:

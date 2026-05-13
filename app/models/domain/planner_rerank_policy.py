@@ -35,6 +35,7 @@ PLANNER_RERANK_SIGNAL_KEYS = frozenset(
         "birth_month_prompt",
         "calendar_days_off_prompt",
         "workflow_intelligence_prompt",
+        "workflow_run_count_prompt",
         "school_literal_present",
         "school_or_district_prompt",
         "city_state_prompt",

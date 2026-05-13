@@ -235,6 +235,174 @@ def upsert_generated_semantic_metadata(
             )
             alias_count += 1
 
+    for metric in _manifest_metric_concepts(
+        domain=domain,
+        workspace_table_id=workspace_table_id,
+        columns=columns,
+        column_id_by_name=column_id_by_name,
+    ):
+        concept_key = str(metric["concept_key"]).upper()
+        display_priority = 95
+        concept_payload = {
+            "concept_key": concept_key,
+            "name": metric["label"],
+            "description": metric["description"],
+            "semantic_type": "metric",
+            "sub_type": str(domain["domain_group"])[:200],
+            "entity": str(domain["domain_key"])[:100],
+            "granularity_rank": 0,
+            "filter_allowed": 0,
+            "group_by_allowed": 0,
+            "aggregation_allowed": 1,
+            "is_identifier": 0,
+            "is_metric": 1,
+            "display_priority": display_priority,
+            "sensitive": 0,
+            "status": "active",
+        }
+        tx.execute_write(
+            """
+            INSERT INTO semantic_concept (
+              concept_key, name, description, semantic_type, sub_type, entity,
+              granularity_rank, filter_allowed, group_by_allowed, aggregation_allowed,
+              is_identifier, is_metric, display_priority, `sensitive`, `status`
+            ) VALUES (
+              :concept_key, :name, :description, :semantic_type, :sub_type, :entity,
+              :granularity_rank, :filter_allowed, :group_by_allowed, :aggregation_allowed,
+              :is_identifier, :is_metric, :display_priority, :sensitive, :status
+            )
+            ON DUPLICATE KEY UPDATE
+              name = VALUES(name),
+              description = VALUES(description),
+              semantic_type = VALUES(semantic_type),
+              sub_type = VALUES(sub_type),
+              entity = VALUES(entity),
+              granularity_rank = VALUES(granularity_rank),
+              filter_allowed = VALUES(filter_allowed),
+              group_by_allowed = VALUES(group_by_allowed),
+              aggregation_allowed = VALUES(aggregation_allowed),
+              is_identifier = VALUES(is_identifier),
+              is_metric = VALUES(is_metric),
+              display_priority = VALUES(display_priority),
+              `sensitive` = VALUES(`sensitive`),
+              `status` = VALUES(`status`),
+              updated_at = CURRENT_TIMESTAMP
+            """,
+            concept_payload,
+        )
+        concept_id = _lookup_id(tx, table_name="semantic_concept", concept_key=concept_key)
+        if concept_id is None:
+            continue
+        concept_count += 1
+
+        bound_column_id = _metric_bound_column_id(metric)
+        bound_column_name = _metric_bound_column_name(metric)
+        if bound_column_id is not None:
+            tx.execute_write(
+                """
+                INSERT INTO workspace_column_semantic_concept_map (
+                  semantic_concept_id, workspace_column_id, relationship_kind, weight
+                ) VALUES (
+                  :semantic_concept_id, :workspace_column_id, 'metric', :weight
+                )
+                ON DUPLICATE KEY UPDATE
+                  relationship_kind = VALUES(relationship_kind),
+                  weight = VALUES(weight)
+                """,
+                {"semantic_concept_id": concept_id, "workspace_column_id": bound_column_id, "weight": 1.0},
+            )
+            concept_map_count += 1
+
+        tx.execute_write(
+            """
+            INSERT INTO semantic_registry (
+              concept_key, semantic_type, sub_type, entity, description,
+              granularity_rank, filter_allowed, group_by_allowed, aggregation_allowed,
+              is_identifier, is_metric, display_priority, `sensitive`
+            ) VALUES (
+              :concept_key, :semantic_type, :sub_type, :entity, :description,
+              :granularity_rank, :filter_allowed, :group_by_allowed, :aggregation_allowed,
+              :is_identifier, :is_metric, :display_priority, :sensitive
+            )
+            ON DUPLICATE KEY UPDATE
+              semantic_type = VALUES(semantic_type),
+              sub_type = VALUES(sub_type),
+              entity = VALUES(entity),
+              description = VALUES(description),
+              granularity_rank = VALUES(granularity_rank),
+              filter_allowed = VALUES(filter_allowed),
+              group_by_allowed = VALUES(group_by_allowed),
+              aggregation_allowed = VALUES(aggregation_allowed),
+              is_identifier = VALUES(is_identifier),
+              is_metric = VALUES(is_metric),
+              display_priority = VALUES(display_priority),
+              `sensitive` = VALUES(`sensitive`),
+              updated_at = CURRENT_TIMESTAMP
+            """,
+            {key: value for key, value in concept_payload.items() if key != "name" and key != "status"},
+        )
+        registry_id = _lookup_id(tx, table_name="semantic_registry", concept_key=concept_key)
+        if registry_id is not None:
+            registry_count += 1
+            if bound_column_id is not None and bound_column_name:
+                tx.execute_write(
+                    """
+                    INSERT INTO semantic_column_map (
+                      semantic_registry_id,
+                      workspace_id,
+                      workspace_column_id,
+                      table_name,
+                      column_name,
+                      priority_rank,
+                      confidence_score
+                    ) VALUES (
+                      :semantic_registry_id,
+                      :workspace_id,
+                      :workspace_column_id,
+                      :table_name,
+                      :column_name,
+                      :priority_rank,
+                      :confidence_score
+                    )
+                    ON DUPLICATE KEY UPDATE
+                      workspace_column_id = VALUES(workspace_column_id),
+                      table_name = VALUES(table_name),
+                      column_name = VALUES(column_name),
+                      priority_rank = VALUES(priority_rank),
+                      confidence_score = VALUES(confidence_score)
+                    """,
+                    {
+                        "semantic_registry_id": registry_id,
+                        "workspace_id": workspace_id,
+                        "workspace_column_id": bound_column_id,
+                        "table_name": domain["read_model"],
+                        "column_name": bound_column_name,
+                        "priority_rank": display_priority,
+                        "confidence_score": 1.0,
+                    },
+                )
+                registry_map_count += 1
+
+        for alias in _semantic_aliases_for_metric(metric=metric, domain=domain):
+            tx.execute_write(
+                """
+                INSERT INTO semantic_concept_alias (
+                  alias_key, concept_key, match_kind, weight
+                ) VALUES (
+                  :alias_key, :concept_key, :match_kind, :weight
+                )
+                ON DUPLICATE KEY UPDATE
+                  weight = GREATEST(weight, VALUES(weight))
+                """,
+                {
+                    "alias_key": alias["alias_key"],
+                    "concept_key": concept_key,
+                    "match_kind": alias["match_kind"],
+                    "weight": alias["weight"],
+                },
+            )
+            alias_count += 1
+
     return {
         "semantic_concept_count": concept_count,
         "semantic_alias_count": alias_count,
@@ -472,6 +640,7 @@ def _metric_sql_binding(
 def _metric_candidate_columns(*, metric_key: str, domain: dict[str, Any]) -> list[tuple[str, str]]:
     key = str(metric_key or "").strip().lower()
     out: list[tuple[str, str]] = []
+    out.extend(_explicit_metric_candidate_columns(key))
     if key:
         out.append((key, "sum"))
     if key.endswith("_count"):
@@ -494,10 +663,11 @@ def _metric_candidate_columns(*, metric_key: str, domain: dict[str, Any]) -> lis
             out.append(("selected", "sum"))
         if stem.startswith("assigned"):
             out.append(("assigned_at", "count"))
-        for identifier in domain.get("identifiers") or []:
-            out.append((str(identifier), "count"))
-        for fallback in ("id", "run_id", "event_id"):
-            out.append((fallback, "count"))
+        if _allows_identifier_count_fallback(key):
+            for identifier in domain.get("identifiers") or []:
+                out.append((str(identifier), "count"))
+            for fallback in ("id", "run_id", "event_id"):
+                out.append((fallback, "count"))
 
     deduped: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -511,6 +681,124 @@ def _metric_candidate_columns(*, metric_key: str, domain: dict[str, Any]) -> lis
         seen.add(pair)
         deduped.append(pair)
     return deduped
+
+
+def _explicit_metric_candidate_columns(metric_key: str) -> list[tuple[str, str]]:
+    return {
+        "active_run_count": [("active_flag", "sum")],
+        "available_resource_count": [("available_flag", "sum")],
+        "pending_offer_count": [("pending_flag", "sum")],
+        "completed_offer_count": [("completed_flag", "sum")],
+        "accepted_offer_count": [("accepted_flag", "sum")],
+        "declined_offer_count": [("declined_flag", "sum")],
+        "timed_out_offer_count": [("timed_out_flag", "sum")],
+        "assignment_count": [("assignment_flag", "sum"), ("id", "count")],
+        "assignment_funnel_count": [("assignment_funnel_flag", "sum"), ("run_id", "count")],
+        "notification_count": [("notification_flag", "sum"), ("id", "count")],
+        "pending_notification_count": [("pending_flag", "sum")],
+        "failed_notification_count": [("failed_flag", "sum")],
+        "dataset_artifact_count": [("dataset_artifact_flag", "sum"), ("id", "count")],
+        "expired_dataset_artifact_count": [("expired_flag", "sum")],
+        "retention_pending_artifact_count": [("retention_pending_flag", "sum")],
+        "data_movement_audit_count": [("data_movement_audit_flag", "sum"), ("id", "count")],
+        "failed_import_count": [("failed_import_flag", "sum")],
+        "failed_export_count": [("failed_export_flag", "sum")],
+    }.get(metric_key, [])
+
+
+def _allows_identifier_count_fallback(metric_key: str) -> bool:
+    key = str(metric_key or "").strip().lower()
+    if not key.endswith("_count"):
+        return False
+    if key in {
+        "run_count",
+        "checkpoint_count",
+        "intake_event_count",
+        "matching_evaluation_count",
+        "matching_candidate_count",
+        "offer_count",
+        "notification_count",
+        "artifact_count",
+    }:
+        return True
+    return key.endswith("_record_count")
+
+
+def _manifest_metric_concepts(
+    *,
+    domain: dict[str, Any],
+    workspace_table_id: int,
+    columns: list[dict[str, Any]],
+    column_id_by_name: dict[str, int],
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in list(domain.get("metrics") or []):
+        if not isinstance(item, dict):
+            continue
+        metric_key = str(item.get("key") or item.get("metric_key") or "").strip()
+        if not metric_key or metric_key in seen:
+            continue
+        seen.add(metric_key)
+        binding = _domain_profile_metric_config(
+            item=item,
+            domain=domain,
+            workspace_table_id=workspace_table_id,
+            columns=columns,
+            column_id_by_name=column_id_by_name,
+        )
+        label = str(item.get("label") or _field_label([item], metric_key)).strip() or metric_key
+        out.append(
+            {
+                "metric_key": metric_key,
+                "concept_key": f"{str(domain['domain_key']).upper()}__{metric_key.upper()}"[:128],
+                "label": label,
+                "description": (
+                    f"{label} from {domain['display_name']} ({domain['read_model']}); "
+                    f"generated Workflow Intelligence metric."
+                ),
+                "binding": binding,
+            }
+        )
+    return out
+
+
+def _metric_bound_column_id(metric: dict[str, Any]) -> int | None:
+    field = ((metric.get("binding") or {}).get("sql_metric") or {}).get("field") or {}
+    try:
+        value = int(field.get("modelColumnId"))
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _metric_bound_column_name(metric: dict[str, Any]) -> str | None:
+    field = ((metric.get("binding") or {}).get("sql_metric") or {}).get("field") or {}
+    value = str(field.get("columnName") or "").strip()
+    return value or None
+
+
+def _semantic_aliases_for_metric(*, metric: dict[str, Any], domain: dict[str, Any]) -> list[dict[str, Any]]:
+    metric_key = str(metric.get("metric_key") or "").strip()
+    label = str(metric.get("label") or "").strip()
+    domain_name = str(domain.get("display_name") or "").strip()
+    domain_key_words = str(domain.get("domain_key") or "").replace("_", " ")
+    phrases = [
+        label,
+        metric_key.replace("_", " "),
+        f"{domain_name} {label}",
+        f"{domain_key_words} {label}",
+        *_metric_alias_phrases(label=label, column_name=metric_key),
+    ]
+    aliases: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for phrase in phrases:
+        alias_key = _normalize_alias_text(phrase)
+        if alias_key == "" or alias_key in seen or _is_generic_alias(alias_key):
+            continue
+        seen.add(alias_key)
+        aliases.append({"alias_key": alias_key[:200], "match_kind": "contains" if " " in alias_key else "exact", "weight": 1.0})
+    return aliases
 
 
 def _json_dumps(value: Any) -> str:

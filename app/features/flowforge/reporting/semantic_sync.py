@@ -18,6 +18,7 @@ _MIGRATION_PATHS = (
     Path("migrations/20260505_flowforge_reporting_read_models.sql"),
     Path("migrations/20260506_flowforge_data_movement_reporting_read_models.sql"),
     Path("migrations/20260510_flowforge_workflow_intelligence_read_models.sql"),
+    Path("migrations/20260512_flowforge_workflow_intelligence_metric_flags.sql"),
 )
 
 

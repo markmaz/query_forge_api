@@ -31,6 +31,19 @@ def test_extract_policy_signals_for_workflow_intelligence_prompt() -> None:
     out = svc.extract_policy_signals(prompt="How many workflow runs failed in FlowForge this week?")
 
     assert "workflow_intelligence_prompt" in out
+    assert "workflow_run_count_prompt" in out
+    assert "aggregate_intent" in out
+    assert "time_constraint_present" in out
+
+
+def test_extract_policy_signals_for_workflow_studio_run_count_prompt() -> None:
+    svc = PlannerSignalPolicyService(enable_db_lookup=False)
+
+    out = svc.extract_policy_signals(prompt="How many times did the workflow studio run today?")
+
+    assert "workflow_intelligence_prompt" in out
+    assert "workflow_run_count_prompt" in out
+    assert "aggregate_intent" in out
     assert "time_constraint_present" in out
 
 

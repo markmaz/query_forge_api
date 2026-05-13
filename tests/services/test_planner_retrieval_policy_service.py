@@ -34,6 +34,19 @@ def test_build_query_specs_for_staff_work_context_prompt() -> None:
     assert any(str(item.get("query") or "").lower() == "staff assignments" for item in specs)
 
 
+def test_build_query_specs_for_workflow_run_count_prompt() -> None:
+    svc = PlannerRetrievalPolicyService(enable_db_lookup=False)
+
+    specs = svc.build_query_specs(
+        workspace_id="ws-1",
+        prompt_signals=["workflow_intelligence_prompt", "workflow_run_count_prompt"],
+        semantic_concept_keys=[],
+    )
+
+    assert any("FlowForge Workflow Runs run count" in str(item.get("query") or "") for item in specs)
+    assert any("workflow_run_count" in list(item.get("reasons") or []) for item in specs)
+
+
 def test_build_query_specs_for_adm_prompt() -> None:
     svc = PlannerRetrievalPolicyService(enable_db_lookup=False)
 
@@ -89,6 +102,25 @@ def test_score_domain_name_bias_for_staff_work_context_prompt() -> None:
     )
 
     assert staff_bias > discipline_bias
+
+
+def test_score_domain_name_bias_prefers_workflow_runs_over_intake_for_run_count_prompt() -> None:
+    svc = PlannerRetrievalPolicyService(enable_db_lookup=False)
+
+    runs_bias = svc.score_domain_name_bias(
+        workspace_id="ws-1",
+        prompt_signals=["workflow_intelligence_prompt", "workflow_run_count_prompt"],
+        candidate_name="FlowForge Workflow Runs",
+    )
+    intake_bias = svc.score_domain_name_bias(
+        workspace_id="ws-1",
+        prompt_signals=["workflow_intelligence_prompt", "workflow_run_count_prompt"],
+        candidate_name="FlowForge Intake Events",
+    )
+
+    assert runs_bias > intake_bias
+    assert runs_bias > 0
+    assert intake_bias < runs_bias
 
 
 def test_retrieval_policy_service_prefers_workspace_rule_when_db_lookup_enabled() -> None:

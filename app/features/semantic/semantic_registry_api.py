@@ -3,14 +3,15 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
-from flask import request
+from flask import g, request
 from flask_restx import Namespace, Resource
 
 from app.decorators.rbac import require_access
 from app.decorators.security import token_required
 from app.exceptions.forge_error import ForgeError
-from app.routes.request_helpers import int_arg
+from app.routes.request_helpers import extract_workspace_id, int_arg
 from app.services.semantic.semantic_registry_service import SemanticRegistryService
+from app.services.semantic.workflow_intelligence_readiness_service import WorkflowIntelligenceSemanticReadinessService
 
 from .schemas import register_registry_models
 
@@ -18,6 +19,14 @@ logger = logging.getLogger(__name__)
 
 semantic_registry_ns = Namespace("semantic-registry", description="Semantic registry endpoints")
 semantic_registry_entry_model = register_registry_models(semantic_registry_ns)
+
+
+def _workflow_intelligence_service() -> WorkflowIntelligenceSemanticReadinessService:
+    return WorkflowIntelligenceSemanticReadinessService()
+
+
+def _actor_user_id() -> str:
+    return str(getattr(g, "user_id", "") or getattr(g, "current_user_id", "") or "").strip()
 
 
 @semantic_registry_ns.route("")
@@ -62,6 +71,39 @@ class SemanticRegistryCollection(Resource):
         except Exception:
             logger.exception("semantic registry create failed")
             return {"error": "semantic registry create failed"}, 500
+
+
+@semantic_registry_ns.route("/workflow-intelligence/readiness")
+class SemanticRegistryWorkflowIntelligenceReadiness(Resource):
+    @token_required
+    @require_access("semantic", role="admin")
+    def get(self):
+        try:
+            result = _workflow_intelligence_service().get_readiness(workspace_id=extract_workspace_id())
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("workflow intelligence semantic readiness failed")
+            return {"error": "workflow intelligence semantic readiness failed"}, 500
+
+
+@semantic_registry_ns.route("/workflow-intelligence/sync")
+class SemanticRegistryWorkflowIntelligenceSync(Resource):
+    @token_required
+    @require_access("semantic", role="admin")
+    def post(self):
+        try:
+            result = _workflow_intelligence_service().sync_readiness(
+                workspace_id=extract_workspace_id(),
+                actor_user_id=_actor_user_id(),
+            )
+            return result, 200
+        except ForgeError as exc:
+            return exc.to_dict(), exc.status_code
+        except Exception:
+            logger.exception("workflow intelligence semantic sync failed")
+            return {"error": "workflow intelligence semantic sync failed"}, 500
 
 
 @semantic_registry_ns.route("/<int:entry_id>")

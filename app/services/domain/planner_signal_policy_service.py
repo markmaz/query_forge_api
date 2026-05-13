@@ -210,6 +210,27 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": 0,
+        "policy_key": "workflow_run_count_signal",
+        "name": "Workflow run count signal",
+        "description": "Detect count-style prompts about Workflow Studio or FlowForge workflow runs.",
+        "scope_type": "global",
+        "scope_workspace_id": None,
+        "priority": 176,
+        "is_active": 1,
+        "stop_on_match": 0,
+        "policy_json": {
+            "version": 1,
+            "signal_keys": ["workflow_intelligence_prompt", "workflow_run_count_prompt", "aggregate_intent"],
+            "match_type": "regex",
+            "patterns": [
+                r"\b(how many|count|number of|total|times)\b.*\b(workflow\s+studio|flowforge|workflow\s+runs?|workflow\s+run|automation\s+runs?)\b.*\b(ran|run|runs|completed|failed|started|active|needs\s+attention)\b",
+                r"\b(workflow\s+studio|flowforge|workflow\s+runs?|workflow\s+run|automation\s+runs?)\b.*\b(how many|count|number of|total|times)\b",
+            ],
+        },
+        "_seeded": True,
+    },
+    {
+        "id": 0,
         "policy_key": "age_extreme_signal",
         "name": "Age extreme signal",
         "description": "Detect oldest or youngest prompts.",

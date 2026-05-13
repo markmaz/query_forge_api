@@ -238,6 +238,43 @@ _SEED_POLICIES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": 0,
+        "policy_key": "workflow_run_count_domain_retrieval",
+        "name": "Workflow run count domain retrieval",
+        "description": "Bias count-style Workflow Studio run prompts toward the generated FlowForge Workflow Runs domain.",
+        "scope_type": "global",
+        "scope_workspace_id": None,
+        "priority": 146,
+        "is_active": 1,
+        "stop_on_match": 0,
+        "policy_json": {
+            "version": 1,
+            "when_signals_all": ["workflow_run_count_prompt"],
+            "query_specs": [
+                {
+                    "query": "FlowForge Workflow Runs run count Workflow Studio runs ran today completed failed active needs attention status started completed",
+                    "score_boost": 0.22,
+                    "reasons": ["workflow_run_count"],
+                    "source": "vector",
+                }
+            ],
+            "domain_name_prefer_tokens": ["workflow runs"],
+            "domain_name_avoid_tokens": [
+                "intake",
+                "checkpoint",
+                "matching",
+                "assignment",
+                "offer",
+                "notification",
+                "artifact",
+                "audit",
+            ],
+            "domain_name_positive_bias": 0.36,
+            "domain_name_negative_bias": 0.16,
+        },
+        "_seeded": True,
+    },
+    {
+        "id": 0,
         "policy_key": "subgroup_semantic_retrieval",
         "name": "Subgroup semantic retrieval",
         "description": "Expand subgroup prompts toward race, ethnicity, and language semantics.",
