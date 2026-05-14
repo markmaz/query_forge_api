@@ -3496,6 +3496,92 @@ def test_normalize_relative_time_this_month_to_custom_calendar_range() -> None:
     assert debug and debug[0]["relative_phrase"] == "this month"
 
 
+def test_normalize_relative_time_today_to_custom_day_range() -> None:
+    plan = {"time": {}, "filters": []}
+    capabilities = {
+        "dimensions": [],
+        "filter_columns": [],
+        "time_columns": [
+            {"column_key": "wt44.started_at", "column_name": "started_at", "data_type": "datetime"},
+        ],
+    }
+
+    out, issues, debug = _normalize_relative_time_in_plan(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="How many times did the workflow studio run today?",
+        today=date(2026, 5, 13),
+    )
+
+    assert issues == []
+    assert out["time"]["time_range"] == "custom"
+    assert out["time"]["start_date"] == "2026-05-13"
+    assert out["time"]["end_date"] == "2026-05-13"
+    assert out["time"]["time_grain"] == "day"
+    assert out["time"]["time_column_key"] == "wt44.started_at"
+    assert debug and debug[0]["relative_token"] == "today"
+
+
+def test_normalize_relative_time_block_today_values_to_custom_day_range() -> None:
+    plan = {
+        "time": {
+            "time_range": "custom",
+            "start_date": "today",
+            "end_date": "today",
+            "time_column_key": "wt44.started_at",
+        },
+        "filters": [
+            {"column_key": "wt44.started_at", "op": "between", "values": ["today", "today"]},
+        ],
+    }
+    capabilities = {
+        "dimensions": [],
+        "filter_columns": [],
+        "time_columns": [
+            {"column_key": "wt44.started_at", "column_name": "started_at", "data_type": "datetime"},
+        ],
+    }
+
+    out, issues, debug = _normalize_relative_time_in_plan(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="How many times did the workflow studio run today?",
+        today=date(2026, 5, 13),
+    )
+
+    assert issues == []
+    assert out["time"]["time_range"] == "custom"
+    assert out["time"]["start_date"] == "2026-05-13"
+    assert out["time"]["end_date"] == "2026-05-13"
+    assert out["filters"] == []
+    assert debug and debug[0]["dropped_time_filters"] == ["wt44.started_at"]
+
+
+def test_normalize_relative_time_this_week_respects_week_start_policy() -> None:
+    plan = {"time": {}, "filters": []}
+    capabilities = {
+        "dimensions": [],
+        "filter_columns": [],
+        "time_columns": [
+            {"column_key": "wt44.started_at", "column_name": "started_at", "data_type": "datetime"},
+        ],
+    }
+
+    out, issues, debug = _normalize_relative_time_in_plan(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="How many workflow runs completed this week?",
+        domain_time_policy={"week_start": "sunday"},
+        today=date(2026, 5, 13),
+    )
+
+    assert issues == []
+    assert out["time"]["start_date"] == "2026-05-10"
+    assert out["time"]["end_date"] == "2026-05-13"
+    assert out["time"]["time_grain"] == "week"
+    assert debug and debug[0]["relative_token"] == "this_week"
+
+
 def test_normalize_named_month_to_custom_calendar_range() -> None:
     plan = {"time": {}, "filters": []}
     capabilities = {

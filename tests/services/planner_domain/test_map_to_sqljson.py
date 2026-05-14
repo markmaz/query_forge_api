@@ -824,3 +824,70 @@ def test_map_to_sqljson_drops_relative_time_placeholder_filters_when_custom_time
     assert children[1]["op"] == "between"
     assert children[1]["field"]["columnName"] == "calendar_date"
     assert children[1]["value"] == ["2026-03-01", "2026-03-23"]
+
+
+def test_map_to_sqljson_expands_date_only_custom_time_for_datetime_columns() -> None:
+    capabilities = {
+        "dimensions": [],
+        "filter_columns": [],
+        "time_columns": [
+            {
+                "column_key": "wt44.started_at",
+                "label": "Started At",
+                "data_type": "datetime",
+                "filterable": True,
+                "workspace_table_id": 44,
+                "model_column_id": 101,
+                "column_name": "started_at",
+            }
+        ],
+        "domain_metrics": [
+            {
+                "metric_key": "run_count",
+                "label": "Run Count",
+                "sql_metric": {
+                    "fn": "count",
+                    "field": {
+                        "modelColumnId": 100,
+                        "workspaceTableId": 44,
+                        "columnName": "run_id",
+                        "exprId": None,
+                        "alias": None,
+                    },
+                    "label": "Run Count",
+                },
+            }
+        ],
+        "user_metrics": [],
+        "overlay_metrics": [],
+    }
+    plan = {
+        "schema_version": 2,
+        "trace_id": "trace-time-2",
+        "workspace_id": "ws-1",
+        "vertical_norm": "workflow_intelligence",
+        "base_domain_id": 25,
+        "intent": "aggregate",
+        "selects": {"dimensions": [], "metrics": [{"metric_ref": "domain_metric:run_count"}]},
+        "filters": [],
+        "time": {
+            "time_range": "custom",
+            "start_date": "2026-05-13",
+            "end_date": "2026-05-13",
+            "time_grain": "day",
+            "time_column_key": "wt44.started_at",
+        },
+        "grouping": {"group_by": [], "order_by": []},
+    }
+
+    out = map_plan_v2_to_sqljson(
+        plan_json=plan,
+        capabilities=capabilities,
+        prompt="How many times did the workflow studio run today?",
+    )
+
+    children = ((out.get("filters") or {}).get("children") or [])
+    assert len(children) == 1
+    assert children[0]["op"] == "between"
+    assert children[0]["field"]["columnName"] == "started_at"
+    assert children[0]["value"] == ["2026-05-13 00:00:00", "2026-05-13 23:59:59"]

@@ -137,13 +137,19 @@ def map_plan_v2_to_sqljson(
         if isinstance(sql_json.get("meta"), dict):
             sql_json["meta"]["time"] = time_block
     if _should_apply_custom_time_filter(time_block):
-        time_col = _to_sql_column_key(dim_lookup.get(_norm_key(time_block.get("time_column_key"))))
+        time_col_row = dim_lookup.get(_norm_key(time_block.get("time_column_key")))
+        time_col = _to_sql_column_key(time_col_row)
         start_date = time_block.get("start_date")
         end_date = time_block.get("end_date")
         if time_col is not None and start_date and end_date:
+            filter_values = _time_filter_values_for_column(
+                column=time_col_row,
+                start_date=start_date,
+                end_date=end_date,
+            )
             time_filter_sql = apply_edits(
                 sql_json,
-                [AddFilterEdit(op="addFilter", col=time_col, operator="between", value=[start_date, end_date])],
+                [AddFilterEdit(op="addFilter", col=time_col, operator="between", value=filter_values)],
                 prompt=prompt,
             )
             sql_json = time_filter_sql
@@ -538,6 +544,36 @@ def _filter_value_for_op(*, item: Mapping[str, Any], op: str) -> Any:
     return item.get("value")
 
 
+def _time_filter_values_for_column(*, column: Optional[Mapping[str, Any]], start_date: Any, end_date: Any) -> List[Any]:
+    if not _is_datetime_time_column(column):
+        return [start_date, end_date]
+    return [_coerce_datetime_lower_bound(start_date), _coerce_datetime_upper_bound(end_date)]
+
+
+def _is_datetime_time_column(column: Optional[Mapping[str, Any]]) -> bool:
+    if not isinstance(column, Mapping):
+        return False
+    data_type = _norm_key(column.get("data_type"))
+    column_name = _norm_key(column.get("column_name"))
+    if any(token in data_type for token in ("datetime", "timestamp")):
+        return True
+    return column_name.endswith("_at")
+
+
+def _coerce_datetime_lower_bound(value: Any) -> Any:
+    text = str(value or "").strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return f"{text} 00:00:00"
+    return value
+
+
+def _coerce_datetime_upper_bound(value: Any) -> Any:
+    text = str(value or "").strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return f"{text} 23:59:59"
+    return value
+
+
 def _is_relative_time_placeholder_filter(
     item: Mapping[str, Any],
     *,
@@ -562,6 +598,12 @@ def _is_relative_time_placeholder_filter(
 def _canonical_relative_time_token(value: Any) -> str:
     token = _norm_key(value).replace(" ", "_")
     aliases = {
+        "today": "today",
+        "yesterday": "yesterday",
+        "this_week": "this_week",
+        "current_week": "this_week",
+        "last_week": "last_week",
+        "previous_week": "last_week",
         "this_month": "this_month",
         "current_month": "this_month",
         "last_month": "last_month",

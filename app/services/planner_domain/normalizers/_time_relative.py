@@ -31,6 +31,15 @@ from ._time_shared import (
 def _canonical_relative_time_token(raw: Any) -> str:
     token = _norm_key(raw).replace("-", "_").replace(" ", "_")
     aliases = {
+        "today": "today",
+        "current_day": "today",
+        "this_day": "today",
+        "yesterday": "yesterday",
+        "previous_day": "yesterday",
+        "this_week": "this_week",
+        "current_week": "this_week",
+        "last_week": "last_week",
+        "previous_week": "last_week",
         "this_month": "this_month",
         "current_month": "this_month",
         "last_month": "last_month",
@@ -51,6 +60,24 @@ def _canonical_relative_time_token(raw: Any) -> str:
         "previous_fiscal_quarter": "fiscal_last_quarter",
     }
     return aliases.get(token, "")
+
+
+def _prompt_relative_day_phrase(prompt_norm: str) -> str:
+    text = str(prompt_norm or "").strip().lower()
+    if re.search(r"\byesterday\b", text) is not None:
+        return "yesterday"
+    if re.search(r"\btoday\b", text) is not None:
+        return "today"
+    return ""
+
+
+def _prompt_relative_week_phrase(prompt_norm: str) -> str:
+    text = str(prompt_norm or "").strip().lower()
+    if re.search(r"\b(last|previous)\s+week\b", text) is not None:
+        return "last_week"
+    if re.search(r"\b(this|current)\s+week\b", text) is not None:
+        return "this_week"
+    return ""
 
 
 def _prompt_relative_month_phrase(prompt_norm: str) -> str:
@@ -134,6 +161,18 @@ def _resolve_relative_token_from_filters(filters: Sequence[Mapping[str, Any]]) -
     return ""
 
 
+def _resolve_relative_token_from_time_block(time_block: Mapping[str, Any]) -> str:
+    block_token = _canonical_relative_time_token(time_block.get("time_range"))
+    if block_token != "":
+        return block_token
+
+    start_token = _canonical_relative_time_token(time_block.get("start_date"))
+    end_token = _canonical_relative_time_token(time_block.get("end_date"))
+    if start_token != "" and start_token == end_token:
+        return start_token
+    return ""
+
+
 def _resolve_relative_time_token(
     *,
     prompt_norm: str,
@@ -141,7 +180,11 @@ def _resolve_relative_time_token(
     filters: Sequence[Mapping[str, Any]],
     relative_map: Mapping[str, Any],
 ) -> str:
-    direct = _prompt_relative_quarter_phrase(prompt_norm)
+    direct = _prompt_relative_day_phrase(prompt_norm)
+    if direct == "":
+        direct = _prompt_relative_week_phrase(prompt_norm)
+    if direct == "":
+        direct = _prompt_relative_quarter_phrase(prompt_norm)
     if direct == "":
         direct = _prompt_relative_month_phrase(prompt_norm)
     if direct == "":
@@ -153,7 +196,7 @@ def _resolve_relative_time_token(
     if direct != "":
         return direct
 
-    block_token = _canonical_relative_time_token(time_block.get("time_range"))
+    block_token = _resolve_relative_token_from_time_block(time_block)
     if block_token != "":
         return block_token
 
@@ -162,6 +205,10 @@ def _resolve_relative_time_token(
 
 def _relative_time_grain(relative_token: str) -> str:
     token = _canonical_relative_time_token(relative_token)
+    if token in {"today", "yesterday"}:
+        return "day"
+    if token.endswith("_week"):
+        return "week"
     if token.endswith("_quarter"):
         return "quarter"
     if token.endswith("_year"):
@@ -214,6 +261,21 @@ def _compute_relative_range(
     canonical_token = _canonical_relative_time_token(token)
     if canonical_token == "":
         return None, None, ""
+
+    if canonical_token == "today":
+        return anchor, anchor, "today"
+    if canonical_token == "yesterday":
+        yesterday = anchor - timedelta(days=1)
+        return yesterday, yesterday, "yesterday"
+    if canonical_token in {"this_week", "last_week"}:
+        week_start = _norm_key(policy.get("week_start"))
+        start_offset = (anchor.weekday() + 1) % 7 if week_start == "sunday" else anchor.weekday()
+        this_week_start = anchor - timedelta(days=start_offset)
+        if canonical_token == "this_week":
+            return this_week_start, anchor, "this week"
+        last_week_start = this_week_start - timedelta(days=7)
+        last_week_end = this_week_start - timedelta(days=1)
+        return last_week_start, last_week_end, "last week"
 
     if canonical_token == "last_month":
         this_month_start = date(anchor.year, anchor.month, 1)
@@ -320,6 +382,15 @@ def _best_time_column_key_for_relative_range(*, capabilities: Mapping[str, Any])
             continue
         column_name = str(row.get("column_name") or "").strip().lower()
         data_type = str(row.get("data_type") or "").strip().lower()
+        date_like = (
+            column_name in {"date_key", "date", "order_date", "transaction_date", "sales_date", "invoice_date"}
+            or "date" in column_name
+            or "time" in column_name
+            or column_name.endswith("_at")
+            or data_type in {"date", "datetime", "timestamp"}
+        )
+        if not date_like:
+            continue
         score = source_weight * 100
         if column_name in {"date_key", "date", "order_date", "transaction_date", "sales_date", "invoice_date"}:
             score += 200
