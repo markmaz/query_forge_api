@@ -6,6 +6,7 @@ from sqlalchemy.exc import OperationalError
 from app.exceptions.forge_error import ForgeError
 from app.models.tenancy.user import User
 from app.models.tenancy.user_workspace import UserWorkspace
+from app.services.auth.token_lifecycle_service import TokenLifecycleService
 from app.services import auth_service
 from app.services.auth_service import AuthService
 
@@ -132,6 +133,31 @@ def test_issue_tokens_includes_roles_claims(monkeypatch) -> None:
     assert payload["roles"] == ["Admin", "Viewer"]
     assert payload["is_admin"] is True
     assert payload["username"] == "user1"
+
+
+def test_decode_and_verify_allows_resource_bound_tokens_for_mcp_audience_check() -> None:
+    service = TokenLifecycleService(
+        secret="test-secret-value-that-is-long-enough",
+        algorithm="HS256",
+        access_ttl_seconds=900,
+        refresh_ttl_seconds=3600,
+        leeway_seconds=30,
+        verify_iat=False,
+        refresh_prefix="qf:refresh:",
+        cache=None,
+        access_claims_provider=lambda _user_id, _username=None: {},
+    )
+    token = service._encode(
+        {
+            "sub": "user-1",
+            "typ": "mcp_access",
+            "aud": "https://mcp.query-forge.com",
+        }
+    )
+
+    payload = service.decode_and_verify(token, expected_typ="mcp_access")
+
+    assert payload["aud"] == "https://mcp.query-forge.com"
 
 
 def test_send_reset_request_and_reset_password(monkeypatch) -> None:

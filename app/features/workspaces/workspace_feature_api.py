@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import logging
+
 from flask import g, request
 from flask_restx import Namespace, Resource
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.decorators.rbac import require_admin
 from app.decorators.security import token_required
 from app.extensions import db
-from app.models.rbac import FEATURE_KEYS, Role, UserRole, WorkspaceFeature
+from app.models.rbac import WORKSPACE_FEATURE_KEYS, Role, UserRole, WorkspaceFeature
+from app.repositories.mcp_oauth import WorkspaceMCPSettingsRepository
 from app.services.rbac_service import set_workspace_feature
 from app.services.workspace_service import WorkspaceService
 
 workspace_features_ns = Namespace("workspace-features", description="Workspace feature entitlements")
+MCP_WORKSPACE_FEATURE_KEY = "queryforge_mcp"
+logger = logging.getLogger(__name__)
 
 
 def _active_workspace_feature_rows(workspace_id: str) -> list[WorkspaceFeature]:
@@ -24,6 +30,26 @@ def _feature_row(workspace_id: str, feature_key: str) -> WorkspaceFeature | None
         feature_key=feature_key,
         is_active=True,
     ).first()
+
+
+def _mcp_settings_repository() -> WorkspaceMCPSettingsRepository:
+    return WorkspaceMCPSettingsRepository()
+
+
+def _is_mcp_feature_enabled(workspace_id: str) -> bool:
+    try:
+        return bool(_mcp_settings_repository().get_settings(workspace_id=workspace_id).get("enabled"))
+    except SQLAlchemyError as exc:
+        logger.warning("Unable to load MCP workspace settings; treating MCP as disabled: %s", exc)
+        return False
+
+
+def _set_mcp_feature_enabled(workspace_id: str, enabled: bool, actor_user_id: str) -> None:
+    _mcp_settings_repository().set_enabled(
+        workspace_id=workspace_id,
+        enabled=enabled,
+        actor_user_id=actor_user_id,
+    )
 
 
 def _workspace_readiness_payload(workspace_id: str) -> dict[str, object]:
@@ -99,11 +125,13 @@ class WorkspaceFeatureList(Resource):
     @require_admin()
     def get(self, workspace_id: str):
         enabled = {row.feature_key for row in _active_workspace_feature_rows(workspace_id)}
+        if _is_mcp_feature_enabled(workspace_id):
+            enabled.add(MCP_WORKSPACE_FEATURE_KEY)
         return {
             "workspace_id": workspace_id,
             "features": [
                 {"feature_key": feature_key, "enabled": feature_key in enabled}
-                for feature_key in FEATURE_KEYS
+                for feature_key in WORKSPACE_FEATURE_KEYS
             ],
         }, 200
 
@@ -112,18 +140,25 @@ class WorkspaceFeatureList(Resource):
     def post(self, workspace_id: str):
         body = request.get_json(silent=True) or {}
         feature_key = str(body.get("feature_key") or "").strip()
-        if feature_key not in FEATURE_KEYS:
+        if feature_key not in WORKSPACE_FEATURE_KEYS:
             return {"error": f"Unknown feature_key: {feature_key}"}, 400
 
-        existing = _feature_row(workspace_id, feature_key)
+        existing = (
+            _is_mcp_feature_enabled(workspace_id)
+            if feature_key == MCP_WORKSPACE_FEATURE_KEY
+            else _feature_row(workspace_id, feature_key)
+        )
         if existing:
             return {"error": "Feature already enabled."}, 409
 
+        actor_user_id = str(getattr(g, "user_id", "") or "")
+        if feature_key == MCP_WORKSPACE_FEATURE_KEY:
+            _set_mcp_feature_enabled(workspace_id, True, actor_user_id)
         set_workspace_feature(
             workspace_id=workspace_id,
             feature_key=feature_key,
             is_active=True,
-            granted_by=str(getattr(g, "user_id", "") or ""),
+            granted_by=actor_user_id,
         )
         return {"feature_key": feature_key, "enabled": True}, 201
 
@@ -133,18 +168,25 @@ class WorkspaceFeatureDetails(Resource):
     @token_required
     @require_admin()
     def delete(self, workspace_id: str, feature_key: str):
-        if feature_key not in FEATURE_KEYS:
+        if feature_key not in WORKSPACE_FEATURE_KEYS:
             return {"error": f"Unknown feature_key: {feature_key}"}, 400
 
-        existing = _feature_row(workspace_id, feature_key)
+        existing = (
+            _is_mcp_feature_enabled(workspace_id)
+            if feature_key == MCP_WORKSPACE_FEATURE_KEY
+            else _feature_row(workspace_id, feature_key)
+        )
         if not existing:
             return {"error": "Feature not enabled."}, 404
 
+        actor_user_id = str(getattr(g, "user_id", "") or "")
+        if feature_key == MCP_WORKSPACE_FEATURE_KEY:
+            _set_mcp_feature_enabled(workspace_id, False, actor_user_id)
         set_workspace_feature(
             workspace_id=workspace_id,
             feature_key=feature_key,
             is_active=False,
-            granted_by=str(getattr(g, "user_id", "") or ""),
+            granted_by=actor_user_id,
         )
         return {"feature_key": feature_key, "enabled": False}, 200
 

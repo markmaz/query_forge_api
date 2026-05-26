@@ -40,15 +40,17 @@ def test_prompt_feedback_route_creates_feedback(client, monkeypatch):
         def __init__(self, *args, **kwargs):
             pass
 
-        def save_feedback(self, *, workspace_id, user_id, trace_id, vote, response_json, **kwargs):
+        def save_feedback(self, *, workspace_id, user_id, trace_id, vote, response_json, feedback_comment=None, **kwargs):
             assert workspace_id == "ws-1"
             assert user_id == "user-1"
             assert trace_id == "trace-1"
             assert vote == "up"
             assert isinstance(response_json, dict)
+            assert feedback_comment is None
             return PromptFeedbackWriteResult(
                 id=99,
                 vote="up",
+                status="recorded",
                 created_at=datetime(2026, 1, 1, 12, 0, 0),
                 updated_at=datetime(2026, 1, 1, 12, 0, 0),
                 created=True,
@@ -68,6 +70,7 @@ def test_prompt_feedback_route_creates_feedback(client, monkeypatch):
     assert resp.status_code == 201
     assert resp.json["id"] == 99
     assert resp.json["vote"] == "up"
+    assert resp.json["status"] == "recorded"
 
 
 def test_prompt_feedback_route_updates_feedback_when_service_marks_not_created(client, monkeypatch):
@@ -80,6 +83,7 @@ def test_prompt_feedback_route_updates_feedback_when_service_marks_not_created(c
             return PromptFeedbackWriteResult(
                 id=99,
                 vote="down",
+                status="analysis_pending",
                 created_at=datetime(2026, 1, 1, 12, 0, 0),
                 updated_at=datetime(2026, 1, 1, 12, 3, 0),
                 created=False,
@@ -98,6 +102,41 @@ def test_prompt_feedback_route_updates_feedback_when_service_marks_not_created(c
     )
     assert resp.status_code == 200
     assert resp.json["vote"] == "down"
+    assert resp.json["status"] == "analysis_pending"
+
+
+def test_prompt_feedback_route_accepts_feedback_comment(client, monkeypatch):
+    class _Svc:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def save_feedback(self, *, feedback_comment=None, **kwargs):
+            del kwargs
+            assert feedback_comment == "The chosen domain was incorrect"
+            return PromptFeedbackWriteResult(
+                id=101,
+                vote="down",
+                status="analysis_pending",
+                created_at=datetime(2026, 1, 1, 12, 0, 0),
+                updated_at=datetime(2026, 1, 1, 12, 0, 0),
+                created=True,
+            )
+
+    monkeypatch.setattr(prompt_feedback_route, "PromptFeedbackService", _Svc)
+    resp = client.post(
+        "/api/v1/prompt-feedback",
+        json={
+            "workspace_id": "ws-1",
+            "trace_id": "trace-2",
+            "vote": "thumbs_down",
+            "feedback_comment": "The chosen domain was incorrect",
+            "response_json": {"answer": "nope"},
+        },
+        headers=_headers(monkeypatch),
+    )
+
+    assert resp.status_code == 201
+    assert resp.json["status"] == "analysis_pending"
 
 
 def test_prompt_feedback_route_rejects_invalid_vote(client, monkeypatch):

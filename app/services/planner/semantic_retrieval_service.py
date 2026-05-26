@@ -17,6 +17,9 @@ from app.services.planner.semantic_candidate_models import (
     SemanticCandidatePayload,
     SemanticConceptCandidate,
 )
+from app.services.feedback_learning.runtime_override_resolver import (
+    RuntimeOverrideResolver,
+)
 from app.services.planner.semantic_catalog_lookup_repository import (
     SemanticCatalogLookupRepository,
 )
@@ -55,8 +58,10 @@ class SemanticRetrievalService:
         self,
         *,
         repository: Optional[SemanticCatalogLookupRepository] = None,
+        runtime_override_resolver: Optional[RuntimeOverrideResolver] = None,
     ) -> None:
         self._repo = repository or SemanticCatalogLookupRepository()
+        self._runtime_override_resolver = runtime_override_resolver
 
     def retrieve(
         self,
@@ -80,8 +85,14 @@ class SemanticRetrievalService:
             capability_index=capability_index,
         )
         try:
-            concept_rows_raw = self._repo.load_concepts()
-            alias_rows = self._repo.load_aliases()
+            concept_rows_raw = _load_repo_rows(
+                self._repo.load_concepts,
+                workspace_id=workspace_id,
+            )
+            alias_rows = _load_repo_rows(
+                self._repo.load_aliases,
+                workspace_id=workspace_id,
+            )
             relationship_rows = self._repo.load_relationships()
             column_map_rows = self._repo.load_concept_column_maps()
             suggestion_scores = self._repo.load_suggestion_scores()
@@ -200,7 +211,11 @@ class SemanticRetrievalService:
                 aliases=alias_rules_by_key.get(concept_key, []),
             )
             suggestion_boost = min(0.2, (float(suggestion_scores.get(concept_key, 0)) / 250.0))
-            score = max(0.0, min(1.0, lexical + suggestion_boost))
+            feedback_adjustment = max(
+                -1.0,
+                min(1.0, float(row.get("feedback_score_adjustment") or 0.0)),
+            )
+            score = max(0.0, min(1.0, lexical + suggestion_boost + feedback_adjustment))
             aliases = [item.alias for item in alias_rules_by_key.get(concept_key, [])]
             candidate_kwargs = {
                 "concept_key": concept_key,
@@ -344,6 +359,38 @@ class SemanticRetrievalService:
             time_candidates=time_candidates,
             alias_rules_by_key=alias_rules_by_key,
         )
+        planning_rules = [
+            "Use only candidate semantic concept keys.",
+            "Do not invent domains, metrics, dimensions, filters, or values.",
+            "Ask for clarification when business terms map to multiple metrics.",
+            "Prefer NAME concepts for grouping fields.",
+        ]
+        runtime_metadata: Dict[str, Any] = {}
+        if self._runtime_override_resolver is not None:
+            domain_hints = self._runtime_override_resolver.resolve_domain_hints(
+                domain_key=selected_domain_key,
+                workspace_id=workspace_id,
+            )
+            for hint in list(domain_hints.get("lexical_hints") or []):
+                hint_key = str(hint or "").strip().lower()
+                if hint_key:
+                    lexical_hints.setdefault(hint_key, [selected_domain_key])
+            for example_prompt in list(domain_hints.get("example_prompts") or []):
+                planning_rules.append(f"Consider feedback example prompt: {example_prompt}")
+            for ambiguity_note in list(domain_hints.get("ambiguity_notes") or []):
+                planning_rules.append(f"Ambiguity note: {ambiguity_note}")
+            if domain_hints["example_prompts"]:
+                runtime_metadata["feedback_domain_example_prompts"] = list(
+                    domain_hints["example_prompts"]
+                )
+            if domain_hints["lexical_hints"]:
+                runtime_metadata["feedback_domain_lexical_hints"] = list(
+                    domain_hints["lexical_hints"]
+                )
+            if domain_hints["ambiguity_notes"]:
+                runtime_metadata["feedback_ambiguity_notes"] = list(
+                    domain_hints["ambiguity_notes"]
+                )
 
         domain_candidates = domain_candidates[:5] or fallback_payload.domain_candidates
         domain_obj = domain_candidates[0] if domain_candidates else None
@@ -361,12 +408,7 @@ class SemanticRetrievalService:
             time_candidates=time_candidates,
             value_candidates=value_candidates,
             lexical_hints=lexical_hints,
-            planning_rules=[
-                "Use only candidate semantic concept keys.",
-                "Do not invent domains, metrics, dimensions, filters, or values.",
-                "Ask for clarification when business terms map to multiple metrics.",
-                "Prefer NAME concepts for grouping fields.",
-            ],
+            planning_rules=_dedupe_text_items(planning_rules),
             metadata={
                 "semantic_source": semantic_source,
                 "restrict_to_domain": restrict_to_domain,
@@ -377,5 +419,30 @@ class SemanticRetrievalService:
                     for k, v in default_time_by_metric.items()
                     if str(k or "").strip() and str(v or "").strip()
                 },
+                **runtime_metadata,
             },
         )
+
+
+def _load_repo_rows(method, *, workspace_id: str):
+    try:
+        return method(workspace_id=workspace_id)
+    except TypeError as exc:
+        if "workspace_id" not in str(exc):
+            raise
+        return method()
+
+
+def _dedupe_text_items(values: List[str]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for item in values:
+        text = str(item or "").strip()
+        if text == "":
+            continue
+        dedupe_key = text.lower()
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        out.append(text)
+    return out

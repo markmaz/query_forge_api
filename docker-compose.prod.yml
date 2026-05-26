@@ -1,0 +1,17 @@
+services:
+  frontend:
+    image: ${QF_UI_IMAGE:?QF_UI_IMAGE is required}
+    build: null
+
+  api:
+    image: ${QF_API_IMAGE:?QF_API_IMAGE is required}
+    build: null
+
+  mcp:
+    image: ${QF_API_IMAGE:?QF_API_IMAGE is required}
+
+  celery-worker:
+    image: ${QF_API_IMAGE:?QF_API_IMAGE is required}
+
+  celery-beat:
+    image: ${QF_API_IMAGE:?QF_API_IMAGE is required}

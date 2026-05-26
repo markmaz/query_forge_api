@@ -9,6 +9,7 @@ from .audit import MCPAuditLogger
 from .auth import AuthResolver, FastMCPRequestAuthenticator
 from .config import MCPSettings
 from .context import RequestContext
+from .rate_limit import MCPRateLimiter
 
 
 @dataclass
@@ -16,11 +17,13 @@ class MCPDependencies:
     settings: MCPSettings
     auth_resolver: Optional[AuthResolver] = None
     audit_logger: Optional[MCPAuditLogger] = None
+    rate_limiter: Optional[MCPRateLimiter] = None
     domain_adapter_factory: Optional[Callable[[], Any]] = None
     dictionary_adapter_factory: Optional[Callable[[], Any]] = None
     planner_adapter_factory: Optional[Callable[[], Any]] = None
     execution_adapter_factory: Optional[Callable[[], Any]] = None
     saved_query_adapter_factory: Optional[Callable[[], Any]] = None
+    flowforge_adapter_factory: Optional[Callable[[], Any]] = None
     policy_resource_factory: Optional[Callable[[], Any]] = None
     semantic_resource_factory: Optional[Callable[[], Any]] = None
 
@@ -32,6 +35,11 @@ class MCPDependencies:
         if self.audit_logger is None:
             self.audit_logger = MCPAuditLogger(enabled=self.settings.audit_logging)
         return self.audit_logger
+
+    def get_rate_limiter(self) -> MCPRateLimiter:
+        if self.rate_limiter is None:
+            self.rate_limiter = MCPRateLimiter(settings=self.settings)
+        return self.rate_limiter
 
     def get_domain_adapter(self):
         if self.domain_adapter_factory is not None:
@@ -62,6 +70,12 @@ class MCPDependencies:
             return self.execution_adapter_factory()
         from .adapters.execution_adapter import ExecutionAdapter
         return ExecutionAdapter(planner_adapter=self.get_planner_adapter())
+
+    def get_flowforge_adapter(self):
+        if self.flowforge_adapter_factory is not None:
+            return self.flowforge_adapter_factory()
+        from .adapters.flowforge_adapter import FlowForgeAdapter
+        return FlowForgeAdapter()
 
     def get_policy_resource(self):
         if self.policy_resource_factory is not None:

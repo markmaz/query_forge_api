@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 import sys
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, URL

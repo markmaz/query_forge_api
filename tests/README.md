@@ -3,13 +3,13 @@
 ## Running
 
 ```
-pytest -q
+./scripts/pytest.sh -q
 ```
 
 ## Route smoke tests
 
 ```
-TEST_USERNAME=... TEST_PASSWORD=... pytest -q tests/api/test_routes_smoke.py
+TEST_USERNAME=... TEST_PASSWORD=... ./scripts/pytest.sh -q tests/api/test_routes_smoke.py
 ```
 
 Notes:
@@ -24,7 +24,7 @@ Notes:
 TEST_BASE_URL=http://localhost:5000 \
 TEST_USERNAME=... \
 TEST_PASSWORD=... \
-pytest -q tests/openapi/test_openapi_contract.py
+./scripts/pytest.sh -q tests/openapi/test_openapi_contract.py
 ```
 
 Notes:

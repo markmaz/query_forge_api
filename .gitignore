@@ -7,8 +7,12 @@ log_file
 .env.*.local
 venv/
 .DS_Store
+.coverage
 .venv
 /models/
 infra/qdrant/storage/
 /logs
 /logs/plan_domain_pipeline_timing.log
+.graphify_detect.json
+app/.graphify_detect.json
+**/graphify-out/

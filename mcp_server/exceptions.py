@@ -14,6 +14,7 @@ MCPErrorCode = Literal[
     "EXECUTION_DISABLED",
     "PREVIEW_LIMIT_EXCEEDED",
     "QUERY_NOT_FOUND",
+    "RATE_LIMITED",
     "INTERNAL_ERROR",
 ]
 

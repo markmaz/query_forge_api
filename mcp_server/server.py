@@ -2,12 +2,24 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 from starlette.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse
+import uvicorn
 
 from .auth import BearerTokenMiddleware
 from .config import MCPSettings
 from .dependencies import MCPDependencies
 from .resource_registry import register_resources
 from .tool_registry import register_tools
+
+
+def protected_resource_metadata(settings: MCPSettings) -> dict[str, object]:
+    authorization_server = settings.authorization_server_url.rstrip("/")
+    return {
+        "resource": settings.resource_url.rstrip("/"),
+        "authorization_servers": [authorization_server],
+        "scopes_supported": list(settings.oauth_scopes_supported),
+        "resource_documentation": f"{authorization_server}/docs/mcp",
+    }
 
 
 def create_mcp_server(
@@ -47,7 +59,28 @@ def create_streamable_http_app(
     resolved_settings = settings or MCPSettings.from_env()
     mcp = create_mcp_server(settings=resolved_settings, dependencies=dependencies)
     app = mcp.streamable_http_app()
-    app.add_middleware(BearerTokenMiddleware)
+
+    async def _metadata_endpoint(request):
+        del request
+        return JSONResponse(protected_resource_metadata(resolved_settings))
+
+    async def _healthz_endpoint(request):
+        del request
+        return JSONResponse(
+            {
+                "status": "ok",
+                "service": "queryforge-mcp",
+                "version": resolved_settings.server_version,
+            }
+        )
+
+    app.add_route(
+        "/.well-known/oauth-protected-resource",
+        _metadata_endpoint,
+        methods=["GET"],
+    )
+    app.add_route("/healthz", _healthz_endpoint, methods=["GET"])
+    app.add_middleware(BearerTokenMiddleware, settings=resolved_settings)
     if resolved_settings.allowed_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -61,8 +94,13 @@ def create_streamable_http_app(
 
 def main() -> None:
     settings = MCPSettings.from_env()
-    mcp = create_mcp_server(settings=settings)
-    mcp.run(transport="streamable-http")
+    app = create_streamable_http_app(settings=settings)
+    uvicorn.run(
+        app,
+        host=settings.host,
+        port=settings.port,
+        log_level="debug" if settings.debug else "info",
+    )
 
 
 if __name__ == "__main__":

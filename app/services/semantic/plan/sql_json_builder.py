@@ -569,6 +569,8 @@ class SqlJsonBuilder:
                     and str(candidate_field.get("columnName") or "").strip()
                 ):
                     metric_field = candidate_field
+                if str(metric_row.get("metric_agg") or "").strip().lower():
+                    fn = str(metric_row.get("metric_agg") or "").strip().lower()
                 if "student" in str(metric_row.get("concept_key") or "").lower():
                     fn = "count_distinct"
             aggs["metrics"].append(
@@ -576,7 +578,7 @@ class SqlJsonBuilder:
                     "id": "semantic_plan_metric_count",
                     "fn": fn,
                     "field": metric_field,
-                    "label": "count",
+                    "label": str((metric_row or {}).get("metric_label") or "count") if isinstance(metric_row, dict) else "count",
                 }
             )
         return out

@@ -8,6 +8,7 @@ from app.services.planner.planner_validation_service import PlannerValidationSer
 from app.services.planner.semantic_candidate_models import CompactSemanticPlan
 from app.services.planner.semantic_plan_compiler import SemanticPlanCompiler
 from app.services.planner.semantic_retrieval_service import SemanticRetrievalService
+from app.services.feedback_learning.runtime_override_resolver import RuntimeOverrideResolver
 
 
 class _Repo:
@@ -291,6 +292,40 @@ class _RepoAliasRegex(_Repo):
         ]
 
 
+class _SemanticOverrideRepository:
+    def __init__(self, rows=None):
+        self.rows = list(rows or [])
+
+    def list_overrides(self, *, workspace_id=None, status=None, concept_key=None):
+        out = list(self.rows)
+        if workspace_id is None:
+            out = [row for row in out if row.get("workspace_id") is None]
+        else:
+            out = [row for row in out if row.get("workspace_id") == workspace_id]
+        if status is not None:
+            out = [row for row in out if row.get("status") == status]
+        if concept_key is not None:
+            out = [row for row in out if row.get("concept_key") == concept_key]
+        return out
+
+
+class _DomainOverrideRepository:
+    def __init__(self, rows=None):
+        self.rows = list(rows or [])
+
+    def list_overrides(self, *, workspace_id=None, status=None, domain_key=None):
+        out = list(self.rows)
+        if workspace_id is None:
+            out = [row for row in out if row.get("workspace_id") is None]
+        else:
+            out = [row for row in out if row.get("workspace_id") == workspace_id]
+        if status is not None:
+            out = [row for row in out if row.get("status") == status]
+        if domain_key is not None:
+            out = [row for row in out if row.get("domain_key") == domain_key]
+        return out
+
+
 def _retrieve_with_repo(prompt: str, repo: object) -> object:
     svc = SemanticRetrievalService(repository=repo)
     return svc.retrieve(
@@ -324,6 +359,91 @@ def test_h_lexical_hints_prefix_beats_contains() -> None:
 def test_i_lexical_hints_regex_considered_when_present() -> None:
     candidates = _retrieve_with_repo("Show sales by territory", _RepoAliasRegex())
     assert candidates.lexical_hints.get("sales") == ["TOTAL_NET_AMOUNT"]
+
+
+def test_i2_feedback_alias_override_can_break_metric_ties() -> None:
+    resolver = RuntimeOverrideResolver(
+        semantic_override_repository=_SemanticOverrideRepository(
+            [
+                {
+                    "workspace_id": "ws-1",
+                    "concept_key": "TOTAL_NET_AMOUNT",
+                    "override_type": "add_alias",
+                    "override_key": "sales",
+                    "override_value_json": {
+                        "alias_key": "sales",
+                        "match_kind": "exact",
+                        "weight": 12.0,
+                    },
+                    "status": "active",
+                }
+            ]
+        ),
+        domain_override_repository=_DomainOverrideRepository(),
+    )
+    repo = SemanticCatalogLookupRepository(
+        sql=None,
+        runtime_override_resolver=resolver,
+    )
+    svc = SemanticRetrievalService(repository=repo, runtime_override_resolver=resolver)
+
+    candidates = svc.retrieve(
+        prompt="Show total sales by territory",
+        workspace_id="ws-1",
+        base_domain_id=3,
+        base_domain_name="Sales Performance",
+        capabilities_compact=_capabilities(),
+    )
+
+    assert candidates.lexical_hints.get("sales") == ["TOTAL_NET_AMOUNT"]
+
+
+def test_i3_feedback_domain_overrides_enrich_runtime_metadata() -> None:
+    resolver = RuntimeOverrideResolver(
+        semantic_override_repository=_SemanticOverrideRepository(),
+        domain_override_repository=_DomainOverrideRepository(
+            [
+                {
+                    "workspace_id": "ws-1",
+                    "domain_key": "DOMAIN_SALES_PERFORMANCE",
+                    "override_type": "add_domain_example_prompt",
+                    "override_key": "show me sales by rep",
+                    "override_value_json": {"prompt": "show me sales by rep"},
+                    "status": "active",
+                },
+                {
+                    "workspace_id": "ws-1",
+                    "domain_key": "DOMAIN_SALES_PERFORMANCE",
+                    "override_type": "add_domain_lexical_hint",
+                    "override_key": "pipeline",
+                    "override_value_json": {"hint": "pipeline"},
+                    "status": "active",
+                },
+                {
+                    "workspace_id": "ws-1",
+                    "domain_key": "DOMAIN_SALES_PERFORMANCE",
+                    "override_type": "add_ambiguity_note",
+                    "override_key": "clarify gross vs net",
+                    "override_value_json": {"note": "clarify gross vs net"},
+                    "status": "active",
+                },
+            ]
+        ),
+    )
+    svc = SemanticRetrievalService(repository=_Repo(), runtime_override_resolver=resolver)
+
+    candidates = svc.retrieve(
+        prompt="Show total sales by territory",
+        workspace_id="ws-1",
+        base_domain_id=3,
+        base_domain_name="Sales Performance",
+        capabilities_compact=_capabilities(),
+    )
+
+    assert candidates.metadata["feedback_domain_example_prompts"] == ["show me sales by rep"]
+    assert candidates.metadata["feedback_ambiguity_notes"] == ["clarify gross vs net"]
+    assert candidates.lexical_hints.get("pipeline") == ["DOMAIN_SALES_PERFORMANCE"]
+    assert any("clarify gross vs net" in rule.lower() for rule in candidates.planning_rules)
 
 
 def test_j_group_by_account_does_not_fall_back_to_account_type_filter_hint() -> None:

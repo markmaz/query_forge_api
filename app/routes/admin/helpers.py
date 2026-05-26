@@ -48,6 +48,22 @@ def _assert_workspace_admin_organization_access(
         )
 
 
+def _assert_workspace_admin_workspace_access(
+    service: TenancyAdminService,
+    workspace_id: str,
+) -> None:
+    if _is_super_admin_request():
+        return
+    scoped_binding = _current_workspace_binding(service)
+    scoped_workspace_id = str(scoped_binding.get("workspace_id") or "").strip()
+    requested_workspace_id = str(workspace_id or "").strip()
+    if not scoped_workspace_id or requested_workspace_id != scoped_workspace_id:
+        raise ForgeError(
+            "Workspace admin access is limited to the current workspace",
+            status_code=403,
+        )
+
+
 def _assert_workspace_admin_datasource_access(
     service: TenancyAdminService,
     datasource_id: int,

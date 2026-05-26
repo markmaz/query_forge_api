@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from flask import g
+from flask import g, has_app_context
 
 
 def resolve_request_username(default: str = "unknown_user") -> str:
+    if not has_app_context():
+        return default
+
     payload = getattr(g, "user_data", None)
     if not isinstance(payload, dict):
         return default

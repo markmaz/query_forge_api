@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+
+from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 from app.exceptions.forge_error import ForgeError
 from app.services.domain.planner_retrieval_policy_service import PlannerRetrievalPolicyService
 from app.services.planner_domain.capability_compactor import _to_int
 from app.services.planner_domain.prompt_intents import _dedupe_text_items
+
+logger = logging.getLogger(__name__)
+
+DOMAIN_VECTOR_SEARCH_ERRORS = (OSError, RuntimeError, ValueError, UnexpectedResponse, ResponseHandlingException)
 
 
 def _dedupe_constraints(values: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
@@ -170,17 +177,28 @@ def get_domain_candidates(
         ],
     )
     rows: List[Dict[str, Any]] = []
+    vector_failures: List[str] = []
     for query_spec in query_specs:
         query_text = str(query_spec.get("query") or "").strip()
         if query_text == "":
             continue
-        result = search_domains_fn(
-            workspace_id=workspace_id,
-            query=query_text,
-            limit=6,
-            score_threshold=0.0,
-            include_payload=False,
-        )
+        try:
+            result = search_domains_fn(
+                workspace_id=workspace_id,
+                query=query_text,
+                limit=6,
+                score_threshold=0.0,
+                include_payload=False,
+            )
+        except DOMAIN_VECTOR_SEARCH_ERRORS as exc:
+            vector_failures.append(type(exc).__name__)
+            logger.warning(
+                "domain candidate vector search failed workspace_id=%s query_source=%s error=%s",
+                workspace_id,
+                str(query_spec.get("source") or "vector"),
+                exc,
+            )
+            continue
         semantic_boost = float(query_spec.get("score_boost") or 0.0)
         semantic_reasons = list(query_spec.get("reasons") or [])
         query_source = str(query_spec.get("source") or "vector")
@@ -199,7 +217,13 @@ def get_domain_candidates(
         domain_id = _to_int(row.get("domain_id"))
         if domain_id is None:
             continue
-        current_score = float(row.get("score") or 0.0) + float(row.get("_semantic_boost") or 0.0)
+        candidate_name = str(row.get("name") or f"domain_{domain_id}")
+        name_bias = retrieval_policy_service.score_domain_name_bias(
+            workspace_id=workspace_id,
+            prompt_signals=prompt_signals,
+            candidate_name=candidate_name,
+        )
+        current_score = float(row.get("score") or 0.0) + float(row.get("_semantic_boost") or 0.0) + float(name_bias or 0.0)
         query_reasons = _dedupe_text_items(
             [
                 *list(row.get("reason") or []),
@@ -211,7 +235,7 @@ def get_domain_candidates(
         if existing is None:
             by_domain[domain_id] = {
                 "domain_id": domain_id,
-                "name": str(row.get("name") or f"domain_{domain_id}"),
+                "name": candidate_name,
                 "score": current_score,
                 "reason": query_reasons,
                 "source": query_source,
@@ -222,7 +246,7 @@ def get_domain_candidates(
         existing["reason"] = _dedupe_text_items(existing_reasons + new_reasons)
         if current_score > float(existing.get("score") or 0.0):
             existing["score"] = current_score
-            existing["name"] = str(row.get("name") or existing.get("name") or f"domain_{domain_id}")
+            existing["name"] = candidate_name or str(existing.get("name") or f"domain_{domain_id}")
             existing["source"] = query_source
     for domain_id, row in by_domain.items():
         if domain_id in seen:
@@ -232,5 +256,15 @@ def get_domain_candidates(
     out.sort(key=lambda item: (-float(item.get("score") or 0.0), int(item.get("domain_id") or 0)))
     out = out[:6]
     if not out:
+        if vector_failures:
+            raise ForgeError(
+                "Domain vector search is temporarily unavailable",
+                status_code=503,
+                details={
+                    "reason": "domain_vector_search_failed",
+                    "failure_count": len(vector_failures),
+                    "failure_types": sorted(set(vector_failures)),
+                },
+            )
         raise ForgeError("No candidate domain found for prompt", status_code=404)
     return out

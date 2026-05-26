@@ -37,6 +37,7 @@ def test_workspace_feature_list_returns_all_keys(client, monkeypatch):
         "_active_workspace_feature_rows",
         lambda workspace_id: [_WorkspaceFeatureRow("skills"), _WorkspaceFeatureRow("ai")],
     )
+    monkeypatch.setattr(workspace_feature_routes, "_is_mcp_feature_enabled", lambda workspace_id: False)
 
     resp = client.get("/api/v1/workspaces/ws-9/features", headers=_headers(monkeypatch, roles={"workspace_admin"}))
     assert resp.status_code == 200
@@ -44,6 +45,18 @@ def test_workspace_feature_list_returns_all_keys(client, monkeypatch):
     assert features["skills"] is True
     assert features["ai"] is True
     assert features["forge_match"] is False
+    assert features["queryforge_mcp"] is False
+
+
+def test_workspace_feature_list_uses_mcp_workspace_settings(client, monkeypatch):
+    monkeypatch.setattr(workspace_feature_routes, "_active_workspace_feature_rows", lambda workspace_id: [])
+    monkeypatch.setattr(workspace_feature_routes, "_is_mcp_feature_enabled", lambda workspace_id: True)
+
+    resp = client.get("/api/v1/workspaces/ws-9/features", headers=_headers(monkeypatch, roles={"workspace_admin"}))
+
+    assert resp.status_code == 200
+    features = {row["feature_key"]: row["enabled"] for row in resp.json["features"]}
+    assert features["queryforge_mcp"] is True
 
 
 def test_workspace_feature_enable_requires_known_feature(client, monkeypatch):
@@ -87,6 +100,34 @@ def test_workspace_feature_enable_success(client, monkeypatch):
     assert resp.json == {"feature_key": "skills", "enabled": True}
 
 
+def test_workspace_feature_enable_mcp_updates_workspace_settings(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(workspace_feature_routes, "_is_mcp_feature_enabled", lambda workspace_id: False)
+    monkeypatch.setattr(
+        workspace_feature_routes,
+        "set_workspace_feature",
+        lambda **kwargs: calls.append(("feature", kwargs)),
+    )
+    monkeypatch.setattr(
+        workspace_feature_routes,
+        "_set_mcp_feature_enabled",
+        lambda workspace_id, enabled, actor_user_id: calls.append(
+            ("mcp", {"workspace_id": workspace_id, "enabled": enabled, "actor_user_id": actor_user_id})
+        ),
+    )
+
+    resp = client.post(
+        "/api/v1/workspaces/ws-9/features",
+        headers=_headers(monkeypatch, roles={"workspace_admin"}),
+        json={"feature_key": "queryforge_mcp"},
+    )
+
+    assert resp.status_code == 201
+    assert resp.json == {"feature_key": "queryforge_mcp", "enabled": True}
+    assert calls[0] == ("mcp", {"workspace_id": "ws-9", "enabled": True, "actor_user_id": "admin-1"})
+    assert calls[1][0] == "feature"
+
+
 def test_workspace_feature_delete_not_found(client, monkeypatch):
     monkeypatch.setattr(workspace_feature_routes, "_feature_row", lambda workspace_id, feature_key: None)
 
@@ -111,6 +152,33 @@ def test_workspace_feature_delete_success(client, monkeypatch):
     )
     assert resp.status_code == 200
     assert resp.json == {"feature_key": "skills", "enabled": False}
+
+
+def test_workspace_feature_delete_mcp_updates_workspace_settings(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(workspace_feature_routes, "_is_mcp_feature_enabled", lambda workspace_id: True)
+    monkeypatch.setattr(
+        workspace_feature_routes,
+        "set_workspace_feature",
+        lambda **kwargs: calls.append(("feature", kwargs)),
+    )
+    monkeypatch.setattr(
+        workspace_feature_routes,
+        "_set_mcp_feature_enabled",
+        lambda workspace_id, enabled, actor_user_id: calls.append(
+            ("mcp", {"workspace_id": workspace_id, "enabled": enabled, "actor_user_id": actor_user_id})
+        ),
+    )
+
+    resp = client.delete(
+        "/api/v1/workspaces/ws-9/features/queryforge_mcp",
+        headers=_headers(monkeypatch, roles={"workspace_admin"}),
+    )
+
+    assert resp.status_code == 200
+    assert resp.json == {"feature_key": "queryforge_mcp", "enabled": False}
+    assert calls[0] == ("mcp", {"workspace_id": "ws-9", "enabled": False, "actor_user_id": "admin-1"})
+    assert calls[1][0] == "feature"
 
 
 def test_workspace_readiness_success(client, monkeypatch):

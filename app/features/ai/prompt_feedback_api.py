@@ -34,13 +34,25 @@ _prompt_feedback_meta_model = prompt_feedback_ns.model(
 _prompt_feedback_request_model = prompt_feedback_ns.model(
     "PromptFeedbackRequest",
     {
-        "workspace_id": fields.String(required=True),
-        "trace_id": fields.String(required=False),
-        "vote": fields.String(required=True, enum=["up", "down", "thumbs_up", "thumbs_down"]),
-        "normalized_prompt": fields.String(required=False),
-        "prompt_text": fields.String(required=False),
-        "response_json": fields.Raw(required=True),
-        "meta": fields.Nested(_prompt_feedback_meta_model, required=False),
+        "workspace_id": fields.String(required=True, description="Workspace id. Must match the X-Workspace-Id header."),
+        "trace_id": fields.String(required=False, description="Optional planner/copilot trace id used for idempotent feedback upserts."),
+        "vote": fields.String(required=True, enum=["up", "down", "thumbs_up", "thumbs_down"], description="User feedback vote. Aliases normalize to up/down."),
+        "normalized_prompt": fields.String(required=False, description="Normalized prompt text captured from the planner/copilot flow."),
+        "prompt_text": fields.String(required=False, description="Raw prompt text as entered by the user."),
+        "feedback_comment": fields.String(required=False, description="Optional reviewer-style free-text comment stored under reserved feedback-learning metadata."),
+        "response_json": fields.Raw(required=True, description="Required planner/copilot response payload snapshot."),
+        "meta": fields.Nested(_prompt_feedback_meta_model, required=False, description="Optional metadata captured alongside the feedback event."),
+    },
+)
+
+_prompt_feedback_response_model = prompt_feedback_ns.model(
+    "PromptFeedbackResponse",
+    {
+        "id": fields.Integer(required=True, description="Persisted prompt feedback record id."),
+        "vote": fields.String(required=True, enum=["up", "down"], description="Normalized vote value."),
+        "status": fields.String(required=True, enum=["recorded", "analysis_pending"], description="Submission status. Negative feedback returns analysis_pending for later learning analysis."),
+        "created_at": fields.DateTime(required=True, description="Created timestamp in ISO-8601 format."),
+        "updated_at": fields.DateTime(required=True, description="Updated timestamp in ISO-8601 format."),
     },
 )
 
@@ -50,6 +62,23 @@ class PromptFeedback(Resource):
     @token_required
     @require_access("ai")
     @prompt_feedback_ns.expect(_prompt_feedback_request_model, validate=False)
+    @prompt_feedback_ns.marshal_with(_prompt_feedback_response_model, code=201, description="Prompt feedback created.")
+    @prompt_feedback_ns.doc(
+        summary="Capture user prompt feedback",
+        description=(
+            "Stores user feedback for a planner/copilot response. The endpoint is backward compatible with existing callers, "
+            "normalizes vote aliases, enforces workspace-header matching, and marks negative feedback as analysis_pending "
+            "for the later feedback-learning pipeline. Optional feedback_comment text is stored under reserved feedback-learning metadata."
+        ),
+        responses={
+            200: "Prompt feedback updated for an existing workspace/user/trace tuple.",
+            400: "Invalid request payload or workspace mismatch.",
+            401: "Authentication required.",
+            403: "Caller lacks AI feature access.",
+            413: "Payload exceeds configured size limit.",
+            500: "Unexpected prompt feedback persistence failure.",
+        },
+    )
     def post(self):
         try:
             body: Dict[str, Any] = request.get_json(silent=True) or {}
@@ -82,6 +111,7 @@ class PromptFeedback(Resource):
                 vote=parsed.vote,
                 normalized_prompt=parsed.normalized_prompt,
                 prompt_text=parsed.prompt_text,
+                feedback_comment=parsed.feedback_comment,
                 response_json=parsed.response_json,
                 meta=parsed.meta.model_dump(mode="json", exclude_none=True) if parsed.meta else None,
             )
@@ -98,6 +128,7 @@ class PromptFeedback(Resource):
                 created_at=result.created_at,
                 updated_at=result.updated_at,
                 vote=result.vote,
+                status=result.status,
             ).model_dump(mode="json")
             return payload, (201 if result.created else 200)
         except ValidationError as exc:

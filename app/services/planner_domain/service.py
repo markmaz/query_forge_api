@@ -216,6 +216,7 @@ class PlannerDomainService:
             llm_client=self._llm,
             llm_explanation_enabled=QF_PLAN_DOMAIN_LLM_EXPLANATION_ENABLED,
         )
+        self._next_actions = NextActionsService(llm_client=self._llm)
         self._enrichment = PlanEnrichmentService(
             explanation_service=self._explanation,
             next_actions_service=self._next_actions,

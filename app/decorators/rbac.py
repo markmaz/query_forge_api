@@ -41,6 +41,7 @@ from functools import wraps
 from flask import g
 from flask_restx import abort
 
+from app.models.rbac import FLOWFORGE_ROLE_IMPLICATIONS
 from app.services.rbac_service import workspace_has_feature
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,17 @@ def _is_super_admin() -> bool:
 def _is_workspace_admin() -> bool:
     _ensure_roles_loaded()
     return "workspace_admin" in g.effective_roles
+
+
+def _role_satisfied(required_role: str) -> bool:
+    _ensure_roles_loaded()
+    if required_role in g.effective_roles:
+        return True
+
+    for assigned_role in g.effective_roles:
+        if required_role in FLOWFORGE_ROLE_IMPLICATIONS.get(assigned_role, set()):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +155,7 @@ def require_role(*role_names: str):
                 return fn(*args, **kwargs)
 
             _ensure_roles_loaded()
-            if not any(r in g.effective_roles for r in role_names):
+            if not any(_role_satisfied(r) for r in role_names):
                 required = " or ".join(f"'{r}'" for r in role_names)
                 abort(403, f"Required role: {required}.")
 
@@ -186,7 +198,7 @@ def require_access(feature_key: str, role: str = "user"):
             # workspace without needing every individual <feature>:admin role.
             if not _is_super_admin() and not _is_workspace_admin():
                 _ensure_roles_loaded()
-                if full_role not in g.effective_roles:
+                if not _role_satisfied(full_role):
                     abort(403, f"Required role: '{full_role}'.")
 
             return fn(*args, **kwargs)

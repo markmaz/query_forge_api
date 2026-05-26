@@ -5,6 +5,7 @@ from time import perf_counter
 from typing import Any, Dict, List, Mapping, Optional
 
 from app.services.planner_domain.conversation_context import _merge_followup_plan_with_context
+from app.services.planner_domain.domain_metric_binding import bind_prompt_domain_metric
 from app.services.planner_domain.llm_planning_service import LLMPlanningService
 from app.services.planner_domain.pipeline_trace import _add_pipeline_step, _append_pipeline_trace_step
 from app.services.planner_domain.plan_helpers import (
@@ -70,7 +71,11 @@ class PlanPostprocessService:
             semester_indicator_columns=semester_indicator_columns,
             domain_time_policy=domain_time_policy,
         )
-        llm_plan = norm_result.plan
+        llm_plan = bind_prompt_domain_metric(
+            plan_json=norm_result.plan,
+            capabilities=capabilities,
+            prompt=prompt,
+        )
         normalization_issues = semantic_alias_issues + norm_result.all_issues
         _add_pipeline_step(
             profile_steps=profile_steps,

@@ -45,10 +45,13 @@ def test_resolve_alias_constraints_delegates_to_grounding_service(monkeypatch) -
         {"kind": "value", "text": "US", "op": "eq", "value_hint": "United States", "notes": None}
     ]
     svc = SemanticIntegrationService(semantic_grounding_service=mock_grounding)
-    result = svc.resolve_alias_constraints(prompt="students born in US")
+    result = svc.resolve_alias_constraints(prompt="students born in US", workspace_id="ws-1")
     assert len(result) == 1
     assert result[0]["value_hint"] == "United States"
-    mock_grounding.resolve_alias_constraints.assert_called_once()
+    mock_grounding.resolve_alias_constraints.assert_called_once_with(
+        prompt="students born in US",
+        workspace_id="ws-1",
+    )
 
 
 def test_resolve_alias_constraints_deduplicates(monkeypatch) -> None:

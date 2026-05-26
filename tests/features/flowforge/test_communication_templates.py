@@ -1,0 +1,509 @@
+from __future__ import annotations
+
+from datetime import datetime
+
+import pytest
+
+from app.exceptions.forge_error import ForgeError
+from app.features.flowforge.communication_template_drafting import CommunicationTemplateDraftGenerator
+from app.features.flowforge.runtime.communication_templates import CommunicationTemplateRenderer
+from app.features.flowforge.service import FlowForgeService
+
+
+def _template(**overrides):
+    template = {
+        "template_key": "therapist-task",
+        "display_name": "Therapist Task",
+        "channel": "email",
+        "purpose": "human_task",
+        "resource_set_id": 30,
+        "subject": "New task for {{resource.display_name}}",
+        "body_blocks": [
+            {"type": "heading", "content": "Task for {{resource.display_name}}"},
+            {"type": "text", "content": "Please respond by {{task.due_at}}."},
+            {"type": "field_list", "fields": ["resource.attributes.specialty", "intake.requested_date"]},
+            {"type": "action_buttons", "actions": ["accept", "decline"]},
+        ],
+        "status": "draft",
+        "metadata": {},
+    }
+    template.update(overrides)
+    return template
+
+
+def test_communication_template_renderer_validates_and_renders_preview():
+    renderer = CommunicationTemplateRenderer()
+    validation = renderer.validate(
+        template=_template(),
+        resource_fields={"resource.display_name", "resource.attributes.specialty"},
+    )
+
+    preview = renderer.render_preview(
+        template=_template(),
+        context={
+            "resource": {"display_name": "Dr. Lane", "attributes": {"specialty": "Anxiety"}},
+            "task": {"due_at": "2026-05-06T18:00:00Z"},
+            "intake": {"requested_date": "Friday"},
+        },
+    )
+
+    assert validation.valid is True
+    assert validation.errors == []
+    assert validation.referenced_actions == ["accept", "decline"]
+    assert preview["subject"] == "New task for Dr. Lane"
+    assert "Requested Date" in preview["html"]
+    assert "Anxiety" in preview["html"]
+
+
+def test_communication_template_renderer_validates_and_renders_image_blocks():
+    renderer = CommunicationTemplateRenderer()
+    template = _template(
+        body_blocks=[
+            {"type": "image", "src": "https://cdn.example.com/logo.png", "alt": "Clinic logo", "width": 180},
+            {"type": "text", "content": "Hello {{resource.display_name}}."},
+        ]
+    )
+
+    validation = renderer.validate(template=template, resource_fields={"resource.display_name"})
+    preview = renderer.render_preview(template=template, context={"resource": {"display_name": "Dr. Lane"}})
+
+    assert validation.valid is True
+    assert '<img src="https://cdn.example.com/logo.png" alt="Clinic logo" width="180"' in preview["html"]
+    assert "Hello Dr. Lane." in preview["html"]
+
+
+def test_communication_template_renderer_renders_runtime_action_links():
+    renderer = CommunicationTemplateRenderer()
+
+    rendered = renderer.render_email(
+        template=_template(),
+        context={
+            "resource": {"display_name": "Dr. Lane", "attributes": {"specialty": "Anxiety"}},
+            "task": {"due_at": "2026-05-06T18:00:00Z"},
+            "intake": {"requested_date": "Friday"},
+        },
+        action_url="http://localhost:3000/flowforge/actions/ffact_123",
+        action_urls={
+            "open_task": "http://localhost:3000/flowforge/actions/ffact_123",
+            "accept": "http://localhost:3000/flowforge/actions/ffact_123?action=accept",
+            "decline": "http://localhost:3000/flowforge/actions/ffact_123?action=decline",
+        },
+    )
+
+    assert rendered["subject"] == "New task for Dr. Lane"
+    assert 'href="http://localhost:3000/flowforge/actions/ffact_123?action=accept"' in rendered["html"]
+    assert 'data-flowforge-action="accept"' in rendered["html"]
+    assert 'href="http://localhost:3000/flowforge/actions/ffact_123?action=decline"' in rendered["html"]
+    assert 'data-flowforge-action="decline"' in rendered["html"]
+
+
+def test_communication_template_renderer_only_links_action_specific_buttons_with_matching_urls():
+    renderer = CommunicationTemplateRenderer()
+
+    rendered = renderer.render_email(
+        template=_template(
+            body_blocks=[
+                {"type": "action_buttons", "actions": ["accept", "decline", "open_task"]},
+            ]
+        ),
+        context={},
+        action_url="http://localhost:3000/flowforge/actions/ffact_123",
+        action_urls={"accept": "http://localhost:3000/flowforge/actions/ffact_123?action=accept"},
+    )
+
+    assert 'href="http://localhost:3000/flowforge/actions/ffact_123?action=accept"' in rendered["html"]
+    assert 'data-flowforge-action="decline"' not in rendered["html"]
+    assert 'data-flowforge-action="open_task"' not in rendered["html"]
+    assert rendered["html"].count('aria-disabled="true"') == 2
+
+
+def test_communication_template_renderer_rejects_unknown_fields_and_actions():
+    renderer = CommunicationTemplateRenderer()
+
+    validation = renderer.validate(
+        template=_template(
+            body_blocks=[
+                {"type": "text", "content": "{{resource.unknown}}"},
+                {"type": "action_buttons", "actions": ["accept", "custom_link"]},
+            ]
+        ),
+        resource_fields={"resource.display_name"},
+    )
+
+    assert validation.valid is False
+    assert "Merge field 'resource.unknown' is not available for this template." in validation.errors
+    assert "unsupported action 'custom_link'" in " ".join(validation.errors)
+
+
+def test_communication_template_renderer_rejects_actions_that_do_not_match_purpose():
+    renderer = CommunicationTemplateRenderer()
+
+    approval_validation = renderer.validate(
+        template=_template(
+            purpose="approval",
+            body_blocks=[{"type": "action_buttons", "actions": ["accept", "decline", "open_task"]}],
+        )
+    )
+    report_validation = renderer.validate(
+        template=_template(
+            purpose="report",
+            body_blocks=[{"type": "action_buttons", "actions": ["open_task"]}],
+        )
+    )
+
+    assert approval_validation.valid is False
+    assert "not available for approval templates: accept, decline" in " ".join(approval_validation.errors)
+    assert report_validation.valid is False
+    assert "not available for report templates: open_task" in " ".join(report_validation.errors)
+
+
+def test_communication_template_draft_generator_produces_structured_blocks():
+    generator = CommunicationTemplateDraftGenerator()
+
+    draft = generator.generate(
+        prompt="Write a warm task email with a due date.",
+        purpose="human_task",
+        channel="email",
+        resource_set_id=30,
+        resource_fields=["resource.display_name", "task.due_at"],
+        required_actions=["accept", "decline", "open_task"],
+        tone="warm",
+    )
+
+    assert draft["subject"] == "Action requested for {{resource.display_name}}"
+    assert draft["body_blocks"][-1] == {"type": "action_buttons", "actions": ["accept", "decline", "open_task"]}
+    assert draft["draft_source"] == "heuristic"
+
+
+def test_communication_template_draft_generator_filters_actions_by_purpose():
+    generator = CommunicationTemplateDraftGenerator()
+
+    draft = generator.generate(
+        prompt="Write an approval email.",
+        purpose="approval",
+        channel="email",
+        resource_set_id=30,
+        resource_fields=["task.due_at"],
+        required_actions=["accept", "decline", "open_task"],
+        tone="concise",
+    )
+
+    assert draft["body_blocks"][-1] == {"type": "action_buttons", "actions": ["open_task"]}
+
+
+def test_communication_template_draft_generator_builds_intake_review_content_from_allowed_fields():
+    generator = CommunicationTemplateDraftGenerator()
+
+    draft = generator.generate(
+        prompt=(
+            "Please draft a notification email for a therapist that has a proper subject and pulls in all "
+            "the intake information from the incoming form laid out in an easy to read format. The recipient "
+            "will have the option to accept or decline the patient. End with a thank you from the Novus team."
+        ),
+        purpose="human_task",
+        channel="email",
+        resource_set_id=30,
+        resource_fields=["resource.display_name"],
+        required_actions=["accept", "decline"],
+        tone="professional",
+    )
+
+    field_lists = [block["fields"] for block in draft["body_blocks"] if block["type"] == "field_list"]
+    text_blocks = [block["content"] for block in draft["body_blocks"] if block["type"] == "text"]
+
+    assert draft["subject"] == "New patient intake review requested"
+    assert "intake.requested_service" in field_lists[0]
+    assert "intake.clinical_summary" in field_lists[0]
+    assert "intake.requested_date" in field_lists[0]
+    assert "intake.client_initials" in field_lists[0]
+    assert "intake.preferred_location" in field_lists[0]
+    assert "intake.preferred_days" in field_lists[0]
+    assert "intake.insurance" in field_lists[0]
+    assert "intake.age_range" in field_lists[0]
+    assert draft["body_blocks"][-1] == {"type": "action_buttons", "actions": ["accept", "decline"]}
+    assert "open_task" not in draft["body_blocks"][-1]["actions"]
+    assert "Thank you,\nThe Novus team" in text_blocks
+
+
+class _BadTemplateDraftClient:
+    _model = "draft-test"
+
+    def chat_json(self, **kwargs):
+        self.kwargs = kwargs
+        return {
+            "subject": "New patient for {{intake.requested_service}} and {{intake.clinical_summary}}",
+            "plain_language_summary": "Generated from bad LLM output.",
+            "body_blocks": [
+                {
+                    "type": "text",
+                    "content": "{{{'label': 'Full Name', 'value': '{intake.patient.full_name}'}}}",
+                },
+                {
+                    "type": "field_list",
+                    "fields": [
+                        "intake.patient.full_name",
+                        "intake.requested_service",
+                        "intake.clinical_summary",
+                    ],
+                },
+                {"type": "action_buttons", "actions": ["accept", "decline", "open_task"]},
+            ],
+        }
+
+
+def test_communication_template_draft_generator_filters_bad_llm_fields_and_serialized_content():
+    llm_client = _BadTemplateDraftClient()
+    generator = CommunicationTemplateDraftGenerator(llm_client=llm_client)
+
+    draft = generator.generate(
+        prompt=(
+            "Draft the therapist intake review email with all intake information from the incoming form. "
+            "The recipient can accept or decline the patient. End with a thank you from the Novus team."
+        ),
+        purpose="human_task",
+        channel="email",
+        resource_set_id=30,
+        resource_fields=["resource.display_name"],
+        required_actions=["accept", "decline", "open_task"],
+        use_llm=True,
+    )
+
+    blocks = draft["body_blocks"]
+    fields = next(block["fields"] for block in blocks if block["type"] == "field_list")
+    rendered_text = " ".join(block.get("content", "") for block in blocks)
+
+    assert "{{{'label'" not in rendered_text
+    assert draft["subject"] == "New patient intake review requested"
+    assert "intake.patient.full_name" not in fields
+    assert "intake.requested_date" in fields
+    assert "intake.client_initials" in fields
+    assert "intake.requested_service" in fields
+    assert "intake.preferred_location" in fields
+    assert "intake.preferred_days" in fields
+    assert "intake.insurance" in fields
+    assert "intake.age_range" in fields
+    assert "intake.clinical_summary" in fields
+    assert "Please review the intake details below" in rendered_text
+    assert "Thank you,\nThe Novus team" in rendered_text
+    assert blocks[-1] == {"type": "action_buttons", "actions": ["accept", "decline"]}
+    assert "{{field.path}}" in llm_client.kwargs["system_prompt"]
+
+
+class _TemplateRepo:
+    def __init__(self) -> None:
+        self.created = None
+        self.created_ai_draft = None
+        self.templates = {
+            501: {
+                "id": 501,
+                "workspace_id": "ws-1",
+                **_template(resource_set_id=None),
+                "body_blocks_json": _template()["body_blocks"],
+                "validation_status": "valid",
+                "validation_result_json": {"valid": True, "errors": [], "warnings": []},
+                "metadata_json": {},
+            }
+        }
+
+    def list_templates(self, **kwargs):
+        return list(self.templates.values())
+
+    def get_template(self, *, template_id: int, **kwargs):
+        return self.templates.get(template_id)
+
+    def create_template(self, **payload):
+        self.created = payload
+        return {
+            "id": 502,
+            "workspace_id": payload["workspace_id"],
+            **payload,
+            "body_blocks_json": payload["body_blocks"],
+            "validation_result_json": payload["validation_result"],
+            "metadata_json": payload["metadata"],
+        }
+
+    def create_ai_draft(self, **payload):
+        self.created_ai_draft = payload
+        return {
+            "id": 601,
+            "workspace_id": payload["workspace_id"],
+            "purpose": payload["purpose"],
+            "channel": payload["channel"],
+            "resource_set_id": payload["resource_set_id"],
+            "prompt": payload["prompt"],
+            "tone": payload["tone"],
+            "required_actions_json": payload["required_actions"],
+            "generated_subject": payload["generated_subject"],
+            "generated_body_blocks_json": payload["generated_body_blocks"],
+            "plain_language_summary": payload["plain_language_summary"],
+            "validation_status": payload["validation_status"],
+            "validation_result_json": payload["validation_result"],
+            "model_provider": payload["model_provider"],
+            "model_name": payload["model_name"],
+            "status": payload["status"],
+        }
+
+    def update_template(self, **kwargs):
+        return True
+
+    def activate_template(self, **kwargs):
+        self.templates[501]["status"] = "active"
+        self.templates[501]["validation_status"] = "valid"
+        self.templates[501]["activated_at"] = datetime(2026, 5, 7, 20, 19, 21)
+        return True
+
+
+class _ResourceRepo:
+    def get_resource_set(self, *, resource_set_id: int, **kwargs):
+        return {"id": resource_set_id, "workspace_id": "ws-1", "active_snapshot_batch_id": 301}
+
+    def list_snapshot_records(self, **kwargs):
+        return [
+            {
+                "source_record_key": "therapist-1",
+                "display_name": "Dr. Lane",
+                "attributes_json": {"specialty": "Anxiety"},
+                "normalized_profile_json": {},
+            }
+        ]
+
+
+def test_flowforge_service_creates_and_activates_communication_template():
+    repo = _TemplateRepo()
+    service = FlowForgeService(communication_template_repository=repo, resource_repository=_ResourceRepo())
+
+    created = service.create_communication_template(workspace_id="ws-1", payload=_template(), actor_user_id="user-1")
+    activated = service.activate_communication_template(workspace_id="ws-1", template_id=501, actor_user_id="user-1")
+
+    assert created["id"] == 502
+    assert repo.created["validation_status"] == "valid"
+    assert activated["status"] == "active"
+    assert activated["activated_at"] == "2026-05-07T20:19:21"
+
+
+def test_flowforge_service_rejects_invalid_communication_template_activation():
+    repo = _TemplateRepo()
+    repo.templates[501]["body_blocks"] = [{"type": "action_buttons", "actions": ["custom_link"]}]
+    repo.templates[501]["body_blocks_json"] = [{"type": "action_buttons", "actions": ["custom_link"]}]
+    service = FlowForgeService(communication_template_repository=repo, resource_repository=_ResourceRepo())
+
+    with pytest.raises(ForgeError) as exc:
+        service.activate_communication_template(workspace_id="ws-1", template_id=501, actor_user_id="user-1")
+
+    assert exc.value.status_code == 400
+
+
+def test_flowforge_service_creates_communication_template_ai_draft():
+    repo = _TemplateRepo()
+    service = FlowForgeService(communication_template_repository=repo, resource_repository=_ResourceRepo())
+
+    result = service.create_communication_template_ai_draft(
+        workspace_id="ws-1",
+        payload={
+            "prompt": "Write a task email with accept and decline actions.",
+            "purpose": "human_task",
+            "channel": "email",
+            "resource_set_id": 30,
+            "required_actions": ["accept", "decline"],
+            "tone": "concise",
+        },
+        actor_user_id="user-1",
+    )
+
+    assert result["id"] == 601
+    assert result["validation_status"] == "valid"
+    assert result["draft_source"] == "heuristic"
+    assert repo.created_ai_draft["created_by"] == "user-1"
+    assert repo.created_ai_draft["model_provider"] == "heuristic"
+
+
+def test_flowforge_service_sends_communication_template_test_email():
+    sent: list[dict[str, str]] = []
+    repo = _TemplateRepo()
+    repo.templates[501]["subject"] = "FlowForge test for {{resource.display_name}}"
+    workflow_body_blocks = [
+        {"type": "heading", "content": "FlowForge task for {{resource.display_name}}"},
+        {"type": "text", "content": "Open FlowForge before {{task.due_at}}."},
+    ]
+    repo.templates[501]["body_blocks"] = workflow_body_blocks
+    repo.templates[501]["body_blocks_json"] = workflow_body_blocks
+    service = FlowForgeService(
+        communication_template_repository=repo,
+        resource_repository=_ResourceRepo(),
+        communication_template_email_sender=lambda recipient, subject, html: sent.append(
+            {"recipient": recipient, "subject": subject, "html": html}
+        ),
+    )
+
+    result = service.send_communication_template_test(
+        workspace_id="ws-1",
+        template_id=501,
+        payload={
+            "recipient": "therapist@example.com",
+            "preview_context": {
+                "resource": {"display_name": "Dr. Lane", "attributes": {"specialty": "Anxiety"}},
+                "task": {"due_at": "2026-05-06T18:00:00Z"},
+                "intake": {"requested_date": "Friday"},
+            },
+        },
+        actor_user_id="user-1",
+    )
+
+    assert result == {
+        "status": "sent",
+        "recipient": "therapist@example.com",
+        "subject": "Workflow test for Dr. Lane",
+    }
+    assert sent == [
+        {
+            "recipient": "therapist@example.com",
+            "subject": "Workflow test for Dr. Lane",
+            "html": sent[0]["html"],
+        }
+    ]
+    assert "Workflow task for Dr. Lane" in sent[0]["html"]
+    assert "Open Workflow before 2026-05-06T18:00:00Z." in sent[0]["html"]
+    assert "FlowForge" not in sent[0]["subject"]
+    assert "FlowForge" not in sent[0]["html"]
+
+
+def test_flowforge_service_returns_controlled_error_when_test_email_send_fails():
+    def fail_send(_recipient: str, _subject: str, _html: str) -> None:
+        raise RuntimeError("SMTP connection unexpectedly closed")
+
+    service = FlowForgeService(
+        communication_template_repository=_TemplateRepo(),
+        resource_repository=_ResourceRepo(),
+        communication_template_email_sender=fail_send,
+    )
+
+    with pytest.raises(ForgeError) as exc:
+        service.send_communication_template_test(
+            workspace_id="ws-1",
+            template_id=501,
+            payload={"recipient": "therapist@example.com"},
+            actor_user_id="user-1",
+        )
+
+    assert exc.value.status_code == 502
+    assert "Unable to send test email" in str(exc.value)
+    assert exc.value.details == {"reason": "SMTP connection unexpectedly closed"}
+
+
+def test_flowforge_service_rejects_ai_draft_actions_that_do_not_match_purpose():
+    service = FlowForgeService(communication_template_repository=_TemplateRepo(), resource_repository=_ResourceRepo())
+
+    with pytest.raises(ForgeError) as exc:
+        service.create_communication_template_ai_draft(
+            workspace_id="ws-1",
+            payload={
+                "prompt": "Write an approval email.",
+                "purpose": "approval",
+                "channel": "email",
+                "resource_set_id": 30,
+                "required_actions": ["approve"],
+            },
+            actor_user_id="user-1",
+        )
+
+    assert exc.value.status_code == 400

@@ -44,8 +44,8 @@ class _FakeValueAliasResolver:
     def __init__(self) -> None:
         self.calls = []
 
-    def resolve(self, *, prompt: str):
-        self.calls.append({"prompt": prompt})
+    def resolve(self, *, prompt: str, workspace_id: str | None = None):
+        self.calls.append({"prompt": prompt, "workspace_id": workspace_id})
         return [
             {
                 "concept_key": "COUNTRY",
@@ -79,6 +79,7 @@ def test_build_grounding_bundle_combines_candidates_and_alias_constraints() -> N
     assert debug["candidate_summary"]["metrics"] == ["ENROLLMENT_COUNT"]
     assert "vertical_norm" not in retrieval.calls[0]
     assert resolver.calls[0]["prompt"] == "students by county not born in the US"
+    assert resolver.calls[0]["workspace_id"] == "ws-1"
 
 
 class _RaisingRetrievalService:
@@ -88,9 +89,27 @@ class _RaisingRetrievalService:
 
 
 class _RaisingAliasResolver:
-    def resolve(self, *, prompt: str):
-        del prompt
+    def resolve(self, *, prompt: str, workspace_id: str | None = None):
+        del prompt, workspace_id
         raise RuntimeError("alias resolution unavailable")
+
+
+class _LegacyValueAliasResolver:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def resolve(self, *, prompt: str):
+        self.calls.append({"prompt": prompt})
+        return [
+            {
+                "concept_key": "RACE_ETHNICITY",
+                "kind": "unknown",
+                "text": "african american",
+                "op": "eq",
+                "value_hint": "Black or African American",
+                "notes": "semantic_alias:RACE_ETHNICITY",
+            }
+        ]
 
 
 def test_build_grounding_bundle_marks_candidate_retrieval_failure() -> None:
@@ -123,3 +142,40 @@ def test_resolve_alias_constraints_returns_empty_on_resolver_failure() -> None:
     )
 
     assert out == []
+
+
+def test_resolve_alias_constraints_supports_legacy_resolver_signature_without_workspace() -> None:
+    resolver = _LegacyValueAliasResolver()
+    svc = SemanticGroundingService(
+        retrieval_service=_FakeRetrievalService(),
+        value_alias_resolver=resolver,
+    )
+
+    out = svc.resolve_alias_constraints(
+        prompt="show me african american students",
+        workspace_id="ws-1",
+    )
+
+    assert out == [
+        {
+            "kind": "unknown",
+            "text": "african american",
+            "op": "eq",
+            "value_hint": "Black or African American",
+            "notes": "semantic_alias:RACE_ETHNICITY",
+        }
+    ]
+    assert resolver.calls == [{"prompt": "show me african american students"}]
+
+
+def test_resolve_alias_constraints_accepts_legacy_alias_constraint_rows() -> None:
+    svc = SemanticGroundingService(
+        retrieval_service=_FakeRetrievalService(),
+        value_alias_resolver=_LegacyValueAliasResolver(),
+    )
+
+    out = svc.resolve_alias_constraints(prompt="show me african american students")
+
+    assert out[0]["value_hint"] == "Black or African American"
+    assert out[0]["text"] == "african american"
+    assert out[0]["notes"] == "semantic_alias:RACE_ETHNICITY"

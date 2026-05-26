@@ -45,6 +45,7 @@ class DomainProfileResponse(DomainProfileBase):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     domain_name: Optional[str] = None
+    domain_kind: Optional[str] = None
 
     @field_validator(
         "created_at", "updated_at", "embedded_at", mode="before"

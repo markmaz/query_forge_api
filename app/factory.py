@@ -22,6 +22,7 @@ from app.config import (
     AWS_SECRET_ACCESS_KEY,
     AWS_SESSION_TOKEN,
     DESTINATION_ENCRYPTION_KEY,
+    FLOWFORGE_WEBHOOK_BASE_URL,
     FRONTEND_ALLOWED_ORIGINS,
     FRONTEND_BASE_URL,
     LLM_INSTANCE_ID,
@@ -30,7 +31,6 @@ from app.config import (
     QF_FORGE_INSIGHTS_ENABLED,
     QF_MINIMAL_CHAT_ENABLED,
     SEMANTIC_CONCEPT_SEED_ON_STARTUP,
-    SEMANTIC_VERTICAL_DEFAULT,
     VALKEY_ADDRESS,
     VALKEY_CONFIG,
     VALKEY_PORT,
@@ -43,6 +43,7 @@ from app.config.logging_config import configure_logging
 from app.exceptions.forge_error import ForgeError
 from app.extensions import db, mail
 from app.features import register_features
+from app.features.mcp_oauth import register_well_known_routes as register_mcp_oauth_well_known_routes
 from app.services.analytics.registry import AnalyticsDatasourceRegistry
 from app.services.auth_service import AuthService
 from app.services.semantic.concept_seed import ConceptSeedService
@@ -136,6 +137,7 @@ def create_app():
     app.config["QF_MINIMAL_CHAT_ENABLED"] = QF_MINIMAL_CHAT_ENABLED
     app.config["QF_FORGE_INSIGHTS_ENABLED"] = QF_FORGE_INSIGHTS_ENABLED
     app.config["FRONTEND_BASE_URL"] = FRONTEND_BASE_URL
+    app.config["FLOWFORGE_WEBHOOK_BASE_URL"] = FLOWFORGE_WEBHOOK_BASE_URL
     app.config["FRONTEND_ALLOWED_ORIGINS"] = list(FRONTEND_ALLOWED_ORIGINS)
     app.config["DESTINATION_ENCRYPTION_KEY"] = DESTINATION_ENCRYPTION_KEY
     if not app.config["LLM_INSTANCE_ID"]:
@@ -182,6 +184,7 @@ def create_app():
     )
 
     register_features(api)
+    register_mcp_oauth_well_known_routes(app)
 
     configure_logging()
     logger = logging.getLogger(__name__)
@@ -236,7 +239,8 @@ def create_app():
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Content-Security-Policy"] = "default-src 'self'"
+        if "Content-Security-Policy" not in response.headers:
+            response.headers["Content-Security-Policy"] = "default-src 'self'"
         return response
 
     @app.teardown_appcontext

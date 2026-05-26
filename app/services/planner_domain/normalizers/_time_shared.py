@@ -54,6 +54,7 @@ def _normalize_domain_time_policy(policy: Optional[Mapping[str, Any]]) -> Dict[s
         "school_year_start_month": None,
         "school_year_end_month": None,
         "timezone": None,
+        "week_start": "monday",
         "default_time_concept_key": None,
         "allow_relative_ranges": True,
         "default_grain": None,
@@ -88,6 +89,9 @@ def _normalize_domain_time_policy(policy: Optional[Mapping[str, Any]]) -> Dict[s
         out["school_year_end_month"] = school_year_end
     timezone_name = str(policy.get("timezone") or "").strip()
     out["timezone"] = timezone_name or None
+    week_start = _norm_key(policy.get("week_start"))
+    if week_start in {"monday", "sunday"}:
+        out["week_start"] = week_start
     default_time_key = _norm_key(policy.get("default_time_concept_key"))
     out["default_time_concept_key"] = default_time_key or None
     if "allow_relative_ranges" in policy:

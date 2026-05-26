@@ -171,7 +171,7 @@ def test_seed_uses_generic_compatibility_set() -> None:
     sql = FakeForgeQueryPort()
     svc = SemanticConceptService(sql=sql)
 
-    result = svc.seed()
+    svc.seed()
 
     concept_calls = [call for call in sql.write_calls if "INSERT INTO semantic_concept" in call.query]
     alias_calls = [call for call in sql.write_calls if "INSERT INTO semantic_concept_alias" in call.query]

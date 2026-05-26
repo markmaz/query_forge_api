@@ -192,7 +192,7 @@ def build_llm_client_for_role(
 
 def _default_timeout_for_role(role: str) -> int:
     role_norm = str(role or "").strip().lower()
-    if role_norm in {LLMRole.PLANNER, LLMRole.QUERY_GENERATOR, LLMRole.ENRICHMENT}:
+    if role_norm in {LLMRole.PLANNER, LLMRole.QUERY_GENERATOR, LLMRole.ENRICHMENT, LLMRole.FLOWFORGE_RULE_DRAFTING}:
         return int(SEMANTIC_PLAN_LLM_TIMEOUT_SECONDS)
     return int(SEMANTIC_LLM_TIMEOUT_SECONDS)
 

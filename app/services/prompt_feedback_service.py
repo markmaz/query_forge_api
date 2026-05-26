@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+from app.constants.feedback_learning import FEEDBACK_LEARNING_META_KEY, FeedbackSubmissionStatus
 from app.adapters.mysql_sql_executor import ForgeMetaSQL
 from app.exceptions.forge_error import ForgeError
 from app.ports.sql_executor import ForgeQueryPort
@@ -21,6 +22,7 @@ _VOTE_ALIASES = {
 class PromptFeedbackWriteResult:
     id: int
     vote: str
+    status: str
     created_at: datetime
     updated_at: datetime
     created: bool
@@ -47,6 +49,7 @@ class PromptFeedbackService:
         trace_id: Optional[str] = None,
         normalized_prompt: Optional[str] = None,
         prompt_text: Optional[str] = None,
+        feedback_comment: Optional[str] = None,
         meta: Optional[Dict[str, Any]] = None,
     ) -> PromptFeedbackWriteResult:
         ws = _required_text(workspace_id, "workspace_id")
@@ -63,6 +66,7 @@ class PromptFeedbackService:
 
         normalized_prompt_text = _optional_text(normalized_prompt)
         prompt_text_value = _optional_text(prompt_text)
+        feedback_comment_text = _optional_text(feedback_comment)
 
         if not isinstance(response_json, dict):
             raise ForgeError("response_json must be an object", status_code=400)
@@ -73,11 +77,12 @@ class PromptFeedbackService:
         )
 
         meta_payload: Optional[str] = None
-        if meta is not None:
-            if not isinstance(meta, dict):
-                raise ForgeError("meta must be an object", status_code=400)
+        if meta is not None and not isinstance(meta, dict):
+            raise ForgeError("meta must be an object", status_code=400)
+        merged_meta = _merge_feedback_meta(meta=meta, feedback_comment=feedback_comment_text)
+        if merged_meta is not None:
             meta_payload = _serialize_json(
-                meta,
+                merged_meta,
                 field_name="meta",
                 max_payload_bytes=self._max_payload_bytes,
             )
@@ -193,6 +198,7 @@ class PromptFeedbackService:
         return PromptFeedbackWriteResult(
             id=int(row["id"]),
             vote=str(row["vote"]),
+            status=_submission_status_for_vote(vote_norm),
             created_at=_coerce_datetime(row.get("created_at"), field_name="created_at"),
             updated_at=_coerce_datetime(row.get("updated_at"), field_name="updated_at"),
             created=created,
@@ -321,11 +327,32 @@ def _optional_text(value: Any) -> Optional[str]:
     return text or None
 
 
+def _merge_feedback_meta(*, meta: Optional[Dict[str, Any]], feedback_comment: Optional[str]) -> Optional[Dict[str, Any]]:
+    base = dict(meta or {})
+    if not feedback_comment:
+        return base or None
+
+    reserved = base.get(FEEDBACK_LEARNING_META_KEY)
+    if not isinstance(reserved, dict):
+        reserved = {}
+    reserved["feedback_comment"] = feedback_comment
+    base[FEEDBACK_LEARNING_META_KEY] = reserved
+    return base
+
+
 def _normalize_vote(vote: Any) -> str:
     key = str(vote or "").strip().lower()
     if key not in _VOTE_ALIASES:
         raise ForgeError("vote must be one of: up, down, thumbs_up, thumbs_down", status_code=400)
     return _VOTE_ALIASES[key]
+
+
+def _submission_status_for_vote(vote: str) -> str:
+    return (
+        FeedbackSubmissionStatus.analysis_pending.value
+        if str(vote or "").strip().lower() == "down"
+        else FeedbackSubmissionStatus.recorded.value
+    )
 
 
 def _serialize_json(value: Dict[str, Any], *, field_name: str, max_payload_bytes: int) -> str:

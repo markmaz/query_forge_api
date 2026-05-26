@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from valkey.exceptions import ConnectionError as ValkeyConnectionError
 
+from app.models.rbac import FEATURE_KEYS, ROLE_DEFINITIONS, WORKSPACE_FEATURE_KEYS
 from app.services.rbac_service import (
     assign_role,
     get_effective_roles,
@@ -85,12 +86,65 @@ def test_workspace_admin_does_not_imply_feature_admin_roles(mock_no_cache):
     assert "forge_match:admin" not in roles
 
 
+def test_mcp_roles_are_defined_without_workspace_admin_or_super_admin_implication(mock_no_cache):
+    role_names = {definition["name"] for definition in ROLE_DEFINITIONS}
+
+    assert {"queryforge_mcp:user", "queryforge_mcp:preview", "queryforge_mcp:admin"}.issubset(role_names)
+    assert "queryforge_mcp" not in FEATURE_KEYS
+    assert "queryforge_mcp" in WORKSPACE_FEATURE_KEYS
+
+    with patch("app.services.rbac_service.get_user_roles", return_value={"workspace_admin"}):
+        workspace_admin_roles = get_effective_roles(user_id=1, workspace_id="ws-1")
+    with patch("app.services.rbac_service.get_user_roles", return_value={"super_admin"}):
+        super_admin_roles = get_effective_roles(user_id=1, workspace_id="ws-1")
+
+    assert "queryforge_mcp:user" not in workspace_admin_roles
+    assert "queryforge_mcp:preview" not in workspace_admin_roles
+    assert "queryforge_mcp:user" not in super_admin_roles
+    assert "queryforge_mcp:preview" not in super_admin_roles
+
+
 def test_feature_admin_implies_feature_user(mock_no_cache):
     with patch("app.services.rbac_service.get_user_roles", return_value={"forge_match:admin"}):
         roles = get_effective_roles(user_id=1)
 
     assert "forge_match:user" in roles
     assert "forge_match:admin" in roles
+
+
+def test_flowforge_roles_are_defined_with_least_privilege_suffixes(mock_no_cache):
+    role_names = {definition["name"] for definition in ROLE_DEFINITIONS}
+
+    assert {
+        "flowforge:viewer",
+        "flowforge:operator",
+        "flowforge:designer",
+        "flowforge:admin",
+        "flowforge:user",
+    }.issubset(role_names)
+
+
+def test_flowforge_admin_implies_operator_designer_viewer_and_legacy_user(mock_no_cache):
+    with patch("app.services.rbac_service.get_user_roles", return_value={"flowforge:admin"}):
+        roles = get_effective_roles(user_id=1, workspace_id="ws-1")
+
+    assert "flowforge:admin" in roles
+    assert "flowforge:designer" in roles
+    assert "flowforge:operator" in roles
+    assert "flowforge:viewer" in roles
+    assert "flowforge:user" in roles
+
+
+def test_flowforge_designer_and_operator_do_not_imply_each_other(mock_no_cache):
+    with patch("app.services.rbac_service.get_user_roles", return_value={"flowforge:designer"}):
+        designer_roles = get_effective_roles(user_id=1, workspace_id="ws-1")
+    with patch("app.services.rbac_service.get_user_roles", return_value={"flowforge:operator"}):
+        operator_roles = get_effective_roles(user_id=1, workspace_id="ws-1")
+
+    assert "flowforge:viewer" in designer_roles
+    assert "flowforge:operator" not in designer_roles
+    assert "flowforge:viewer" in operator_roles
+    assert "flowforge:designer" not in operator_roles
 
 
 def test_feature_admin_does_not_imply_other_feature_user(mock_no_cache):

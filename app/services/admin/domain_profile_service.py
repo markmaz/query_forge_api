@@ -36,7 +36,8 @@ SELECT
     dp.embedded_at,
     dp.created_at,
     dp.updated_at,
-    d.name AS domain_name
+    d.name AS domain_name,
+    d.kind AS domain_kind
 FROM domain_profile dp
 LEFT JOIN domain d ON d.id = dp.domain_id
 WHERE dp.workspace_id = :workspace_id
@@ -62,7 +63,8 @@ SELECT
     dp.embedded_at,
     dp.created_at,
     dp.updated_at,
-    d.name AS domain_name
+    d.name AS domain_name,
+    d.kind AS domain_kind
 FROM domain_profile dp
 LEFT JOIN domain d ON d.id = dp.domain_id
 WHERE dp.workspace_id = :workspace_id AND dp.domain_id = :domain_id
@@ -224,6 +226,7 @@ def _row_to_response(row: Dict[str, Any]) -> DomainProfileResponse:
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
         domain_name=row.get("domain_name"),
+        domain_kind=row.get("domain_kind"),
     )
 
 

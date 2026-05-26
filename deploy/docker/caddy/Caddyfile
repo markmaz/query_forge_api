@@ -1,0 +1,11 @@
+{$QF_SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	@api path /api/* /oauth/* /.well-known/oauth-authorization-server
+	reverse_proxy @api api:8000
+
+	@mcp path /mcp* /.well-known/oauth-protected-resource
+	reverse_proxy @mcp mcp:8001
+
+	reverse_proxy frontend:80
+}

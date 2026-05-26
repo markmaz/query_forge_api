@@ -33,6 +33,7 @@ _SAMPLE_ROW = {
     "created_at": "2026-01-01 00:00:00",
     "updated_at": None,
     "domain_name": "Schools",
+    "domain_kind": "education",
 }
 
 
@@ -115,6 +116,7 @@ def test_list_profiles_returns_rows():
     assert len(result) == 1
     assert result[0]["domain_id"] == 4
     assert result[0]["domain_name"] == "Schools"
+    assert result[0]["domain_kind"] == "education"
 
 
 def test_list_profiles_empty():

@@ -282,6 +282,7 @@ class SemanticIntegrationService:
         self,
         *,
         prompt: str,
+        workspace_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Return deduplicated semantic alias constraints for a prompt.
 
@@ -293,6 +294,7 @@ class SemanticIntegrationService:
         try:
             constraints = self._semantic_grounding_service().resolve_alias_constraints(
                 prompt=prompt,
+                workspace_id=workspace_id,
             )
         except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as exc:
             logger.warning("planner_domain semantic alias constraints failed err=%s", exc)
