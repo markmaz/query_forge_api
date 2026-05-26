@@ -78,13 +78,8 @@ jobs:
           rm -rf release ui-release
           mkdir -p release/query-forge-api ui-release
 
-          rsync -a \
-            --exclude '.git' \
-            --exclude '.venv' \
-            --exclude '__pycache__' \
-            --exclude '.pytest_cache' \
-            --exclude '.ruff_cache' \
-            --exclude '.hypothesis' \
+          package_sources=()
+          for path in \
             app \
             config \
             data \
@@ -95,7 +90,22 @@ jobs:
             requirements \
             scripts \
             version.json \
-            wsgi.py \
+            wsgi.py; do
+            if [ -e "$path" ]; then
+              package_sources+=("$path")
+            else
+              echo "Skipping missing package path: $path"
+            fi
+          done
+
+          rsync -a \
+            --exclude '.git' \
+            --exclude '.venv' \
+            --exclude '__pycache__' \
+            --exclude '.pytest_cache' \
+            --exclude '.ruff_cache' \
+            --exclude '.hypothesis' \
+            "${package_sources[@]}" \
             release/query-forge-api/
 
           rsync -a query-forge-ui/dist/ ui-release/
