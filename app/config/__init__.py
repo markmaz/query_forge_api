@@ -522,6 +522,7 @@ GAZETTEER_CSV_PATH = (
 )
 
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
+FLOWFORGE_WEBHOOK_BASE_URL = os.getenv("FLOWFORGE_WEBHOOK_BASE_URL", "").strip()
 FRONTEND_ALLOWED_ORIGINS = _parse_allowed_origins(
     os.getenv("FRONTEND_ALLOWED_ORIGINS"),
     os.getenv("CORS_ALLOWED_ORIGINS"),

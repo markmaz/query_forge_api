@@ -4,6 +4,7 @@ from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
+from flask import Flask
 
 from app.exceptions.forge_error import ForgeError
 from app.config.llm_resolver import ResolvedLLMRuntime
@@ -1720,6 +1721,22 @@ def test_flowforge_service_lists_integrations_without_webhook_secret():
         },
     ]
     assert "webhook_secret" not in result[0]
+
+
+def test_flowforge_service_lists_absolute_webhook_url_when_base_url_configured():
+    app = Flask(__name__)
+    app.config["FLOWFORGE_WEBHOOK_BASE_URL"] = "https://api.queryforge.example"
+    service = FlowForgeService(
+        resource_repository=_ResourceRepo(),
+        matching_repository=_MatchingRepo(),
+        integration_repository=_IntegrationRepo(),
+    )
+
+    with app.app_context():
+        result = service.list_integrations(workspace_id="ws-1")
+
+    assert result[0]["webhook_path"] == "/api/v1/flowforge/webhooks/jotform/ffj_public"
+    assert result[0]["webhook_url"] == "https://api.queryforge.example/api/v1/flowforge/webhooks/jotform/ffj_public"
 
 
 def test_flowforge_service_creates_jotform_integration_with_one_time_secret():

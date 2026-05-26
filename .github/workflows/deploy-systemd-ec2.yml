@@ -1,0 +1,164 @@
+name: Deploy Systemd EC2
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-systemd-ec2
+  cancel-in-progress: false
+
+env:
+  RELEASE_NAME: query-forge-${{ github.sha }}.tar.gz
+  UI_RELEASE_NAME: query-forge-ui-${{ github.sha }}.tar.gz
+  QF_UI_REPOSITORY: ${{ vars.QF_UI_REPOSITORY || 'markmaz/query_forge_ui' }}
+  QF_UI_REF: ${{ vars.QF_UI_REF || github.ref_name }}
+  BACKEND_EC2_PORT: ${{ vars.BACKEND_EC2_PORT || vars.EC2_PORT || '22' }}
+  FRONTEND_EC2_PORT: ${{ vars.FRONTEND_EC2_PORT || vars.EC2_PORT || '22' }}
+  BACKEND_DEPLOY_PATH: ${{ vars.BACKEND_DEPLOY_PATH || '/opt/query-forge/backend' }}
+  FRONTEND_DEPLOY_PATH: ${{ vars.FRONTEND_DEPLOY_PATH || '/var/www/query-forge' }}
+  QF_KEEP_RELEASES: ${{ vars.QF_KEEP_RELEASES || '5' }}
+  QF_RUN_MIGRATIONS: ${{ vars.QF_RUN_MIGRATIONS || 'false' }}
+  QF_MIGRATION_COMMAND: ${{ vars.QF_MIGRATION_COMMAND || '' }}
+  QF_API_SERVICE: ${{ vars.QF_API_SERVICE || 'queryforge-api' }}
+  QF_CELERY_SERVICE: ${{ vars.QF_CELERY_SERVICE || 'queryforge-celery-worker' }}
+  QF_CELERY_BEAT_SERVICE: ${{ vars.QF_CELERY_BEAT_SERVICE || 'queryforge-celery-beat' }}
+  QF_MCP_SERVICE: ${{ vars.QF_MCP_SERVICE || '' }}
+  QF_RESTART_NGINX: ${{ vars.QF_RESTART_NGINX || 'true' }}
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout API
+        uses: actions/checkout@v4
+
+      - name: Checkout UI
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.QF_UI_REPOSITORY }}
+          ref: ${{ env.QF_UI_REF }}
+          path: query-forge-ui
+          token: ${{ secrets.QF_UI_REPO_TOKEN || github.token }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: query-forge-ui/package-lock.json
+
+      - name: Build frontend
+        working-directory: query-forge-ui
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL || secrets.VITE_API_URL || '/api/v1' }}
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements/requirements.txt
+
+      - name: Validate backend dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements/requirements.txt
+
+      - name: Package releases
+        run: |
+          set -euo pipefail
+          rm -rf release ui-release
+          mkdir -p release/query-forge-api ui-release
+
+          rsync -a \
+            --exclude '.git' \
+            --exclude '.venv' \
+            --exclude '__pycache__' \
+            --exclude '.pytest_cache' \
+            --exclude '.ruff_cache' \
+            --exclude '.hypothesis' \
+            app \
+            config \
+            data \
+            db \
+            mcp_server \
+            migrations \
+            models \
+            requirements \
+            scripts \
+            version.json \
+            wsgi.py \
+            release/query-forge-api/
+
+          rsync -a query-forge-ui/dist/ ui-release/
+          tar -czf "$RELEASE_NAME" -C release .
+          tar -czf "$UI_RELEASE_NAME" -C ui-release .
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.BACKEND_EC2_SSH_KEY || secrets.EC2_SSH_KEY }}" > ~/.ssh/backend_deploy_key
+          chmod 600 ~/.ssh/backend_deploy_key
+          ssh-keyscan -p "$BACKEND_EC2_PORT" -H "${{ secrets.BACKEND_EC2_HOST || secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+          printf '%s\n' "${{ secrets.FRONTEND_EC2_SSH_KEY || secrets.EC2_SSH_KEY }}" > ~/.ssh/frontend_deploy_key
+          chmod 600 ~/.ssh/frontend_deploy_key
+          ssh-keyscan -p "$FRONTEND_EC2_PORT" -H "${{ secrets.FRONTEND_EC2_HOST || secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Upload backend release
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/backend_deploy_key -p "$BACKEND_EC2_PORT" "${{ secrets.BACKEND_EC2_USER || secrets.EC2_USER }}@${{ secrets.BACKEND_EC2_HOST || secrets.EC2_HOST }}" \
+            "mkdir -p /tmp/query-forge-deploy"
+          scp -i ~/.ssh/backend_deploy_key -P "$BACKEND_EC2_PORT" "$RELEASE_NAME" \
+            "${{ secrets.BACKEND_EC2_USER || secrets.EC2_USER }}@${{ secrets.BACKEND_EC2_HOST || secrets.EC2_HOST }}:/tmp/query-forge-deploy/$RELEASE_NAME"
+          scp -i ~/.ssh/backend_deploy_key -P "$BACKEND_EC2_PORT" scripts/deploy/ec2_systemd_backend_deploy.sh \
+            "${{ secrets.BACKEND_EC2_USER || secrets.EC2_USER }}@${{ secrets.BACKEND_EC2_HOST || secrets.EC2_HOST }}:/tmp/query-forge-deploy/ec2_systemd_backend_deploy.sh"
+
+      - name: Activate backend release
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/backend_deploy_key -p "$BACKEND_EC2_PORT" "${{ secrets.BACKEND_EC2_USER || secrets.EC2_USER }}@${{ secrets.BACKEND_EC2_HOST || secrets.EC2_HOST }}" \
+            "chmod +x /tmp/query-forge-deploy/ec2_systemd_backend_deploy.sh && \
+             QF_BACKEND_DEPLOY_PATH='$BACKEND_DEPLOY_PATH' \
+             QF_RELEASE_ID='${{ github.sha }}' \
+             QF_KEEP_RELEASES='$QF_KEEP_RELEASES' \
+             QF_RUN_MIGRATIONS='$QF_RUN_MIGRATIONS' \
+             QF_MIGRATION_COMMAND='$QF_MIGRATION_COMMAND' \
+             QF_API_SERVICE='$QF_API_SERVICE' \
+             QF_CELERY_SERVICE='$QF_CELERY_SERVICE' \
+             QF_CELERY_BEAT_SERVICE='$QF_CELERY_BEAT_SERVICE' \
+             QF_MCP_SERVICE='$QF_MCP_SERVICE' \
+             /tmp/query-forge-deploy/ec2_systemd_backend_deploy.sh \
+               '/tmp/query-forge-deploy/$RELEASE_NAME'"
+
+      - name: Upload frontend release
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/frontend_deploy_key -p "$FRONTEND_EC2_PORT" "${{ secrets.FRONTEND_EC2_USER || secrets.EC2_USER }}@${{ secrets.FRONTEND_EC2_HOST || secrets.EC2_HOST }}" \
+            "mkdir -p /tmp/query-forge-deploy"
+          scp -i ~/.ssh/frontend_deploy_key -P "$FRONTEND_EC2_PORT" "$UI_RELEASE_NAME" \
+            "${{ secrets.FRONTEND_EC2_USER || secrets.EC2_USER }}@${{ secrets.FRONTEND_EC2_HOST || secrets.EC2_HOST }}:/tmp/query-forge-deploy/$UI_RELEASE_NAME"
+          scp -i ~/.ssh/frontend_deploy_key -P "$FRONTEND_EC2_PORT" scripts/deploy/ec2_systemd_frontend_deploy.sh \
+            "${{ secrets.FRONTEND_EC2_USER || secrets.EC2_USER }}@${{ secrets.FRONTEND_EC2_HOST || secrets.EC2_HOST }}:/tmp/query-forge-deploy/ec2_systemd_frontend_deploy.sh"
+
+      - name: Activate frontend release
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/frontend_deploy_key -p "$FRONTEND_EC2_PORT" "${{ secrets.FRONTEND_EC2_USER || secrets.EC2_USER }}@${{ secrets.FRONTEND_EC2_HOST || secrets.EC2_HOST }}" \
+            "chmod +x /tmp/query-forge-deploy/ec2_systemd_frontend_deploy.sh && \
+             QF_FRONTEND_DEPLOY_PATH='$FRONTEND_DEPLOY_PATH' \
+             QF_RELEASE_ID='${{ github.sha }}' \
+             QF_KEEP_RELEASES='$QF_KEEP_RELEASES' \
+             QF_RESTART_NGINX='$QF_RESTART_NGINX' \
+             /tmp/query-forge-deploy/ec2_systemd_frontend_deploy.sh \
+               '/tmp/query-forge-deploy/$UI_RELEASE_NAME'"

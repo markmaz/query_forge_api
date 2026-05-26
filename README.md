@@ -135,6 +135,7 @@ Jotform webhook intake:
 - persisted webhooks store an idempotent `flowforge_intake_events` record with normalized payload, raw payload, headers, source IP, mode, and raw-payload retention expiration
 - duplicate Jotform deliveries return the existing intake event id instead of creating a second event
 - configure Jotform to POST to `/api/v1/flowforge/webhooks/jotform/<webhook_public_id>?token=<webhook_secret>` when custom headers are unavailable
+- set `FLOWFORGE_WEBHOOK_BASE_URL` to the externally reachable API/base app origin when the UI should show absolute webhook URLs, for example `https://queryforge.example.com`
 - prefer `X-FlowForge-Webhook-Token` or `X-Jotform-Webhook-Token` for the per-integration `webhook_secret` if the sender can provide custom headers
 - the receiver accepts JSON and form-encoded payloads, including Jotform's `rawRequest` field
 - current behavior persists the intake event, evaluates configured integration triggers, stores `trigger_evaluation_json`, creates durable `flowforge_runs` for selected pinned triggers, appends initial `workflow.run.created` events, and returns `202 Accepted`; node execution and side effects are later FlowForge runtime phases
@@ -257,6 +258,12 @@ The MCP server is standalone. It does not run inside the Flask app process.
 
 QueryForge is expected to run in Docker.
 
+For the EC2/GitHub Actions deployment shape modeled after Blessing Tree, see
+`docs/admin/ec2-docker-compose-deployment.md`. That stack builds API and UI
+images, deploys them through Docker Compose on EC2, uses Caddy for TLS, and
+runs API, MCP, Celery worker, Celery Beat, Valkey, and Qdrant containers against
+an external RDS MySQL database.
+
 Use the root-level Compose stack from the workspace root:
 
 ```bash
@@ -345,6 +352,7 @@ That file is intended for:
 #### Browser/API integration
 
 - `FRONTEND_BASE_URL`
+- `FLOWFORGE_WEBHOOK_BASE_URL`
 - `FRONTEND_ALLOWED_ORIGINS`
 - `COOKIE_SECURE`
 - `COOKIE_SAMESITE`
