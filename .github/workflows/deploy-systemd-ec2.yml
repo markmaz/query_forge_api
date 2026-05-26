@@ -14,15 +14,15 @@ env:
   QF_UI_REF: ${{ vars.QF_UI_REF || github.ref_name }}
   BACKEND_EC2_PORT: ${{ vars.BACKEND_EC2_PORT || vars.EC2_PORT || '22' }}
   FRONTEND_EC2_PORT: ${{ vars.FRONTEND_EC2_PORT || vars.EC2_PORT || '22' }}
-  BACKEND_DEPLOY_PATH: ${{ vars.BACKEND_DEPLOY_PATH || '/opt/query-forge/backend' }}
+  BACKEND_DEPLOY_PATH: ${{ vars.BACKEND_DEPLOY_PATH || '/opt/query-forge/query_forge_api' }}
   FRONTEND_DEPLOY_PATH: ${{ vars.FRONTEND_DEPLOY_PATH || '/var/www/query-forge' }}
   QF_KEEP_RELEASES: ${{ vars.QF_KEEP_RELEASES || '5' }}
   QF_RUN_MIGRATIONS: ${{ vars.QF_RUN_MIGRATIONS || 'false' }}
   QF_MIGRATION_COMMAND: ${{ vars.QF_MIGRATION_COMMAND || '' }}
-  QF_API_SERVICE: ${{ vars.QF_API_SERVICE || 'queryforge-api' }}
-  QF_CELERY_SERVICE: ${{ vars.QF_CELERY_SERVICE || 'queryforge-celery-worker' }}
-  QF_CELERY_BEAT_SERVICE: ${{ vars.QF_CELERY_BEAT_SERVICE || 'queryforge-celery-beat' }}
-  QF_MCP_SERVICE: ${{ vars.QF_MCP_SERVICE || '' }}
+  QF_API_SERVICE: ${{ vars.QF_API_SERVICE || 'queryforge' }}
+  QF_CELERY_SERVICE: ${{ vars.QF_CELERY_SERVICE || 'celery' }}
+  QF_CELERY_BEAT_SERVICE: ${{ vars.QF_CELERY_BEAT_SERVICE || 'celery-beat' }}
+  QF_MCP_SERVICE: ${{ vars.QF_MCP_SERVICE || 'mcp_server' }}
   QF_RESTART_NGINX: ${{ vars.QF_RESTART_NGINX || 'true' }}
 
 jobs:

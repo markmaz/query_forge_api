@@ -20,6 +20,11 @@ fi
 mkdir -p "$release_dir"
 tar -xzf "$release_archive" -C "$release_dir"
 ln -sfn "$release_dir" "$current_link"
+rsync -a --delete \
+  --exclude '/.well-known' \
+  --exclude '/current' \
+  --exclude '/releases' \
+  "$release_dir"/ "$deploy_dir"/
 
 if [ "${QF_RESTART_NGINX:-true}" = "true" ]; then
   "${sudo_cmd[@]}" nginx -t
