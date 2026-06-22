@@ -3,6 +3,7 @@
 .venv
 venv
 __pycache__
+**/__pycache__
 .pytest_cache
 .ruff_cache
 .coverage
@@ -20,9 +21,19 @@ test.log
 test_output.txt
 response.txt
 response2.txt
+rbac_audit_report.md
 tests
 docs
 memory.md
 tree.txt
+infra
+models
+data/prodigy_exports
+data/*.spacy
+data/*train*
+data/*dev*
+data/*goldset*
+data/*unlabeled*
+data/*failure*
 *.pyc
 *.pyo

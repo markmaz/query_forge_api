@@ -48,6 +48,9 @@ export QF_HTTP_PORT="${QF_HTTP_PORT:-80}"
 export QF_HTTPS_PORT="${QF_HTTPS_PORT:-443}"
 
 docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+if [ "${QF_RUN_MIGRATIONS:-false}" = "true" ]; then
+  docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile migrate run --rm migrate
+fi
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
 
 docker image prune -f >/dev/null 2>&1 || true

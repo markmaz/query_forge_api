@@ -7,6 +7,10 @@ services:
     image: ${QF_API_IMAGE:?QF_API_IMAGE is required}
     build: null
 
+  migrate:
+    image: ${QF_API_IMAGE:?QF_API_IMAGE is required}
+    build: null
+
   mcp:
     image: ${QF_API_IMAGE:?QF_API_IMAGE is required}
 

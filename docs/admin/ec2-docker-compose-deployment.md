@@ -157,6 +157,7 @@ Optional:
 | `QF_HTTPS_PORT` | `443` |
 | `QF_UI_REPOSITORY` | `markmaz/query_forge_ui` |
 | `QF_UI_REF` | workflow branch name |
+| `QF_RUN_MIGRATIONS` | `false` |
 
 ## Deploy
 
@@ -176,8 +177,20 @@ Then it uploads the Compose files to EC2 and runs:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile migrate run --rm migrate  # only when QF_RUN_MIGRATIONS=true
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
 ```
+
+For a first customer cutover, set `QF_RUN_MIGRATIONS=true` only after:
+
+1. the RDS backup/snapshot exists,
+2. `/opt/query-forge/shared/query-forge.env` points at the correct database,
+3. `QF_MIGRATIONS_MODE=plan` has been run manually and reviewed, and
+4. an already-migrated database has been baselined if needed, and
+5. the deployment window is open.
+
+After the first successful deploy, leave `QF_RUN_MIGRATIONS=false` unless the
+next release contains reviewed database changes.
 
 ## Manual Local Build
 
@@ -199,9 +212,63 @@ QueryForge currently has raw SQL migration files under:
 migrations/
 ```
 
-This deployment scaffold does not run migrations automatically yet. Apply migrations to RDS before the app containers are updated, using the same reviewed SQL process used for production changes.
+The API image includes a one-shot migration runner:
 
-Recommended next improvement: add a migration runner container or Flyway container so deployment can run migrations before `api`, `mcp`, and Celery restart.
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile migrate run --rm migrate
+```
+
+The runner:
+
+- applies SQL files in sorted filename order,
+- supports `DELIMITER` statements because it uses the MySQL client,
+- records applied filenames and SHA-256 checksums in
+  `query_forge_schema_migrations`,
+- skips already-applied files with matching checksums, and
+- fails if an applied migration file checksum changes.
+
+To preview pending migrations:
+
+```bash
+QF_MIGRATIONS_MODE=plan docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile migrate run --rm migrate
+```
+
+If a production database already has the SQL files applied from an earlier
+manual rollout, record those files without re-running them:
+
+```bash
+QF_MIGRATIONS_MODE=baseline docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile migrate run --rm migrate
+```
+
+Only use `baseline` after comparing the target database to the reviewed
+migration set. It marks the current SQL files as already handled.
+
+Use the same reviewed SQL process used for production changes before enabling
+`QF_RUN_MIGRATIONS=true` in GitHub Actions.
+
+Workspace-specific setup such as Workflow Intelligence semantic sync is still a
+post-migration operational step. It is not run automatically by the Docker
+migration service.
+
+## Customer Image Access
+
+The workflow pushes commit-tagged images to GHCR:
+
+```text
+ghcr.io/<owner>/query-forge-api:<commit-sha>
+ghcr.io/<owner>/query-forge-ui:<commit-sha>
+```
+
+If the packages are private, the EC2 host needs `GHCR_USERNAME` and
+`GHCR_TOKEN` secrets so `ec2_docker_deploy.sh` can run `docker login`. For a
+customer-managed environment, either:
+
+- grant their deployment account read access to the GHCR packages,
+- publish a customer-approved release tag to a registry they can pull from, or
+- export and transfer the images through their approved artifact process.
+
+Do not rely on `latest` for customer change control; deploy an immutable
+commit SHA or release tag.
 
 ## TLS
 

@@ -49,6 +49,18 @@ services:
       - "8000"
     restart: unless-stopped
 
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: query-forge-api:${QF_IMAGE_TAG:-local}
+    env_file:
+      - ${QF_ENV_FILE:-deploy/docker/query-forge.env}
+    command: ["bash", "scripts/docker/run_migrations.sh"]
+    profiles:
+      - migrate
+    restart: "no"
+
   mcp:
     image: query-forge-api:${QF_IMAGE_TAG:-local}
     env_file:
