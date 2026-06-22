@@ -35,13 +35,19 @@ jobs:
       - name: Checkout API
         uses: actions/checkout@v4
 
+      - name: Validate private UI checkout access
+        if: ${{ secrets.QF_UI_REPO_TOKEN == '' }}
+        run: |
+          echo "::error title=Missing QF_UI_REPO_TOKEN::This workflow checks out the private query_forge_ui repository from the API repository. Add QF_UI_REPO_TOKEN to the production environment or repository secrets with read access to markmaz/query_forge_ui."
+          exit 1
+
       - name: Checkout UI
         uses: actions/checkout@v4
         with:
           repository: ${{ env.QF_UI_REPOSITORY }}
           ref: ${{ env.QF_UI_REF }}
           path: query-forge-ui
-          token: ${{ secrets.QF_UI_REPO_TOKEN || github.token }}
+          token: ${{ secrets.QF_UI_REPO_TOKEN }}
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
