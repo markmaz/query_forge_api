@@ -206,6 +206,10 @@ def test_check_all_healthy():
 
     assert result["overall"] == "healthy"
     assert result["checks"]["app"]["status"] == "ok"
+    assert result["checks"]["app"]["pid"] > 0
+    assert result["checks"]["app"]["uptime_seconds"] >= 0
+    assert "rss_bytes" in result["checks"]["app"]["memory"]
+    assert "peak_rss_bytes" in result["checks"]["app"]["memory"]
     assert result["checks"]["mysql"]["status"] == "ok"
     assert result["checks"]["mysql"]["latency_ms"] >= 0
     assert result["checks"]["llms"]["status"] == "ok"

@@ -93,6 +93,34 @@ The backend systemd units should point at:
 /opt/query-forge/backend/current
 ```
 
+Recommended API `ExecStart` shape:
+
+```bash
+/opt/query-forge/backend/current/.venv/bin/gunicorn \
+  -c /opt/query-forge/backend/current/gunicorn.conf.py \
+  wsgi:app
+```
+
+The Gunicorn config recycles workers after `QF_GUNICORN_MAX_REQUESTS`
+requests, plus jitter, to contain slow memory growth. Set these values in the
+shared backend `.env` if the default `1000` requests is too high or too low for
+the instance. The default worker count is `1`, which is appropriate for a
+single-user or demo host where each worker imports the ML/NLP stack.
+
+Recommended Celery recycle settings in the shared backend `.env`:
+
+```text
+QF_CELERY_MAX_TASKS_PER_CHILD=100
+QF_CELERY_MAX_MEMORY_PER_CHILD_KB=0
+```
+
+The default Celery concurrency is `1`. Increase it only after checking memory
+headroom, because each prefork child can load hundreds of MB of Python and
+native-library state.
+
+Use a nonzero `QF_CELERY_MAX_MEMORY_PER_CHILD_KB` only after observing normal
+task memory, because ML/NLP imports can legitimately raise baseline RSS.
+
 The deployment script creates a fresh virtualenv inside each release and installs:
 
 ```bash

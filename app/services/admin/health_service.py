@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import resource
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
@@ -21,6 +23,7 @@ from app.ports.sql_executor import ForgeQueryPort
 from app.services.tenancy.workspace_llm_service import WorkspaceLLMService
 
 logger = logging.getLogger(__name__)
+_PROCESS_STARTED_AT = time.time()
 
 
 class AdminHealthService:
@@ -64,7 +67,12 @@ class AdminHealthService:
         return {"overall": overall, "checks": checks}
 
     def _check_app(self) -> Dict[str, Any]:
-        return {"status": "ok"}
+        return {
+            "status": "ok",
+            "pid": os.getpid(),
+            "uptime_seconds": int(time.time() - _PROCESS_STARTED_AT),
+            "memory": _current_process_memory(),
+        }
 
     def _check_mysql(self) -> Dict[str, Any]:
         start = time.perf_counter()
@@ -626,6 +634,37 @@ def _display_llm_endpoint(cfg: dict[str, Any]) -> str:
     if provider == "anthropic":
         return "https://api.anthropic.com/v1"
     return ""
+
+
+def _current_process_memory() -> Dict[str, Optional[int]]:
+    rss_bytes = _linux_status_kb_value("VmRSS")
+    peak_rss_bytes = _linux_status_kb_value("VmHWM")
+
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    maxrss = int(getattr(usage, "ru_maxrss", 0) or 0)
+    if peak_rss_bytes is None and maxrss > 0:
+        # Linux reports kilobytes; macOS reports bytes. The EC2 path is Linux,
+        # but keep the fallback usable for local development.
+        peak_rss_bytes = maxrss if maxrss > 10_000_000 else maxrss * 1024
+
+    return {
+        "rss_bytes": rss_bytes,
+        "peak_rss_bytes": peak_rss_bytes,
+    }
+
+
+def _linux_status_kb_value(name: str) -> Optional[int]:
+    try:
+        with open("/proc/self/status", "r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.startswith(f"{name}:"):
+                    continue
+                parts = line.split()
+                if len(parts) >= 2:
+                    return int(parts[1]) * 1024
+    except (OSError, ValueError):
+        return None
+    return None
 
 
 def _to_int_or_none(value: Any) -> int | None:

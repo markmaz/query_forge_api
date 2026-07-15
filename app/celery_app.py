@@ -5,6 +5,18 @@ from celery import Celery
 
 from app.config import VALKEY_CONFIG
 
+
+def _int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        value = int(str(raw).strip())
+    except ValueError:
+        return default
+    return value if value >= 0 else default
+
+
 _is_darwin = platform.system().lower() == "darwin"
 # Celery CLI defaults to prefork if pool is not explicitly provided. On macOS,
 # prefork with native ML libs (torch/sentence-transformers) can crash workers.
@@ -20,9 +32,12 @@ celery.autodiscover_tasks(["app.tasks"])
 # 2) `celery -A app.celery_app worker` startup path.
 _default_pool = "solo" if _is_darwin else "prefork"
 _selected_pool = os.getenv("QF_CELERY_WORKER_POOL", _default_pool).strip().lower() or _default_pool
-_conf_update = {"worker_pool": _selected_pool}
-if _selected_pool == "solo":
-    _conf_update["worker_concurrency"] = int(os.getenv("QF_CELERY_WORKER_CONCURRENCY", "1"))
+_conf_update = {
+    "worker_pool": _selected_pool,
+    "worker_concurrency": max(1, _int_env("QF_CELERY_WORKER_CONCURRENCY", 1)),
+    "worker_max_tasks_per_child": _int_env("QF_CELERY_MAX_TASKS_PER_CHILD", 100),
+    "worker_max_memory_per_child": _int_env("QF_CELERY_MAX_MEMORY_PER_CHILD_KB", 0),
+}
 celery.conf.update(_conf_update)
 
 QF_TASK_NAMESPACE = "qf"
@@ -45,8 +60,9 @@ def configure_forge_celery(app):
     default_pool = "solo" if _is_darwin else "prefork"
     selected_pool = os.getenv("QF_CELERY_WORKER_POOL", default_pool).strip().lower() or default_pool
     celery.conf.worker_pool = selected_pool
-    if selected_pool == "solo":
-        celery.conf.worker_concurrency = int(os.getenv("QF_CELERY_WORKER_CONCURRENCY", "1"))
+    celery.conf.worker_concurrency = max(1, _int_env("QF_CELERY_WORKER_CONCURRENCY", 1))
+    celery.conf.worker_max_tasks_per_child = _int_env("QF_CELERY_MAX_TASKS_PER_CHILD", 100)
+    celery.conf.worker_max_memory_per_child = _int_env("QF_CELERY_MAX_MEMORY_PER_CHILD_KB", 0)
 
 
 beat_schedule = dict(getattr(celery.conf, "beat_schedule", {}) or {})
