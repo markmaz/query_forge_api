@@ -66,6 +66,39 @@ def test_plan_domain_route_returns_service_payload(client, monkeypatch):
     assert resp.json["plan_json_v2"]["schema_version"] == 2
 
 
+def test_plan_domain_route_missing_token_returns_auth_error(client):
+    resp = client.post(
+        "/api/v1/planner/plan_domain",
+        json={"prompt": "students per teacher by county"},
+    )
+
+    assert resp.status_code == 403
+    assert resp.json["error"] == "Token is missing"
+
+
+def test_plan_domain_route_preserves_service_forge_error(client, monkeypatch):
+    class _Svc:
+        def emit_failed_plan_trace(self, *, payload, user_id, error):
+            del payload, user_id, error
+            return "trace-missing-conversation"
+
+        def plan(self, payload, *, user_id):
+            del payload, user_id
+            raise ForgeError("Conversation not found", status_code=404, details={"conversation_id": "pdc-missing"})
+
+    monkeypatch.setattr(planner_domain_route, "PlannerDomainService", _Svc)
+    resp = client.post(
+        "/api/v1/planner/plan_domain",
+        json={"workspace_id": "ws-1", "prompt": "continue", "conversation_id": "pdc-missing"},
+        headers=_headers(monkeypatch),
+    )
+
+    assert resp.status_code == 404
+    assert resp.json["error"] == "Conversation not found"
+    assert resp.json["details"]["conversation_id"] == "pdc-missing"
+    assert resp.json["details"]["trace_id"] == "trace-missing-conversation"
+
+
 def test_plan_domain_route_calendar_days_off_workflow_payload_survives_http_boundary(client, monkeypatch):
     prompt = "Show me all the days off barksdale elementary has in December"
     golden_debug = _load_golden_debug("calendar_days_off")

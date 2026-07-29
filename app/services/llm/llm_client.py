@@ -69,7 +69,9 @@ class LLMClient:
                 extra_params=extra_params,
             )
         parsed = first.get("parsed") if isinstance(first.get("parsed"), dict) else None
-        is_valid = parsed is not None and (validator(parsed) if validator is not None else True)
+        is_valid = self._trace_has_valid_json_payload(first, parsed=parsed) and (
+            validator(parsed) if validator is not None and parsed is not None else True
+        )
         second: Optional[Dict[str, Any]] = None
         if not is_valid and retry_invalid_schema:
             repair_user = (
@@ -92,7 +94,9 @@ class LLMClient:
                     extra_params=extra_params,
                 )
             parsed = second.get("parsed") if isinstance(second.get("parsed"), dict) else None
-            is_valid = parsed is not None and (validator(parsed) if validator is not None else True)
+            is_valid = self._trace_has_valid_json_payload(second, parsed=parsed) and (
+                validator(parsed) if validator is not None and parsed is not None else True
+            )
         if not is_valid or parsed is None:
             raise ForgeError(
                 "Invalid model response JSON",
@@ -510,6 +514,16 @@ class LLMClient:
             return None
         except (TypeError, ValueError, json.JSONDecodeError):
             return None
+
+    @staticmethod
+    def _trace_has_valid_json_payload(trace: Dict[str, Any], *, parsed: Optional[Dict[str, Any]]) -> bool:
+        if parsed is None:
+            return False
+        if isinstance(parsed.get("error"), dict):
+            return False
+        if trace.get("error"):
+            return False
+        return True
 
     @staticmethod
     def _trace_summary(trace: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

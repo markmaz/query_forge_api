@@ -176,6 +176,18 @@ def create_app():
         authorizations=authorizations,
     )
 
+    @api.errorhandler(ForgeError)
+    def handle_restx_service_error(error):
+        payload = error.to_dict()
+        trace_id = getattr(g, "failed_trace_id", None)
+        if trace_id:
+            details = payload.get("details")
+            if not isinstance(details, dict):
+                details = {}
+            details.setdefault("trace_id", trace_id)
+            payload["details"] = details
+        return payload, error.status_code
+
     CORS(
         app,
         resources={r"/*": {"origins": list(FRONTEND_ALLOWED_ORIGINS)}},

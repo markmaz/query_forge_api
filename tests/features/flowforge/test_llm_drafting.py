@@ -1,3 +1,6 @@
+import pytest
+
+from app.exceptions.forge_error import ForgeError
 from app.features.flowforge.llm_drafting import MatchingPolicyDraftGenerator
 from app.features.flowforge.workflow_drafting import WorkflowGraphDraftGenerator, normalize_generated_workflow_graph
 
@@ -113,6 +116,40 @@ class _ShortcutWorkflowLLM:
                 ],
             },
             "plain_language_summary": "Shortcut summary.",
+        }
+
+
+class _WorkflowErrorLLM:
+    _model = "bad-workflow-model"
+
+    def chat_json(self, **payload):
+        return {
+            "error": {
+                "message": "The model does not exist.",
+                "type": "invalid_request_error",
+                "code": "model_not_found",
+            }
+        }
+
+
+class _WorkflowGraphlessLLM:
+    _model = "graphless-workflow-model"
+
+    def chat_json(self, **payload):
+        return {"plain_language_summary": "I forgot the graph."}
+
+
+class _RootNodesWorkflowLLM:
+    _model = "root-nodes-workflow-model"
+
+    def chat_json(self, **payload):
+        return {
+            "nodes": [
+                {"id": "start", "type": "manual_start", "label": "Manual Start", "position": {"x": 120, "y": 140}, "data": {}},
+                {"id": "done", "type": "end", "label": "Done", "position": {"x": 360, "y": 140}, "data": {}},
+            ],
+            "edges": [{"id": "start-done", "source": "start", "target": "done"}],
+            "plain_language_summary": "Root-level graph.",
         }
 
 
@@ -354,3 +391,37 @@ def test_workflow_graph_generator_repairs_resource_offer_shortcut_when_prompt_re
     assert edges_by_id["e_decision_no_match"]["branch"] == "no_match"
     assert edges_by_id["e_iterate_retry"]["target"] == "match_therapists"
     assert "Shortcut summary" not in result["plain_language_summary"]
+
+
+def test_workflow_graph_generator_rejects_provider_error_payload():
+    with pytest.raises(ForgeError) as exc:
+        WorkflowGraphDraftGenerator(llm_client=_WorkflowErrorLLM()).generate(
+            prompt="Create a manual notification workflow.",
+            current_graph={"nodes": [{"id": "start", "type": "manual_start"}], "edges": []},
+            use_llm=True,
+        )
+
+    assert exc.value.message == "Workflow AI provider returned an error"
+    assert exc.value.details["provider_error"]["code"] == "model_not_found"
+
+
+def test_workflow_graph_generator_rejects_graphless_llm_payload():
+    with pytest.raises(ForgeError) as exc:
+        WorkflowGraphDraftGenerator(llm_client=_WorkflowGraphlessLLM()).generate(
+            prompt="Create a manual notification workflow.",
+            current_graph={"nodes": [{"id": "start", "type": "manual_start"}], "edges": []},
+            use_llm=True,
+        )
+
+    assert exc.value.message == "Workflow AI response did not include a workflow graph"
+
+
+def test_workflow_graph_generator_accepts_root_level_nodes_payload():
+    result = WorkflowGraphDraftGenerator(llm_client=_RootNodesWorkflowLLM()).generate(
+        prompt="Create a manual notification workflow.",
+        current_graph={"nodes": [], "edges": []},
+        use_llm=True,
+    )
+
+    assert [node["type"] for node in result["graph"]["nodes"]] == ["manual_start", "end"]
+    assert result["graph"]["edges"] == [{"id": "start-done", "source": "start", "target": "done"}]

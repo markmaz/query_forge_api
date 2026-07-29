@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.exceptions.forge_error import ForgeError
+
 SUPPORTED_NODE_TYPES = {
     "manual_start",
     "schedule_trigger",
@@ -392,6 +394,36 @@ def _first_non_empty(*values: Any) -> Any:
     return ""
 
 
+def _extract_llm_workflow_graph(payload: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(payload.get("error"), dict):
+        error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+        raise ForgeError(
+            "Workflow AI provider returned an error",
+            status_code=502,
+            details={
+                "provider_error": {
+                    "message": _clean_string(error.get("message")),
+                    "type": _clean_string(error.get("type")),
+                    "code": _clean_string(error.get("code")),
+                }
+            },
+        )
+    graph = payload.get("graph") if isinstance(payload.get("graph"), dict) else None
+    if graph is None and isinstance(payload.get("workflow_graph"), dict):
+        graph = payload.get("workflow_graph")
+    if graph is None and isinstance(payload.get("workflow"), dict):
+        graph = payload.get("workflow")
+    if graph is None and isinstance(payload.get("nodes"), list):
+        graph = payload
+    if graph is None or not isinstance(graph.get("nodes"), list):
+        raise ForgeError(
+            "Workflow AI response did not include a workflow graph",
+            status_code=502,
+            details={"hint": "Expected graph.nodes or root-level nodes in the LLM response."},
+        )
+    return graph
+
+
 def _merge_non_empty(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
     merged = dict(base)
     for key, value in overrides.items():
@@ -758,8 +790,8 @@ class WorkflowGraphDraftGenerator:
             retry_invalid_schema=True,
             max_tokens=2200,
         )
-        generated_graph = payload.get("graph") if isinstance(payload.get("graph"), dict) else payload
-        graph = normalize_generated_workflow_graph(generated_graph if isinstance(generated_graph, dict) else {}, fallback_graph=current_graph)
+        generated_graph = _extract_llm_workflow_graph(payload)
+        graph = normalize_generated_workflow_graph(generated_graph, fallback_graph=current_graph)
         graph, repaired_offer_flow = ensure_offer_acceptance_flow_if_requested(
             graph,
             prompt=prompt,

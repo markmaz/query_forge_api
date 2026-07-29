@@ -81,6 +81,42 @@ def test_chat_json_invalid_response_includes_attempt_details() -> None:
     assert exc.value.details["attempt2"] is None
 
 
+def test_chat_json_rejects_provider_error_json_without_validator() -> None:
+    provider_error = {
+        "message": "The model does not exist.",
+        "type": "invalid_request_error",
+        "code": "model_not_found",
+    }
+    client = _FakeLLMClient(
+        traces=[
+            {
+                "raw_text": "{\"error\": {\"message\": \"The model does not exist.\"}}",
+                "parsed": {"error": provider_error},
+                "content": None,
+                "error": "http_status:404",
+            },
+            {
+                "raw_text": "",
+                "parsed": None,
+                "content": None,
+                "error": "http_status:404",
+            },
+        ]
+    )
+
+    with pytest.raises(ForgeError) as exc:
+        client.chat_json(
+            system_prompt="sys",
+            user_prompt="usr",
+            response_format=True,
+            retry_invalid_schema=True,
+        )
+
+    assert exc.value.message == "Invalid model response JSON"
+    assert exc.value.details["attempt1"]["provider_error"]["code"] == "model_not_found"
+    assert exc.value.details["attempt2"]["error"] == "http_status:404"
+
+
 def test_chat_json_with_trace_connect_error_returns_actionable_service_error(monkeypatch) -> None:
     class _BrokenClient:
         def __init__(self, *args, **kwargs):
