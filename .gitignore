@@ -2,6 +2,7 @@ __pycache__/
 .vscode/
 log_file
 .env
+/.env_backup
 .env.local
 .env.docker
 .env.*.local
